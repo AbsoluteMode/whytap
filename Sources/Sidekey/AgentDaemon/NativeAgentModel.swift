@@ -13,6 +13,12 @@ struct NativeAgentToolResult {
     var actions: UsefulActionsBlock? = nil
     /// App-owned line for a confirmed Whytap change ("Drop Smart → model").
     var change: String? = nil
+    /// A Whytap write the app refused or could not make: its error code.
+    /// A turn with one cannot finish with status `done`.
+    var failedWrite: String? = nil
+    /// The change as its step drop words it when that says more than the
+    /// line: a model change names the model it replaced.
+    var stepLine: String? = nil
 }
 
 /// Keeps provider-native assistant items intact within a turn, including

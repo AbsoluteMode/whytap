@@ -107,6 +107,11 @@ unfiltered. The Agent shows `Filler + ну`.
 There is no Replace list: it came with Drop learning, which was shelved on
 2026-11-23.
 
+In Whytap's own Agent a turn that only made such changes ends without text:
+the app shows one drop per saved change right of the island and keeps the
+lines in History (`docs/agent.md`). External harnesses are not affected; they
+get the same tool results as before.
+
 ## Island tools and their hotkeys
 
 `whytap_toolbox_get` returns `pinned` (tool ids shown in the island, in order;

@@ -11,22 +11,32 @@ struct NativeAgentFinalAnswer {
     /// schemas) means none. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
     static let insertField = "insert_text"
     static let actionWarning = " Earlier file edits, commands or Whytap changes may have completed; check before retrying."
-    enum Status: String { case answered, unverified, needs_clarification }
+    enum Status: String { case answered, unverified, needs_clarification, done }
+    /// The model's explicit sign that the turn's confirmed Whytap changes are
+    /// its whole result. Offered only with the whytap tool; the provider
+    /// accepts it only when a change was confirmed and none failed.
+    /// WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+    static let doneStatus = Status.done.rawValue
     let status: Status
     let answer: String
+    /// Status `done` with nothing written and no cards: show no text.
+    var showsOnlyChanges: Bool { status == .done }
     /// The explicit insert_text card, also first in `actions`; nil when none.
     let insert: ActionItem?
     let actions: UsefulActionsBlock
 
     var visibleText: String {
         switch status {
-        case .answered: return answer
+        case .answered, .done: return answer
         case .unverified: return "Couldn’t verify\n\n" + answer
         case .needs_clarification: return "Clarification needed\n\n" + answer
         }
     }
 
-    static var definition: [String: Any] {
+    static var definition: [String: Any] { definition(appChanges: false) }
+
+    /// `appChanges`: the turn has the whytap tool, so status `done` is offered.
+    static func definition(appChanges: Bool) -> [String: Any] {
         let string: [String: Any] = ["type": "string"]
         func object(_ properties: [String: Any]) -> [String: Any] {
             ["type": "object", "properties": properties, "required": properties.keys.sorted(), "additionalProperties": false]
@@ -37,9 +47,11 @@ struct NativeAgentFinalAnswer {
         return ["name": toolName, "strict": true,
                 "description": "Finish the turn with the requested answer and at most 20 cards across sources and actions. Call alone, after all evidence and actions have completed. Does not open or execute cards.",
                 "parameters": object([
-                    "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"],
-                               "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."],
-                    "answer": ["type": "string", "description": "Direct, nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. Use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
+                    "status": ["type": "string",
+                               "enum": ["answered", "unverified", "needs_clarification"] + (appChanges ? [doneStatus] : []),
+                               "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."
+                                + (appChanges ? " Use done only when this turn's confirmed Whytap changes are everything the user asked for and you have nothing to add: answer is then an empty string, with no sources, insert_text or actions, and the app shows the changes itself." : "")],
+                    "answer": ["type": "string", "description": (appChanges ? "Empty only with status done. Otherwise a direct, " : "Direct, ") + "nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. Use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
                     "sources": ["type": "array", "items": source, "description": "Supporting public HTTP(S) links with short titles; empty when no sources are needed."],
                     insertField: ["type": "string", "description": "Ready-to-paste plain text shown first as the Insert card, which pastes into the field the user came from and replaces their selection there. The complete result when the user gave text (selected or in the request) and asked to rewrite, shorten, translate, fix or reformat it, or asked for a message or reply to send; the one exact shell command when they asked how to install, update, run or configure something. No Markdown fence, quotes or commentary. Empty string when nothing is meant to be pasted."],
                     "actions": ["type": "array", "items": ["anyOf": [path, copy]],
@@ -53,14 +65,22 @@ struct NativeAgentFinalAnswer {
     init(arguments: [String: Any], openAICitations: Bool = true) throws {
         let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
-              let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
+              let rawStatus = arguments["status"] as? String, var status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
         let text = clean(answer).trimmingCharacters(in: .whitespacesAndNewlines)
         let insertField = (arguments[Self.insertField] as? String).map(clean) ?? arguments[Self.insertField]
-        guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
+        // `done` means no text at all. With text it is an ordinary answer:
+        // what the model wrote is never dropped.
+        if status == .done, !text.isEmpty { status = .answered }
+        if status == .done {
+            let insertEmpty = (insertField as? String).map { Self.pasteText($0).isEmpty } ?? true
+            guard sources.isEmpty, actions.isEmpty, insertEmpty else { throw Self.invalid() }
+        } else {
+            guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
+        }
         let insert: String
         switch insertField {
         case nil, is NSNull: insert = ""

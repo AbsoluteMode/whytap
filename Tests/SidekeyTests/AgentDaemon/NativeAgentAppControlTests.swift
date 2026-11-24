@@ -817,6 +817,303 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(e.fillers.terms().count, FillerTermsStore.maxTermCount)
     }
 
+    // MARK: Steps instead of text
+    // WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+
+    /// The model's sign that the confirmed changes are the whole result.
+    private func done() -> [String: Any] {
+        call("finish_answer", ["status": "done", "answer": "", "sources": [], "actions": [], "insert_text": ""], id: "final")
+    }
+
+    private func steps(_ turn: Turn) -> [AgentAppStep]? {
+        turn.events.compactMap { if case .appSteps(let steps) = $0 { return steps }; return nil }.last
+    }
+
+    func testOneActionWithNothingToAddEndsWithItsStepAndNoText() async throws {
+        let e = try env()
+        let result = try await turn(e, "добавь whytap в vocab", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            done()
+        ])
+        XCTAssertEqual(e.vocabulary.terms, ["whytap"])
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "vocab_add", line: "Vocab + whytap")])
+        XCTAssertNil(result.finalText, "no answer text is sent to the island")
+        XCTAssertFalse(result.events.contains { if case .blockComplete = $0 { return true }; return false })
+        XCTAssertEqual(result.events.last, .done(sources: []))
+        XCTAssertEqual(result.bodies.count, 2, "no extra model request")
+        // The next turn knows what was done.
+        let saved = try String(contentsOf: e.directory.appendingPathComponent(NativeAgentConversation.fileName), encoding: .utf8)
+        XCTAssertTrue(saved.contains("Vocab + whytap"), saved)
+        // The sign is offered with its rule, only beside the whytap tool.
+        let tools = result.bodies.first?["tools"] as? [[String: Any]] ?? []
+        let finish = tools.compactMap { $0["function"] as? [String: Any] }.first { $0["name"] as? String == "finish_answer" }
+        let status = ((finish?["parameters"] as? [String: Any])?["properties"] as? [String: Any])?["status"] as? [String: Any]
+        XCTAssertEqual(status?["enum"] as? [String], ["answered", "unverified", "needs_clarification", "done"])
+        let system = (result.bodies.first?["messages"] as? [[String: Any]])?.first?["content"] as? String ?? ""
+        XCTAssertTrue(system.replacingOccurrences(of: "\n", with: " ").contains("status done and an empty answer"),
+                      "the prompt explains the sign")
+    }
+
+    func testThreeActionsEndWithThreeStepsInTheOrderTheyWereMade() async throws {
+        let e = try env()
+        let result = try await turn(e, "добавь whytap в vocab, убери слово короче из речи и включи Smart", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            app("whytap_filler_add", ["terms": ["короче"]], id: "f"),
+            app("whytap_set_setting", ["key": "dropMode", "value": "smart", "expected": "fast"], id: "s"),
+            done()
+        ])
+        XCTAssertEqual(steps(result), [
+            AgentAppStep(operation: "vocab_add", line: "Vocab + whytap"),
+            AgentAppStep(operation: "filler_add", line: "Filler + короче"),
+            AgentAppStep(operation: "set_setting", line: "Drop mode → Smart")
+        ])
+        XCTAssertNil(result.finalText)
+        XCTAssertEqual(e.fillers.terms(), ["короче"])
+    }
+
+    /// "Change the model": the drop is a short summary of what it was and
+    /// what it is now. The text answer's line is unchanged.
+    func testAModelChangeStepSaysWhatItWasAndWhatItIsNow() async throws {
+        let e = try env()
+        let expected: [String: Any] = ["account": "openRouter", "model": "old-text", "provider": "old/pin"]
+        let result = try await turn(e, "поменяй модель Drop Smart cleanup на candidate-text", [
+            app("whytap_get_state", [:], id: "s"),
+            app("whytap_set_model", ["feature": "dropSmartCleanup", "account": "openRouter",
+                                      "model": "candidate-text", "expected": expected], id: "m"),
+            done()
+        ])
+        XCTAssertEqual(e.routing.route(for: .dropSmartCleanup)?.model, "candidate-text")
+        let step = AgentAppStep(operation: "set_model", line: "Drop Smart cleanup: old-text → candidate-text")
+        XCTAssertEqual(steps(result), [step])
+        XCTAssertEqual(step.symbol, "cpu")
+        XCTAssertEqual(step.parts.subject, "Drop Smart cleanup")
+        XCTAssertEqual(step.parts.value, "old-text → candidate-text")
+        XCTAssertNil(result.finalText)
+        // The wing's label during the turn stays the app's line.
+        XCTAssertTrue(result.labels.contains("Drop Smart cleanup → candidate-text"), "\(result.labels)")
+        // Nothing to compare with: the line as it is.
+        XCTAssertNil(NativeAgentAppControl.stepLine("set_model", .object(["feature": .string("agent"),
+            "route": .object(["model": .string("m")])]), expected: .null))
+        XCTAssertNil(NativeAgentAppControl.stepLine("set_model", .object(["feature": .string("agent"),
+            "route": .object(["model": .string("m")])]), expected: .object(["model": .string("m")])))
+        XCTAssertNil(NativeAgentAppControl.stepLine("vocab_add", .object([:]), expected: nil))
+    }
+
+    /// "Reassign the hotkey": the drop shows the hotkey that is now assigned.
+    func testAHotkeyReassignedStepShowsTheAssignedKeys() async throws {
+        let e = try env()
+        usKeyboard()
+        XCTAssertEqual(e.hotkeys.assignToolShortcut(combo("option+d"), to: .monitor), .saved)
+        let result = try await turn(e, "переназначь хоткей Monitor на option f", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            app("whytap_hotkey_set", ["tool": "monitor", "keys": "option+f", "expected": "option+d"], id: "h"),
+            done()
+        ])
+        XCTAssertEqual(e.hotkeys.toolShortcuts[.monitor], combo("option+f"))
+        let shown = try XCTUnwrap(steps(result))
+        XCTAssertEqual(shown.count, 1)
+        XCTAssertEqual(shown[0].operation, "hotkey_set")
+        XCTAssertEqual(shown[0].symbol, "keyboard")
+        XCTAssertTrue(shown[0].line.hasPrefix("Hotkey: Monitor — ⌥F"), shown[0].line)
+        XCTAssertNil(result.finalText)
+    }
+
+    /// "Add a tool to the hover / remove one": a drop per change says which
+    /// tool was added or removed.
+    func testHoverToolsAddedAndRemovedAreSteps() async throws {
+        let e = try env()
+        let added = try await turn(e, "добавь Shot в ховер", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "expected": defaultPinned], id: "p"),
+            done()
+        ])
+        XCTAssertEqual(steps(added), [AgentAppStep(operation: "toolbox_set", line: "Toolbox + Shot")])
+        XCTAssertEqual(steps(added)?.first?.symbol, "square.grid.2x2")
+        XCTAssertTrue(e.layout.slots.contains(.screenshot))
+        let pinned = defaultPinned + ["screenshot"]
+        let removed = try await turn(e, "убери Monitor из ховера", [
+            app("whytap_toolbox_set", ["tool": "monitor", "pinned": false, "expected": pinned], id: "p"),
+            done()
+        ])
+        XCTAssertEqual(steps(removed), [AgentAppStep(operation: "toolbox_set", line: "Toolbox − Monitor")])
+        XCTAssertFalse(e.layout.slots.contains(.monitor))
+        XCTAssertNil(removed.finalText)
+    }
+
+    func testAToolAddedWithItsHotkeyIsOneStep() async throws {
+        let e = try env()
+        usKeyboard()
+        let result = try await turn(e, "добавь в меню Shot и поставь ему ⌥S", [
+            app("whytap_toolbox_get", [:], id: "g"),
+            app("whytap_toolbox_set", ["tool": "screenshot", "pinned": true, "position": NSNull(),
+                                        "expected": defaultPinned], id: "p"),
+            app("whytap_hotkey_set", ["tool": "screenshot", "keys": "option+s", "expected": NSNull()], id: "h"),
+            done()
+        ])
+        XCTAssertEqual(steps(result), [AgentAppStep(operation: "toolbox_set",
+                                                    line: "Toolbox + Shot · ⌥S (no longer types “ß” in text fields)")])
+    }
+
+    func testAFailedActionIsNeverShownAsDoneAndTheAgentMustSayIt() async throws {
+        let e = try env()
+        for index in 0..<FillerTermsStore.maxTermCount { e.fillers.add("filler\(index)") }
+        let result = try await turn(e, "добавь whytap в vocab и убери слово короче", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            app("whytap_filler_add", ["terms": ["короче"]], id: "f"),
+            done(),
+            final("Filler полон (100 слов): «короче» не добавлено.")
+        ])
+        XCTAssertNil(steps(result), "a turn with a failed change shows no drops")
+        XCTAssertEqual(result.finalText, "Vocab + whytap\n\nFiller полон (100 слов): «короче» не добавлено.")
+        XCTAssertFalse(e.fillers.terms().contains("короче"))
+        XCTAssertTrue(result.toolResults().last?.contains("Status done was refused: a Whytap change failed") == true,
+                      "\(result.toolResults())")
+        XCTAssertFalse(result.labels.contains { $0.hasPrefix("Filler + ") })
+    }
+
+    func testAModelThatInsistsOnDoneAfterAFailureEndsInAnErrorWithTheWarning() async throws {
+        let e = try env()
+        for index in 0..<FillerTermsStore.maxTermCount { e.fillers.add("filler\(index)") }
+        let result = try await turn(e, "убери слово короче", [
+            app("whytap_filler_add", ["terms": ["короче"]], id: "f"),
+            done(), done()
+        ])
+        XCTAssertNil(steps(result))
+        XCTAssertNil(result.finalText)
+        guard case .error(_, let message, _) = result.events.last else { return XCTFail("\(result.events)") }
+        XCTAssertTrue(message.contains("Whytap changes may have completed"), message)
+    }
+
+    func testDoneWithoutAConfirmedChangeIsRefusedAndTheAnswerIsText() async throws {
+        let e = try env()
+        e.vocabulary.add("Whytap")
+        // The word is already there: nothing changed, so there is nothing to show.
+        let existing = try await turn(e, "добавь whytap в vocab", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            done(),
+            final("Whytap уже есть в Vocab.")
+        ])
+        XCTAssertNil(steps(existing))
+        XCTAssertEqual(existing.finalText, "Whytap уже есть в Vocab.")
+        XCTAssertTrue(existing.toolResults().last?.contains("the app confirmed no change") == true)
+        // A plain question with no action at all.
+        let question = try await turn(e, "что такое vocab?", [done(), final("Vocab — список слов для диктовки.")])
+        XCTAssertNil(steps(question))
+        XCTAssertEqual(question.finalText, "Vocab — список слов для диктовки.")
+    }
+
+    func testAnActionWithNeededTextKeepsTheTextAnswer() async throws {
+        let e = try env()
+        // An ordinary answer after a change: lines above the text, as before.
+        let answered = try await turn(e, "добавь whytap в vocab и скажи, сколько там слов", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            final("Теперь в Vocab одно слово.")
+        ])
+        XCTAssertNil(steps(answered))
+        XCTAssertEqual(answered.finalText, "Vocab + whytap\n\nТеперь в Vocab одно слово.")
+        // Status done with text is an ordinary answer too: nothing written is dropped.
+        let wordy = try await turn(e, "добавь exodia в vocab", [
+            app("whytap_vocab_add", ["terms": ["exodia"]], id: "v"),
+            call("finish_answer", ["status": "done", "answer": "Учти: Vocab работает не на всех моделях.",
+                                   "sources": [], "actions": []], id: "final")
+        ])
+        XCTAssertNil(steps(wordy))
+        XCTAssertEqual(wordy.finalText, "Vocab + exodia\n\nУчти: Vocab работает не на всех моделях.")
+    }
+
+    /// A file edit or command has no app-owned line, so a turn that made one
+    /// cannot end with drops alone, even when its Whytap change succeeded.
+    func testATurnThatAlsoWroteAFileMustAnswerInText() async throws {
+        let e = try env()
+        let file = e.directory.appendingPathComponent("note.txt")
+        let result = try await turn(e, "добавь whytap в vocab и сохрани заметку", [
+            app("whytap_vocab_add", ["terms": ["whytap"]], id: "v"),
+            call("write_file", ["path": file.path, "content": "note"], id: "w"),
+            done(),
+            final("Заметка сохранена.")
+        ], options: AgentRunOptions(model: "vendor/agent-model", allowActions: true))
+        XCTAssertNil(steps(result))
+        XCTAssertEqual(result.finalText, "Vocab + whytap\n\nЗаметка сохранена.")
+        XCTAssertEqual(try String(contentsOf: file, encoding: .utf8), "note")
+        XCTAssertTrue(result.toolResults().last?.contains("also edited files or ran commands") == true, "\(result.toolResults())")
+    }
+
+    func testAnOrdinaryQuestionIsUntouched() async throws {
+        let e = try env()
+        let result = try await turn(e, "сколько будет 2+2?", [final("4")])
+        XCTAssertNil(steps(result))
+        XCTAssertEqual(result.finalText, "4")
+        XCTAssertEqual(result.events.last, .done(sources: []))
+    }
+
+    func testWithoutTheWhytapToolTheSignIsNotOffered() async throws {
+        let e = try env()
+        let result = try await turn(e, "hello", [final("Hi.")], installed: false)
+        let tools = result.bodies.first?["tools"] as? [[String: Any]] ?? []
+        let finish = tools.compactMap { $0["function"] as? [String: Any] }.first { $0["name"] as? String == "finish_answer" }
+        let status = ((finish?["parameters"] as? [String: Any])?["properties"] as? [String: Any])?["status"] as? [String: Any]
+        XCTAssertEqual(status?["enum"] as? [String], ["answered", "unverified", "needs_clarification"])
+        XCTAssertFalse(String(describing: finish).contains("status done"))
+    }
+
+    func testDoneCarriesNoTextCardsOrPaste() {
+        func make(_ arguments: [String: Any]) -> NativeAgentFinalAnswer? { try? NativeAgentFinalAnswer(arguments: arguments) }
+        let quiet = make(["status": "done", "answer": "  ", "sources": [], "actions": [], "insert_text": ""])
+        XCTAssertEqual(quiet?.showsOnlyChanges, true)
+        XCTAssertEqual(make(["status": "done", "answer": "", "sources": [], "actions": []])?.showsOnlyChanges, true)
+        XCTAssertEqual(make(["status": "done", "answer": "Text", "sources": [], "actions": []])?.status, .answered)
+        XCTAssertNil(make(["status": "done", "answer": "", "sources": [], "actions": [], "insert_text": "ls"]))
+        XCTAssertNil(make(["status": "done", "answer": "", "sources": [["title": "A", "url": "https://a.example"]], "actions": []]))
+        XCTAssertNil(make(["status": "answered", "answer": "", "sources": [], "actions": []]), "an answer still needs text")
+    }
+
+    func testStepMarksAndParts() {
+        let vocab = AgentAppStep(operation: "vocab_add", line: "Vocab + whytap")
+        XCTAssertEqual(vocab.symbol, "book.closed")
+        XCTAssertEqual(vocab.parts.subject, "Vocab"); XCTAssertEqual(vocab.parts.sign, " + "); XCTAssertEqual(vocab.parts.value, "whytap")
+        let model = AgentAppStep(operation: "set_model", line: "Drop Smart cleanup → a: b + c")
+        XCTAssertEqual(model.parts.subject, "Drop Smart cleanup"); XCTAssertEqual(model.parts.value, "a: b + c")
+        XCTAssertEqual(AgentAppStep(operation: "todo_update", line: "Done").parts.value, "Done")
+        XCTAssertEqual(AgentAppStep.historyMarkdown([vocab, AgentAppStep(operation: "vocab_add", line: "Vocab + __init__")]),
+                       "Vocab + whytap\n\nVocab + \\_\\_init\\_\\_")
+    }
+
+    /// Live check against the maintainer's Agent route, off unless asked for:
+    /// AGENT_STEP_DROPS_LIVE=1 with ANTHROPIC_API_KEY in the environment
+    /// (through Case). Real model, temporary stores; prints what it chose.
+    func testLiveModelUsesDoneOnlyWhenTheChangesAreTheWholeAnswer() async throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard environment["AGENT_STEP_DROPS_LIVE"] == "1", let key = environment["ANTHROPIC_API_KEY"], !key.isEmpty else {
+            throw XCTSkip("Set AGENT_STEP_DROPS_LIVE=1 and ANTHROPIC_API_KEY for the live check")
+        }
+        func live(_ prompt: String, prepare: (Env) -> Void = { _ in }) async throws -> (steps: [AgentAppStep]?, text: String?, events: [AgentSSEEvent]) {
+            let e = try env()
+            prepare(e)
+            try e.keys.save(key, account: ProviderAccount.anthropicKeychainAccount)
+            let controller = e.controller
+            let provider = NativeAgentProvider(keys: e.keys, http: NativeAgentHTTP(), workspace: { e.directory },
+                                               appControl: { { request in await controller.handle(request) } },
+                                               usageSink: { _ in }, diagnosticsSink: { _ in })
+            var events: [AgentSSEEvent] = []
+            let options = AgentRunOptions(model: "claude-sonnet-5-5", allowActions: false, openCodeProvider: .anthropic)
+            for await event in provider.run(prompt: prompt, resumeSessionID: nil, options: options) { events.append(event) }
+            let turn = Turn(events: events, bodies: [])
+            print("LIVE [\(prompt)] steps=\(steps(turn)?.map(\.line) ?? []) text=\(turn.finalText ?? "-") labels=\(turn.labels)")
+            return (steps(turn), turn.finalText, events)
+        }
+        let one = try await live("добавь whytap в vocab")
+        XCTAssertEqual(one.steps?.map { $0.line.lowercased() }, ["vocab + whytap"], "\(one.events)")
+        XCTAssertNil(one.text)
+        let three = try await live("добавь whytap в vocab, убери слово короче из речи и включи режим Smart")
+        XCTAssertEqual(three.steps?.count, 3, "\(three.events)")
+        let existing = try await live("добавь whytap в vocab") { $0.vocabulary.setTerms(["Whytap"]) }
+        XCTAssertNil(existing.steps, "\(existing.events)")
+        XCTAssertNotNil(existing.text)
+        let question = try await live("что такое Vocab в Whytap? ответь одной фразой")
+        XCTAssertNil(question.steps)
+        XCTAssertNotNil(question.text)
+    }
+
     // MARK: Catalog contract
 
     func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {

@@ -214,6 +214,83 @@ final class AgentControllerHistoryTests: XCTestCase {
         XCTAssertEqual(store.streamingText, answer)
     }
 
+    // MARK: - Steps instead of text
+    // WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+
+    /// "добавь whytap в vocab и убери короче": the turn ends with its steps
+    /// only. No answer panel opens, the drops get the steps once, and History
+    /// keeps what was done although nothing was written on screen.
+    func testStepsOnlyTurnShowsNoAnswerHandsTheStepsOverAndStaysInHistory() async throws {
+        let (chatStore, history, _) = try makeChatStore()
+        let snapshot = makeSnapshot()
+        let provider = ManualCLIProviderHistory()
+        let store = AskResponseStore()
+        let flow = IslandAgentFlowStore(responseStore: store, dropProviderBrand: { nil }, dropCleanupBrand: { nil },
+                                        agentProviderBrand: { nil })
+        let controller = AgentController(
+            gestureMonitor: MockRightCmdGestureMonitorHistory(), snapshotProvider: { snapshot },
+            resolveProvider: { provider }, responseStore: store, chatStackStore: chatStore,
+            agentEnabled: { true }, islandAgentFlow: flow)
+        var handed: [[AgentAppStep]] = []
+        controller.onAppSteps = { handed.append($0) }
+        let steps = [AgentAppStep(operation: "vocab_add", line: "Vocab + whytap"),
+                     AgentAppStep(operation: "filler_add", line: "Filler + __init__")]
+
+        controller.submitTextQuery("добавь whytap в vocab и убери __init__", snapshot: snapshot)
+        await waitUntil { provider.calls.count == 1 }
+        provider.continuations.first?.yield(.toolExecuting(tool: "whytap", label: "Vocab + whytap"))
+        XCTAssertTrue(handed.isEmpty, "nothing is shown as done before the turn ends")
+        provider.continuations.first?.yield(.appSteps(steps))
+        provider.continuations.first?.yield(.done(sources: []))
+        provider.continuations.first?.finish()
+        await waitUntil { chatStore.rows.first?.status == .done }
+
+        XCTAssertEqual(handed, [steps])
+        XCTAssertEqual(store.streamingText, "")
+        XCTAssertTrue(store.blocks.isEmpty)
+        flow.refreshFromResponseStore()
+        XCTAssertFalse(flow.answerPanelVisible, "no answer panel for a steps-only turn")
+        XCTAssertEqual(flow.wing, .hidden)
+        XCTAssertEqual(AppState.shared.agentPhase, .idle)
+        let row = try XCTUnwrap(chatStore.rows.first)
+        XCTAssertEqual(row.responseMarkdown, "Vocab + whytap\n\nFiller + \\_\\_init\\_\\_")
+        let blocks = try JSONDecoder().decode([UIBlock].self, from: Data(try XCTUnwrap(row.blocksJSON).utf8))
+        XCTAssertEqual(blocks, [.textAnswer(TextAnswerBlock(body: row.responseMarkdown))])
+        XCTAssertEqual(try history.latestAgentEntries(limit: 1).first?.responseMarkdown, row.responseMarkdown)
+        XCTAssertTrue(chatStore.historyMessages().last?.content.contains("Vocab + whytap") == true)
+
+        // The next turn starts clean: an ordinary answer hands over no steps.
+        controller.submitTextQuery("сколько будет 2+2?", snapshot: snapshot)
+        await waitUntil { provider.calls.count == 2 }
+        XCTAssertTrue(store.appSteps.isEmpty)
+        provider.continuations.last?.yield(.finalAnswer(text: "4"))
+        provider.continuations.last?.yield(.done(sources: []))
+        provider.continuations.last?.finish()
+        await waitUntil { chatStore.rows.filter { $0.status == .done }.count == 2 }
+        XCTAssertEqual(handed.count, 1)
+        XCTAssertEqual(store.streamingText, "4")
+    }
+
+    /// A turn that fails after its steps were reported hands nothing to the
+    /// drops: the error is what the user sees.
+    func testAnErrorAfterStepsShowsTheErrorNotDrops() async throws {
+        let (chatStore, _, _) = try makeChatStore()
+        let snapshot = makeSnapshot()
+        let provider = ManualCLIProviderHistory()
+        let store = AskResponseStore()
+        let controller = makeController(snapshot: snapshot, agentClient: provider, chatStackStore: chatStore, responseStore: store)
+        var handed: [[AgentAppStep]] = []
+        controller.onAppSteps = { handed.append($0) }
+        controller.submitTextQuery("добавь whytap в vocab", snapshot: snapshot)
+        await waitUntil { provider.calls.count == 1 }
+        provider.continuations.first?.yield(.appSteps([AgentAppStep(operation: "vocab_add", line: "Vocab + whytap")]))
+        provider.continuations.first?.yield(.error(code: "native_agent", message: "Lost connection.", retryable: true))
+        provider.continuations.first?.finish()
+        await waitUntil { chatStore.rows.first?.status == .error }
+        XCTAssertTrue(handed.isEmpty)
+        XCTAssertEqual(store.errorMessage, "Lost connection.")
+    }
+
     func testFinalTableMarkdownIsPersistedVerbatimInTextAnswerAndResponseMarkdown() async throws {
         let (chatStore, history, _) = try makeChatStore()
         let snapshot = makeSnapshot()

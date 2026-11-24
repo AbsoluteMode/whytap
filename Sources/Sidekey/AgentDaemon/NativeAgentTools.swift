@@ -63,7 +63,7 @@ struct NativeAgentTools {
             tool["strict"] = true
             return tool
         }
-        return tools + [NativeAgentFinalAnswer.definition]
+        return tools + [NativeAgentFinalAnswer.definition(appChanges: appControl)]
     }
 
     func execute(_ call: NativeAgentToolCall) async -> NativeAgentToolResult {

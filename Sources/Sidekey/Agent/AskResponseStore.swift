@@ -18,6 +18,10 @@ final class AskResponseStore: ObservableObject {
     @Published private(set) var errorMessage: String?
     @Published private(set) var isErrorRetryable: Bool = false
     @Published private(set) var streamCompleted: Bool = false
+    /// The finished turn's confirmed Whytap changes when they are its whole
+    /// result: there is no answer text and the island shows drops instead.
+    /// WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+    private(set) var appSteps: [AgentAppStep] = []
 
     /// The permission ask currently shown in the pill — always the HEAD of
     /// `permissionQueue`. Published so the UI re-renders when the head changes.
@@ -235,6 +239,8 @@ final class AskResponseStore: ObservableObject {
                 permissionQueue.append(prompt)
                 syncPendingPermissionHead()
                 onPermissionRequest?(prompt)
+            case .appSteps(let steps):
+                appSteps = steps
             case .statusNarration(let text):
                 os_log(
                     "sse status.narration label_chars=%{public}d",
@@ -289,6 +295,7 @@ final class AskResponseStore: ObservableObject {
         streamingText = ""
         narrationBuffer = ""
         pendingFinalAnswer = ""
+        appSteps = []
         blocks = []
         sources = []
         toolLabelTypewriter.clear()

@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-agent-toolbox-hotkeys.md]
+related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-agent-toolbox-hotkeys.md, 2026-11-24-agent-step-drops.md]
 ---
 
 # The built-in Agent controls Whytap

@@ -90,6 +90,16 @@ tools:
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |
 | `whytap`: change Whytap's own settings, island tools and hotkeys, add Vocab and Filler words, To-do (next version after 2.2.26) | yes | yes |
 
+When your request only changes Whytap ("add whytap to vocab", "switch Drop
+to Smart") and the Agent has nothing else to tell you, it writes no answer:
+each saved change shows as a small glass drop right of the island for a few
+seconds (`Vocab + whytap`, `Agent: old model → new model`, `Hotkey: Shot —
+⌥S`, `Toolbox − Monitor`), in the order they were made, at most three at a
+time. Nothing asks you to confirm and nothing there is clickable. The same
+lines are saved in History. If a change failed, was already in place, or the
+Agent has a question or an explanation, you get the usual text answer
+instead (next version after 2.2.27).
+
 Paths can be absolute or start with `~`; relative paths are inside the
 agent's folder. Nothing confines the agent to that folder: it acts with your
 macOS user's rights on any file you can read or write, and commands run as

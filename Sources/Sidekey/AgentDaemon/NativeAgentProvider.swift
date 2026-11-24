@@ -122,6 +122,13 @@ final class NativeAgentProvider: CLIProvider {
         var accepted = false
         // Confirmed Whytap changes, shown by the app above the model's answer.
         var changes: [String] = []
+        // The operation behind each line, and whether a Whytap write failed:
+        // what decides if the turn may end with drops instead of text.
+        var changeOperations: [String] = []
+        var stepLines: [String?] = []
+        var writeFailed = false, doneRefused = false
+        // File edits and commands have no app-owned line: their result is text.
+        var otherActions = false
         var toolCount = 0, searchCount = 0, screenCount = 0
         for _ in 0..<12 {
             try Task.checkCancellation()
@@ -204,6 +211,33 @@ final class NativeAgentProvider: CLIProvider {
             } else {
                 completion = nil
             }
+            if let final = completion, final.showsOnlyChanges {
+                // The model says the changes are the whole result. That holds
+                // only if the app confirmed at least one and none failed;
+                // otherwise it must answer in text, asked once.
+                // WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+                guard !changes.isEmpty, changes.count == changeOperations.count, !writeFailed, !otherActions else {
+                    guard !doneRefused, let call = calls.first else {
+                        throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted)
+                    }
+                    doneRefused = true
+                    let reason = writeFailed
+                        ? "a Whytap change failed in this turn. Call finish_answer again with status answered and say what was and was not changed."
+                        : otherActions
+                        ? "this turn also edited files or ran commands, which the app does not show. Call finish_answer again with status answered and report them."
+                        : "the app confirmed no change in this turn. Call finish_answer again with status answered and a short answer."
+                    model.append(results: [(call, .init(text: "Status done was refused: " + reason))])
+                    continue
+                }
+                let steps = changes.indices.map {
+                    AgentAppStep(operation: changeOperations[$0], line: stepLines[$0] ?? changes[$0])
+                }
+                try? conversation.append(user: prompt, assistant: changes.joined(separator: "\n"), directory: directory)
+                lock.withLock { sessionID = conversation.id }
+                continuation.yield(.appSteps(steps))
+                continuation.yield(.done(sources: []))
+                return
+            }
             if let final = completion {
                 // App-owned lines are literal text inside the Markdown answer.
                 let text = (changes.map(NativeAgentAppControl.markdownLiteral) + [final.visibleText]).joined(separator: "\n\n")
@@ -247,7 +281,7 @@ final class NativeAgentProvider: CLIProvider {
                 let appWrite = appOperation?.writes == true
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
-                if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
+                if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true; otherActions = true }
                 if appWrite { actionsAttempted = true }
                 let result: NativeAgentToolResult
                 if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
@@ -261,8 +295,14 @@ final class NativeAgentProvider: CLIProvider {
                 else if searchCount > 2 && call.name == "web_search" { result = .init(text: "Search limit reached; answer using available results.") }
                 else if screenCount > 2 && call.name == "capture_screen" { result = .init(text: "Screen capture limit reached for this request.") }
                 else { result = await tools.execute(call) }
+                if result.failedWrite != nil { writeFailed = true }
                 if let change = result.change {
                     let line = NativeAgentAppControl.record(change, into: &changes)
+                    // A hotkey joined to its "Toolbox + …" line adds no step.
+                    if changes.count > changeOperations.count, let operation = appOperation?.operation {
+                        changeOperations.append(operation)
+                        stepLines.append(result.stepLine)
+                    }
                     continuation.yield(.toolExecuting(tool: call.name, label: line))
                 }
                 try Task.checkCancellation()

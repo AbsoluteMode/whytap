@@ -38,6 +38,8 @@ final class AgentController: ObservableObject {
     @Published private(set) var state: AgentControllerState = .idle
     private(set) var currentSnapshot: FocusSnapshot?
     let responseStore: AskResponseStore
+    /// A finished turn whose whole result is its confirmed Whytap changes.
+    var onAppSteps: (([AgentAppStep]) -> Void)?
 
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "agent")
 
@@ -1454,6 +1456,10 @@ final class AgentController: ObservableObject {
                         sessionStore.setSessionID(sessionID, for: provider.id)
                     }
                     self.finalizeActiveRow()
+                    // A turn whose result is only its Whytap changes has no
+                    // answer panel: the steps go to the drops beside the island.
+                    let steps = self.responseStore.appSteps
+                    if !steps.isEmpty, self.responseStore.errorMessage == nil { self.onAppSteps?(steps) }
                 },
                 onToolEvent: { tool in
                     self.recordActiveRowTool(tool)
@@ -1624,6 +1630,11 @@ final class AgentController: ObservableObject {
                 // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Follow-up context)
                 if !hasText, !answer.isEmpty {
                     blocks.insert(.textAnswer(TextAnswerBlock(body: answer)), at: 0)
+                } else if !hasText, !responseStore.appSteps.isEmpty {
+                    // Nothing was written on screen: History keeps the steps
+                    // the drops showed.
+                    // WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+                    blocks.insert(.textAnswer(TextAnswerBlock(body: AgentAppStep.historyMarkdown(responseStore.appSteps))), at: 0)
                 }
                 chatStackStore.finalizeChat(
                     rowId: rowId,

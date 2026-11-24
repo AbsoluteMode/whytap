@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
-related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md, 2026-11-23-agent-low-effort.md]
+related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md, 2026-11-23-agent-low-effort.md, 2026-11-24-agent-step-drops.md]
 ---
 
 # Decision

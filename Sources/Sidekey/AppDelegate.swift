@@ -176,6 +176,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// user started by abandoning the failed take. Reset when recovery returns.
     private var retryInFlight = false
     private var agentController: AgentController?
+    /// The drops right of the island that show what the Agent changed in
+    /// Whytap. WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+    private var agentStepDrops: (controller: AgentStepDropsController, panel: AgentStepDropsPanel)?
     /// Retained alongside `agentController`; handles the R-Option Google
     /// gesture (text tap / hold voice). Created in `startAgentIfEnabled`.
     private var googleSearchController: GoogleSearchController?
@@ -634,6 +637,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         caseBrokerServer = nil
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
+        agentStepDrops?.controller.dismiss()
         meetingsEventConsumer?.cancel()
         meetingsEventConsumer = nil
     }
@@ -1005,6 +1009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         panel?.orderOut(nil)
         IslandPanel.shared.hide()
         IslandNotificationPanel.shared.hide()
+        agentStepDrops?.controller.dismiss()
 
         Task { @MainActor in
             await BackgroundLuminanceObserver.shared.stop()
@@ -1334,9 +1339,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func ensureSettingsWindowController() -> SettingsWindowController {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
-                screenshotProtectionChanged: { enabled in
+                screenshotProtectionChanged: { [weak self] enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
+                    self?.agentStepDrops?.panel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -2052,6 +2058,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             agentLinksSelection: IslandPanel.shared.agentLinksSelection
         )
         self.agentController = agentController
+        // The same flow store the island renders: its open answer keeps drops away.
+        let stepDrops = AgentStepDropsController.live(agentFlow: islandFlow)
+        agentStepDrops = stepDrops
+        agentController.onAppSteps = { [weak controller = stepDrops.0] steps in controller?.show(steps) }
         // GoogleSearchController shares the same streaming session factory as
         // the agent. Retained on the delegate so it lives as long as
         // `agentController`.

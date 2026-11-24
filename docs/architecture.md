@@ -1896,6 +1896,26 @@ HarnessConsent rechecked right before the write; the built-in Agent adds what
 the current request names. App-owned change lines are escaped as Markdown
 literals in the answer ("Vocab + __init__" renders as saved). WHY:
 .project-docs/decisions/2026-11-23-agent-drop-lists.md
+Steps instead of text (AgentSteps/, NativeAgentProvider): finish_answer has
+a fourth status, done, offered only with the whytap tool: the confirmed
+changes are the whole result, the answer is empty. The provider accepts it
+only when the app confirmed a change in this turn, no Whytap write failed
+(NativeAgentToolResult.failedWrite) and the turn made no file edit or command;
+otherwise it asks once for a text answer
+(a second done is an invalid answer), and done with text is an ordinary
+answer. An accepted done sends appSteps (operation + line per change; a model
+change as "Feature: old → new" from the matched expected route) and done, no
+finalAnswer: the answer panel stays closed, AgentController.onAppSteps
+hands the steps to AgentStepDropsController and the History row keeps the
+same lines. AgentStepDropsPanel sits right of the island one level below it,
+follows the system appearance and never takes the mouse or keys. One glass
+drop per step in order, at most three (a fourth sends the first back into the
+island), 3.2 s + 0.8 s per further drop, leaving last first; a drop is in the
+view only while shown and the panel is up before the first and after the
+last (macOS 26 glassEffectID morph, a leading-edge bud otherwise, fades for
+Reduce Motion). Shown only on an idle island; a take, a turn, sleep or quit
+fades them; steps arriving during a dictation wait up to 20 s. WHY:
+.project-docs/decisions/2026-11-24-agent-step-drops.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only

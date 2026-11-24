@@ -31,6 +31,11 @@ enum AgentSSEEvent: Decodable, Equatable {
     /// Drives the live progress line exactly like a toolExecuting label, but
     /// is NOT recorded as a tool in chat history.
     case statusNarration(text: String)
+    /// Native agent only: the turn's confirmed Whytap changes ARE its result.
+    /// The agent finished with status `done` and no text, so the island shows
+    /// one drop per step instead of an answer; `done` follows.
+    /// WHY: .project-docs/decisions/2026-11-24-agent-step-drops.md
+    case appSteps([AgentAppStep])
 
     init(rawSSE: String) throws {
         let message = try Self.parse(rawSSE: rawSSE)

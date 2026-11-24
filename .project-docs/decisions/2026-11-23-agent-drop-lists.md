@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AppControl/HarnessAccessTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md]
+related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md, 2026-11-24-agent-step-drops.md]
 ---
 
 # The Agent adds words to Vocab and Filler

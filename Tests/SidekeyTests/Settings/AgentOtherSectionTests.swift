@@ -62,16 +62,6 @@ final class AgentOtherSectionTests: XCTestCase {
         }
     }
 
-    /// The feature screens' clips: Drop, Translate & Subtitles and Screenshots
-    /// have theirs, each a bundled file.
-    // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
-    func test_feature_screens_have_their_clips() throws {
-        XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
-        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
-        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
-        XCTAssertTrue(FeatureVideo.allCases.contains(.subtitles))
-    }
-
     func test_other_row_clips_name_the_users_own_shortcuts() {
         var configuration = HotkeyConfiguration.defaults
         configuration.dropVoiceShortcut = .combo(.optionPeriod)

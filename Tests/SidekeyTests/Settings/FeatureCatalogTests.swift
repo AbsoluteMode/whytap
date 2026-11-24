@@ -462,7 +462,10 @@ final class FeatureCatalogTests: XCTestCase {
     }
 
     func testClipsAreTheOnesThatExist() {
-        XCTAssertNil(FeatureCatalog.info(for: .drop).video, "No Drop clip yet: the screen shows no placeholder")
+        // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+        XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
+        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
+        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)

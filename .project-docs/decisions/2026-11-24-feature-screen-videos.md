@@ -1,8 +1,8 @@
 ---
 id: feature-screen-videos-2026-11-24
 type: decision
-title: Feature screens get the Drop, Shot, Translate and Subtitles clips
-summary: Four bundled clips for the feature screens (drop-fast, screenshot, translate, subtitles), named after their kit scene ids, referenced from FeatureCatalog.video; the clips follow build 1747 and show real model output.
+title: Feature screens get the Drop, Shot and Translate clips
+summary: Three bundled clips for the feature screens (drop-fast, screenshot, translate), named after their kit scene ids and referenced from FeatureCatalog.video; a Subtitles clip is made and waits for a place on the shared screen; the clips follow build 1747 and show real model output.
 status: proposed
 tags: [settings, video, features]
 canonical_for: [feature-screen-videos]
@@ -20,7 +20,7 @@ sources:
 related: [2026-11-20-other-feature-videos.md, 2026-11-24-settings-around-features.md]
 ---
 
-# Feature screens get their clips
+# Feature screens get their clips (Drop, Shot, Translate)
 
 ## Context
 
@@ -30,13 +30,15 @@ their screens showed no clip.
 
 ## Decision
 
-- Four clips in `Resources/FeatureVideos`, named after the motion kit's scene
+- Three clips in `Resources/FeatureVideos`, named after the motion kit's scene
   ids like the existing ones: `drop-fast.mp4` (`.dropFast`, "Drop"),
-  `screenshot.mp4` (`.screenshot`, "Shot"), `translate.mp4` (`.translate`) and
-  `subtitles.mp4` (`.subtitles`).
+  `screenshot.mp4` (`.screenshot`, "Shot") and `translate.mp4` (`.translate`).
 - `FeatureCatalog` points Drop, Screenshots and Translate & Subtitles at them;
-  the feature screen template draws `FeatureInfo.video`. `.subtitles` is there
-  for the Subtitles part of the shared screen.
+  the feature screen template draws `FeatureInfo.video`.
+- A Subtitles clip (kit scene `subtitles`) is made too. A feature has one clip
+  and the shared screen has no Subtitles block yet, so it is not bundled: a
+  bundled clip with no place to play would only add weight. It joins as
+  `subtitles.mp4` / `.subtitles` with the screen part that shows it.
 - A clip counts as shown when it is a feature's catalog clip or has a ▶ on an
   Other row (`test_every_feature_video_has_a_button`).
 - Encoding as the earlier row clips: 720p re-encodes of the kit render with the

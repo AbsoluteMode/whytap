@@ -1357,6 +1357,22 @@ automatically, Meeting Notes, Google search, Agent, Screenshot protection,
 Auto-hide island); rows that are plain options have none. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
+Settings is being rebuilt around features, in steps. FeatureCatalog
+(Settings/Features) is the list of features as data: for each AppFeature (Drop,
+Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots) its
+name, one phrase, bundled clip if any, shortcuts (FeatureHotkey, keys read live
+from HotkeyConfiguration), how it is turned on, where its settings are shown
+today, and its requirements (a model route, a macOS permission, the OpenAI key
+of Subtitles, Drop's shortcut being delivered). Readiness is computed from
+FeatureSetupSnapshot, plain values without stores, and reported in words:
+Ready, Off (a feature with a switch that is off), Needs setup (on, a required
+step missing, with the first reason and the count of the rest) and Not set up
+(an island tool without a switch; quiet). System audio is never shown as
+allowed or missing: macOS cannot be asked in advance. A missing speech model
+offers the model on this Mac first, where the Mac (Apple Silicon) and the
+feature can use it. No catalog text names a key. WHY:
+.project-docs/decisions/2026-11-24-settings-around-features.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).

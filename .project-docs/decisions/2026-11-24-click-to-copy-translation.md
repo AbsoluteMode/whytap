@@ -52,6 +52,8 @@ click.
   (`TranslationView.copiedShownFor`). VoiceOver hears "Copied", and the result
   has a "Copy translation" accessibility action. The context menu's Copy
   translation shows it too.
+- A populated result highlights on hover and while a click is pressed. It
+  has a keyboard focus ring and Return copies the whole focused result.
 - Subtitles: no click-to-copy; their context menu is unchanged.
 
 ## Why

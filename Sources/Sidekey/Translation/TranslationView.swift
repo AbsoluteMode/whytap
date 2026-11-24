@@ -9,15 +9,17 @@ struct TranslationView: View {
     var embedded = false
     /// Closes the floating window; the embedded Toolbox pane has no close control.
     var close: () -> Void = {}
-    /// The floating overlay's window-level click dispatch for × and the
-    /// session button; the Toolbox pane has its own, which nothing dispatches.
+    /// The floating panel's click dispatch. The Toolbox pane watches
+    /// the copy target through a local event monitor.
     @ObservedObject var hitTargets = SubtitleOverlayHitTargets()
     /// Copies the text translation and says "Copied ✓" for a moment; the
     /// controller owns it, so the floating window and the Toolbox pane keep it.
     @ObservedObject var copier = TranslationView.makeCopier()
     @State private var closeHovered = false
     @FocusState private var inputFocused: Bool
+    @FocusState private var resultFocused: Bool
     @State private var inputHovered = false
+    @State private var resultHovered = false
     /// The running overlay's controls: shown on hover and kept for
     /// `controlsLinger` after the pointer leaves, so a press that briefly
     /// loses hover (the panel turning key, a tooltip) still lands on Stop or ×.
@@ -108,21 +110,42 @@ struct TranslationView: View {
                         }
                         .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
                         .focused($settingsFocused)
-                    } else {
+                    } else if canCopyTranslation {
                         // A click copies the whole translation; a drag still
                         // selects part of it (the click is only watched).
                         // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
                         Text(textOutput)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                             .background {
-                                if !text.result.isEmpty {
-                                    SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
-                                                               activate: copyTranslation)
+                                let opacity = hitTargets.pressed == .copy ? 0.14 : (resultHovered ? 0.08 : 0)
+                                RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(opacity))
+                            }
+                            .background {
+                                SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
+                                                           activate: copyTranslation)
+                            }
+                            .onHover { resultHovered = $0 }
+                            .onDisappear { resultHovered = false }
+                            .focusable(interactions: .activate)
+                            .focused($resultFocused)
+                            .onKeyPress(.return) {
+                                copyTranslation()
+                                return .handled
+                            }
+                            .overlay {
+                                if resultFocused {
+                                    RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 2)
+                                        .allowsHitTesting(false)
                                 }
                             }
-                            .help(text.result.isEmpty ? "" : "Click to copy the translation")
+                            .help("Click the translation or focus it and press Return to copy")
                             .accessibilityAction(named: "Copy translation", copyTranslation)
+                    } else {
+                        Text(textOutput)
+                            .textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .font(.system(size: text.issue != nil || inputTooLong ? (embedded ? 12 : 13) : (embedded ? 18 : 24),
@@ -140,7 +163,7 @@ struct TranslationView: View {
         }
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Copy translation") { copyTranslation() }.disabled(text.result.isEmpty)
+            Button("Copy translation") { copyTranslation() }.disabled(!canCopyTranslation)
             Button("Clear") { text.input = ""; inputFocused = true }.disabled(text.input.isEmpty)
             if text.isTranslating { Button("Cancel translation") { text.cancel() } }
             Menu("Translate to") {
@@ -172,8 +195,12 @@ struct TranslationView: View {
         return text.result.isEmpty ? "Translation" : text.result
     }
 
+    private var canCopyTranslation: Bool {
+        !text.result.isEmpty && !inputTooLong && !text.isTranslating && text.issue == nil
+    }
+
     private func copyTranslation() {
-        guard !text.result.isEmpty else { return }
+        guard canCopyTranslation else { return }
         copier.copy(text.result)
     }
 

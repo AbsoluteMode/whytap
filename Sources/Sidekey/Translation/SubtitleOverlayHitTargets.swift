@@ -77,7 +77,7 @@ final class SubtitleOverlayHitTargets: ObservableObject {
     /// The window frame of a shown control, if it is on screen in `window`.
     func frame(of control: Control, in window: NSWindow) -> CGRect? {
         guard let view = shownView(control, in: window) else { return nil }
-        let frame = frame(of: view)
+        let frame = control == .copy ? view.convert(view.visibleRect, to: nil) : frame(of: view)
         return frame.isEmpty ? nil : frame
     }
 
@@ -134,11 +134,12 @@ final class SubtitleOverlayHitTargets: ObservableObject {
             if !event.modifierFlags.contains(.control), event.clickCount <= 1,
                frame(of: .copy, in: window)?.contains(point) == true, let view = shownView(.copy, in: window) {
                 copyPress = (view, point)
+                pressed = .copy
             }
             return false
         case .leftMouseDragged:
             if let copyPress, hypot(point.x - copyPress.start.x, point.y - copyPress.start.y) > Self.clickSlop {
-                self.copyPress = nil
+                cancelPress()
             }
             guard consumes else { return false }
             if press != nil, !pressHolds(at: point, in: window) { cancelPress() }
@@ -148,6 +149,7 @@ final class SubtitleOverlayHitTargets: ObservableObject {
             let consumed = consumes
             var action = consumes && pressHolds(at: point, in: window) ? press?.view?.activate : nil
             if let copyPress, shownView(.copy, in: window) === copyPress.view,
+               frame(of: .copy, in: window)?.contains(point) == true,
                hypot(point.x - copyPress.start.x, point.y - copyPress.start.y) <= Self.clickSlop {
                 action = copyPress.view.activate
             }

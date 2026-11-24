@@ -62,7 +62,8 @@ and shows a notice.
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
 Russian. Click the translation to copy all of it: **Copied ✓** shows for a
 second at the corner of the result. Dragging over it still selects a part to
-copy with ⌘C, and a double click selects a word. Right-click the palette for
+copy with ⌘C, and a double click selects a word. With keyboard navigation
+enabled, Tab can focus the result and Return copies it. Right-click the palette for
 **Translate to**, **Copy translation**,
 **Clear** or **Cancel translation**. The floating palette also offers **Subtitles**;
 in Toolbox select its separate tile. Explicit language choices

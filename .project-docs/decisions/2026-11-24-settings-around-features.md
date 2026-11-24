@@ -123,6 +123,11 @@ accepted the second version.
   link (`whytap://settings/agentMode`, the setup prompt) opens the Agent
   screen. The Agent's examples are only things its tools do today (files,
   a command, the screen, web search, To-do, Whytap's own settings).
+- Google search's shortcuts are saved now (`hotkeys.googleSearchTextShortcut`,
+  `…VoiceShortcut`, `…VoiceGesture`, also in backup and settings sync). They
+  never were: a change on its screen or in Hotkeys was dropped at once and the
+  key monitor kept Right Option (builder review of #458). An Agent turned on
+  elsewhere clears the screen's earlier "why it did not turn on".
 
 ## Why
 

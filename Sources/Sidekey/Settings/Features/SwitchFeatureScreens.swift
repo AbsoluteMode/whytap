@@ -61,8 +61,12 @@ final class FeatureSwitchModel: ObservableObject {
         self.environment = environment
     }
 
+    /// The flag changed elsewhere (the island, onboarding, a nudge). Once
+    /// the feature is on, an earlier "why it did not turn on" is stale.
     func follow(_ now: Bool) {
-        if !busy { isOn = now }
+        guard !busy else { return }
+        isOn = now
+        if now { problem = nil }
     }
 
     @discardableResult

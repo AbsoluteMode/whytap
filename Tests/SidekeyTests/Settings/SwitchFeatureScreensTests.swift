@@ -69,6 +69,42 @@ final class SwitchFeatureScreensTests: XCTestCase {
         XCTAssertTrue(model.isOn)
     }
 
+    func testAnAgentTurnedOnElsewhereDropsTheOldReason() async throws {
+        let fixture = try await fixture(.freshInstall)
+        var environment = fixture.environment
+        environment.setAgent = { _ in AgentOtherSection.Problem.noModel.message }
+        let agent = FeatureSwitchModel(feature: .agent, isOn: false, environment: environment)
+        await agent.turn(true)?.value
+        XCTAssertNotNil(agent.problem)
+        agent.follow(true)
+        XCTAssertTrue(agent.isOn)
+        XCTAssertNil(agent.problem, "The Agent is on: “choose a model” no longer applies")
+    }
+
+    /// Google search's shortcuts were never saved: a change on the screen
+    /// (or in Hotkeys) was lost at once and never reached the key monitor.
+    func testGoogleShortcutsAndToggleAreSavedAndSurviveAReload() async throws {
+        let fixture = try await fixture(.freshInstall)
+        let text = FeatureShortcutEditor(hotkey: .googleText, preferences: fixture.hotkeys)
+        text.record(.combo(.optionPeriod))
+        XCTAssertNil(text.notice)
+        let voice = FeatureShortcutEditor(hotkey: .googleVoice, preferences: fixture.hotkeys)
+        voice.record(.modifier(.rightCommand))
+        voice.setGesture(.tap)
+        XCTAssertEqual(fixture.hotkeys.configuration.googleSearchTextShortcut, .combo(.optionPeriod))
+        XCTAssertEqual(fixture.hotkeys.configuration.googleSearchVoiceGesture, .tap)
+
+        let reloaded = HotkeyPreferences(defaults: fixture.defaults)
+        XCTAssertEqual(reloaded.configuration.googleSearchTextShortcut, .combo(.optionPeriod))
+        XCTAssertEqual(reloaded.configuration.googleSearchVoiceShortcut, voice.configuration.googleSearchVoiceShortcut)
+        XCTAssertEqual(reloaded.configuration.googleSearchVoiceGesture, .tap)
+
+        fixture.hotkeys.resetToDefaults()
+        XCTAssertEqual(fixture.hotkeys.configuration.googleSearchTextShortcut,
+                       HotkeyConfiguration.defaults.googleSearchTextShortcut)
+        XCTAssertEqual(HotkeyPreferences(defaults: fixture.defaults).configuration.googleSearchVoiceGesture, .hold)
+    }
+
     func testMeetingNotesLeadsToTheNotes() {
         let selection = SettingsWindowSelection()
         selection.open(.meetings)

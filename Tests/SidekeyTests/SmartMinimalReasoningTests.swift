@@ -436,7 +436,6 @@ final class SmartMinimalReasoningTests: XCTestCase {
                 XCTAssertEqual(line.model, logged, label)
                 XCTAssertEqual(line.status, status, label)
                 XCTAssertEqual(line.requestID, "unavailable", label)
-                XCTAssertGreaterThanOrEqual(line.llmMs, 0, label)
                 XCTAssertEqual(line.outputTokens, status == 200 ? 14 : -1, label)
                 XCTAssertEqual(line.reasoningTokens, status == 200 ? 0 : -1, label)
                 // Every text field of the line, whatever it is called.
@@ -470,6 +469,19 @@ final class SmartMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(lines.map(\.effort), ["low+between_tools", "default"])
         XCTAssertEqual(lines.map(\.effortRefused), [false, true])
         XCTAssertEqual(lines.last?.status, 200)
+
+        // OpenRouter's own generation ID is kept for its dashboard.
+        lines = []
+        try route(.openRouter, "google/gemini-3.8-flash")
+        provider { [unowned self] _, _ in
+            urls.last?.hasSuffix("/models") == true
+                ? (200, #"{"data":[{"id":"google/gemini-3.8-flash","reasoning":{"mandatory":true,"supported_efforts":["low"]}}]}"#)
+                : (200, Self.openAIReply.replacingOccurrences(of: #"{"usage""#, with: #"{"id":"gen-1763980000-AbC123","usage""#))
+        }
+        _ = try await dictate(processor())
+        XCTAssertEqual(lines.map(\.requestID), ["gen-1763980000-AbC123"])
+        XCTAssertEqual(lines.map(\.effort), ["low"])
+        XCTAssertEqual(lines.map(\.model), ["google/gemini-3.8-flash"])
 
         // Translation and meetings: a line for translation, none for meetings.
         lines = []

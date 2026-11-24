@@ -106,8 +106,11 @@ below), and that time is spent on every dictation.
 - **Timings survive.** The numeric lines `cleanup …` (category `cleanup-llm`),
   `drop processing ok …` and `drop turn … completed …` are logged at the
   default level, which the unified system log stores, instead of info. Every
-  Smart and translation request, successful or failed, on any route now
-  writes one `cleanup` line built from one structure (`CleanupDiagnostics`):
+  Smart and translation request that got an HTTP response, successful or
+  failed, on any route now writes one `cleanup` line built from one structure
+  (`CleanupDiagnostics`; a request that never got a response, such as a
+  timeout or a lost connection, is the existing `drop cleanup failed` error
+  line and CFNetwork's own lines):
   provider, model, OpenRouter request ID, the reasoning setting that was
   answered, HTTP status, catalog and request milliseconds, output and
   reasoning tokens, and whether the field was refused. A model name is saved

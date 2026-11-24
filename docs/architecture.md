@@ -195,8 +195,9 @@ Voice flow (Drop / dictation):
        Translation, meetings, OpenRouter and custom servers are unchanged. The
        cleanup timing lines (category cleanup-llm, "drop processing ok",
        "drop turn ... completed") are logged at the default level so the system
-       log keeps them; each Smart or translation request writes one cleanup
-       line from one structure (CleanupDiagnostics). The saved model name
+       log keeps them; each Smart or translation request that got an HTTP
+       response writes one cleanup line from one structure
+       (CleanupDiagnostics). The saved model name
        itself is never logged (CleanupDiagnosticModel): Anthropic and OpenAI lines carry one of a
        fixed list of published family names, OpenRouter lines an ID its own
        catalog lists; any other saved name is "other" and a user's own server

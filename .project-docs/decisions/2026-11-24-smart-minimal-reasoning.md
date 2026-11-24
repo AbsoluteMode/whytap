@@ -170,6 +170,27 @@ without the field, 3 of 4 at `none`, 2 of 4 at `low`). That hint confusion
 exists at every setting and belongs to the prompt, not to this change; it is
 left as a follow-up.
 
+Live, Anthropic Messages, 2026-11-24 (the app's `anthropic-version`,
+2023-06-01). The Models API states the same table: `between_tools` is
+supported by Claude Sonnet 5.5 only, `disabled` by Haiku 5.5, Opus 5, Sonnet 5
+and the 4.x models and by no Fable, Mythos or Opus 5.5 model, and `effort` by
+every listed model except Haiku 4.5. One Smart request each confirmed that
+Haiku 5.5 accepts low effort with `disabled`, and Fable 5.2 and Opus 5.5 low
+effort alone. The same eight dictations on the maintainer's route, one request
+at a time:
+
+| claude-sonnet-5-5 | Median | Slowest | Total | Thinking |
+| --- | --- | --- | --- | --- |
+| no field (before) | 1.70 s | 3.14 s | 13.7 s | 2 of 8 replies, 197 and 217 tokens |
+| low effort | 1.28 s | 1.93 s | 10.6 s | none |
+| low effort, `between_tools` (sent now) | 1.17 s | 1.70 s | 9.3 s | none |
+
+The pass verdict came for the clean sentence only, in all three settings; the
+self-correction, the brand names, the list, the long thought with its hedges
+and the English dictation (kept in English) came out the same. One difference
+seen: with `between_tools` the opening filler of one dictation ("listen,")
+stayed in the text.
+
 ## Rejected
 
 - Medium or the provider default: the maintainer asked for the minimum.

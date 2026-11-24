@@ -11,6 +11,7 @@ struct DropFeatureView: View {
     @ObservedObject var selection: SettingsWindowSelection
     @ObservedObject var models: APIAndModelsViewModel
     @ObservedObject var permissions: PermissionsSettingsViewModel
+    /// Observed so the download's progress redraws the screen.
     @ObservedObject private var onDevice: OnDeviceSpeechModelController
     @ObservedObject private var hotkeys: HotkeyPreferences
     @StateObject private var shortcut: FeatureShortcutEditor
@@ -19,7 +20,6 @@ struct DropFeatureView: View {
     @State private var language: AppLanguage?
     @State private var volumeDuck = false
     @State private var autoStop = false
-    @FocusState private var backFocused: Bool
 
     init(snapshot: FeatureSetupSnapshot, selection: SettingsWindowSelection, models: APIAndModelsViewModel,
          permissions: PermissionsSettingsViewModel, environment: FeaturesEnvironment,
@@ -40,39 +40,31 @@ struct DropFeatureView: View {
 
     private var info: FeatureInfo { FeatureCatalog.info(for: .drop) }
     private var status: FeatureStatus { FeatureCatalog.status(for: .drop, snapshot: snapshot) }
-    private var checks: [FeatureCheck] { FeatureCatalog.checks(for: .drop, snapshot: snapshot) }
     private var gesture: HotkeyGesture { FeatureHotkey.dropVoice.gesture(in: hotkeys.configuration) }
+    private var context: FeatureScreenContext {
+        FeatureScreenContext(snapshot: snapshot, selection: selection, models: models,
+                             permissions: permissions, environment: environment)
+    }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                header
-                if case .needsSetup(let missing) = status, let first = missing.first {
-                    FeatureNeedsBox(
-                        consequence: FeatureCatalog.consequence(of: first, for: .drop, snapshot: snapshot),
-                        more: missing.count - 1,
-                        action: first.action,
-                        download: downloadFraction,
-                        modelSize: OnDeviceSpeechModel.parakeetTdtV3.approximateSize,
-                        perform: perform)
-                }
-                shortcutGroup
-                // A newcomer meets the steps before the field they unlock;
-                // once Drop is ready the field comes first.
-                if status.isReady {
-                    tryGroup
-                    needsGroup
-                } else {
-                    needsGroup
-                    tryGroup
-                }
-                settingsGroup
-                wordsGroup
+        FeatureScreenScaffold {
+            FeatureScreenHeader(info: info, about: FeatureCatalog.dropAbout(gesture: gesture)) {
+                selection.shownFeature = nil
             }
-            .frame(maxWidth: SettingsFeaturesView.contentWidth, alignment: .topLeading)
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-            .frame(maxWidth: .infinity, alignment: .top)
+            FeatureNeedsBanner(feature: .drop, context: context)
+            FeatureVideoStrip(info: info)
+            shortcutGroup
+            // A newcomer meets the steps before the field they unlock;
+            // once Drop is ready the field comes first.
+            if status.isReady {
+                tryGroup
+                FeatureNeedsGroup(feature: .drop, context: context)
+            } else {
+                FeatureNeedsGroup(feature: .drop, context: context)
+                tryGroup
+            }
+            settingsGroup
+            wordsGroup
         }
         .onAppear(perform: reload)
         .onDisappear { shortcut.cancel() }
@@ -84,41 +76,6 @@ struct DropFeatureView: View {
         autoStop = environment.autoStop.isEnabled
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Button { selection.shownFeature = nil } label: {
-                HStack(spacing: 3) {
-                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
-                    Text("Features").font(.system(size: 12.5, weight: .medium))
-                }
-                .foregroundStyle(MacSettingsTheme.accent)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
-            }
-            // The same hover, press and focus feedback as the Features rows.
-            .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.accent, focused: backFocused))
-            .focused($backFocused)
-            .padding(.leading, -6)
-            .accessibilityLabel("Back to Features")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(info.name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text(info.kind)
-                    .font(.system(size: 13))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            Text(FeatureCatalog.dropAbout(gesture: gesture))
-                .font(.system(size: 13))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-    }
-
     // MARK: - Shortcut
 
     private var shortcutGroup: some View {
@@ -127,7 +84,7 @@ struct DropFeatureView: View {
             MacCard {
                 FeatureShortcutRow(
                     editor: shortcut,
-                    detail: HotkeysSettingsView.dropDetail(for: gesture, shortcut: hotkeys.configuration.dropVoiceShortcut))
+                    detail: FeatureShortcutsGroup.detail(for: .dropVoice, in: hotkeys.configuration))
             }
         }
     }
@@ -165,112 +122,7 @@ struct DropFeatureView: View {
     // MARK: - What it needs
 
     static func requiredSummary(_ checks: [FeatureCheck]) -> String {
-        let required = checks.filter { !$0.requirement.optional }
-        let done = required.filter { $0.state.isMet }.count
-        return done == required.count ? "All required are set" : "\(done) of \(required.count) required"
-    }
-
-    private var needsGroup: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            MacGroupTitle(title: "What it needs", trailing: Self.requiredSummary(checks))
-            MacCard {
-                ForEach(Array(checks.enumerated()), id: \.element.id) { index, check in
-                    if index > 0 { MacRowSeparator() }
-                    FeatureRequirementRow(
-                        check: check,
-                        note: note(for: check),
-                        download: downloadFraction,
-                        perform: perform
-                    ) { modelMenu(for: check) }
-                }
-            }
-        }
-    }
-
-    /// The model dropdown of API & Models, in place: picking a model here is
-    /// the same choice as picking it there.
-    @ViewBuilder
-    private func modelMenu(for check: FeatureCheck) -> some View {
-        if case .model(let feature) = check.requirement.kind,
-           snapshot.selectableModels.contains(feature) {
-            ModelMenu(viewModel: models, feature: feature,
-                      label: models.rows.first { $0.feature == feature }?.selectionLabel ?? "Choose a model",
-                      onAddKey: { selection.showAPIKeys() },
-                      // Beside the free model's button the list is the other way.
-                      width: Self.offersOnDevice(check) ? 150 : 230)
-        }
-    }
-
-    static func offersOnDevice(_ check: FeatureCheck) -> Bool {
-        switch check.action {
-        case .downloadOnDeviceModel, .useOnDeviceModel: return true
-        default: return false
-        }
-    }
-
-    /// What the catalog's one sentence cannot know: this Mac's own limits and
-    /// the steps macOS 27.3 wants.
-    private func note(for check: FeatureCheck) -> String? {
-        switch check.requirement.kind {
-        case .model(let feature):
-            let speech = feature.modelUse(on: .onDevice) != nil
-            if speech, !check.state.isMet, snapshot.onDevice == .unsupported {
-                return "The free model that runs on a Mac needs Apple Silicon. Add a key from Soniox, Deepgram, ElevenLabs or OpenAI."
-            }
-            return models.rows.first { $0.feature == feature }?.message
-        case .permission(.keyboard):
-            if permissions.keyboardNeedsRestart { return permissions.restartBlocked }
-            // Override is on: only the last step is left to say.
-            if snapshot.keyboardSetup == .inputMonitoring {
-                return "Override is on. Add Whytap under Input Monitoring, then restart Whytap."
-            }
-            return permissions.settingsOnly && !permissions.keyboardReady
-                ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil
-        case .dropShortcut:
-            guard case .unmet = check.state else { return nil }
-            return FeatureCatalog.consequence(of: check, for: .drop, snapshot: snapshot)
-        case .permission, .subtitlesKey:
-            return nil
-        }
-    }
-
-    private var downloadFraction: Double? {
-        if case .downloading(let fraction) = onDevice.status { return fraction }
-        return nil
-    }
-
-    // MARK: - Actions
-
-    private func perform(_ action: FeatureSetupAction) {
-        switch action {
-        case .downloadOnDeviceModel(let feature):
-            // The download takes minutes; a model picked meanwhile (here or
-            // in API & Models) is the newer choice and stays.
-            let startedFrom = models.currentRoute(for: feature)
-            Task {
-                if await onDevice.download() { models.useOnDeviceModel(for: feature, ifRouteIs: startedFrom) }
-            }
-        case .useOnDeviceModel(let feature):
-            models.useOnDeviceModel(for: feature)
-        case .chooseModel(let feature):
-            selection.focus(feature)
-        case .addKey, .fixKey, .addOpenAIKey:
-            selection.showAPIKeys()
-        case .allow(.keyboard):
-            permissions.requestAccessibility()
-        case .allow(.microphone):
-            permissions.requestMicrophone()
-        case .allow(.screenRecording):
-            Task { await permissions.requestScreenRecording() }
-        case .allow(.systemAudio):
-            break
-        case .openInputMonitoring:
-            permissions.requestInputMonitoring()
-        case .restartWhytap:
-            permissions.restartWhytap()
-        case .retryShortcut:
-            permissions.retryDropShortcut()
-        }
+        FeatureNeedsGroup.requiredSummary(checks)
     }
 
     // MARK: - Settings

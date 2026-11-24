@@ -104,7 +104,18 @@ accepted the second version.
   uses is not saved, the row says which, and recording stays open.
 - Choosing the model on this Mac from the screen assigns it to that one
   feature and opens no Assign window for the others.
-- There is no video block until a Drop clip exists: no placeholder is drawn.
+- ~~There is no video block until a Drop clip exists: no placeholder is
+  drawn.~~ Replaced the same day (step 2, "do all of it"): every feature
+  screen keeps the clip's place. A made clip plays in place on click; a clip
+  not made yet is a quiet "Video coming" row with what it will show
+  (`FeatureInfo.clipCaption`). The clips are made in a separate task.
+- Step 2 builds every screen from one template (`FeatureScreen.swift`):
+  `FeatureScreenContext` (snapshot, view models, environment, the setup
+  actions), the header, the switch card with the status in words, the Needs
+  setup box, the clip strip, the feature's shortcuts, "What it needs", the
+  feature's own settings and its examples. A new screen is one case in
+  `FeatureScreens` and `place: .screen` in the catalog; Drop keeps its own
+  order around the same parts.
 
 ## Why
 

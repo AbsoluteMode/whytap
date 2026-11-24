@@ -86,7 +86,7 @@ struct IslandCaseSecretRow: View {
     }
 }
 
-/// "+ Key in <project>" at the end of an expanded project.
+/// "+ Key in <project>": the first row of an expanded project, above its keys.
 struct IslandCaseAddKeyRow: View {
     let projectName: String
     let action: () -> Void

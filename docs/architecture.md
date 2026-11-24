@@ -691,8 +691,11 @@ Case secrets manager:
   key-only matches show only those keys. Results put the project with the best
   match first (equal ones keep project order); a query word starting a word of a
   project name lets the rest match that project's keys (`whytap github`); later
-  words of 3+ letters tolerate one typo (`github_lan`). + Key opens a separate creation field,
-  including from a project search result; typing/Return in search never writes. Navigation is white and explanations are
+  words of 3+ letters tolerate one typo (`github_lan`). + Key is the first row of an
+  expanded project, above its keys, and opens a separate creation field,
+  including from a project search result; typing/Return in search never writes.
+  The key just saved is listed first in its project, under + Key, until Case
+  locks; then it takes its place by name. Navigation is white and explanations are
   short. Case has no Doppler integration or import screen.
   All explicitly opened hover submenus survive pointer exit until Back, an
   outside click or bare Escape. The root tools grid follows ordinary hover;

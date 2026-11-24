@@ -439,7 +439,7 @@ unknown dates last, preserving provider groups and stable ties. Empty search
 keeps catalog order.
 Подписей real-time, recorded и LLM with tools в списке нет. Функции: Drop Fast,
 Drop Smart (распознавание + очистка текста), Meetings (расшифровка + заметки),
-Agent, Agent voice, Voice search, Translation и Subtitles (в 2.2.26 — Speech + отдельная LLM;
+Agent (модель голоса + модель ответа, одна карточка), Voice search, Translation и Subtitles (в 2.2.26 — Speech + отдельная LLM;
 в следующей версии — только OpenAI · gpt-realtime-translate с ключом OpenAI). Ошибки и
 действия для их исправления видны и в свёрнутом состоянии. Над карточкой — тихая пометка «N features have no model ·
 Show»: Show раскрывает первую нужную функцию, прокручивает к ней и на пару секунд

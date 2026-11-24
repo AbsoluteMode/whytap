@@ -80,14 +80,15 @@ struct FeatureGroup: Equatable, Identifiable {
 
     /// Every feature exactly once (Costs groups usage by it too). Paired
     /// functions keep their speech route beside the LLM route that processes
-    /// its text. Subtitles' features are retired: the card shows the Audio
-    /// translate slot instead of rows.
+    /// its text, speech first: the Agent's card holds its voice model and its
+    /// answer model, and there is no separate "Agent voice" card. Subtitles'
+    /// features are retired: the card shows the Audio translate slot instead
+    /// of rows.
     static let layout: [(title: String, features: [AIFeature])] = [
         ("Drop Fast", [.dropFast]),
         ("Drop Smart", [.dropSmart, .dropSmartCleanup]),
         ("Meetings", [.meetings, .meetingNotes]),
-        ("Agent", [.agent]),
-        ("Agent voice", [.agentVoice]),
+        ("Agent", [.agentVoice, .agent]),
         ("Voice search", [.voiceSearch]),
         ("Translation", [.translation]),
         ("Subtitles", [.subtitlesAudio, .subtitlesTranslation]),

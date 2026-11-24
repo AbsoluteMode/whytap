@@ -46,11 +46,12 @@ final class FeatureScreenTemplateTests: XCTestCase {
         }
     }
 
-    func testEveryFeatureSaysWhatItsClipShowsEvenBeforeTheClipIsMade() {
+    func testEveryFeatureSaysWhatItsClipShows() {
         for info in FeatureCatalog.all where info.place == .screen {
             XCTAssertFalse(info.clipCaption.isEmpty, "\(info.feature) has no clip caption")
         }
-        XCTAssertNil(FeatureVideoStrip.url(for: FeatureCatalog.info(for: .drop)), "Drop's clip is not made yet")
+        // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+        XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast, "Drop's clip is made")
     }
 
     func testStartingAnotherShortcutReleasesTheFirstRecorder() async throws {

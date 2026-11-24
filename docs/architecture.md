@@ -168,14 +168,21 @@ Voice flow (Drop / dictation):
        name, the language and mode hints and the transcript; no text of the
        target window is read or sent, with no setting to add it. WHY:
        .project-docs/decisions/2026-11-22-smart-no-window-context.md
-       SmartFormattingProfile selects destination syntax from app identity and
-       the focused element's AX role and document URL, read on this Mac by
-       SmartFormattingMetadataReader (1.5s deadline) and never sent.
-       Markdown editors/recognized web composers use a fixed syntax subset;
-       IDEs require a real Markdown file, and single-line/unknown fields stay plain.
-       Slack/Telegram use local RTF + semantic HTML + plain clipboard fallback;
-       code/URLs survive filler stripping and every flavor is restored after
-       paste. Fast and clean-Decision editor bypass stay unchanged. WHY:
+       One line in the system prompt names the app the text is meant for and
+       lets the model use that app's Markdown if it knows the app shows it;
+       there is no list of apps with their own rules. The line replaces the
+       prompt's plain-text rule (PostProcessor.systemPrompt(for:)). A
+       single-line field, a take into Whytap's own editor and an app without
+       a name get no line and stay plain. SmartFormattingMetadataReader reads
+       the focused element's AX role and document URL on this Mac (1.5s
+       deadline); they are never sent. WHY:
+       .project-docs/decisions/2026-11-24-smart-destination-line.md
+       Slack/Telegram (bundle ID, or app.slack.com / web.telegram.org in a
+       browser) are the only apps named in SmartFormattingProfile: their
+       paste uses local RTF + semantic HTML + plain clipboard fallback, and
+       their line describes that converter. Code/URLs survive filler
+       stripping and every flavor is restored after paste. Fast and the
+       editor's pass verdict stay plain. WHY:
        .project-docs/decisions/2026-10-21-smart-destination-formatting.md
        Smart uses the lowest supported OpenRouter reasoning effort (or off
        when optional), discovered from the cached model catalog, and asks

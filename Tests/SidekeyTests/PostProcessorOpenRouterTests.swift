@@ -65,7 +65,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let env = makeEnv()
         try env.keys.save("or-key", account: OpenRouterLLMKeyStore.account)
         env.routing.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/auto"), for: .dropSmartCleanup)
-        for profile in [SmartFormattingProfile.plain, .slack, .telegram, .github, .commonMark] {
+        for profile in [SmartFormattingProfile.plain, .slack, .telegram, .app("GitHub"), .app("Obsidian")] {
             let client = FakeOpenRouterClient(completion: "Проверь импорт.")
             _ = try await env.processor(client).processOutput(
                 "ну проверь импорт", targetApp: "Telegram", language: "ru", transcriptionMode: "smart", formatting: profile
@@ -74,7 +74,7 @@ final class PostProcessorOpenRouterTests: XCTestCase {
             XCTAssertEqual(client.lastMessages[0].role, "system")
             XCTAssertEqual(
                 client.lastMessages[0].content,
-                profile.instructions.map { PostProcessor.systemPrompt + "\n\n" + $0 } ?? PostProcessor.systemPrompt
+                PostProcessor.systemPrompt(for: profile)
             )
             XCTAssertEqual(
                 client.lastMessages[1].content,
@@ -104,11 +104,11 @@ final class PostProcessorOpenRouterTests: XCTestCase {
         let server = env.routing.addServer(name: "Test", baseURL: "http://localhost:8000/v1")
         env.routing.setRoute(FeatureRoute(account: .server(server.id), model: "selected-model"), for: .dropSmartCleanup)
         let client = FakeOpenRouterClient(completion: "Проверь `timeout_ms`, пожалуйста.")
-        let result = try await env.processor(client).process("Проверь timeout_ms", language: "ru", transcriptionMode: "smart", formatting: .commonMark)
+        let result = try await env.processor(client).process("Проверь timeout_ms", targetApp: "Obsidian", language: "ru", transcriptionMode: "smart", formatting: .app("Obsidian"))
         XCTAssertEqual(result, "Проверь `timeout_ms`, пожалуйста.")
         XCTAssertEqual(client.lastModel, "selected-model")
-        XCTAssertTrue(client.lastMessages[0].content.contains("CommonMark"))
-        XCTAssertTrue(client.lastMessages[0].content.hasPrefix(PostProcessor.systemPrompt))
+        XCTAssertEqual(client.lastMessages[0].content, PostProcessor.systemPrompt(for: .app("Obsidian")))
+        XCTAssertTrue(client.lastMessages[0].content.contains("для приложения «Obsidian»"))
     }
 
     func testServerRouteProcessesDirectlyWithoutRequiredKey() async throws {

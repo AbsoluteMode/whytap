@@ -38,7 +38,7 @@ sources:
   - type: url
     reference: https://code.visualstudio.com/docs/languages/markdown
     confirmed_at: 2026-10-21
-related: [2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-decisions.md, 2026-10-22-smart-editor-pass.md, 2026-11-22-smart-no-window-context.md]
+related: [2026-10-21-smart-editor-prompt.md, 2026-10-21-smart-decisions.md, 2026-10-22-smart-editor-pass.md, 2026-11-22-smart-no-window-context.md, 2026-11-24-smart-destination-line.md]
 ---
 
 # Destination formatting
@@ -149,3 +149,9 @@ Extends the Smart editor's presentation contract for recognized destinations.
 The screen-context envelope mentioned above was removed on 2026-11-22: see
 [2026-11-22-smart-no-window-context.md](2026-11-22-smart-no-window-context.md).
 Its meaning preservation, strict failures, Retry and Decision contracts remain.
+
+On 2026-11-24 the profile table and the per-profile rules above were replaced
+by one line naming the destination app: see
+[2026-11-24-smart-destination-line.md](2026-11-24-smart-destination-line.md).
+The clipboard conversion for Slack and Telegram and the literal preservation
+remain.

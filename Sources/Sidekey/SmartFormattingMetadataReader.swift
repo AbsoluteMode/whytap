@@ -2,8 +2,9 @@ import ApplicationServices
 import Foundation
 
 /// Reads the focused field's Accessibility role and the containing document's
-/// URL of a given process, so Smart can pick a destination formatting profile
-/// (`SmartFormattingProfile.resolve`) on this Mac.
+/// URL of a given process, so Smart can tell on this Mac a single-line field
+/// (no markup) and Slack or Telegram in a browser (rich paste):
+/// `SmartFormattingProfile.resolve`.
 ///
 /// Only these two values are read. No text of the window (values, titles,
 /// descriptions) is collected, and nothing read here goes into the cleanup

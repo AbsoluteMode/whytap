@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/SmartFormattingMetadataReader.swift
     confirmed_at: 2026-11-22
-related: [2026-10-21-smart-destination-formatting.md, 2026-09-07-smart-latency.md, 2026-10-19-strict-drop-modes.md]
+related: [2026-10-21-smart-destination-formatting.md, 2026-09-07-smart-latency.md, 2026-10-19-strict-drop-modes.md, 2026-11-24-smart-destination-line.md]
 ---
 
 # Smart: no window context
@@ -92,5 +92,11 @@ Supersedes the screen-context envelope described in
 and the context collection part of
 [2026-09-07-smart-latency.md](2026-09-07-smart-latency.md); its deadline now
 bounds only the formatting metadata read.
+
+Since 2026-11-24 the "fixed rules of the chosen destination format" are one
+line naming the app, and the focused role and document URL only tell a
+single-line field and Slack or Telegram in a browser:
+[2026-11-24-smart-destination-line.md](2026-11-24-smart-destination-line.md).
+The request still carries no window text and no address.
 
 2026-11-22 · branch `claude/smart-no-ax-context-0bf183`

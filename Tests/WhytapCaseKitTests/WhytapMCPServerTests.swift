@@ -90,7 +90,7 @@ final class WhytapMCPServerTests: XCTestCase {
         }
         XCTAssertFalse(readOnly.contains { ["whytap_set_model", "whytap_set_provider", "whytap_set_setting",
                                              "whytap_todo_add", "whytap_todo_update", "whytap_meeting_open",
-                                             "whytap_toolbox_set", "whytap_hotkey_set"].contains($0) })
+                                             "whytap_toolbox_set", "whytap_hotkey_set", "whytap_vocab_add", "whytap_filler_add"].contains($0) })
     }
 
     func test_initialize_names_one_server_and_carries_both_guides() throws {

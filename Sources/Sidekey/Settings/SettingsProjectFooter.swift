@@ -6,13 +6,27 @@ struct SettingsProjectFooter: View {
     let identity: AppBuildIdentity
     /// Nil only in previews and tests without an app delegate: no button.
     var updateController: UpdateController?
+    /// With releases to show, the version is a button that opens What's New.
+    // WHY: .project-docs/decisions/2026-11-24-whats-new-window.md
+    var whatsNew: WhatsNewPresenter?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("\(identity.name) \(identity.version)")
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .lineLimit(1)
+                if let whatsNew, !whatsNew.history.isEmpty {
+                    Button { whatsNew.presentHistory() } label: {
+                        Text("\(identity.name) \(identity.version)").lineLimit(1)
+                    }
+                    .buttonStyle(SettingsFooterLinkStyle())
+                    .padding(.leading, -6)
+                    .help("What’s new in \(identity.name) \(identity.version)")
+                    .accessibilityLabel("\(identity.name) \(identity.version)")
+                    .accessibilityHint("Shows what’s new in this version")
+                } else {
+                    Text("\(identity.name) \(identity.version)")
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 0)
                 if let updateController {
                     SettingsFooterUpdateButton(controller: updateController)

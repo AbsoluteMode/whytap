@@ -105,7 +105,9 @@ final class AgentSettingsStore: ObservableObject {
                                        ? routing.route(for: .agent)?.provider : nil,
                                    // Read from defaults: a synced choice applies at once.
                                    preferTavilySearch: defaults.string(forKey: Keys.webSearchChoice) == AgentWebSearchChoice.tavily.rawValue,
-                                   webSearchSupport: selectedWebSearchSupport)
+                                   webSearchSupport: selectedWebSearchSupport,
+                                   lowEffortSupport: selectedCatalogEntry?.supportsLowEffort,
+                                   outputTokenLimit: selectedCatalogEntry?.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil })
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
@@ -159,11 +161,14 @@ final class AgentSettingsStore: ObservableObject {
     /// The catalog's built-in web search flag for the Agent model, independent
     /// of whether the catalog gives token limits (the Search row and the next
     /// turn must agree). WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-    var selectedWebSearchSupport: Bool? {
+    var selectedWebSearchSupport: Bool? { selectedCatalogEntry?.supportsWebSearch }
+
+    /// The Agent model's entry in its route provider's catalog snapshot.
+    var selectedCatalogEntry: CatalogModel? {
         guard let id = selectedOpenCodeModel, let provider = selectedOpenCodeProvider else { return nil }
         return catalogs.snapshot(for: provider.account)?.models.first {
             OpenCodeEnvironment.normalizeModel($0.id) == id
-        }?.supportsWebSearch
+        }
     }
 
     /// The user's explicit pick when it is a level this CLI accepts, else Low.

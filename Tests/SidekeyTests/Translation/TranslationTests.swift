@@ -326,8 +326,10 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(rows.map(\.isLive), [false, false, false, true])
         XCTAssertEqual(rows.last?.id, SubtitleCaption.liveID)
 
-        let many = (1...12).map { line("s\($0)", "t\($0)") }
-        XCTAssertEqual(SubtitleCaption.rows(lines: many, live: "").map(\.source), (9...12).map { "s\($0)" })
+        let many = (1...20).map { line("s\($0)", "t\($0)") }
+        XCTAssertEqual(SubtitleCaption.rows(lines: many, live: "").map(\.source), (9...20).map { "s\($0)" })
+        let next = UUID()
+        XCTAssertEqual(SubtitleCaption.rows(lines: [], live: "heard", liveID: next).last?.id, next)
         let issue = TranslationIssue(message: "Set up Subtitles in API & Models.", feature: .subtitlesAudio)
         XCTAssertEqual(SubtitleCaption.status(hasRows: true, phase: .failed, issue: issue), issue.message)
     }

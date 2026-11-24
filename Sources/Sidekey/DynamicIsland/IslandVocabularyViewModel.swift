@@ -33,8 +33,8 @@ final class IslandVocabularyViewModel: ObservableObject {
     init(vocabulary: VocabularyCache = .shared) {
         self.vocabulary = vocabulary
         // The list loads once, then is saved whole; a term added elsewhere
-        // (a learning suggestion's Y) must reach this copy before the next save.
-        // WHY: .project-docs/decisions/2026-11-22-drop-edit-learning.md
+        // (another editor, settings sync) must reach this copy before the next save.
+        // WHY: .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
         changeObserver = NotificationCenter.default.addObserver(
             forName: VocabularyCache.didChangeNotification, object: vocabulary, queue: .main
         ) { [weak self] _ in

@@ -17,7 +17,7 @@ import XCTest
 final class LocalPathLoggingInvariantTests: XCTestCase {
     /// Files on the provider paths that touch user/model content.
     private static let guardedFiles = [
-        "Sources/Sidekey/Streaming/BYOK/OpenRouterLLMClient.swift",
+        "Sources/Sidekey/Streaming/BYOK/CleanupDiagnostics.swift",
         "Sources/Sidekey/Meetings/MeetingBYOKProcessor.swift",
         "Sources/Sidekey/Streaming/BYOK/DirectProviderStreamingSession.swift",
         "Sources/Sidekey/Streaming/BYOK/ProviderBatchTranscriber.swift",
@@ -35,6 +35,22 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
         "prompt", "user", "system", "reply", "text", "transcript",
         "markdown", "instructions", "segments", "samples",
     ]
+
+    /// The Smart / translation / meeting text clients hold the prompt, the
+    /// reply and the saved model name. They write nothing to the log
+    /// themselves: every line goes through `CleanupDiagnostics`, whose fields
+    /// are fixed words, verified catalog names and numbers.
+    /// WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
+    func test_textClientsLogOnlyThroughCleanupDiagnostics() throws {
+        for relativePath in ["Sources/Sidekey/Streaming/BYOK/OpenRouterLLMClient.swift",
+                             "Sources/Sidekey/Streaming/BYOK/AnthropicLLMClient.swift"] {
+            let source = try readProjectFile(relativePath)
+            for call in ["os_log(", "Logger(", "NSLog(", "print(", "OSLog("] {
+                XCTAssertFalse(source.contains(call), "\(relativePath): \(call) bypasses CleanupDiagnostics")
+            }
+            XCTAssertTrue(source.contains("diagnostics(") , "\(relativePath): expected a CleanupDiagnostics line")
+        }
+    }
 
     func test_guardedPathsNeverLogPromptOrContent() throws {
         for relativePath in Self.guardedFiles {

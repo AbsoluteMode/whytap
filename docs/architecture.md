@@ -183,6 +183,26 @@ Voice flow (Drop / dictation):
        summaries and custom endpoints retain their own defaults. The
        formatting metadata read has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
        timings/counts/IDs only. WHY: docs/decisions/2026-09-07-smart-latency.md
+       On the direct Anthropic and OpenAI routes Smart (client profile .smart)
+       sends the least reasoning the chosen model accepts (SmartDirectReasoning:
+       Anthropic output_config.effort low, plus thinking between_tools on
+       Claude Sonnet 5.5 or disabled on Haiku 5.5 and Sonnet 5; OpenAI
+       reasoning_effort none, minimal or low by model). A model outside the
+       tables gets no field; when a request with a field is refused with HTTP
+       400 (or 422 on Anthropic), it is repeated once without the field, and
+       only if that repeat returns a valid answer is the model left without
+       the field until relaunch.
+       Translation, meetings, OpenRouter and custom servers are unchanged. The
+       cleanup timing lines (category cleanup-llm, "drop processing ok",
+       "drop turn ... completed") are logged at the default level so the system
+       log keeps them; each Smart or translation request that got an HTTP
+       response writes one cleanup line from one structure
+       (CleanupDiagnostics). The saved model name
+       itself is never logged (CleanupDiagnosticModel): Anthropic and OpenAI lines carry one of a
+       fixed list of published family names, OpenRouter lines an ID its own
+       catalog lists; any other saved name is "other" and a user's own server
+       "custom". WHY:
+       .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->
             CGEvent Cmd+V (4-event sequence)
@@ -266,6 +286,17 @@ Live text in the recording wing (Drop and agent voice):
   shorter rewrite (ElevenLabs removes repeated words and false starts) keeps
   the text before it in place and leaves free space at the right edge. WHY:
   .project-docs/decisions/2026-11-21-live-text-forward-only.md
+  LiveTextStabilizer first decides which snapshots the line shows at all. It
+  compares each one with the text on screen word by word: words after the
+  last common word are shown at once and replace the live guess after it; a
+  snapshot that only ends earlier is not shown; a change before that word (or
+  a shorter phrase) is shown in one step after the provider has kept that
+  same change for 1.5 s. Text delivered but not revealed yet follows the
+  newest snapshot. The plain line (IslandPlainLiveText) uses the same rule.
+  ElevenLabs scribe_v3_live alternates between readings of a phrase for a
+  second or two. Display only: paste and auto-stop read the provider's
+  text. Any provider. WHY:
+  .project-docs/decisions/2026-11-23-live-text-stable-display.md
   Soniox publishes the complete live snapshot once per token frame.
   WHY: .project-docs/decisions/2026-11-15-live-text-rewrites.md
   A face rebuilt mid-take shows its text at once; text revealed past its
@@ -303,6 +334,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   of the generic star; OpenRouter's hosting-provider pin does not change authorship.
   OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Mistral, Cohere and Perplexity have
   prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
+  One provider has one mark: an OpenAI or Anthropic account shows that same
+  bundled model-author mark wherever its provider is drawn (Drop and cleanup
+  tickers, API & Models, first-run keys), never a second asset or an SF Symbol.
   A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
   without keys/content/model requests; recording never waits for it. Cache I/O
   is off the main actor, failed refreshes retain usable artwork, and stale view
@@ -325,14 +359,23 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Settings -> API & Models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
-  Anthropic uses Messages. Provider-native reasoning/tool items survive within
+  Anthropic uses Messages. Direct Anthropic and OpenAI requests ask for low
+  effort (NativeAgentEffort: output_config.effort / reasoning.effort, only on
+  models documented or catalogued to take it), allow 16,384 output tokens (or
+  the catalog's lower limit, even without a context length) and
+  wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s and gets no effort.
+  A finished direct Anthropic plain-text reply (end_turn, text blocks only) is
+  the answer, checked like finish_answer; cards come from its text as usual.
+  A cut answer reports the output limit. WHY:
+  .project-docs/decisions/2026-11-23-agent-low-effort.md Provider-native reasoning/tool items survive within
   the turn. OpenRouter continuations normalize tool arguments to JSON strings,
   preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
   reasoning. Only allowlisted provider error categories become static messages;
   raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
   reported usage is recorded. Native model requests also emit local
   unified-log events (native-agent): generated turn/request IDs, timings, counts,
-  tool/reasoning shape, status and fixed error hints only. No content, route
+  tool/reasoning shape, requested effort, token usage (input, output, thinking,
+  cache), status and fixed error hints only. No content, route
   strings, external IDs, keys or raw errors; search HTTP is not model traffic.
   The OS manages retention. Hints are mentions, not a proven cause. No provider fallback or model substitution. Connect checks only
   local key availability, model selection and writable workspace; it does not
@@ -460,13 +503,29 @@ Translation tools:
   when idle or hovered, one row of source/target language, Start/Stop and ×.
   It never takes keyboard focus when shown; Toolbox uses the same box. WHY:
   .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
-  The box shows phrase pairs: original (left, at most 45 %) and its
-  translation running to the box's edge (PairGridLayout); the box hugs its
-  widest row (HuggingColumnLayout), bottom-anchored, only whole pairs (NewestRowsLayout), the phrase
-  still being heard last as a dim live original; Toolbox stacks original over
-  translation. Every other pair sits on a faint band that follows the pair's
-  position in the session. WHY:
+  The box shows phrase pairs: original (left, a fixed 38 %) and its
+  translation (SteadyPairsLayout), the phrase still being heard last as a dim
+  live pair; Toolbox stacks original over translation (whole pairs,
+  NewestRowsLayout). Every other pair sits on a faint band that follows the
+  pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
+  The caption is 146 pt high while connecting or listening. The audio
+  permissions link sits inside it. Stop immediately shows Start and a
+  108 pt caption if there are rows. With no rows the stopped box shows
+  only its controls, and a problem hugs its message. The caption takes the
+  panel's width up to 708 pt and the height the controls leave, so the
+  360 x 190 pt minimum panel fits every state. The live pair
+  settles in place under LiveSubtitleModel.liveID; its original shows only up
+  to the audio position its translation has reached (and its first sentence
+  end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
+  the settled pair keeps at least that much of both streams through any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
+  newest lines (NewestLinesColumn), so a long original never hides its
+  translation; older lines leave at the top behind a fade, a line at a time. On hover
+  the controls cover the caption's top instead of resizing it, so Stop and ×
+  never move; their clicks go through the panel's sendEvent
+  (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
+  acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
+  black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
   holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
@@ -480,13 +539,32 @@ Translation tools:
   ignored and kept for a rollback build. The owner chose this on 2026-11-22
   (three users, all aware), an exception to keeping saved audio routes. WHY:
   .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+  Subtitles capture the system mix at 24 kHz, low-passed before resampling
+  (SystemAudioAntiAliasFilter; Meeting Notes keep 16 kHz), WHY:
+  .project-docs/decisions/2026-11-23-subtitle-realtime-audio.md.
   OpenAIRealtimeTranslateAdapter streams the capture (24 kHz, 200 ms frames)
   to one session that returns the translation and, with gpt-realtime-whisper
   input transcription, the heard original. SubtitleSpeechPairer cuts the
   translation at sentence ends (SubtitleSegmenter's sentence rules), 1.2 s
   pauses or a clause past 160 characters and matches the original's
-  sentence that ended (elapsed_ms) before it; the live pair shows whole
-  words only. Refused key, no credit, busy, unsupported language and a
+  sentence that ended (elapsed_ms) before it, plus later sentences the model
+  joined: of the sentence ends heard by the cut, the one whose length (the
+  session's translation-to-original ratio) and delay (the session's median)
+  fit the translation best. The live pair shows whole words only; a held last
+  word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
+  TranslationPanel.sendEvent from frames they measured
+  (SubtitleOverlayHitTargets), like the island: a press acts only on the
+  button view, action and frame it began on, while the panel shows
+  (SubtitleSessionAction: Start, Cancel or Stop with its session, run by
+  LiveSubtitleModel.perform only while it is still the action shown), and
+  dims the button since SwiftUI never sees it; the running overlay keeps
+  them 1 s after hover ends. Stop shows the stopped box at once
+  (SubtitlePhase.isRunning) while the tail settles; Start then drops it.
+  Audio is sent off the main actor. A delta can publish the caption once
+  80 ms have passed since the last flush, and an 80 ms timer also flushes.
+  The adapter and LiveSubtitleModel log only numbers: how far
+  elapsed_ms trails the audio sent. WHY:
+  .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md Refused key, no credit, busy, unsupported language and a
   dropped socket end the session with a named message; Costs estimates
   $3.06 per audio hour. WHY:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
@@ -617,11 +695,12 @@ Case secrets manager:
   The Case drawer has a 320 pt content viewport (the outer hit band includes
   its gap/music strip) and retains the notch-derived width. Connected clients
   appear as app icons; clicking one opens that client's policy. An always-visible
-  Connect button offers Whytap Agent plus installed Claude Code and Cursor with
-  bundled logos, then grouped project scope and Accept/Bypass before registration.
-  Codex is not offered. There is no arbitrary program picker; existing legacy
+  Connect button offers Whytap Agent plus installed Claude Code, Codex and Cursor,
+  then grouped project scope and Accept/Bypass before registration. Outside
+  clients show bundled monochrome logos; Whytap Agent shows the island's Agent
+  orb in colour. There is no arbitrary program picker; existing legacy
   registrations stay editable. WHY:
-  .project-docs/decisions/2026-10-21-case-connect-claude-code.md. Mode
+  .project-docs/decisions/2026-11-23-case-connect-codex.md. Mode
   and project headings have thin horizontal dividers above their controls.
   Selected projects has a metadata search that preserves the full draft selection;
   All projects includes future projects, with its explanation in native help.
@@ -631,8 +710,11 @@ Case secrets manager:
   key-only matches show only those keys. Results put the project with the best
   match first (equal ones keep project order); a query word starting a word of a
   project name lets the rest match that project's keys (`whytap github`); later
-  words of 3+ letters tolerate one typo (`github_lan`). + Key opens a separate creation field,
-  including from a project search result; typing/Return in search never writes. Navigation is white and explanations are
+  words of 3+ letters tolerate one typo (`github_lan`). + Key is the first row of an
+  expanded project, above its keys, and opens a separate creation field,
+  including from a project search result; typing/Return in search never writes.
+  The key just saved is listed first in its project, under + Key, until Case
+  locks; then it takes its place by name. Navigation is white and explanations are
   short. Case has no Doppler integration or import screen.
   All explicitly opened hover submenus survive pointer exit until Back, an
   outside click or bare Escape. The root tools grid follows ordinary hover;
@@ -780,6 +862,13 @@ Monitor inside hover:
   Monitor/removed-dashboards.json,
   removes that ID's snapshot files and returns an open board to the picker; the
   store hides listed IDs, so a collector rewriting the file cannot bring it back.
+  Server status is not a default board: MonitorStore.serverStatusListed is
+  true only while servers.json names at least one server (or cannot be read)
+  and server-status is not deleted; without it both surfaces show no row and
+  an empty picker says "No dashboards yet". Whytap never writes servers.json.
+  A reload that finds the polled configuration removed, emptied, unreadable
+  or replaced cancels the poll in flight before it reaches SSH.
+  WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
   A listed server-status hides Server status and stops its SSH polling,
   cancelling a poll in flight on every live surface (an in-process notice per
   Monitor folder); an unreadable list pauses polling too.
@@ -979,103 +1068,21 @@ Input language offer:
   language code, the count and the offered codes are stored. WHY:
   .project-docs/decisions/2026-11-20-input-language-suggestion.md
 
-Learning from edits after Drop (sidekey.dropLearning.enabled, on unless the
-  user switched it off: a missing key reads as on, an explicit false is kept;
-  Settings -> Other -> Drop -> Learn from my edits; WHY:
-  .project-docs/decisions/2026-11-22-drop-learning-default-on.md):
-  AutoPasteEngine.paste hands over the field at the paste boundary (after
-  focus restore, right before Cmd+V): the system-wide focused element of the
-  frontmost target app, metadata only, never Whytap's own editors.
-  DropLearningCoordinator then watches that field until it empties (sent),
-  focus leaves it, it goes away, another take starts or 120 s pass: AX
-  value/destroyed/focus notifications plus a bounded read every 0.5 s, and a
-  listen-only Return/Enter key-code monitor (only during the watch, keeps
-  nothing, never delays Return) that triggers a read. Both deadlines (5 s
-  to see the paste, 120 s in all) are monotonic clock times checked before
-  every read, whatever triggered it. The last text that still aligns with
-  the take counts, minus the corrections it already held when the field
-  first showed the paste (a draft is not an edit). A read reports text,
-  focus left (verified: other app, other element, process gone; the last
-  text counts) or unreadable (a failed or empty focus lookup, or still
-  focused but no length, over the bound, a failed transfer or the gate
-  now refuses it; nothing counts). Another
-  message (no alignment) or a paste not seen within 5 s counts nothing.
-  Electron and Chromium apps get AXManualAccessibility (else
-  AXEnhancedUserInterface) set on the target app only, at take start, only
-  when its focused element is not already a readable field and the
-  attribute reads as false (an unreadable attribute is never written). The
-  approval (same process by bundle ID and launch date, frontmost, the same
-  focused element or a confirmed absence, gate and secure input) is taken
-  again after the blocking flag read and must match, each pass confirming
-  focus after its metadata query; right before the write the flag must
-  still read false, focus, process and front app are confirmed again and a
-  fresh IsSecureEventInputEnabled sample, taken after the last blocking AX
-  call, must be false; a failed focus lookup exposes nothing. It is undone when the watch ends, the next take goes
-  elsewhere, 660 s pass without a paste, learning and calibration are
-  switched off (UserDefaults change) or Whytap quits; only for the same
-  process (checked again after the flag read), while the flag reads true
-  or still reads false after a write never seen applied (Electron applies
-  it about 2 s later, so the pending enable is cancelled) (WHY:
-  .project-docs/decisions/2026-11-22-drop-edit-observation.md). Every read
-  happens only if that app is still frontmost, the same element still has
-  keyboard focus and DropEditFieldGate allows it (metadata before any text, fail closed: AXSecureTextField, secure
-  event input, terminals and password managers by bundle ID, own process,
-  unknown app, non-text role, any AX error but a missing attribute). The
-  field must report its length (at most 20,000 UTF-16 units) and only that
-  range is requested (AXStringForRange); no length means no read. Focus
-  and the gate are confirmed again after the length query and after the
-  transfer (focus is checked before and after the gate's metadata calls);
-  if another app takes focus during the capture, the paste engine posts no
-  Cmd+V and restores the clipboard. With learning and calibration off no
-  capture callback is passed and the paste path is unchanged.
-  Switching learning or calibration off stops the watch. It
-  compares with what reached the field (a rich paste's plainText), aligns
-  the take inside the field word by word (DropEditDiff, semi-global, >50% changed = rewrite) and
-  DropLearningClassifier turns edits into candidates without a model: a
-  sound-alike term -> Vocab (only if the wrong word is in the provider's raw
-  text); On this Mac / batch / Retry / recorder fallback, a full route list,
-  a term already in Vocab or a Smart-only error -> Replace (never for
-  dictionary words or grammar endings); full list without Replace -> Vocab
-  full with the route's limit (Y opens Vocab); undone replacement / Vocab
-  term written where not said -> remove; deleted spoken word -> Filler;
-  retyped cut filler -> Stop cutting. Translated takes teach nothing. The
-  same correction in two takes within 14 days becomes one suggestion; N is
-  forever, an expired one starts over; never while the island is not idle;
-  a new take cancels the pending read. DropLearningLedger stores only
-  HMAC-SHA256 (per-install salt) and day numbers, outside backup/sync; words
-  stay in memory until Y, which saves through VocabularyCache /
-  FillerTermsStore / DropReplacementStore (editors reload on their change
-  notification). Hidden calibration (sidekey.dropLearning.calibration):
-  reads until the field holds still (<=30 s), journals to Application
-  Support/<bundle id>/drop-learning/calibration.jsonl (0600), separate
-  ledger, dry-run Y, 0700 folder / 0600 single-name file without following
-  links, ends itself after 14 days (checked at launch, hourly and before
-  every read) and deletes its data. Fired fillers come from the same masked Filler pass.
-  Replace is its own DropOutputPolicy step after Smart and before Filler
-  (DropReplaceFilter: one pass, longest first, letter lookaround
-  boundaries, code/links/e-mail literal; key sidekey.drop.replacements.v1,
-  Vocabulary backup section). Vocab is one list of up to 1,000 terms x 50
-  chars; VocabularyBudget trims it per request in list order: Deepgram ~450
-  est. tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
+Vocab budget: Vocab is one list of up to 1,000 terms x 50 chars;
+  VocabularyBudget trims it per request in list order: Deepgram ~450 est.
+  tokens, ElevenLabs Scribe Live 50 x 20, Soniox ~7,000 tokens, OpenAI
   Realtime prompt ~800 tokens, ElevenLabs recorded keyterms unchanged, query
-  terms within 8 KB encoded. WHY:
-  .project-docs/decisions/2026-11-22-drop-edit-learning.md
-  A suggestion is asked by DropLearningDropsController: DropLearningDropsModel
-  (chain of four drops: list icon, action with +/- in a thin circle, Y, N;
-  budding 0.1 s apart, open at 0.7 s, reverse retract 0.6 s, 10 s open time
-  with no visible timer, hover pauses, one suggestion at a time) drawn by
-  DropLearningDropsView in DropLearningDropsPanel, a non-activating panel
-  right of the island just below its level, following the system
-  appearance. macOS 26 glassEffect in a GlassEffectContainer (blend spacing
-  5 pt < 7 pt gap: bridges only while a drop leaves its parent); thin
-  material on 14/15; opaque with Reduce Transparency; Reduce Motion fades.
-  Y/N are plain glass with a 0.75 pt green/red contour and soft glow only,
-  letters at rest, check/cross under the pointer. Answers: click, or
-  Control-Y / Control-N Carbon hot keys (IDs 19/20) registered only while
-  the drops are shown, Control alone lights Y/N; reserved in the Hotkeys
-  conflict check and listed in Help. An active Drop or Agent phase, an open
-  Agent answer, sleep or quit puts them out and lets an unanswered suggestion go. WHY:
-  .project-docs/decisions/2026-11-22-drop-learning-drops.md
+  terms within 8 KB encoded. VocabularyCache posts a change notification and
+  an open Vocab editor reloads. WHY:
+  .project-docs/decisions/2026-11-23-vocabulary-route-budget.md
+
+Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
+  accepts sidekey.drop.replacements.v1 so older archives restore (restored,
+  never read), and at launch and hourly the hidden calibration journal
+  (drop-learning/calibration.jsonl) and its keys are deleted once calibration
+  is off or 14 days old; nothing is read or collected. FillerTermsStore posts
+  a change notification and every Filler editor reloads. WHY:
+  .project-docs/decisions/2026-11-23-drop-learning-shelved.md
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
@@ -1158,7 +1165,8 @@ Update flow (download-on-action):
   with a CALayer spinner (IslandUpdateSpinner; SwiftUI .repeatForever would
   freeze during main-thread stalls) -> requested install + relaunch while idle
   -> "Updated" indicator for 5s on the next launch (JustUpdatedIndicator,
-  one-shot marker). A meeting recording, dictation or agent activity defers the
+  one-shot marker), and the What's New window when the new version has
+  something for the person (below). A meeting recording, dictation or agent activity defers the
   app-initiated relaunch into Ready with Restart / Later; returning to idle alone
   never restarts it. Ready-stage Later replies .skip, cancelling the current
   installation without permanently skipping the version. The user approved
@@ -1174,6 +1182,18 @@ Update flow (download-on-action):
   is known this session, also after ✕ or a Later; its click is the pill's own
   action, a hidden update returning as the downloading pill. WHY:
   .project-docs/decisions/2026-11-21-settings-update-button.md
+  What's New: `Resources/WhatsNew.json` (bundled, never fetched) lists, per
+  public version, up to five things a person will notice. The first launch of
+  a newer version opens one window (WhatsNewPresenter, WhatsNewLaunch) with
+  the releases since the remembered version, newest first; a version with
+  `"items": []` opens nothing, a new Mac gets the onboarding instead, a Mac
+  with nothing remembered sees the running version only, and the highest
+  launched version is what is remembered (a rollback repeats nothing). It
+  comes forward
+  without taking the keyboard and never returns by itself; the version in
+  the Settings footer reopens the list. The release script refuses a prod
+  version without its entry (`scripts/whats-new.py check`). WHY:
+  .project-docs/decisions/2026-11-24-whats-new-window.md
   Update/Not now and Restart/Later use measured NSWindow down/up dispatch for
   first mouse, including alongside a different open hover tool. Native buttons
   retain keyboard/accessibility activation and hover/pressed/focus feedback.
@@ -1218,7 +1238,9 @@ provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
 then Search (the Agent's web search, AgentSearchRow; see the native Agent
 section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
-list. A shared pick writes every feature route of its kind
+list (FeatureGroup.layout): a function that listens and writes is one card,
+speech route first (Drop Smart, Meetings, and Agent with its Agent voice
+route). A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
 a feature it cannot serve (the Agent without tools, a provider without a
@@ -1382,9 +1404,8 @@ a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
 show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Learn from my edits, Meeting Notes, Google search, Agent,
-Screenshot protection, Auto-hide island); rows that are plain options have
-none. WHY:
+automatically, Meeting Notes, Google search, Agent, Screenshot protection,
+Auto-hide island); rows that are plain options have none. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
@@ -1403,52 +1424,152 @@ recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
 First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
-OnboardingWindowController, accessory app, no Dock icon) in place of the former
-Settings -> Permissions screen: a fixed dark 960x600 window in the former paid
-onboarding's look (OnboardingTheme: Instrument Serif headline with an italic
-word, a short left pane with the page's controls, a stage on the right), up to
-five pages, each skippable, closing = Done; every page but the first has Back
-(OnboardingFlow.previous over the same list; ← and ⌘[ outside text fields,
-OnboardingBackKey) that keeps what was done. 1 Speech (hidden when Drop's speech
-route runs): "I speak" language (PrivacyPreferences.selectedLanguage, the Input
-Lang setting; searchable list, English or native name, arrows and Return), On
-this Mac card ("Download and use for Drop", about 470 MB; when the download
-lands OnboardingDropSpeech sets On this Mac on the Drop Fast/Smart rows that
-cannot run, nothing else; hidden on Intel), and one tile per keyed provider
-(OnboardingKeyOffer: Soniox, Deepgram, ElevenLabs, OpenRouter, OpenAI,
-Anthropic, Tavily) with its offer from APIHintsView.hints and a Speech/AI/Search
-badge; a click opens the key field (the Settings save path) and Get offer, a
-speech key also sets that provider for Drop; one footer place: Continue when a
-saved speech key (not refused) or the downloaded model can run Drop, with "Drop
-will use X" above it (preselected: Drop's running provider, else Soniox,
-Deepgram, ElevenLabs, else On this Mac; a saved speech tile picks; Continue runs
-the free key check before a new provider), else Set up later; "Restore from another Mac"; the
-stage plays a scripted silent Drop with the real orb. 2 Permissions: Microphone
-and Keyboard control on PermissionsSettingsViewModel, done at
-dropHotkeyStatus == .ready (DropShortcutStatusSection when both are granted but
-the shortcut is not installed), plus an optional Screen Recording row for Shot
-(ScreenRecordingAccess.requestOnce, the launch's one request shared with Shot;
-never holds Continue); hidden when ready.
-3 Try Drop: the user's own shortcut, a native field, "That's Drop" only on
-DropLocalEditor's sidekeyDropInsertedIntoLocalEditor for that field; while the
-onboarding is visible a Drop press with no route says so on the page (no
-Settings over it) and one with a missing permission returns to page 2.
-4 Make it yours: tool shortcuts and hover tools, each with a bundled clip
-(Resources/FeatureVideos/onboarding-hotkeys.mp4, onboarding-hover.mp4) and Open
-for Settings -> Hotkeys or Toolbox. 5 Turn on more: Google search / Meeting
-Notes / Agent with switch and clip, "Add a model" when the feature's model does
-not run, and Coding agents (OnboardingCodingTools: Claude Code and Codex when
-installed; Connect runs CaseClientSetup.connect, the Case -> Connect setup,
-without a Case registration); Done. No Calendar. System Audio Recording, Input
-Monitoring, Automation and Calendar are asked at first use. OnboardingLaunch:
-firstLaunchPresented (any launch since 2026-10-26) or the former onboarding's
-key = ran before, never shown on update; sidekey.onboarding.pending.v1 brings
-it back after a quit until Done; neither key is in backups or sync. A first
-Drop press with the microphone never asked asks it and records nothing
+OnboardingJourneyWindowController + OnboardingJourneyModel, temporarily visible in the app switcher): one dark 520x440 window with Back (also ← and ⌘[ outside text
+fields), a progress rail with one segment per step (a passed step reached by
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10"
+("NN / 11" with the search step), one step at
+a time and a footer. The journey starts with the language globe. Drag, click
+a country or type a language. English, Portuguese and Spanish offer variants,
+stored in PrivacyPreferences.selectedLanguageVariant. Source (On this Mac or
+API keys), Speech key, optional Language model key, and optional Tavily for
+a self-hosted language model follow. The access steps are Keyboard control, Microphone, Input Monitoring (only when the Drop
+shortcut needs it), Screen Recording (optional), Try Drop, Toolbox,
+and the last step (Enjoy Whytap, with whytap.ai and Finish); a step whose result already holds is left out. A step whose
+action succeeds moves on by itself after its dwell (OnboardingDwellController;
+1.15 s on the key steps so the padlock opens first) with no chip or Continue;
+Return goes on at once, Back keeps what was done and a step reached by Back
+offers a plain Next. The source and key steps share one wire scene
+(OnboardingWireScene, drawn per display frame): the chosen key flies to its
+padlock, turns and opens it when a key is accepted and catches when refused.
+The key field (OnboardingKeyStage) shows every input as dots; a provider is
+named only by its key's own format (prefix or Deepgram's 40 hex characters)
+or a clicked mark, otherwise Return is a format problem; five problems are
+named (format, refused, no credit or access, no answer with Retry; Tavily's
+429 is "busy" with Retry). An accepted language model key starts on the
+recommended model, the provider's newest Sonnet or Sol in its catalog
+(OnboardingModelPick.recommended), otherwise its newest flagship (newest
+generation, highest known output price). On the language model step only
+(the speech step sets the provider's one Settings speech model and moves on),
+when the provider has several models a quiet "Choose model ⌄" opens their list (OnboardingModelList): readable
+names never cut (OnboardingModelPick.readableName) with the ID under each,
+prices, the recommended one first with a small tag; the panel keeps one width (from its widest row in the
+selection and the whole catalog, `OnboardingModelList.panelWidth`) with and without a search query, results
+use the same row grid and "No models found" is one quiet row; no model is checked
+until the person picks one, then the list checks it and the button names it. The step waits for a pick or
+Next (which keeps the recommended model) instead of moving on by itself. Speech and the language model go
+through the shared Speech and LLM rows (APIAndModelsViewModel.selectShared).
+The provider row ends with a "Self-hosted" mark; it turns the step's key
+field into Base URL, an optional key and one model on the same step
+(OnboardingServerFields): a transcription
+model on the speech step, an LLM on the language model step, and a server
+added on one comes back filled in on the other; Return adds the server and its checked model like
+Settings does (addServer, runServerModelCheck, addServerModel), sets the
+shared row and moves on; a provider mark or Escape turns the fields back.
+"Accepted" belongs to the route that answered (OnboardingJourneyModel.accepted:
+a provider, the server or Tavily; `outcome(_:for:)`): another mark shows its
+own state (its try, "Saved X key · press Return" or an empty field), the
+server fields stay open, and the route, model, Self-hosted mark and Tavily
+step change only after a new check passes; "Choose model" picks only on the
+accepted provider. Above ten models the list opens with a search over the
+provider's whole catalog (OnboardingModelSearch, modelCatalog). The four access
+steps share one template (OnboardingAccessStage): a title, the step's own wire
+figure (a Command keycap on its switch, a microphone capsule, an aperture, a
+display with viewfinder corners; OnboardingAccessFigures, drawn per display
+frame), one line and an Allow capsule. Allow asks macOS and the step waits
+(OnboardingAccessState.waiting: "Turn on Whytap, then come back here.", the
+Privacy & Security pane, a quiet Open System Settings and a "Waiting…" capsule,
+no spinner). On 27.3 (`PermissionsHelper.usesProtectionOverridePane`) requests
+show no dialog, so keyboard control and Screen & system audio show a numbered
+guide instead (OnboardingAccessKind.guide): + under System & App Protection
+Override, Override System Protections (not Choose Apps), five OKs, the red
+Allow and the password, then + under Input Monitoring; for the screen, + under
+Screen & System Audio Recording. Keyboard control counts there only with
+Accessibility, posting and listening (`PermissionsHelper.keyboardReady`); a
+process that starts with Accessibility but no posting gets the Choose Apps
+line. Grants present at launch are recorded (`recordLaunchGrants`); one that
+appears later needs a new process, so the step shows `restarting`; after this
+step's own Open System Settings `AppRelauncher` reopens Whytap on the same step,
+under the update restart's activity rules (UpdateController.restartDeferralReason),
+once per press: a try blocked by an activity waits for Restart Whytap, with its
+reason on the step (also in the guide's Waiting). The reopen helper starts just
+before the quit; if it cannot start nothing quits and the step says so, and a
+cancelled quit stops it (Settings and Drop's repair window offer Restart
+Whytap). Screen & system audio offers its system audio ask in every state,
+independent of the screen grant, and with the screen on it stays for the ask,
+the window's Next the one way on. "Ask for system audio" runs one second of the
+Meetings process tap (SystemAudioPermissionProbe) so macOS asks now. Saved keys
+are named from Keychain attributes only (`TokenStore.exists`). The screen step names both settings and confirms only
+the screen preflight. Audio-only
+consent is requested by the first recording from the Core Audio tap's aggregate
+device. Key steps offer the sole saved provider up front and list saved accounts
+by name. Return checks the selected saved key. The step on screen is kept in
+`sidekey.onboarding.step.v1`, and a quit (System Settings' Quit & Reopen after a
+privacy switch) does not finish the onboarding (AppDelegate.isTerminating): the
+relaunch continues at that step, or the next one still on the way. Whytap is an
+`.accessory` app (no Dock icon), so ⌘Tab did not list it; while the onboarding is
+open it is `.regular` (in ⌘Tab and the Dock, a Dock click brings the window
+forward) and closing the onboarding hands back `.accessory`
+(OnboardingJourneyWindowController.inAppSwitcher). Only the
+system's own check (polling and a return to the app) makes it granted, then
+the figure plays its click and the step moves on after 1.05 s. A return to the
+app with the switch still off shows one calm line and Allow again
+(OnboardingJourneyModel.recheckPermissions; not while macOS's own microphone
+dialog is open); reaching the step again starts at Allow. Screen Recording has
+Skip for now under Allow instead of the footer's Skip. The last three steps
+(OnboardingFinaleStages) keep that language: Try Drop shows the person's Drop
+key as a wire key and once as keys in the real field's header ("Hold Space
+and speak"); the field says "Your text will appear here", a take that brought
+nothing says so inside the field (no line under it), and Continue sits under
+the field from the start and works once a take arrived, with Skip beside it;
+in the app Drop itself listens, while the standalone preview, which starts no
+hotkeys, listens for the person's Drop shortcut in its own window
+(OnboardingDropStandIn, implemented by OnboardingPreviewKit's
+OnboardingPreviewDrop, which runs a held Space or hold combo through Drop's own
+SpaceHoldDetector with SpaceHoldMonitor's mapping and swallow rule: a short tap
+types a space, a hold past the threshold erases what printed, records and
+swallows its repeats and release; a take always ends on release, focus loss, a
+30 s limit or leaving the step); while Drop records
+(OnboardingVoiceSignal, from AppState.phase and audioLevels) the line under the
+lede becomes soft waves that follow the voice, with no island chip; a take that
+ends with nothing in the field gets one calm line ("No speech heard - try
+again.", the text went to another field, or Drop's delivery failure) and a new
+take clears it. There is no Shortcuts step (REV 64). Toolbox puts the whole
+Toolbox catalog (every tool but Settings, as Settings → Toolbox lists it) on a
+tilted ring of 38 pt tiles that turns slowly like a carousel
+(OnboardingCarousel, one round in 70 s, per display frame; still under Reduce
+Motion) around a small card; a pointed or focused tile stops the turn, lights
+and is named on the card with HoverToolRegistry's description, and the turn
+goes on when the pointer leaves. The last step, "Enjoy Whytap.", has no
+summary: a loop of twenty real questions for the Ask agent
+(OnboardingQuestionList) that drifts slowly from the bottom up (8 pt/s, four
+rows in view, soft fades at the edges, whole rows without motion under Reduce
+Motion); the pointer on the list stops the drift and lights the row under it
+(brighter fill, rose outline, bright ↗, pointing-hand cursor); a click opens
+whytap.ai/?q=<question>, which the page asks on load; then one
+Ask line (OnboardingAskLine) and Finish; there is no separate whytap.ai page.
+Skip / Set up later invalidate a running key or model check of that step (`OnboardingJourneyModel.skip`,
+`selectShared(stillWanted:)`), so no route changes after a skip; On this Mac's download keeps the model alive
+until it lands and then applies its route unless a newer speech choice came first; a permission revoked after
+it was granted clears the step's allowed state. Footer Skip and a key's Submit/Retry use
+OnboardingFeedbackButtonStyle (hover, press, focus, unavailable).
+Toolbox and the last step have no timer: they wait for Continue or Finish (or
+Return), and their progress segment does not fill by time.
+`scripts/onboarding-preview.sh` runs the same window standalone with fakes,
+outside Whytap; the fakes live in the OnboardingPreviewKit target, which the app
+does not link. System Audio Recording, Automation and Calendar are asked at
+first use. OnboardingLaunch: firstLaunchPresented (any launch since 2026-10-26)
+or the former onboarding's key = ran before, never shown on update;
+sidekey.onboarding.pending.v1 brings it back after a quit until it is
+finished; neither key is in backups or sync. A first Drop press with the
+microphone never asked asks it and records nothing
 (DropHotkeyRecovery.startGate); Now Playing's Automation prompt waits while the
 onboarding is visible. To see it again on a Mac:
 `defaults delete com.rootwise.sidekey sidekey.permissions.firstLaunchPresented.v1`
-and relaunch. WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
+and relaunch; it starts at the first step not yet done (a set-up Mac goes
+straight to Try Drop), and every step is seen in the preview. A key press
+nothing in the window takes is dropped without the alert sound
+(OnboardingJourneyWindow), and the Try Drop field takes Escape quietly. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
+.project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
 Settings -> API & Models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow
@@ -1535,20 +1656,38 @@ fake). macOS is asked only from Connect (requestFullAccessToEvents); opening
 Hover and refreshing only read the authorization status. Anything but Full Access
 (denied, restricted, revoked, "Add Events Only") is appleAccessOff; Settings and
 the Connect page say where to allow access, with Open Privacy Settings (Privacy &
-Security -> Calendars). A refused Connect saves nothing (allow, then Connect
-again, no second prompt); a saved connection keeps itself, clears Apple events
-and its row reads Access off. checkAppleAccess() reads only the status for a
+Security -> Calendars). A refused Allow access saves nothing (allow in System
+Settings, then the same "Allow access to calendars" button, no second prompt); a
+saved connection keeps itself and Disconnect, clears Apple events. Settings calls
+prepareMacCalendars() (status, then only the calendar list of a saved, readable
+connection: no event read, so the day open in Hover keeps its events; events of
+a calendar that left the Mac are dropped) on appear, on app activation and after
+Allow.
+macCalendarGroups groups by EKSource.sourceIdentifier. Only apple: entries count
+toward the hidden-calendar limit; inactive direct-connection entries make room. checkAppleAccess() reads only the status for a
 saved or refused Apple connection when Calendar or Settings opens and when the
 app becomes active, so neither shows a stale answer.
+Since 2026-11-23 Calendar on this Mac is the only way to connect: Hover's
+Calendars page and Settings -> Integrations -> Calendars show
+CalendarConnections.macAccess (notAsked / refused / loading / noCalendars /
+ready), one Allow access button, the Mac's calendars grouped by EventKit source
+(macCalendarGroups) with a tick each (hiddenFeeds, apple: feeds only; Whytap's
+own events and direct accounts are always shown) and Open Internet Accounts.
+Google, Outlook and Zoom OAuth (CalendarOAuth, CalendarRemoteClient,
+CalendarConnectionFlow.start for those providers) stays in the code with no
+button; accounts connected by earlier builds keep refreshing and are listed
+under "Connected directly" with Disconnect. WHY:
+.project-docs/decisions/2026-11-23-calendar-macos-only.md
 Calendar opens a 350pt inline Hover day on today. Tile, search, assigned hotkey
 and whytap://tool/calendar use the same surface; reopening resets to today.
 The day is a scrolling hour grid (44 pt per hour, opening an hour before now,
 red now line). Events are blocks from start to end in one colour, each with the
 small logo of its service (bundled official Google Calendar and Outlook icons,
 Zoom and Whytap; the installed Calendar app icon; margins trimmed), time range and
-calendar name. Every connected calendar is shown: Hover has no calendar hiding
-or Refresh button (open, day change, account change and a 60 s poll refresh).
-WHY: .project-docs/decisions/2026-11-21-calendar-logos.md
+calendar name. Every ticked calendar is shown (ticks on the Calendars page since
+2026-11-23); there is no Refresh button (open, day change, account change and a
+60 s poll refresh). WHY: .project-docs/decisions/2026-11-21-calendar-logos.md,
+.project-docs/decisions/2026-11-23-calendar-macos-only.md
 Calendar on this Mac feeds keep provider `apple`; `CalendarFeed.displayService`
 (Exchange, or a CalDAV account titled Google/Outlook or with such an address)
 only picks the Google or Outlook logo. Blocks add, as height allows, the title's
@@ -1565,11 +1704,12 @@ joins the meeting link, else opens the event in its own calendar (Google/Outlook
 web, ical://ekevent on this Mac). There is no details page; details are in the
 hover bubble. WHY:
 .project-docs/decisions/2026-11-20-calendar-day-view.md
-A compact day switcher and Connect stay in Hover; Connect rows carry the
-provider logos, and connection errors and Retry are listed there.
-Connect starts the provider browser or macOS permission prompt directly, using
-the same CalendarConnectionFlow as Settings → Integrations. No intermediate
-form, account-name field, Advanced app setup or Whytap account is shown.
+A compact day switcher and Connect (Calendars once connected) stay in Hover; the
+Calendars page shows the access state, the Mac's calendars with ticks, and
+connection errors and Retry. Allow access starts the macOS permission prompt
+directly, using the same CalendarConnectionFlow as Settings → Integrations. No
+intermediate form, account-name field, Advanced app setup or Whytap account is
+shown.
 Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime
 PlannerWindowController calls. CalendarConnectionFlow keeps permission work alive
 through temporary Hover hiding. Only Hover-owned connections pin its menu;
@@ -1701,16 +1841,19 @@ response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,
 whytap_meeting_transcript (by index or around a moment, bounded by replies and
-bytes, a longer reply continued by fromOffset) and whytap_meeting_open (busy
-while a note is being edited; a meeting link then shows nothing). One Yes covers future content and action tools
+bytes, a longer reply continued by fromOffset), whytap_meeting_open (busy
+while a note is being edited; a meeting link then shows nothing),
+whytap_vocab_add and whytap_filler_add. One Yes covers future content and action tools
 except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
-only with a sole finish_answer call containing status, answer, insert_text, sources
-and actions.
+with a sole finish_answer call containing status, answer, insert_text, sources
+and actions; on direct Anthropic a finished plain-text reply (end_turn, text
+blocks only, no tool call) is also the answer, with no sources or actions of its
+own; links, paths and commands in its text become cards as for every answer.
 Strict tool schemas and application-required completion preserve the selected route.
 Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
 forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
@@ -1791,6 +1934,19 @@ only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
 or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
+(whytap_vocab_add, VocabularyCache.add/validate) and Filler
+(whytap_filler_add, FillerTermsStore.add/validate), 1–20 entries each, the
+editors' own stores and rules; open editors reload from the stores'
+notifications and every take reads the lists. One invalid entry adds nothing
+(line breaks and control characters are refused, joiners like U+200C pass);
+an existing entry is reported in its saved form, never rewritten. No read or
+removal, no per-route promise (each route sends what its model supports).
+External harnesses need HarnessAccessGate's Yes (gatedOperations), with
+HarnessConsent rechecked right before the write; the built-in Agent adds what
+the current request names. App-owned change lines are escaped as Markdown
+literals in the answer ("Vocab + __init__" renders as saved). WHY:
+.project-docs/decisions/2026-11-23-agent-drop-lists.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
@@ -1805,8 +1961,8 @@ Island History pastes several rows in one opening: with a paste target,
 ⌘-click marks rows in click order (a blue numbered badge; ⌘-click again
 unmarks), Enter pastes the marked rows instead of the hovered one and closes
 History, and Escape clears the marks. Plain click (copy) and plain Enter on
-one row are unchanged; the footer says "⌘-click for several", then "Enter to
-paste N to <app>   Esc to clear". HistoryPastePlan keeps mark order and merges
+one row are unchanged; the footer teaches ⌘-click (Select), then with marks
+Paste N to <app> and Esc Clear. HistoryPastePlan keeps mark order and merges
 neighbouring rows of a kind: files and images go out as one multi-item paste
 (one Cmd+V), texts as one paste a line each; text, files, text is three pastes
 400 ms apart, stopping at the first that fails. The whole series is bound to
@@ -1823,12 +1979,18 @@ is open and survive the Agent/Drop/Clipboard tabs. Marks work everywhere
 are marked copies all of them in mark order as one pasteboard
 (HistoryPasteboardWriter.writeAll: texts one string a line each, files and
 images one item each, mixed rows one item per group in order) and clears the
-marks; without a target Enter leaves the marks alone. Footer with marks:
-"Click to copy N   Enter to paste N to <app>   Esc to clear" (Toolbox:
-"⌘-click to unmark", it has no key monitor). Multi-row pastes and copies stay
-out of clipboard history. WHY:
+marks; without a target Enter leaves the marks alone. Whether Enter may paste
+marks follows the target name live: the island sets it in the same panelMode
+change that shows History, after the panel appeared. The footer is a row of
+plain-text HistoryHint blocks (HistoryHoverView.hints) with hairlines between
+them, no icons or keycaps: "Click to copy | ⌘-click for several | Enter to
+paste to <app>"; with marks "Click to copy N | Enter to paste N to <app> | Esc
+to clear" (Toolbox: "⌘-click to unmark", it has no key monitor). The row steps
+from 9.5 pt to 8 pt (ViewThatFits); only then the app name truncates. Multi-row pastes and copies
+stay out of clipboard history. WHY:
 .project-docs/decisions/2026-11-22-history-multi-paste.md,
-.project-docs/decisions/2026-11-22-history-multi-copy.md
+.project-docs/decisions/2026-11-22-history-multi-copy.md,
+.project-docs/decisions/2026-11-22-history-hint-keycaps.md
 The History connection sets secure_delete=ON, so cap evictions and agent
 trimming zero freed bytes and pages. After store setup,
 scrubFreePagesInBackground VACUUMs each database file once off main (version in
@@ -2169,6 +2331,36 @@ FLAVOR=prod EXODIA_NOTARIZE=1 ./scripts/user-release.sh --build-only
 # Publishing also needs the project's Sparkle signing key and GitHub access
 FLAVOR=prod ./scripts/user-release.sh --upload-only
 ```
+
+Test runs play no sound. `SystemSoundGuard`
+(`Tests/SidekeyTests/Support/SystemSoundGuard.swift`, installed at bundle load
+by the `SidekeyTestBootstrap` target) turns the AppKit alert off for the test
+process and ends the run with a report naming each test that asked for a
+sound. A test whose key reaches the end of a window's responder chain, or that
+plays a sound file, fails: the app would beep for the user in the same place,
+so fix the app or wrap an intended case in `SystemSoundGuard.expectingSound { }`.
+A key sent through `NSApp.sendEvent` without a key window is only reported (a
+test process has no key window). WHY:
+`.project-docs/decisions/2026-11-23-silent-test-runs.md`.
+
+Test runs put no window on the screen and never take focus.
+`OnScreenWindowGuard` (`Tests/SidekeyTests/Support/OnScreenWindowGuard.swift`,
+installed by the same bootstrap) keeps every window order-in away from the
+window server and remembers it, so `window.isVisible` is still true for the
+code under test after `show()` and false after order-out or close; a test may
+call the app's real `show()`. `NSApp.activate` and
+`NSRunningApplication.activate` are recorded and not performed. `runModal`,
+alert and panel sheets, `NSOpenPanel`/`NSSavePanel`, menu pop-ups and
+`NSWorkspace` `open` are not performed, answer "cancelled" and fail the test:
+give such code an injected presenter or opener, or wrap a call whose request
+is the thing checked in `OnScreenWindowGuard.recording { }`. After every test
+the guard asks the window server for this process's on-screen windows; any
+window found fails that test. A test of a SwiftUI gesture, which needs a
+really ordered window, uses `OnScreenWindowGuard.orderInBeyondEveryDisplay`
+(zero opacity, outside every display) and closes the window before it ends.
+The run ends with an `OnScreenWindowGuard` summary line;
+`WHYTAP_TEST_WINDOW_REPORT=<path>` lists every request by test. WHY:
+`.project-docs/decisions/2026-11-24-windowless-test-runs.md`.
 
 Whytap stays open source and uses ready-made community builds for normal installs
 and updates. The default DMG/Sparkle pipeline builds and signs locally with the

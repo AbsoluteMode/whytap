@@ -375,6 +375,16 @@ struct IslandCaseVaultPanel: View {
         }
 
         if isExpanded {
+            // First under the project name: a project can hold a hundred keys.
+            // WHY: docs/DESIGN.md — Case add-key position.
+            IslandCaseAddKeyRow(projectName: section.name) {
+                startAddingKey(to: section.id)
+            }
+            .onDrop(of: [UTType.text], isTargeted: nil) { _ in
+                handleDrop(onProject: section.id)
+            }
+            .padding(.leading, IslandCaseVaultStyle.childIndent)
+
             ForEach(section.secrets) { secret in
                 VStack(spacing: 3) {
                     IslandCaseSecretRow(
@@ -397,11 +407,6 @@ struct IslandCaseVaultPanel: View {
                 }
                 .padding(.leading, IslandCaseVaultStyle.childIndent)
             }
-
-            IslandCaseAddKeyRow(projectName: section.name) {
-                startAddingKey(to: section.id)
-            }
-            .padding(.leading, IslandCaseVaultStyle.childIndent)
         }
     }
 

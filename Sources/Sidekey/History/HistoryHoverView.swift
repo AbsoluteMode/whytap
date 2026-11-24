@@ -148,6 +148,8 @@ struct HistoryHoverView: View {
     var allowsKeyboardPaste = true
     /// Rows already marked when the panel appears (offscreen review renders).
     var initialSelection: [HistoryStripCard] = []
+    /// Test seam: receives the panel's key monitor when the panel appears.
+    var onKeyMonitorReady: ((HistoryHoverKeyMonitor) -> Void)? = nil
 
     @State private var hoveredCard: HistoryStripCard?
     @StateObject private var keyMonitor = HistoryHoverKeyMonitor()
@@ -155,17 +157,22 @@ struct HistoryHoverView: View {
 
     /// Footer. Without marks it teaches the gestures; with marks it says what
     /// a click and Enter will do with them. `escapeClears` is false where no
-    /// key monitor runs (Toolbox): there ⌘-click unmarks.
-    static func hintText(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> String {
+    /// key monitor runs (Toolbox): there ⌘-click unmarks. Each hint is one
+    /// plain-text block; the view separates them with hairlines.
+    // WHY: .project-docs/decisions/2026-11-22-history-hint-keycaps.md
+    static func hints(targetAppName: String?, selectedCount: Int = 0, escapeClears: Bool = true) -> [HistoryHint] {
         let target = (targetAppName?.isEmpty == false) ? targetAppName : nil
         guard selectedCount > 0 else {
-            guard let target else { return "Click for copy   ⌘-click for several" }
-            return "Click for copy   ⌘-click for several   Enter to paste to \(target)"
+            var hints = [HistoryHint(text: "Click to copy"), HistoryHint(text: "⌘-click for several")]
+            if let target { hints.append(HistoryHint(text: "Enter to paste to", target: target)) }
+            return hints
         }
-        var parts = ["Click to copy \(selectedCount)"]
-        if let target { parts.append("Enter to paste \(selectedCount) to \(target)") }
-        parts.append(escapeClears ? "Esc to clear" : "⌘-click to unmark")
-        return parts.joined(separator: "   ")
+        var hints = [HistoryHint(text: "Click to copy \(selectedCount)")]
+        if let target {
+            hints.append(HistoryHint(text: "Enter to paste \(selectedCount) to", target: target))
+        }
+        hints.append(HistoryHint(text: escapeClears ? "Esc to clear" : "⌘-click to unmark"))
+        return hints
     }
 
     /// Enter pastes only where a target was captured; marks and copy work everywhere.
@@ -201,10 +208,9 @@ struct HistoryHoverView: View {
             keyMonitor.onPaste = onPaste
             keyMonitor.selectedCards = { [selection] in selection.cards }
             keyMonitor.onClearSelection = { [selection] in selection.clear() }
-            keyMonitor.canPaste = Self.canPaste(allowsKeyboardPaste: allowsKeyboardPaste,
-                                                targetAppName: targetAppName)
             initialSelection.forEach(selection.toggle)
             if allowsKeyboardPaste { keyMonitor.start() }
+            onKeyMonitorReady?(keyMonitor)
         }
         .onDisappear {
             keyMonitor.stop()
@@ -212,6 +218,15 @@ struct HistoryHoverView: View {
         }
         .onChange(of: hoveredCard) { _, newValue in
             keyMonitor.hoveredCard = newValue
+        }
+        // The island captures the paste target in the same panelMode change
+        // that shows this panel, so the name can arrive after onAppear. A
+        // copy taken only at appear left Enter with marks passing the key on
+        // (AppKit beeped) while the footer already offered the paste.
+        // WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
+        .onChange(of: targetAppName, initial: true) { _, name in
+            keyMonitor.canPaste = Self.canPaste(allowsKeyboardPaste: allowsKeyboardPaste,
+                                                targetAppName: name)
         }
     }
 
@@ -333,15 +348,11 @@ struct HistoryHoverView: View {
     }
 
     private var hintRow: some View {
-        Text(Self.hintText(
+        HistoryHintBar(hints: Self.hints(
             targetAppName: targetAppName,
             selectedCount: selection.count,
             escapeClears: allowsKeyboardPaste
         ))
-            .font(.system(size: 9.5, weight: .medium))
-            .foregroundStyle(IslandInk.color.opacity(0.55))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
             .padding(.horizontal, 8)
             .frame(maxWidth: .infinity)
             .frame(height: Self.hintHeight)
@@ -365,6 +376,71 @@ struct HistoryHoverView: View {
         case .drop: return "Drop"
         case .clipboard: return "Clipboard"
         }
+    }
+}
+
+/// One footer hint in plain text.
+struct HistoryHint: Equatable {
+    /// The hint up to the app name ("Click to copy", "Enter to paste 3 to").
+    let text: String
+    /// App the paste goes to. Drawn after the text and the only part that
+    /// shortens when the footer is narrow, so the hints stay whole.
+    var target: String? = nil
+
+    var fullText: String { [text, target].compactMap { $0 }.joined(separator: " ") }
+}
+
+/// The footer's hints as separate plain-text blocks with a hairline between
+/// them. The whole row steps down from 9.5 pt to 8 pt (as the old one-line
+/// footer scaled to fit); only when 8 pt is still too wide does the app
+/// name, and nothing else, shorten.
+private struct HistoryHintBar: View {
+    let hints: [HistoryHint]
+
+    static let fontSizes: [CGFloat] = [9.5, 9, 8.5, 8]
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            ForEach(Self.fontSizes, id: \.self) { size in
+                row(size: size, truncatesTarget: false)
+            }
+            row(size: Self.fontSizes.last ?? 8, truncatesTarget: true)
+        }
+    }
+
+    private func row(size: CGFloat, truncatesTarget: Bool) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Array(hints.enumerated()), id: \.offset) { index, hint in
+                if index > 0 {
+                    Capsule()
+                        .fill(IslandInk.color.opacity(0.22))
+                        .frame(width: 1, height: 10)
+                }
+                block(hint, truncatesTarget: truncatesTarget)
+            }
+        }
+        .font(.system(size: size, weight: .medium))
+        .foregroundStyle(IslandInk.color.opacity(0.55))
+        .lineLimit(1)
+    }
+
+    @ViewBuilder
+    private func block(_ hint: HistoryHint, truncatesTarget: Bool) -> some View {
+        HStack(spacing: 3) {
+            Text(hint.text)
+                .fixedSize()
+            if let target = hint.target {
+                if truncatesTarget {
+                    Text(target)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
+                } else {
+                    Text(target).fixedSize()
+                }
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(hint.fullText)
     }
 }
 

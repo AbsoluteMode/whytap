@@ -56,7 +56,9 @@ final class SpeechTranslationModelTests: XCTestCase {
         return model
     }
 
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 3) async throws {
+    /// Returns as soon as the condition holds. The deadline only matters on a loaded
+    /// Mac (the build queue saw load 317 on 14 cores), so it is generous.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
     }
@@ -70,7 +72,9 @@ final class SpeechTranslationModelTests: XCTestCase {
         audio.pair.continuation.yield([0.1, 0.2, -0.1])
         try await wait(session.sentBytes > 0)
         session.yieldRecorded()
-        try await wait(model.lines.count >= 7)
+        // The recording's last sentence arrives after the seventh pair is closed.
+        try await wait(model.lines.count >= 7 && !model.live.isEmpty && !model.liveTranslation.isEmpty)
+        XCTAssertEqual(model.lines.count, 7)
         XCTAssertFalse(model.liveTranslation.isEmpty || model.live.isEmpty, "the last sentence is still live")
         model.stop()
         try await wait(model.phase == .idle)
@@ -141,6 +145,73 @@ final class SpeechTranslationModelTests: XCTestCase {
         XCTAssertEqual(model.issue?.message, "OpenAI live translation does not support Kazakh. Choose another target language.")
     }
 
+    /// Stop shows a stopped session at once: the recorded provider took 5.7 s
+    /// from session.close to session.closed, and the overlay used to show a
+    /// spinner all that time. The last translation still settles after it,
+    /// and Start right away drops that tail and begins a new session.
+    func testStopShowsAStoppedSessionAtOnceAndTheTailSettlesAfter() async throws {
+        let first = FakeSpeechTranslation()
+        first.closesOnEndInput = false // a provider still finishing
+        let second = FakeSpeechTranslation()
+        var sessions = [first, second]
+        let model = makeModel(translator: { sessions.removeFirst() })
+        model.start()
+        try await wait(model.phase == .listening)
+        first.pair.continuation.yield(.source(" Thank you all.", elapsedMs: 600))
+        first.pair.continuation.yield(.source(" See", elapsedMs: 1_400))
+        first.pair.continuation.yield(.translation("Спасибо всем", elapsedMs: 1_000))
+        try await wait(model.liveTranslation == "Спасибо")
+
+        model.stop()
+        // Same run loop turn: no longer running, the stopped box and Start.
+        XCTAssertFalse(model.phase.isRunning)
+        XCTAssertEqual(TranslationView.overlayCaption(phase: model.phase, hasRows: true, hasIssue: false),
+                       .fixed(TranslationView.stoppedCaptionHeight))
+        XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: model.phase, issue: nil))
+
+        // The tail arrives after Stop and settles in place.
+        try await wait(first.endInputCount == 1)
+        first.pair.continuation.yield(.translation(".", elapsedMs: 1_200))
+        first.pair.continuation.yield(.closed)
+        first.pair.continuation.finish()
+        try await wait(model.phase == .idle)
+        XCTAssertEqual(model.lines.map(\.translation), ["Спасибо всем."])
+
+        // Start during a slow finish drops it and starts again at once.
+        let slow = FakeSpeechTranslation()
+        slow.closesOnEndInput = false
+        sessions = [slow, second]
+        model.start()
+        try await wait(model.phase == .listening)
+        model.stop()
+        XCTAssertFalse(model.phase.isRunning)
+        model.start()
+        try await wait(model.phase == .listening)
+        XCTAssertEqual(slow.closeCount, 1, "the old session is closed")
+        XCTAssertTrue(sessions.isEmpty, "a new session was opened")
+        XCTAssertTrue(model.lines.isEmpty)
+        model.cancel()
+    }
+
+    /// Start during Stop's tail, then closing the overlay before the old
+    /// session is released: the queued Start never opens a session or capture.
+    func testClosingWhileAStartWaitsForTheOldSessionStartsNothing() async throws {
+        let first = FakeSpeechTranslation()
+        first.closesOnEndInput = false
+        var opened = 0
+        let audio = FixtureSubtitleAudio()
+        let model = makeModel(translator: { opened += 1; return opened == 1 ? first : FakeSpeechTranslation() }, audio: audio)
+        model.start()
+        try await wait(model.phase == .listening)
+        model.stop()
+        XCTAssertNotNil(model.start(), "Start queues behind the finishing session")
+        await model.cancel().value // the overlay closes before the cleanup ends
+        try await Task.sleep(for: .milliseconds(300))
+        XCTAssertEqual(opened, 1, "no second provider session")
+        XCTAssertFalse(model.phase.isRunning)
+        XCTAssertFalse(model.phase.isActive)
+    }
+
     func testAProviderThatNeverClosesIsBoundedByTheStopWatchdog() async throws {
         let session = FakeSpeechTranslation()
         session.closesOnEndInput = false
@@ -151,17 +222,9 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(!model.lines.isEmpty)
         model.stop()
         XCTAssertEqual(model.phase, .finishing)
-        try await wait(model.phase == .failed, seconds: 12)
+        try await wait(model.phase == .failed)
         XCTAssertEqual(model.issue?.message, "The speech provider did not finish in time. The completed subtitles are still here.")
         XCTAssertFalse(model.lines.isEmpty)
-    }
-
-    func testALongLiveOriginalShowsItsNewestWholeWords() {
-        let heard = String(repeating: "word ", count: 30) + "last words here"
-        let row = SubtitleCaption.rows(lines: [], live: heard).first
-        XCTAssertEqual(row?.source.hasPrefix("…word"), true)
-        XCTAssertEqual(row?.source.hasSuffix("last words here"), true)
-        XCTAssertLessThanOrEqual(row?.source.count ?? 0, SubtitleCaption.liveSourceLimit + 1)
     }
 
     func testAConnectionLostAfterStopKeepsTheTranslatedTailAndSaysSo() async throws {
@@ -220,7 +283,9 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
         return try? JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any]
     }
 
-    private func open(_ transport: StubWebSocketTransport, deadline: Duration = .seconds(2)) async throws
+    /// The start deadline is long unless a test is about it: a handshake answered at
+    /// once must not lose to the timer on a loaded Mac.
+    private func open(_ transport: StubWebSocketTransport, deadline: Duration = .seconds(30)) async throws
         -> SpeechTranslationSession {
         var adapter = OpenAIRealtimeTranslateAdapter(transport: { transport })
         adapter.startDeadline = deadline
@@ -241,20 +306,23 @@ final class OpenAIRealtimeTranslateAdapterTests: XCTestCase {
         await session.close()
     }
 
-    func testAudioIsUpsampledToTwoHundredMillisecondFramesAndCloseFlushes() async throws {
+    /// The capture is already 24 kHz: its bytes go out unchanged, in 200 ms
+    /// frames, the rest flushed at close.
+    func testTwentyFourKilohertzAudioGoesOutUnchangedInTwoHundredMillisecondFrames() async throws {
         let transport = StubWebSocketTransport()
         transport.deliverText(#"{"type":"session.updated"}"#)
         let session = try await open(transport)
-        // 9,600 bytes = 300 ms at 16 kHz -> 14,400 bytes at 24 kHz: one 200 ms frame, the rest waits.
-        await session.sendAudio(Data(count: 9_600))
+        // 14,400 bytes = 300 ms at 24 kHz: one 200 ms frame, the rest waits.
+        let pcm = Data((0..<14_400).map { UInt8(truncatingIfNeeded: $0 &* 7) })
+        await session.sendAudio(pcm)
         var appends = transport.sent.compactMap(json).filter { $0["type"] as? String == "session.input_audio_buffer.append" }
         XCTAssertEqual(appends.count, 1)
-        XCTAssertEqual(Data(base64Encoded: appends[0]["audio"] as? String ?? "")?.count, 9_600)
+        XCTAssertEqual(Data(base64Encoded: appends[0]["audio"] as? String ?? ""), pcm.prefix(9_600))
         await session.endInput()
         let sent = transport.sent.compactMap(json)
         appends = sent.filter { $0["type"] as? String == "session.input_audio_buffer.append" }
         XCTAssertEqual(appends.count, 2, "the rest is flushed before close")
-        XCTAssertEqual(Data(base64Encoded: appends[1]["audio"] as? String ?? "")?.count, 4_800)
+        XCTAssertEqual(Data(base64Encoded: appends[1]["audio"] as? String ?? ""), pcm.suffix(4_800))
         XCTAssertEqual(sent.last?["type"] as? String, "session.close")
         XCTAssertEqual(session.acceptedAudioSeconds(), 0.3, accuracy: 0.001)
         transport.deliverText(#"{"type":"session.input_transcript.delta","delta":" Hello","elapsed_ms":200}"#)

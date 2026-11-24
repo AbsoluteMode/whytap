@@ -32,6 +32,9 @@ final class HistoryMultiPasteRenderTests: XCTestCase {
 
         let states: [(String, String?, [HistoryStripCard], Bool)] = [
             ("hint", "Telegram", [], true),
+            ("hint-clash-verge", "Clash Verge", [], true),
+            ("hint-long-name", "Microsoft Remote Desktop Beta", [], true),
+            ("long-name-marked", "Microsoft Remote Desktop Beta", [cards[2], cards[0]], true),
             ("three-files", "Telegram", [cards[2], cards[0], cards[3]], true),
             ("mixed", "Mail", [cards[1], cards[0], cards[3]], true),
             ("no-target", nil, [], true),
@@ -41,21 +44,22 @@ final class HistoryMultiPasteRenderTests: XCTestCase {
         let width: CGFloat = 312
         let height = HistoryHoverView.requiredContentHeight + 12
         for (name, target, marked, keyboard) in states {
+          for dark in [true, false] {
             let view = HistoryHoverView(
                 mode: .constant(.clipboard), cards: cards, targetAppName: target,
                 onSelectMode: { _ in }, onCopy: { _ in }, onPreviewAnchorChange: { _, _ in },
                 onPaste: { _ in }, allowsKeyboardPaste: keyboard, initialSelection: marked
             )
             .frame(width: width, height: height, alignment: .top)
-            .background(Color.black)
-            .environment(\.colorScheme, .dark)
+            .background(dark ? Color.black : Color(white: 0.93))
+            .environment(\.colorScheme, dark ? .dark : .light)
 
             let host = NSHostingView(rootView: view)
             host.frame = NSRect(x: 0, y: 0, width: width, height: height)
             let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: width, height: height),
                                   styleMask: .borderless, backing: .buffered, defer: true)
             window.isReleasedWhenClosed = false
-            window.appearance = NSAppearance(named: .darkAqua)
+            window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             window.contentView = host
             defer { window.contentView = nil; window.close() }
             host.layoutSubtreeIfNeeded()
@@ -64,9 +68,10 @@ final class HistoryMultiPasteRenderTests: XCTestCase {
             let image = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: image)
             try XCTUnwrap(image.representation(using: .png, properties: [:]))
-                .write(to: destination.appendingPathComponent("history-\(name).png"))
+                .write(to: destination.appendingPathComponent("history-\(name)-\(dark ? "dark" : "light").png"))
             XCTAssertFalse(window.isVisible)
             XCTAssertFalse(window.isKeyWindow)
+          }
         }
     }
 }

@@ -59,21 +59,6 @@ is a verifiable claim rather than a slogan.
   address; these are not sent with the request or logged.
   Rich clipboard conversion for recognized chat apps runs on the Mac, using
   the same clipboard suppression and restore as ordinary dictation.
-- Learning from your edits after Drop (on unless you turn it off in Settings
-  → Other → Drop → Learn from my edits) watches the field a take was pasted
-  into, through Accessibility, until you send or clear it, leave it, start
-  another take or 2 minutes pass, and only while it is still the same
-  focused field. While it watches, it notices Return and Enter by key code
-  only, to read the field once more; no keys are recorded. For Electron and
-  web apps (Claude, Slack) it asks only that app to expose its text fields
-  for that time and turns this off afterwards. Password fields,
-  secure input, terminals, password managers, Whytap's own fields and fields
-  that do not expose their text are never read. The words of a correction stay
-  in memory until you accept a suggestion; on disk there are only salted
-  hashes and day counts, outside backups, settings sync and logs. Nothing is
-  sent anywhere and no model is asked. A hidden developer calibration mode
-  writes a local journal of the edited words (readable only by you) and
-  deletes it after 14 days.
 - Logs go to the unified system log (`os_log`, subsystem
   `com.rootwise.sidekey`). They never contain transcripts, prompts, replies
   or keys; `Tests/SidekeyTests/LLM/LocalPathLoggingInvariantTests.swift`
@@ -83,7 +68,9 @@ is a verifiable claim rather than a slogan.
   in memory while using the unified calendar, without a persistent event cache.
   Their attendees (names, addresses, responses), read from Calendar on this Mac
   and Microsoft only, are never written to the archive, backups or logs.
-  Calendar account credentials are stored in Keychain and are not logged.
+  Calendars of this Mac are read locally through macOS (EventKit): Whytap holds
+  no credentials for them and sends no request for them. Accounts connected
+  directly by an earlier build keep their credentials in Keychain, never logged.
   Public native OAuth client configuration can be bundled for normal sign-in.
   Planner content, calendar settings and saved account credentials are included
   inside encrypted backups; external events are fetched again after recovery.
@@ -136,7 +123,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | OpenRouter providers | OpenRouter, with your key: the list of providers serving the model selected for an OpenRouter feature, with their latency and throughput. Only the request itself is sent, no audio or text. A pinned provider then receives that feature's requests alone, with no fallback | when an OpenRouter row is shown in API & Models (reused for 5 minutes) |
 | Model probes | the provider of the feature you are choosing a model for: 1 second of digital silence for speech models, the prompt "Reply with OK." (plus one fictitious tool for agent models) for text models. Never your audio, transcripts, prompts or notes. Costs a fraction of a cent | only when you pick a model that is not in the built-in list, or press Check now |
 | Encrypted backup | your private GitHub repository or the folder/sync service you selected; only authenticated ciphertext leaves Whytap | after you explicitly configure and enable Backup |
-| Connected calendars (Calendar shows Soon in the published 2.2.26 build) | the Google, Microsoft or Zoom account provider you explicitly connect; OAuth authorization and event queries for the displayed date range | sign-in in your browser, then while the calendar view is visible or refreshing; local tasks/events are not uploaded |
+| Calendars connected directly by an earlier build (Calendar shows Soon in the published 2.2.26 build; since 2026-11-23 new connections use the calendars of this Mac, which send nothing) | the Google, Microsoft or Zoom account provider of that connection; token refresh and event queries for the displayed date range | while the calendar view is visible or refreshing; local tasks/events are not uploaded |
 | Agent web search (built-in) | nothing extra from Whytap: the Agent's model provider (Anthropic, OpenAI or OpenRouter) runs the search the model asks for, with your key, inside the same request. Through OpenRouter the query goes to Exa (to Anthropic's own search for Claude models) | only when the model decides a request needs current web facts; Tavily is used instead when the model has no search of its own or Tavily is picked in API & Models → Models → Search |
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
@@ -160,8 +147,7 @@ Data-use policies depend on the selected provider and its account settings.
 
 - Accessibility: global hotkeys (hold Space, Right Command), detecting an
   editable text field before recording, the focused field's role and
-  document address for Smart formatting (never the window's text), the one
-  read of the field after a take when learning from edits is on and, only
+  document address for Smart formatting (never the window's text) and, only
   when Brightness keys is switched on in Settings → Toolbox → Display, the
   Mac's brightness keys.
 - Microphone: dictation and meetings.
@@ -170,11 +156,11 @@ Data-use policies depend on the selected provider and its account settings.
   at stop.
 - Post Event (part of Accessibility on current macOS): the synthetic
   Command-V used to paste.
-- Calendars: only after choosing Apple Calendar in Planner's Connect account,
-  once Calendar is available (it is shown as Soon and asks for nothing today).
-  macOS requires full event access to read selected system calendars; Whytap's
-  current native calendar adapter only reads events. Direct Google, Microsoft
-  and Zoom connections use their provider's OAuth consent instead.
+- Calendars: only after **Allow access to calendars** in Calendar or Settings ->
+  Integrations (the published 2.2.26 build shows Calendar as Soon and asks for
+  nothing). macOS requires full event access to read the Mac's calendars;
+  Whytap only reads events. Google, Outlook and other accounts come from System
+  Settings -> Internet Accounts; Whytap no longer offers direct provider sign-in.
 
 The hold-Space detector reads keyboard events only to recognise the trigger
 key and Escape. The Brightness keys tap receives only system-defined events,

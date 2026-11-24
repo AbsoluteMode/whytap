@@ -11,13 +11,24 @@ final class MonitorStore: ObservableObject {
     /// Server status was deleted like any other board: it is not listed and
     /// Whytap does not connect to the servers in servers.json.
     @Published private(set) var serverStatusRemoved = false
+    /// Server status is a board only for a user who set servers up: it is
+    /// listed while servers.json names at least one server (or cannot be
+    /// read, so the mistake is visible) and the board was not deleted.
+    /// WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
+    @Published private(set) var serverStatusListed = false
 
     /// Server status's ID in the deleted list; never a snapshot's ID.
     static let serverStatusID = "server-status"
 
     let root: URL
     private let collector: (MonitorServer) async throws -> MonitorServerMetrics
-    private var configuration: MonitorServerConfiguration?
+    /// The servers being polled. A poll belongs to the configuration it
+    /// started with: once that is removed, emptied, unreadable or replaced,
+    /// the poll in flight is cancelled before it can reach SSH.
+    /// WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
+    private var configuration: MonitorServerConfiguration? {
+        didSet { if configuration != oldValue { refreshTask?.cancel() } }
+    }
     private var task: Task<Void, Never>?
     private var lastServerRefresh: Date?
     private var refreshRequested = false
@@ -66,9 +77,11 @@ final class MonitorStore: ObservableObject {
                 let due = self.lastServerRefresh.map { Date().timeIntervalSince($0) >= self.refreshSeconds } ?? true
                 if due || self.refreshRequested {
                     self.refreshRequested = false
-                    await self.refreshServers(generation: runGeneration)
+                    let finished = await self.refreshServers(generation: runGeneration)
                     guard !Task.isCancelled, self.generation == runGeneration else { break }
-                    self.lastServerRefresh = Date()
+                    // A poll cancelled for a replaced configuration leaves the
+                    // new one due at once instead of a whole interval later.
+                    if finished { self.lastServerRefresh = Date() }
                 }
                 do { try await Task.sleep(nanoseconds: 2_000_000_000) }
                 catch { break }
@@ -136,12 +149,11 @@ final class MonitorStore: ObservableObject {
         let configFile = root.appendingPathComponent("servers.json")
         // A deleted Server status reads no configuration, so refreshServers
         // has nothing to connect to; servers.json itself stays as it is.
-        guard pollingAllowed, fm.fileExists(atPath: configFile.path) else {
+        guard !serverStatusRemoved, fm.fileExists(atPath: configFile.path) else {
+            serverStatusListed = false
             configuration = nil
             readings = []
-            serverError = removed == nil
-                ? "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
-                : nil
+            serverError = nil
             return
         }
         do {
@@ -151,6 +163,21 @@ final class MonitorStore: ObservableObject {
                 throw MonitorValidationError.invalidServers
             }
             let newConfiguration = try MonitorServerConfiguration.decode(Data(contentsOf: configFile))
+            // No servers named: nothing was set up, so there is no board.
+            guard !newConfiguration.servers.isEmpty else {
+                serverStatusListed = false
+                configuration = nil
+                readings = []
+                serverError = nil
+                return
+            }
+            serverStatusListed = true
+            guard pollingAllowed else {
+                configuration = nil
+                readings = []
+                serverError = "Server status is paused until the list of deleted dashboards can be read. Ask your agent to validate removed-dashboards.json."
+                return
+            }
             if newConfiguration != configuration {
                 let previous = Dictionary(uniqueKeysWithValues: readings.map { ($0.id, $0) })
                 readings = newConfiguration.servers.map { server in
@@ -163,6 +190,9 @@ final class MonitorStore: ObservableObject {
             }
             serverError = nil
         } catch {
+            // A file that is there but unreadable is a setup attempt: the
+            // board stays listed and says what is wrong.
+            serverStatusListed = true
             configuration = nil
             serverError = "Server configuration could not be loaded. Ask your agent to validate servers.json."
             readings = readings.map { reading in
@@ -192,7 +222,7 @@ final class MonitorStore: ObservableObject {
         let wasListed = try MonitorRemovedDashboards.withLock(root: root, timeout: removedListLockTimeout) {
             reloadFiles()
             let wasListed = id == Self.serverStatusID
-                ? !serverStatusRemoved : dashboards.contains { $0.id == id }
+                ? serverStatusListed : dashboards.contains { $0.id == id }
             var removed = try MonitorRemovedDashboards.load(root: root)
             if !removed.contains(id) {
                 removed.insert(id)
@@ -215,15 +245,18 @@ final class MonitorStore: ObservableObject {
         return wasListed
     }
 
-    func refreshServers(generation refreshGeneration: UInt64? = nil) async {
-        guard let configuration else { return }
+    /// Returns false when the poll was cancelled before it finished.
+    @discardableResult
+    func refreshServers(generation refreshGeneration: UInt64? = nil) async -> Bool {
+        guard let configuration else { return true }
         readings = readings.map { reading in
             var pending = reading
             pending.refreshing = true
             return pending
         }
         // Its own task, so reloadFiles can cancel it the moment Server status
-        // is deleted (here or on another surface) or the list turns unreadable.
+        // is deleted (here or on another surface), the list turns unreadable
+        // or the configuration it started with is no longer the current one.
         let poll = Task<Void, Never> { @MainActor [weak self] in
             guard let self else { return }
             await self.collect(configuration, generation: refreshGeneration)
@@ -238,6 +271,7 @@ final class MonitorStore: ObservableObject {
                 return idle
             }
         }
+        return !poll.isCancelled
     }
 
     private func collect(_ configuration: MonitorServerConfiguration, generation refreshGeneration: UInt64?) async {

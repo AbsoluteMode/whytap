@@ -80,6 +80,10 @@ enum OnboardingLaunch {
     /// The former onboarding's completion marker (removed 2026-10-17). Its
     /// users ran Whytap before the first-launch marker existed.
     static let legacyCompletedKey = "sidekey.b2b.onboarding.hasCompleted"
+    /// The step on screen, so a relaunch (System Settings' Quit & Reopen
+    /// after a privacy switch) continues there.
+    // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+    static let stepKey = "sidekey.onboarding.step.v1"
 
     /// `true` when the onboarding should open now. Marks the Mac as launched.
     static func consume(in defaults: UserDefaults) -> Bool {
@@ -93,5 +97,15 @@ enum OnboardingLaunch {
 
     static func finish(in defaults: UserDefaults) {
         defaults.removeObject(forKey: pendingKey)
+        defaults.removeObject(forKey: stepKey)
+    }
+
+    /// Where a resumed onboarding opens: the saved step while it is still on
+    /// the way, else the next one on the way after it, else the first.
+    static func resumedStep(saved raw: String?, on steps: [OnboardingStep]) -> OnboardingStep {
+        let first = steps.first ?? .thanks
+        guard let raw, let saved = OnboardingStep(rawValue: raw) else { return first }
+        if steps.contains(saved) { return saved }
+        return OnboardingJourney.next(after: saved, in: steps) ?? first
     }
 }

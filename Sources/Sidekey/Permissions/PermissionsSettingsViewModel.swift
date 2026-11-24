@@ -14,6 +14,8 @@ final class PermissionsSettingsViewModel: ObservableObject {
     @Published private(set) var accessibilityRequested = false
     @Published private(set) var screenRecordingRequested = false
     @Published private(set) var dropHotkeyStatus = AppState.shared.dropHotkeyStatus
+    /// What this process started with: on 27.3 a later grant needs a restart.
+    let launchGrants: PermissionsHelper.LaunchGrants
 
     private var onComplete: () -> Void
     private var didComplete = false
@@ -22,9 +24,12 @@ final class PermissionsSettingsViewModel: ObservableObject {
     private let screenRecordingRequester: () async -> Void
     private let accessibilityRequester: () -> Void
     private let openAccessibilitySettings: () -> Void
+    private let usesProtectionOverridePane: () -> Bool
     private let openScreenRecordingSettings: () -> Void
+    private let openInputMonitoringPane: () -> Void
     private let runtimeRefresh: (_ retry: Bool, _ resumePolling: Bool) -> Void
     private var statusSubscription: AnyCancellable?
+    private let relaunchApp: @MainActor () -> String?
     /// When `false`, `completeIfReady` is a no-op even when every
     /// required permission is granted. Used by the Settings path so
     /// the view stays on screen showing the All Set state instead of
@@ -39,7 +44,11 @@ final class PermissionsSettingsViewModel: ObservableObject {
         screenRecordingRequester: @escaping () async -> Void = PermissionsHelper.requestScreenRecording,
         accessibilityRequester: @escaping () -> Void = { PermissionsHelper.promptAccessibility() },
         openAccessibilitySettings: @escaping () -> Void = PermissionsHelper.openAccessibilitySettings,
+        usesProtectionOverridePane: @escaping () -> Bool = { PermissionsHelper.usesProtectionOverridePane },
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
+        launchGrants: PermissionsHelper.LaunchGrants? = nil,
+        openInputMonitoringSettings: @escaping () -> Void = PermissionsHelper.openInputMonitoringSettings,
+        relaunch: @escaping @MainActor () -> String? = { AppRelauncher.relaunch() },
         runtimeRefresh: @escaping (Bool, Bool) -> Void = { retry, resumePolling in
             NotificationCenter.default.post(name: .sidekeyRuntimePermissionsRefresh, object: nil,
                 userInfo: ["retry": retry, "resumePolling": resumePolling])
@@ -52,10 +61,17 @@ final class PermissionsSettingsViewModel: ObservableObject {
         self.screenRecordingRequester = screenRecordingRequester
         self.accessibilityRequester = accessibilityRequester
         self.openAccessibilitySettings = openAccessibilitySettings
+        self.usesProtectionOverridePane = usesProtectionOverridePane
         self.openScreenRecordingSettings = openScreenRecordingSettings
         self.runtimeRefresh = runtimeRefresh
-        self.snapshot = snapshotProvider()
-        self.screenRecordingGranted = screenRecordingAccessProvider()
+        self.openInputMonitoringPane = openInputMonitoringSettings
+        self.relaunchApp = relaunch
+        let snapshot = snapshotProvider()
+        let screen = screenRecordingAccessProvider()
+        self.snapshot = snapshot
+        self.screenRecordingGranted = screen
+        self.launchGrants = launchGrants ?? PermissionsHelper.launchGrants
+            ?? .init(snapshot: snapshot, screenRecording: screen)
         statusSubscription = AppState.shared.$dropHotkeyStatus.dropFirst().sink { [weak self] status in
             self?.dropHotkeyStatus = status
             self?.completeIfReady()
@@ -65,6 +81,80 @@ final class PermissionsSettingsViewModel: ObservableObject {
     func updateOnComplete(_ onComplete: @escaping () -> Void) {
         self.onComplete = onComplete
     }
+
+    /// 27.3 and later: keyboard control and Screen Recording are given in
+    /// System Settings with +, never by a request.
+    var settingsOnly: Bool { usesProtectionOverridePane() }
+
+    /// Keyboard control as Drop needs it on this macOS.
+    var keyboardReady: Bool { PermissionsHelper.keyboardReady(snapshot, settingsOnly: settingsOnly) }
+
+    /// A keyboard grant made after launch: on 27.3 it works after a restart.
+    var keyboardNeedsRestart: Bool {
+        Self.needsRestart(keyboard: snapshot, launch: launchGrants, settingsOnly: settingsOnly)
+    }
+
+    /// A Screen Recording grant made after launch, on 27.3.
+    var screenNeedsRestart: Bool {
+        Self.needsRestart(screen: screenRecordingGranted, launch: launchGrants, settingsOnly: settingsOnly)
+    }
+
+    static func needsRestart(keyboard snapshot: PermissionsHelper.Snapshot,
+                             launch: PermissionsHelper.LaunchGrants, settingsOnly: Bool) -> Bool {
+        settingsOnly && PermissionsHelper.keyboardReady(snapshot, settingsOnly: true)
+            && !PermissionsHelper.keyboardReady(launch.snapshot, settingsOnly: true)
+    }
+
+    static func needsRestart(screen: Bool, launch: PermissionsHelper.LaunchGrants, settingsOnly: Bool) -> Bool {
+        settingsOnly && screen && !launch.screenRecording
+    }
+
+    /// Where keyboard control stands on 27.3, from this process's own grants.
+    enum KeyboardSetup: Equatable {
+        /// Nothing usable yet: add Whytap with + under Override.
+        case addWhytap
+        /// Started with Accessibility but no posting. That is what Choose Apps
+        /// gives (VoiceInk #1089), but the check can't tell what was picked.
+        case chooseAppsOnly
+        /// Override is on; Input Monitoring is still missing.
+        case inputMonitoring
+        /// Everything is on; a restart makes it work.
+        case restart
+        case ready
+    }
+
+    var keyboardSetup: KeyboardSetup {
+        Self.keyboardSetup(now: snapshot, launch: launchGrants.snapshot)
+    }
+
+    static func keyboardSetup(now: PermissionsHelper.Snapshot, launch: PermissionsHelper.Snapshot) -> KeyboardSetup {
+        let ready = PermissionsHelper.keyboardReady(now, settingsOnly: true)
+        if ready { return PermissionsHelper.keyboardReady(launch, settingsOnly: true) ? .ready : .restart }
+        if now.accessibilityGranted, now.postEventGranted { return .inputMonitoring }
+        if launch.accessibilityGranted, !launch.postEventGranted, !now.postEventGranted { return .chooseAppsOnly }
+        return .addWhytap
+    }
+
+    /// One line for Settings and Drop's repair window: what to do on 27.3.
+    static let keyboardSettingsGuide = "Drop needs control across all apps to type where you are. In System & App Protection Override click +, choose Whytap, pick Override System Protections and confirm. Then add Whytap under Input Monitoring and restart Whytap."
+    static let screenSettingsGuide = "Click + under Screen & System Audio Recording and choose Whytap, then restart Whytap."
+
+    /// Why the last restart waited (a meeting recording, dictation…), shown
+    /// beside the Restart button; nil once it may go.
+    @Published private(set) var restartBlocked: String?
+
+    /// Quits and reopens Whytap so a 27.3 grant takes effect, unless an
+    /// activity must finish first: then `restartBlocked` says which.
+    @discardableResult
+    func restartWhytap() -> Bool {
+        restartBlocked = relaunchApp()
+        return restartBlocked == nil
+    }
+
+    func openInputMonitoring() { openInputMonitoringPane() }
+
+    /// Keyboard control's pane (System & App Protection Override on 27.3).
+    func openKeyboardSettings() { openAccessibilitySettings() }
 
     var allRequiredGranted: Bool {
         snapshot.allRequiredGranted && dropHotkeyStatus == .ready
@@ -95,6 +185,13 @@ final class PermissionsSettingsViewModel: ObservableObject {
     func requestScreenRecording() async {
         guard !isRequestingScreenRecording else { return }
         guard !screenRecordingAccessProvider() else { return refresh() }
+        // 27.3: the request shows nothing; the pane with + is the way.
+        // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+        guard !settingsOnly else {
+            screenRecordingRequested = true
+            openScreenRecordingSettings()
+            return refresh()
+        }
         guard !screenRecordingRequested else {
             openScreenRecordingSettings()
             return refresh()
@@ -123,10 +220,15 @@ final class PermissionsSettingsViewModel: ObservableObject {
     }
 
     func requestAccessibility() {
-        // Stay menu-bar-only — no Dock icon flip. The first press only asks
-        // macOS, whose dialog leads to System Settings itself.
-        if snapshotProvider().accessibilityGranted {
+        if PermissionsHelper.keyboardReady(snapshotProvider(), settingsOnly: settingsOnly) {
             // Nothing to ask.
+        } else if settingsOnly {
+            // 27.3: no dialog, no row. The press only opens System & App
+            // Protection Override, where the step's guide says what to click;
+            // no system request rides along with it.
+            // WHY: .project-docs/decisions/2026-11-23-keyboard-control-protection-override.md
+            accessibilityRequested = true
+            openAccessibilitySettings()
         } else if accessibilityRequested {
             openAccessibilitySettings()
         } else {
@@ -135,6 +237,9 @@ final class PermissionsSettingsViewModel: ObservableObject {
         }
         refresh()
     }
+
+    /// Whether the keyboard button's next press opens System Settings.
+    var keyboardOpensSettings: Bool { accessibilityRequested || settingsOnly }
 
     func requestMicrophone() {
         // Branch on the live status so a denied/restricted user is

@@ -8,14 +8,23 @@ on your Mac, and inference runs at the provider you choose, with your key.
 
 1. In **Settings → API & Models → API keys**, add an OpenRouter, OpenAI or
    Anthropic key.
-2. Under **Models**, choose the **Agent** model (and **Agent voice** for spoken
-   requests).
+2. Under **Models**, choose an **LLM** (and a **Speech** model for spoken
+   requests). To give the Agent its own models, open **Advanced**: the
+   **Agent** card holds both, Speech for your voice and Text for the answer.
 3. In **Settings → Other → Agent**, turn on **Agent**.
 
 Turning it on connects: it prepares the local workspace and checks that a key and a model are
 present; it does not prove that the provider accepts the key. Requests are
 billed by your provider. Whytap never switches to another provider or model on
 its own.
+
+## Speed
+
+On **Anthropic** and **OpenAI** the Agent asks the model for low effort, so a
+simple question is answered without long thinking; tool use stays. Models that
+do not take the setting keep their own default, and OpenRouter models are
+unchanged. An answer can be up to 16,384 tokens; a longer one says it reached
+the model's output limit.
 
 ## Answers and actions
 
@@ -79,7 +88,7 @@ tools:
 | `write_file`: create or replace a file | yes | removed and refused |
 | `run_command`: run a shell command | yes | removed and refused |
 | `case_list_keys`: Case key names, never values | only after you connect the Whytap agent in Case | same |
-| `whytap`: change Whytap's own settings, island tools and hotkeys, To-do (next version after 2.2.26) | yes | yes |
+| `whytap`: change Whytap's own settings, island tools and hotkeys, add Vocab and Filler words, To-do (next version after 2.2.26) | yes | yes |
 
 Paths can be absolute or start with `~`; relative paths are inside the
 agent's folder. Nothing confines the agent to that folder: it acts with your

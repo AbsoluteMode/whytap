@@ -562,7 +562,13 @@ final class UpdateController: NSObject, ObservableObject {
         }
     }
 
-    private var restartDeferralReason: String? {
+    private var restartDeferralReason: String? { Self.restartDeferralReason(appState) }
+
+    /// Why Whytap must not quit for a restart now (a meeting recording,
+    /// dictation, a screenshot…), or nil. Shared with the onboarding's
+    /// restart after a macOS 27.3 grant (AppRelauncher).
+    @MainActor
+    static func restartDeferralReason(_ appState: AppState?) -> String? {
         guard let appState else { return "Restart when your current activity is finished." }
         if appState.meetingRecordingActive || appState.isMeetingRecording {
             return "Ready. Finish the meeting recording, then choose Restart."

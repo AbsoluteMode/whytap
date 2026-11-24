@@ -238,8 +238,9 @@ final class APIAndModelsRenderTests: XCTestCase {
                         size: NSSize(width: width, height: 1100), dark: dark,
                         to: directory.appendingPathComponent("key-form-\(label)-\(dark ? "dark" : "light")-\(Int(width)).png"))
                 }
-                for expanded in [nil, "Drop Smart", "Subtitles"] as [String?] {
-                    let state = expanded == "Subtitles" ? "subtitles-expanded" : (expanded == nil ? "collapsed" : "expanded")
+                for expanded in [nil, "Drop Smart", "Agent", "Subtitles"] as [String?] {
+                    let state = ["Subtitles": "subtitles-expanded", "Agent": "agent-expanded"][expanded ?? ""]
+                        ?? (expanded == nil ? "collapsed" : "expanded")
                     try await render(
                         APIAndModelsView(viewModel: vm, focusedFeature: .constant(nil),
                                          initiallyExpandedGroup: expanded),

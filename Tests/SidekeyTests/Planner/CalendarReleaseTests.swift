@@ -195,7 +195,7 @@ final class CalendarReleaseTests: XCTestCase {
         XCTAssertEqual(mac.prompts, 1)
         XCTAssertEqual(model.connectionFlow.error, CalendarConnectionError.appleConnectRefusedMessage)
         XCTAssertTrue(model.connectionFlow.error?.contains("System Settings → Privacy & Security → Calendars") == true)
-        XCTAssertTrue(model.connectionFlow.error?.contains("then press Connect again") == true,
+        XCTAssertTrue(model.connectionFlow.error?.contains("then choose \(CalendarConnectionError.allowAccessTitle) again") == true,
                       "nothing was connected, so the step after System Settings is named")
         XCTAssertTrue(connections.appleAccessOff, "Settings and the Connect page offer Open Privacy Settings")
         XCTAssertFalse(connections.appleEnabled)
@@ -321,14 +321,15 @@ final class CalendarReleaseTests: XCTestCase {
         XCTAssertTrue(connections.appleAccessOff, "opening Settings reads the current permission")
         XCTAssertEqual(connections.errors["apple"], CalendarConnectionError.appleAccessOffMessage)
         XCTAssertEqual(mac.prompts, 0)
-        XCTAssertEqual(mac.reads, 0, "Settings checks the status only, it reads no events")
+        XCTAssertEqual(mac.reads, 0, "nothing is read while access is off")
 
         mac.status = .fullAccess   // back from System Settings with Settings still open: Whytap becomes active
         NotificationCenter.default.post(name: NSApplication.didBecomeActiveNotification, object: NSApp)
         try await Task.sleep(for: .milliseconds(50))
         XCTAssertFalse(connections.appleAccessOff)
         XCTAssertNil(connections.errors["apple"])
-        XCTAssertEqual(mac.reads, 0)
+        XCTAssertEqual(mac.reads, 1, "once allowed, Settings loads the calendar list itself (no prompt)")
+        XCTAssertEqual(mac.prompts, 0)
     }
 
     func testSettingsNeverChecksAnUnconnectedCalendar() async throws {

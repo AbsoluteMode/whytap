@@ -101,8 +101,11 @@ feature sessions with regular checked integration and one working application.
   every finding; a re-block is only for a problem the fix introduced or a
   listed item still unfixed. It is an on-demand headless
   session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
-  starts only while the queue has open work; only the maintainer activates or
-  deactivates it. These queue messages are user-authorized. Workers follow the
+  starts only while the queue has open work, the screen is unlocked and the
+  load is below its limit; only the maintainer activates or deactivates it.
+  A model-free watchdog appends stalls, environment waits and unreachable
+  authors to an alerts file. WHY:
+  .project-docs/decisions/2026-11-23-builder-queue-watchdog.md These queue messages are user-authorized. Workers follow the
   result and report issues without starting competing builds. Follow the
   runbook for CLI inboxes, pending installs, their automatic retry and
   recovery. WHY: .project-docs/decisions/2026-11-19-on-demand-build-queue-builder.md

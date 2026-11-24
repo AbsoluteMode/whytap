@@ -231,7 +231,7 @@ class MonitorDashboardRestoreTests(unittest.TestCase):
         code, output, _ = self.restore("server-status")
 
         self.assertEqual(code, 0)
-        self.assertIn("Server status is listed again", output)
+        self.assertIn("Server status is no longer deleted", output)
         self.assertEqual(self.removed_ids(), ["fixture-a"])
         self.assertEqual(self.removed.stat().st_mode & 0o777, 0o600)
         self.assertEqual(servers.read_text(), '{"servers": []}\n', "servers.json is not touched")

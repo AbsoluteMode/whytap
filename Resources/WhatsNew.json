@@ -1,0 +1,37 @@
+{
+  "releases": [
+    {
+      "version": "2.2.27",
+      "date": "2026-11-24",
+      "items": [
+        {
+          "title": "The Agent controls Whytap",
+          "body": "Ask it to change a model, switch Drop mode or set a hotkey, and it does it in one turn.",
+          "symbol": "sparkles",
+          "video": "agent"
+        },
+        {
+          "title": "Answers you can insert",
+          "body": "A rewrite, translation or command comes back as a card that pastes into the field you came from.",
+          "symbol": "text.insert"
+        },
+        {
+          "title": "Calendar is open",
+          "body": "Your Mac's calendars in the island: Google, Outlook, Exchange and iCloud.",
+          "symbol": "calendar"
+        },
+        {
+          "title": "Models in two picks",
+          "body": "One Speech row and one LLM row set every feature at once. A model per feature stays under Advanced.",
+          "symbol": "slider.horizontal.3",
+          "link": { "title": "Open Models", "settings": "apiAndModels" }
+        },
+        {
+          "title": "Subtitles show both languages",
+          "body": "Each phrase is a pair: the original beside its translation.",
+          "symbol": "captions.bubble"
+        }
+      ]
+    }
+  ]
+}

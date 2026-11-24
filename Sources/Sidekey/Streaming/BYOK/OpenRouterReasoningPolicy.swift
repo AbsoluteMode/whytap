@@ -34,14 +34,22 @@ struct OpenRouterReasoningSetting: Encodable, Equatable {
 /// endpoints never use this catalog or receive OpenRouter-specific settings.
 actor OpenRouterReasoningCatalog {
     private var entries: [String: OpenRouterReasoningCapabilities] = [:]
+    /// Every model ID of the last catalog read, with or without reasoning data.
+    private var listed: Set<String> = []
     private var expiresAt: Date = .distantPast
 
     func update(_ models: [OpenRouterModelOption]) {
         entries = Dictionary(models.compactMap { model in
             model.reasoning.map { (model.id, $0) }
         }, uniquingKeysWith: { _, newest in newest })
+        listed = Set(models.map(\.id))
         expiresAt = Date().addingTimeInterval(3600)
     }
+
+    /// Whether OpenRouter's public catalog, as last read, lists this ID. A
+    /// name the catalog does not list (a private alias, a typo, an unread
+    /// catalog) is never written to the log.
+    func lists(_ model: String) -> Bool { listed.contains(model) }
 
     func setting(model: String, baseURL: URL, session: URLSession) async -> OpenRouterReasoningSetting? {
         if expiresAt > Date() { return entries[model]?.dictationSetting }
@@ -66,6 +74,7 @@ actor OpenRouterReasoningCatalog {
             entries = Dictionary(catalog.data.compactMap { model in
                 model.reasoning.map { (model.id, $0) }
             }, uniquingKeysWith: { _, newest in newest })
+            listed = Set(catalog.data.map(\.id))
             expiresAt = Date().addingTimeInterval(3600)
             return entries[model]?.dictationSetting
         } catch {

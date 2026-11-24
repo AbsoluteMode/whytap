@@ -39,7 +39,7 @@ struct MonitorHoverPanel: View {
     }
 
     private var title: String {
-        if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved { return "Server status" }
+        if selectedID == MonitorStore.serverStatusID, store.serverStatusListed { return "Server status" }
         return selectedDashboard?.title ?? "Monitor"
     }
 
@@ -89,7 +89,7 @@ struct MonitorHoverPanel: View {
             Group {
                 if selectedID == nil {
                     dashboardPicker
-                } else if selectedID == MonitorStore.serverStatusID, !store.serverStatusRemoved {
+                } else if selectedID == MonitorStore.serverStatusID, store.serverStatusListed {
                     MonitorServersView(store: store, allowsOpeningFolder: false, showsHeader: false,
                                        compactPresentation: true)
                 } else if let dashboard = selectedDashboard {
@@ -136,11 +136,45 @@ struct MonitorHoverPanel: View {
     /// instead of over their edge.
     static let scrollerGutter: CGFloat = 10
 
-    private var dashboardPicker: some View {
+    /// Nothing to choose: no custom board and no servers set up.
+    static let emptyTitle = "No dashboards yet"
+    static let emptyText = "Ask your coding agent to add one: a custom dashboard, or your servers’ CPU, memory and GPU readings."
+
+    static func pickerIsEmpty(serverStatusListed: Bool, dashboardCount: Int) -> Bool {
+        !serverStatusListed && dashboardCount == 0
+    }
+
+    @ViewBuilder private var dashboardPicker: some View {
+        if Self.pickerIsEmpty(serverStatusListed: store.serverStatusListed,
+                              dashboardCount: store.dashboards.count) {
+            VStack(spacing: 6) {
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: 20))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(Self.emptyTitle).font(.system(size: 12, weight: .semibold))
+                Text(Self.emptyText)
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    // No fixedSize: it would give the panel a minimum height
+                    // its host has to grow to.
+                    .lineLimit(4)
+            }
+            .padding(.horizontal, 12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else {
+            dashboardList
+        }
+    }
+
+    private var dashboardList: some View {
         ScrollView(.vertical) {
             LazyVStack(spacing: 8) {
                 // Every board, Server status included, has the same row and ×.
-                if !store.serverStatusRemoved {
+                // Server status is listed only once servers.json names a server.
+                // WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
+                if store.serverStatusListed {
                     dashboardRow(id: MonitorStore.serverStatusID, title: "Server status",
                                  image: "server.rack", subtitle: "CPU, memory and GPU readings",
                                  onDelete: { delete(id: MonitorStore.serverStatusID, title: "Server status") })

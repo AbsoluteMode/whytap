@@ -68,6 +68,22 @@ let package = Package(
             dependencies: ["Sidekey"],
             path: "Sources/SidekeyApp"
         ),
+        // The onboarding as a standalone window with fake providers and
+        // permissions, for review (scripts/onboarding-preview.sh). Never
+        // packaged: build-dmg.sh builds only the Sidekey and whytap products.
+        // Its fake providers, catalogs and permissions, apart from the app's
+        // module so they can never reach a Whytap build; @testable for the
+        // app's internal protocols (debug builds only, like the tests).
+        .target(
+            name: "OnboardingPreviewKit",
+            dependencies: ["Sidekey"],
+            path: "Sources/OnboardingPreviewKit"
+        ),
+        .executableTarget(
+            name: "OnboardingPreview",
+            dependencies: ["OnboardingPreviewKit"],
+            path: "Sources/OnboardingPreview"
+        ),
         .executableTarget(
             name: "WhytapCLI",
             dependencies: ["WhytapCaseKit"],
@@ -78,9 +94,16 @@ let package = Package(
             dependencies: ["WhytapCaseKit"],
             path: "Tests/WhytapCaseKitTests"
         ),
+        // Test-only load hook: installs the guards that keep test runs from
+        // playing the system alert sound (Tests/SidekeyTests/Support/SystemSoundGuard.swift)
+        // and from putting windows on screen (Tests/SidekeyTests/Support/OnScreenWindowGuard.swift).
+        .target(
+            name: "SidekeyTestBootstrap",
+            path: "Tests/SidekeyTestBootstrap"
+        ),
         .testTarget(
             name: "SidekeyTests",
-            dependencies: ["Sidekey"],
+            dependencies: ["Sidekey", "OnboardingPreviewKit", "SidekeyTestBootstrap"],
             path: "Tests/SidekeyTests"
         )
     ],

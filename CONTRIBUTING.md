@@ -28,6 +28,11 @@ name the files to change and how to check the result.
    ```
 
    Documentation-only changes do not need the Swift checks; say so in the PR.
+   The run is silent and ends with a `SystemSoundGuard` line; a test that
+   sends a key nothing takes fails, because the app would beep there too.
+   The run also shows no window and takes no focus (`OnScreenWindowGuard`):
+   a window your test shows stays off screen while `isVisible` is true, and a
+   test that opens an alert, a panel, a menu or another app fails.
 5. **Open a pull request** against `main`. Say what changed, why, and how you
    checked it. A maintainer reviews it and squash-merges.
 

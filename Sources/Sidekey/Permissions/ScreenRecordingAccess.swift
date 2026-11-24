@@ -45,8 +45,9 @@ final class ScreenRecordingAccess {
 
     /// Asks macOS at most once per launch. The decision is synchronous, so a
     /// second call arriving before the request runs is already `.alreadyRequested`.
+    /// `afterRequest` runs once macOS answered the request (`.requested` only).
     @discardableResult
-    func requestOnce() -> Outcome {
+    func requestOnce(afterRequest: (@MainActor () -> Void)? = nil) -> Outcome {
         if isGrantedProvider() { return .granted }
         let time = now()
         if let requestedAt {
@@ -54,7 +55,10 @@ final class ScreenRecordingAccess {
         }
         requestedAt = time
         let request = self.request
-        Task { await request() }
+        Task { @MainActor in
+            await request()
+            afterRequest?()
+        }
         return .requested
     }
 }

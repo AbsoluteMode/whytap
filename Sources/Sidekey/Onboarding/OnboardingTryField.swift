@@ -9,6 +9,11 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 struct OnboardingTryField: NSViewRepresentable {
     var placeholder: String
+    /// A failed take's line is drawn in its tone; nil is the quiet grey.
+    var placeholderColor: NSColor? = nil
+    /// The standalone preview's pretend take: typed in as Drop would, then
+    /// reported like Drop's own insertion.
+    var take: String? = nil
     var onDictated: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -22,6 +27,7 @@ struct OnboardingTryField: NSViewRepresentable {
 
         let textView = OnboardingTryTextView(frame: .zero)
         textView.placeholder = placeholder
+        textView.placeholderColor = placeholderColor
         textView.isEditable = true
         textView.isSelectable = true
         textView.isRichText = false
@@ -48,7 +54,14 @@ struct OnboardingTryField: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         context.coordinator.onDictated = onDictated
-        (scrollView.documentView as? OnboardingTryTextView)?.placeholder = placeholder
+        guard let textView = scrollView.documentView as? OnboardingTryTextView else { return }
+        textView.placeholder = placeholder
+        textView.placeholderColor = placeholderColor
+        if let take, take != context.coordinator.lastTake {
+            context.coordinator.lastTake = take
+            textView.string = take
+            DispatchQueue.main.async { context.coordinator.onDictated() }
+        }
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onDictated: onDictated) }
@@ -56,6 +69,7 @@ struct OnboardingTryField: NSViewRepresentable {
     @MainActor
     final class Coordinator {
         var onDictated: () -> Void
+        var lastTake: String?
         private var observation: NSObjectProtocol?
 
         init(onDictated: @escaping () -> Void) { self.onDictated = onDictated }
@@ -77,10 +91,28 @@ struct OnboardingTryField: NSViewRepresentable {
 /// Takes the keyboard as soon as it is on screen, so holding the shortcut
 /// right away already has a target, and draws a quiet placeholder.
 @MainActor
-final class OnboardingTryTextView: NSTextView {
-    var placeholder = "" { didSet { needsDisplay = true } }
+class OnboardingTryTextView: NSTextView {
+    var placeholder = "" { didSet { if placeholder != oldValue { needsDisplay = true } } }
+    var placeholderColor: NSColor? { didSet { if placeholderColor != oldValue { needsDisplay = true } } }
 
     override var acceptsFirstResponder: Bool { true }
+
+    /// Escape (`cancelOperation:`) has nothing to cancel in this field, and
+    /// left unhandled it ends in the alert sound; it is taken quietly. The
+    /// completion command (Option-Escape, `complete:`) is a separate command
+    /// and still offers completions. Drop's own Escape (cancel a take) is
+    /// read by its event tap before the field.
+    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
+    override func doCommand(by selector: Selector) {
+        if selector == #selector(NSResponder.cancelOperation(_:)) {
+            quietEscapes += 1
+            return
+        }
+        super.doCommand(by: selector)
+    }
+
+    /// Escapes taken quietly (for tests).
+    private(set) var quietEscapes = 0
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
@@ -100,11 +132,12 @@ final class OnboardingTryTextView: NSTextView {
         super.draw(dirtyRect)
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
-            // The onboarding's italic serif, as in the pictured note.
-            .font: NSFont(name: "InstrumentSerif-Italic", size: 18) ?? font ?? .systemFont(ofSize: 15),
-            .foregroundColor: NSColor.placeholderTextColor,
+            .font: font ?? .systemFont(ofSize: 15),
+            .foregroundColor: placeholderColor ?? NSColor.placeholderTextColor,
         ]
-        let origin = NSPoint(x: textContainerInset.width + 4, y: textContainerInset.height - 1)
-        (placeholder as NSString).draw(at: origin, withAttributes: attributes)
+        // Wraps: a failed take's line can be longer than the field.
+        let rect = NSRect(x: textContainerInset.width, y: textContainerInset.height,
+                          width: max(0, bounds.width - textContainerInset.width * 2), height: bounds.height)
+        (placeholder as NSString).draw(with: rect, options: [.usesLineFragmentOrigin], attributes: attributes)
     }
 }

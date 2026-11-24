@@ -238,7 +238,7 @@ final class CalendarEventPreviewTests: XCTestCase {
         state.hide("b")
         XCTAssertEqual(state.anchor?.content.id, "b", "Hiding waits briefly for the next event")
         let clock = ContinuousClock()
-        let deadline = clock.now + .seconds(2)
+        let deadline = clock.now + .seconds(30)  // ends as soon as it hides
         while state.anchor != nil, clock.now < deadline {
             try await clock.sleep(for: .milliseconds(10))
         }

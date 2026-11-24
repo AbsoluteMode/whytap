@@ -39,6 +39,28 @@ final class AIUsageTests: XCTestCase {
         XCTAssertEqual(AIUsageTotal(events: rows[1].events, currency: .elevenLabsCredits).text, "—")
     }
 
+    /// The Agent's voice and its answers are one Costs row, as in Models:
+    /// nothing spent on either is dropped, and each model stays a line.
+    @MainActor func test_agent_voice_and_answer_costs_share_the_agent_row() {
+        let rows = AIUsageCostRow.grouped([
+            event(0.5, feature: .agent, model: "anthropic/claude-sonnet-5.5"),
+            event(0.25, feature: .agentVoice, account: .soniox, model: "stt-rt-v5"),
+            event(120, feature: .agentVoice, account: .elevenLabs, model: "scribe_v3_live"),
+            event(0.01, feature: .voiceSearch, account: .soniox, model: "stt-rt-v5"),
+        ])
+        XCTAssertEqual(rows.map(\.title), ["Agent", "Voice search"])
+        XCTAssertEqual(rows[0].events.count, 3)
+        XCTAssertEqual(rows[0].models.map(\.model), ["anthropic/claude-sonnet-5.5", "scribe_v3_live", "stt-rt-v5"])
+        XCTAssertEqual(AIUsageTotal(events: rows[0].events, currency: .usd).text, "$0.75")
+        XCTAssertEqual(AIUsagePrice(events: rows[0].events).text, "$0.75\n\(120.formatted()) credits")
+        let voiceOnly = AIUsageCostRow.grouped([event(0.25, feature: .agentVoice, account: .soniox, model: "stt-rt-v5")])
+        XCTAssertEqual(voiceOnly.map(\.title), ["Agent"])
+        // Every feature the journal can name lands in exactly one row.
+        for feature in AIFeature.activeCases {
+            XCTAssertEqual(AIUsageCostRow.grouped([event(0.01, feature: feature)]).count, 1, "\(feature)")
+        }
+    }
+
     func test_partial_unknown_cost_and_small_nonzero_cost_are_not_free() {
         let events = [event(0.02), event(nil)]
         XCTAssertEqual(AIUsageTotal(events: events, currency: .usd).text, "$0.02")

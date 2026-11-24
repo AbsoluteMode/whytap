@@ -167,6 +167,65 @@ final class APIAndModelsViewModelTests: XCTestCase {
         vm.rows.first { $0.feature == feature }
     }
 
+    /// Advanced shows one Agent card: its voice model, then its answer model,
+    /// like Drop Smart and Meetings. Each still changes on its own route, and
+    /// the shared Speech and LLM rows count the change as custom.
+    func test_agent_card_holds_its_voice_and_answer_models_and_each_changes_alone() async throws {
+        let env = try makeEnv(
+            snapshots: [
+                .soniox: fresh([CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
+                                CatalogModel(id: "stt-rt-v7", uses: [.realtimeSTT])]),
+                .openRouter: fresh([
+                    CatalogModel(id: "a/one", uses: [.chat, .chatWithTools], contextLength: 1_000_000, supportsTools: true),
+                    CatalogModel(id: "a/two", uses: [.chat, .chatWithTools], contextLength: 1_000_000, supportsTools: true),
+                ]),
+            ],
+            keyed: [.soniox, .openRouter]
+        )
+        for feature in [AIFeature.dropFast, .dropSmart, .agentVoice, .voiceSearch] {
+            env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: feature)
+        }
+        for feature in [AIFeature.dropSmartCleanup, .meetingNotes, .agent, .translation] {
+            env.routing.setRoute(FeatureRoute(account: .openRouter, model: "a/one"), for: feature)
+        }
+        let vm = env.makeViewModel()
+
+        XCTAssertEqual(vm.groups.filter { $0.title.hasPrefix("Agent") }.map(\.title), ["Agent"], "no Agent voice card")
+        func card() throws -> FeatureGroup { try XCTUnwrap(vm.groups.first { $0.title == "Agent" }) }
+        XCTAssertEqual(try card().rows.map(\.fieldLabel), ["Speech", "Text"])
+        XCTAssertEqual(try card().summary, "stt-rt-v6 · a/one")
+        XCTAssertTrue(try card().covers(.agentVoice), "a link to the voice route opens the Agent card")
+        XCTAssertTrue(try card().covers(.agent))
+
+        await vm.select(model: "stt-rt-v7", account: .soniox, for: .agentVoice)
+        XCTAssertEqual(try card().summary, "stt-rt-v7 · a/one")
+        XCTAssertEqual(env.routing.route(for: .agentVoice), FeatureRoute(account: .soniox, model: "stt-rt-v7"))
+        XCTAssertEqual(env.routing.route(for: .agent)?.model, "a/one", "the answer model did not move")
+
+        await vm.select(model: "a/two", account: .openRouter, for: .agent)
+        XCTAssertEqual(try card().summary, "stt-rt-v7 · a/two")
+        XCTAssertEqual(env.routing.route(for: .agent)?.model, "a/two")
+        XCTAssertEqual(env.routing.route(for: .agentVoice)?.model, "stt-rt-v7", "the voice model did not move")
+
+        let speech = try XCTUnwrap(vm.sharedRows.first { $0.kind == .speech })
+        let llm = try XCTUnwrap(vm.sharedRows.first { $0.kind == .llm })
+        XCTAssertEqual(speech.custom, [.agentVoice])
+        // Meetings has no model in this setup, hence the trailing "not set".
+        XCTAssertEqual(speech.label, "Soniox · stt-rt-v6 · 1 custom · 1 not set")
+        XCTAssertEqual(llm.custom, [.agent])
+        XCTAssertTrue(llm.label.hasSuffix("a/one · 1 custom"), llm.label)
+    }
+
+    /// An unset voice route marks the one Agent card, not a card of its own.
+    func test_agent_card_asks_for_setup_when_only_its_voice_has_no_model() throws {
+        let env = try makeEnv(keyed: [.openRouter])
+        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "a/one"), for: .agent)
+        let vm = env.makeViewModel()
+        let card = try XCTUnwrap(vm.groups.first { $0.title == "Agent" })
+        XCTAssertTrue(card.needsSetup)
+        XCTAssertEqual(card.summary, "Choose a model · a/one")
+    }
+
     func test_inline_first_key_save_checks_without_proposing_or_assigning_models() async throws {
         let env = try makeEnv(snapshots: [.openAI: fresh([CatalogModel(id: "text-model", uses: [.chat])])])
         let vm = env.makeViewModel()
@@ -758,9 +817,10 @@ final class APIAndModelsProviderTests: XCTestCase {
         let (vm, _, _, _) = try make()
         let features = vm.groups.flatMap { $0.rows.map(\.feature) }
         XCTAssertEqual(features.sorted { $0.rawValue < $1.rawValue }, AIFeature.activeCases.sorted { $0.rawValue < $1.rawValue })
-        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Agent voice", "Voice search", "Translation", "Subtitles"])
+        XCTAssertEqual(vm.groups.map(\.title), ["Drop Fast", "Drop Smart", "Meetings", "Agent", "Voice search", "Translation", "Subtitles"])
         XCTAssertEqual(vm.groups.first { $0.title == "Drop Smart" }?.rows.map(\.feature), [.dropSmart, .dropSmartCleanup])
         XCTAssertEqual(vm.groups.first { $0.title == "Meetings" }?.rows.map(\.feature), [.meetings, .meetingNotes])
+        XCTAssertEqual(vm.groups.first { $0.title == "Agent" }?.rows.map(\.feature), [.agentVoice, .agent])
         XCTAssertEqual(vm.groups.first { $0.title == "Translation" }?.rows.map(\.feature), [.translation])
         // Subtitles have one slot, Audio translate, and no routes.
         let subtitles = try XCTUnwrap(vm.groups.first { $0.title == "Subtitles" })

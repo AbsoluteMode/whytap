@@ -1834,7 +1834,10 @@ Models) replaces the caption. One row inside the box holds source → target,
 Start/Stop (Cancel while connecting/finishing) and ×; it shows while idle and on
 hover while running, easing over 0.15 s (none with Reduce Motion). No title,
 mode switch, labels, audio status, Original/Follow, empty-state screen or
-footer. Copy translation, Clear and Translate text live in the context menu.
+footer. Copy translation, Clear and Translate text live in the context menu;
+a click on the translation column copies too and shows a "Copied ✓" capsule
+at the caption's bottom-right corner for 1 s (the palette shows it at the
+result's corner).
 Showing subtitles does not make the panel key. Toolbox shows the same row and
 box (15 pt caption) only when there is text. Offscreen renders cover idle,
 result and Toolbox listening; hover and live focus are unverified. WHY:

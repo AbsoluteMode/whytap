@@ -12,6 +12,9 @@ struct TranslationView: View {
     /// The floating overlay's window-level click dispatch for × and the
     /// session button; the Toolbox pane has its own, which nothing dispatches.
     @ObservedObject var hitTargets = SubtitleOverlayHitTargets()
+    /// Copies a translation and says "Copied ✓" for a moment; the controller
+    /// owns it, so the floating window and the Toolbox pane keep it.
+    @ObservedObject var copier = TranslationView.makeCopier()
     @State private var closeHovered = false
     @FocusState private var inputFocused: Bool
     @State private var inputHovered = false
@@ -38,6 +41,10 @@ struct TranslationView: View {
         .onChange(of: presentation.isTextPresented) { _, visible in
             if !embedded && !visible { inputFocused = false }
         }
+        // The Toolbox pane's window is Settings: its clicks on a translation
+        // reach the copy target through a local monitor.
+        .onAppear { if embedded { hitTargets.startLocalCopyDispatch() } }
+        .onDisappear { if embedded { hitTargets.stopLocalCopyDispatch() } }
         .task(id: presentation.inputFocusRequest) {
             guard !embedded, isText, presentation.isTextPresented else { return }
             let request = presentation.inputFocusRequest
@@ -91,7 +98,7 @@ struct TranslationView: View {
                 .background(Color.white.opacity(inputHovered ? 0.10 : 0.065))
                 .onHover { inputHovered = $0 }
                 .accessibilityLabel("Text to translate")
-                .accessibilityHint("Press Return to translate. Right-click for language and copy options.")
+                .accessibilityHint("Press Return to translate. Click the translation to copy it. Right-click for language options.")
             ScrollView {
                 Group {
                     if let issue = text.issue, let feature = issue.feature {
@@ -102,9 +109,20 @@ struct TranslationView: View {
                         .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
                         .focused($settingsFocused)
                     } else {
+                        // A click copies the whole translation; a drag still
+                        // selects part of it (the click is only watched).
+                        // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
                         Text(textOutput)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .background {
+                                if !text.result.isEmpty {
+                                    SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
+                                                               passive: true, activate: copyTranslation)
+                                }
+                            }
+                            .help(text.result.isEmpty ? "" : "Click to copy the translation")
+                            .accessibilityAction(named: "Copy translation", copyTranslation)
                     }
                 }
                 .font(.system(size: text.issue != nil || inputTooLong ? (embedded ? 12 : 13) : (embedded ? 18 : 24),
@@ -116,6 +134,8 @@ struct TranslationView: View {
             }
             .frame(maxWidth: .infinity, minHeight: 32, maxHeight: .infinity, alignment: .topLeading)
             .background(Color.black.opacity(0.08))
+            .overlay(alignment: .bottomTrailing) { if copier.copied { copiedBadge.padding(8) } }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: copier.copied)
             .accessibilityLabel("Translation")
         }
         .contentShape(Rectangle())
@@ -154,8 +174,50 @@ struct TranslationView: View {
 
     private func copyTranslation() {
         guard !text.result.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text.result, forType: .string)
+        copier.copy(text.result)
+    }
+
+    /// What Copy translation and a click on the subtitles copy: every
+    /// finished translation of the session, a blank line between phrases.
+    static func subtitleTranslation(_ lines: [SubtitleLine]) -> String {
+        lines.compactMap(\.translation).joined(separator: "\n\n")
+    }
+
+    private func copySubtitles() {
+        let value = Self.subtitleTranslation(subtitles.lines)
+        guard !value.isEmpty else { return }
+        copier.copy(value)
+    }
+
+    private var hasSubtitleTranslation: Bool { subtitles.lines.contains { $0.translation != nil } }
+
+    /// How long "Copied ✓" shows after a translation is copied.
+    static let copiedShownFor: Duration = .seconds(1)
+
+    /// Writes to `pasteboard` and tells VoiceOver, which does not see the badge.
+    static func makeCopier(pasteboard: NSPasteboard = .general) -> PromptCopier {
+        PromptCopier(copy: { value in
+            pasteboard.clearContents()
+            pasteboard.setString(value, forType: .string)
+            NSAccessibility.post(element: NSApplication.shared, notification: .announcementRequested,
+                                 userInfo: [.announcement: "Copied",
+                                            .priority: NSAccessibilityPriorityLevel.medium.rawValue])
+        }, shownFor: copiedShownFor)
+    }
+
+    private var copiedBadge: some View {
+        HStack(spacing: 4) {
+            Text("Copied")
+            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold))
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(Capsule().fill(Color.black.opacity(0.72)))
+        .transition(.opacity)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
@@ -175,6 +237,15 @@ struct TranslationView: View {
                     caption(rows)
                         .padding(.horizontal, 12).padding(.vertical, 8)
                         .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 12))
+                        // Pairs are stacked here: a click anywhere on them copies.
+                        .background {
+                            if hasSubtitleTranslation {
+                                SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
+                                                           passive: true, activate: copySubtitles)
+                            }
+                        }
+                        .overlay(alignment: .bottomTrailing) { if copier.copied { copiedBadge.padding(6) } }
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: copier.copied)
                         .contextMenu { subtitleMenu }
                 }
                 if waitingWithoutAudio { audioPermissionsButton }
@@ -336,6 +407,23 @@ struct TranslationView: View {
                                        .init(color: .black, location: SteadyPairsLayout.topFade)],
                                startPoint: .top, endPoint: .bottom)
             }
+            // A click on the translation column copies the translation.
+            // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+            .background {
+                if hasSubtitleTranslation {
+                    GeometryReader { geometry in
+                        let columns = layout.columns(width: geometry.size.width)
+                        let start = Self.bandInset.width + columns.source + layout.columnSpacing / 2
+                        SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
+                                                   activate: copySubtitles)
+                            .frame(width: max(0, geometry.size.width - start))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+                    }
+                }
+            }
+            .overlay(alignment: .bottomTrailing) { if copier.copied { copiedBadge } }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: copier.copied)
+            .accessibilityAction(named: "Copy translation", copySubtitles)
             .animation(reduceMotion ? nil : .easeOut(duration: 0.3), value: rows)
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Subtitles")
@@ -510,13 +598,8 @@ struct TranslationView: View {
     }
 
     @ViewBuilder private var subtitleMenu: some View {
-        Button("Copy translation") {
-            let value = subtitles.lines.compactMap(\.translation).joined(separator: "\n\n")
-            guard !value.isEmpty else { return }
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString(value, forType: .string)
-        }
-        .disabled(!subtitles.lines.contains { $0.translation != nil })
+        Button("Copy translation", action: copySubtitles)
+            .disabled(!hasSubtitleTranslation)
         Button("Clear") { subtitles.clear() }
             .disabled(subtitles.phase.isActive || subtitles.lines.isEmpty)
         if !embedded {

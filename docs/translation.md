@@ -60,12 +60,15 @@ palette closes before the text arrives, Drop saves it in **History → Drop**
 and shows a notice.
 
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
-Russian. Right-click the palette for **Translate to**, **Copy translation**,
+Russian. Click the translation to copy all of it: **Copied ✓** shows for a
+second at the corner of the result. Dragging over it still selects a part to
+copy with ⌘C, and a double click selects a word. Right-click the palette for
+**Translate to**, **Copy translation**,
 **Clear** or **Cancel translation**. The floating palette also offers **Subtitles**;
 in Toolbox select its separate tile. Explicit language choices
-are retained, including existing saved choices. Native text selection also
-supports copying. Only language choices are saved, never submitted text or
-subtitle content; the clipboard is accessed only by an explicit Copy action.
+are retained, including existing saved choices. Only language choices are saved, never submitted text or
+subtitle content; the clipboard is accessed only by a click on a translation
+or an explicit Copy action.
 
 Editing the input or changing the target cancels the old request and clears
 its result. Late responses cannot replace a newer translation. Inputs are
@@ -88,8 +91,12 @@ long original without a pause shows its newest lines beside the translation.
 Hover the box to
 reach the languages, **Stop** and **×**; they cover the top of the caption
 without moving it and stay a second after the pointer leaves.
-In the Toolbox pane the original sits above its translation. **Copy
-translation** in the box's context menu copies the completed translations.
+In the Toolbox pane the original sits above its translation. A click on the
+translations (the right column; anywhere on the pairs in Toolbox) copies all
+completed translations of the session, a blank line between phrases, and shows
+**Copied ✓** for a second; so does **Copy translation** in the box's context
+menu. The original's column does nothing on click, and dragging the box moves
+it. The click works while another app is active, without taking its focus.
 
 Only system audio is captured. The microphone is not opened, no recording is
 saved, and no meeting note is created. Starting may request macOS **System

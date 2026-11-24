@@ -22,6 +22,14 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
+    /// The switches of the features that have one. The Agent's connects the
+    /// native Agent and returns why it did not turn on.
+    var setAgent: @MainActor (Bool) async -> String?
+    var setMeetings: (Bool) -> Void
+    var setGoogle: (Bool) -> Void
+    /// "Allow file edits and commands".
+    var agentSettings: AgentSettingsStore
+    var meetingNotifications: MeetingReadyNotifications
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
@@ -33,6 +41,11 @@ struct FeaturesEnvironment {
          agentOn: @escaping () -> Bool = { false },
          meetingsOn: @escaping () -> Bool = { false },
          googleOn: @escaping () -> Bool = { false },
+         setAgent: @escaping @MainActor (Bool) async -> String? = { _ in nil },
+         setMeetings: @escaping (Bool) -> Void = { _ in },
+         setGoogle: @escaping (Bool) -> Void = { _ in },
+         agentSettings: AgentSettingsStore? = nil,
+         meetingNotifications: MeetingReadyNotifications? = nil,
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil) {
@@ -49,6 +62,11 @@ struct FeaturesEnvironment {
         self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
         self.autoStop = autoStop ?? .shared
         self.openHoverPanel = openHoverPanel
+        self.setAgent = setAgent
+        self.setMeetings = setMeetings
+        self.setGoogle = setGoogle
+        self.agentSettings = agentSettings ?? .shared
+        self.meetingNotifications = meetingNotifications ?? .shared
     }
 }
 

@@ -1042,7 +1042,7 @@ final class AgentController: ObservableObject {
         responseStore.markErrorBlock(StateErrorBlock(
             title: "No agent connected",
             subtitle: "Connect in Settings",
-            message: "Turn on Agent in Settings → Other. Its model is set in API & Models.",
+            message: "Turn on Agent in Settings → Features → Agent. Its model is set there too.",
             code: "not_connected",
             retryable: false
         ))

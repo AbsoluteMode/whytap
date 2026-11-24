@@ -73,7 +73,7 @@ struct NativeAgentTools {
                 return await NativeAgentAppControl.execute(call, handler: appControl)
             }
             guard Self.definitions(allowActions: allowActions).contains(where: { $0["name"] as? String == call.name }) else {
-                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be disabled in Settings → Other.")
+                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be turned off in Settings → Features → Agent.")
             }
             let args = call.arguments
             func required(_ name: String) throws -> String {

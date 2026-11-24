@@ -1421,7 +1421,16 @@ setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
 one a "Video coming" row says what it will show), FeatureShortcutsGroup (one
 recorder per shortcut), FeatureNeedsGroup, the feature's own settings and
 FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
-its screen; Drop keeps DropFeatureView around the same parts. WHY:
+its screen; Drop keeps DropFeatureView around the same parts. The Agent,
+Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
+the switch (FeatureSwitchModel) writes the same flag as Other and the island
+through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
+connects the native Agent first (AgentOtherSection.turn) and moves only once
+it is on, otherwise the card says why. The Agent screen adds Allow file edits
+and commands and things to ask; Meeting Notes adds the note-ready notification
+and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
+setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
+Features). WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

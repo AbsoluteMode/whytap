@@ -432,7 +432,7 @@ final class FeatureCatalogTests: XCTestCase {
         var everything = FeatureSetupSnapshot()
         everything.dropMode = .smart
         for info in FeatureCatalog.all {
-            texts += [info.name, info.kind, info.line] + info.hotkeys.map(\.label)
+            texts += [info.name, info.kind, info.line, info.about, info.clipCaption] + info.examples + info.hotkeys.map(\.label)
             for snapshot in [FeatureSetupSnapshot(), everything] {
                 for check in FeatureCatalog.checks(for: info.feature, snapshot: snapshot) {
                     texts += [check.requirement.title, check.requirement.detail, check.reason ?? "",
@@ -470,9 +470,9 @@ final class FeatureCatalogTests: XCTestCase {
 
     func testFeaturesWithoutAScreenPointAtTheirPresentPlace() {
         XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .tab(.agentMode))
-        XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .tab(.other))
-        XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .tab(.other))
+        XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .screen)
+        XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .screen)
+        XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .screen)
         XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).place, .tool(.translate))
         XCTAssertEqual(FeatureCatalog.info(for: .screenshots).place, .tool(.screenshot))
     }

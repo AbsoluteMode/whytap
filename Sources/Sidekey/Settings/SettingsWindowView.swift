@@ -82,7 +82,13 @@ struct SettingsWindowView: View {
             agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),
                                               activeProvider: AgentProviderStore.shared.activeProvider) },
             meetingsOn: otherMeetingsEnabled,
-            googleOn: otherGoogleEnabled
+            googleOn: otherGoogleEnabled,
+            setAgent: { [agentModeViewModel, onAgentToggle] on in
+                await AgentOtherSection.turn(on, viewModel: agentModeViewModel, settings: .shared,
+                                             store: .shared, onAgentToggle: onAgentToggle)?.message
+            },
+            setMeetings: otherOnMeetingsToggle,
+            setGoogle: otherOnGoogleToggle
         )
     }
 
@@ -386,6 +392,7 @@ final class SettingsWindowSelection: ObservableObject {
         let resolvedTab = selectedTab.resolved
         let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         self.selectedTab = availableTab
+        if selectedTab == .agentMode { shownFeature = .agent }
         previousNonNotesTab = availableTab == .notes ? SettingsWindowTab.defaultAvailable : availableTab
     }
 
@@ -400,7 +407,8 @@ final class SettingsWindowSelection: ObservableObject {
             previousNonNotesTab = availableTab
         }
         // The sidebar's Features row is "Features home": back to the list.
-        if availableTab == .features { shownFeature = nil }
+        // A link to the old Agents tab opens the Agent's own screen.
+        if availableTab == .features { shownFeature = tab == .agentMode ? .agent : nil }
         selectedTab = availableTab
     }
 

@@ -116,6 +116,13 @@ accepted the second version.
   feature's own settings and its examples. A new screen is one case in
   `FeatureScreens` and `place: .screen` in the catalog; Drop keeps its own
   order around the same parts.
+- The Agent, Meeting Notes and Google search get their own screens. Their
+  switches stay in Other until Other is taken apart, so both write the same
+  flag. The Agent's switch connects first and stays off with the reason
+  ("Choose an Agent model in API & Models.") when it cannot. The old Agents
+  link (`whytap://settings/agentMode`, the setup prompt) opens the Agent
+  screen. The Agent's examples are only things its tools do today (files,
+  a command, the screen, web search, To-do, Whytap's own settings).
 
 ## Why
 

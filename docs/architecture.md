@@ -2272,6 +2272,25 @@ A key sent through `NSApp.sendEvent` without a key window is only reported (a
 test process has no key window). WHY:
 `.project-docs/decisions/2026-11-23-silent-test-runs.md`.
 
+Test runs put no window on the screen and never take focus.
+`OnScreenWindowGuard` (`Tests/SidekeyTests/Support/OnScreenWindowGuard.swift`,
+installed by the same bootstrap) keeps every window order-in away from the
+window server and remembers it, so `window.isVisible` is still true for the
+code under test after `show()` and false after order-out or close; a test may
+call the app's real `show()`. `NSApp.activate` and
+`NSRunningApplication.activate` are recorded and not performed. `runModal`,
+alert and panel sheets, `NSOpenPanel`/`NSSavePanel`, menu pop-ups and
+`NSWorkspace` `open` are not performed, answer "cancelled" and fail the test:
+give such code an injected presenter or opener, or wrap a call whose request
+is the thing checked in `OnScreenWindowGuard.recording { }`. After every test
+the guard asks the window server for this process's on-screen windows; any
+window found fails that test. A test of a SwiftUI gesture, which needs a
+really ordered window, uses `OnScreenWindowGuard.orderInBeyondEveryDisplay`
+(zero opacity, outside every display) and closes the window before it ends.
+The run ends with an `OnScreenWindowGuard` summary line;
+`WHYTAP_TEST_WINDOW_REPORT=<path>` lists every request by test. WHY:
+`.project-docs/decisions/2026-11-24-windowless-test-runs.md`.
+
 Whytap stays open source and uses ready-made community builds for normal installs
 and updates. The default DMG/Sparkle pipeline builds and signs locally with the
 Developer ID certificate of the team committed in `Resources/developer-id-team.txt`

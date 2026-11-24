@@ -21,7 +21,8 @@ enum SmartDirectReasoning {
     ///   o-series model not listed here is asked for `low`, which all of them
     ///   take).
     /// GPT-4.1 and GPT-4o refuse the argument; chat snapshots, pro models and
-    /// any other generation get none, as for the Agent.
+    /// any other generation get none, as for the Agent. Families match by
+    /// prefix: a variant (`gpt-5.1-codex`) gets its family's level.
     static func openAIEffort(model: String) -> String? {
         guard NativeAgentEffort.openAIReasoning(model) else { return nil }
         let id = openAIBase(model)

@@ -53,6 +53,11 @@ struct NativeAgentModel {
     var reasoningRefusals = NativeAgentEffort.refusals
     /// Whether this turn's first request had the provider's own web search.
     private var reasoningSearch: Bool?
+    /// Whether this turn sends the fields for a model that refused them; set
+    /// at the turn's first request and by an accepted refusal repeat.
+    private var reasoningRefused: Bool?
+    /// A response of this turn was accepted: later refusals are not repeated.
+    private var acceptedInTurn = false
 
     init(options: AgentRunOptions, key: String, system: String, history: [NativeAgentConversation.Pair], prompt: String,
          http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
@@ -96,9 +101,16 @@ struct NativeAgentModel {
         let turnSearch = reasoningSearch ?? builtInSearch
         reasoningSearch = turnSearch
         let refusalAPI = NativeAgentEffort.refusalAPI(options.openCodeProvider)
-        let reasoning = reasoningRefusals.contains(refusalAPI, model: model) ? nil
-            : NativeAgentEffort.request(provider: options.openCodeProvider, model: model, catalogFlag: options.lowEffortSupport,
-                                        openRouter: options.openRouterReasoning, providerSearch: turnSearch)
+        let turnRefused = reasoningRefused ?? reasoningRefusals.contains(refusalAPI, model: model)
+        reasoningRefused = turnRefused
+        func reasoningFields(refused: Bool) -> NativeAgentEffort.Request? {
+            NativeAgentEffort.request(provider: options.openCodeProvider, model: model, catalogFlag: options.lowEffortSupport,
+                                      openRouter: options.openRouterReasoning, providerSearch: turnSearch, refused: refused)
+        }
+        let reasoning = reasoningFields(refused: turnRefused)
+        // Only the turn's first exchange may repeat: a thinking setting must
+        // not change after the model answered within the turn.
+        let mayRepeat = reasoning != nil && !turnRefused && !acceptedInTurn
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
         // OpenRouter cap per request, so they get what is left of the turn.
@@ -172,17 +184,30 @@ struct NativeAgentModel {
             return request
         }
         do {
-            return try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
-                                  reasoning: reasoning, repeatsOnRefusal: reasoning != nil)
-        } catch where reasoning != nil && NativeAgentEffort.refused(error, provider: options.openCodeProvider) && !Task.isCancelled {
-            // The provider refused the request: the same one goes once more
-            // without the reasoning fields. Only an accepted answer to that
-            // repeat shows the fields were the cause; the model then goes
-            // without them until relaunch.
-            let result = try await send(makeRequest(nil), model: model, toolsCount: tools.count, outputLimit: outputLimit,
-                                        reasoning: nil, effortRetry: true)
-            reasoningRefusals.record(refusalAPI, model: model)
+            let result = try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
+                                        reasoning: reasoning, repeatsOnRefusal: mayRepeat)
+            acceptedInTurn = true
             return result
+        } catch where mayRepeat && NativeAgentEffort.refused(error, provider: options.openCodeProvider) && !Task.isCancelled {
+            // The provider refused a reasoning setting: the same request goes
+            // once more with what a refusing model gets (OpenAI `low`, else
+            // no field). Only an accepted answer to that repeat shows the
+            // fields were the cause; the model then gets that until relaunch.
+            let fallback = reasoningFields(refused: true)
+            let result = try await send(makeRequest(fallback?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
+                                        reasoning: fallback, effortRetry: true)
+            reasoningRefusals.record(refusalAPI, model: model)
+            reasoningRefused = true
+            acceptedInTurn = true
+            return result
+        } catch {
+            // A refused request that was not repeated after all (cancelled
+            // in between) still reports its usage.
+            if mayRepeat, NativeAgentEffort.refused(error, provider: options.openCodeProvider) {
+                usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
+                                currency: .usd, amount: nil, basis: .unavailable))
+            }
+            throw error
         }
     }
 

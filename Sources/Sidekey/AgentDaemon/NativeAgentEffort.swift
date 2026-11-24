@@ -4,8 +4,9 @@ import Foundation
 /// accepts and turns thinking off where the model allows that, so a simple
 /// question is answered without long thinking. The per-model tables are the
 /// ones Drop Smart uses (`SmartDirectReasoning`, `OpenRouterReasoningPolicy`).
-/// A model outside them gets no field (its own default), and a request the
-/// provider refuses with the fields goes again without them (`NativeAgentModel`).
+/// A model outside them gets no field (its own default), and a turn's first
+/// request that the provider refuses for these fields goes again with OpenAI
+/// `low` or without them (`NativeAgentModel`).
 // WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
 enum NativeAgentEffort {
     /// What one request asks for: the body fields and their diagnostic names.
@@ -31,11 +32,24 @@ enum NativeAgentEffort {
     /// `minimal` beside its search tool (`low` is sent), and Claude Sonnet 5.5
     /// with `between_tools` repeats `finish_answer` after a search (no
     /// `thinking` field is sent, low effort stays).
+    ///
+    /// `refused`: the provider refused these fields for this model before.
+    /// Direct OpenAI then gets `low`, which every reasoning model takes (the
+    /// Agent's level before 2026-11-24), when the table asked for less;
+    /// otherwise nothing is sent.
     static func request(provider: OpenCodeModelProvider, model: String, catalogFlag: Bool?,
-                        openRouter: OpenRouterReasoningCapabilities? = nil, providerSearch: Bool = false) -> Request? {
+                        openRouter: OpenRouterReasoningCapabilities? = nil, providerSearch: Bool = false,
+                        refused: Bool = false) -> Request? {
         typealias Effort = NativeAgentDiagnostics.Effort
+        if refused {
+            guard provider == .openAI, let effort = SmartDirectReasoning.openAIEffort(model: model), effort != "low" else { return nil }
+            return Request(fields: ["reasoning": ["effort": "low"]], effort: .low, thinking: nil)
+        }
         switch provider {
         case .anthropic:
+            // The Models API saying the model takes no effort setting: nothing
+            // is sent, the thinking field included.
+            guard catalogFlag != false else { return nil }
             let effort = catalogFlag ?? anthropicSupports(model) ? "low" : nil
             var thinking = SmartDirectReasoning.anthropic(model: model)?.thinking
             if providerSearch, thinking == "between_tools" { thinking = nil }
@@ -60,16 +74,15 @@ enum NativeAgentEffort {
         }
     }
 
-    /// Whether a failed request may go again without the reasoning fields:
-    /// the provider answered HTTP 400 and its error names a reasoning setting
-    /// (`ErrorShape.namesReasoning`), or OpenRouter answered 404 (no endpoint
-    /// supports the requested parameters). The model did not run, so nothing
-    /// is repeated or paid twice. Any other failure, an unrelated 400
-    /// included, is not repeated.
+    /// Whether a failed request may go again with the `refused` fields: the
+    /// provider answered HTTP 400 (OpenRouter also 404) and its error refuses
+    /// a reasoning setting (`ErrorShape.namesReasoning`: the setting named in
+    /// `param`, or named with a refusal in one sentence, or OpenRouter's "no
+    /// endpoints ... requested parameters"). The model did not run, so
+    /// nothing is repeated or paid twice. Any other failure is not repeated.
     static func refused(_ error: Error, provider: OpenCodeModelProvider) -> Bool {
-        guard case NativeAgentError.service(_, let status, let shape) = error else { return false }
-        if provider == .openRouter, status == 404 { return true }
-        return status == 400 && shape.namesReasoning == true
+        guard case NativeAgentError.service(_, let status, let shape) = error, shape.namesReasoning == true else { return false }
+        return status == 400 || (provider == .openRouter && status == 404)
     }
 
     /// Models whose provider refused the Agent's reasoning fields and then

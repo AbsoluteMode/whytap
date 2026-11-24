@@ -116,6 +116,48 @@ enum NativeAgentDiagnostics {
 
         /// Removes quoted text (often the user's own words) and keeps a quoted
         /// tool identifier such as 'web_search' as a bare word.
+        /// The error refuses a reasoning setting: its `param` names one
+        /// (`reasoning.effort`, `thinking.type`); or one sentence of the
+        /// message (or of the upstream text OpenRouter quotes), with quoted
+        /// text removed except field names, names a setting and refuses it
+        /// ("is not supported", "cannot be used with"); or it is OpenRouter's
+        /// "no endpoints ... requested parameters". A message that only
+        /// mentions thinking blocks or a reasoning item is not a refusal.
+        /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+        static func refusesReasoning(error: [String: Any]?, raw: String?) -> Bool {
+            let settings = ["reasoning", "thinking", "effort", "output_config"]
+            if let param = (error?["param"] as? String)?.prefix(200).lowercased(), settings.contains(where: param.contains) { return true }
+            let refusals = ["not supported", "unsupported", "does not support", "doesn't support", "not allowed",
+                            "not permitted", "cannot be used", "can't be used", "unrecognized", "unknown parameter",
+                            "invalid value", "not available", "not enabled", "only supported"]
+            for text in [error?["message"] as? String, raw].compactMap({ $0 }) {
+                let plain = fieldNamesKept(String(text.prefix(16_384)).lowercased())
+                if plain.contains("no endpoints") && plain.contains("requested parameters") { return true }
+                let sentences = plain.replacingOccurrences(of: ". ", with: "\n").split(whereSeparator: { $0 == "\n" || $0 == ";" })
+                for sentence in sentences {
+                    let words = String(sentence)
+                    if settings.contains(where: words.contains) && refusals.contains(where: words.contains) { return true }
+                }
+            }
+            return false
+        }
+
+        /// Quoted text removed, except a quoted field name
+        /// (`"thinking.type.between_tools"`), whose dots are kept apart from
+        /// sentence ends.
+        static func fieldNamesKept(_ text: String) -> String {
+            let pattern = #"(?<![\p{L}\p{N}])['"`‘“]([^'"`’”]*)['"`’”](?![\p{L}\p{N}])"#
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+            var result = text
+            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
+                guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
+                let content = String(text[inner])
+                let field = content.range(of: #"^[a-z_]+(\.[a-z_]+)*$"#, options: .regularExpression) != nil
+                result.replaceSubrange(whole, with: field ? content.replacingOccurrences(of: ".", with: "_") : " ")
+            }
+            return result
+        }
+
         static func unquoted(_ text: String) -> String {
             let pattern = #"(?<![\p{L}\p{N}])['"`‘“]([^'"`’”]*)['"`’”](?![\p{L}\p{N}])"#
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
@@ -143,8 +185,7 @@ enum NativeAgentDiagnostics {
             let text = [error?["message"] as? String, metadata?["raw"] as? String]
                 .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
-            let named = text + " " + (error?["param"] as? String ?? "").prefix(200).lowercased()
-            namesReasoning = ["reasoning", "thinking", "effort", "output_config"].contains(where: named.contains)
+            namesReasoning = Self.refusesReasoning(error: error, raw: metadata?["raw"] as? String)
             rejectsWebSearch = Self.refusesWebSearch(error: error, category: category, searchToolIndex: searchToolIndex)
             self.truncated = truncated
             parsed = object != nil

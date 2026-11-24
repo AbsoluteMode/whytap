@@ -22,6 +22,18 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
+    /// Hover, Notify and Monitor: the island's tool layout, the Notify
+    /// sources and their sounds, Monitor's dashboards (read, never polled
+    /// here), where agents put their files, and the clipboard a prompt is
+    /// copied to. Tests pass temporary ones; nothing touches the user's own.
+    // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
+    var hoverStore: HoverLayoutStore
+    var notifySupervisor: NotifyScriptSupervisor
+    var meetingNotifications: MeetingReadyNotifications
+    var notificationSounds: NotificationSoundSettings
+    var monitor: MonitorStore
+    var notifyRoot: URL
+    var copyText: (String) -> Void
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
@@ -35,7 +47,14 @@ struct FeaturesEnvironment {
          googleOn: @escaping () -> Bool = { false },
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
-         hotkeys: HotkeyPreferences? = nil) {
+         hotkeys: HotkeyPreferences? = nil,
+         hoverStore: HoverLayoutStore? = nil,
+         notifySupervisor: NotifyScriptSupervisor? = nil,
+         meetingNotifications: MeetingReadyNotifications? = nil,
+         notificationSounds: NotificationSoundSettings? = nil,
+         monitor: MonitorStore? = nil,
+         notifyRoot: URL = NotifyPaths.root,
+         copyText: @escaping (String) -> Void = FeaturesEnvironment.copyToClipboard) {
         self.dropMode = dropMode
         self.agentOn = agentOn
         self.meetingsOn = meetingsOn
@@ -49,6 +68,23 @@ struct FeaturesEnvironment {
         self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
         self.autoStop = autoStop ?? .shared
         self.openHoverPanel = openHoverPanel
+        self.hoverStore = hoverStore ?? .shared
+        self.notifySupervisor = notifySupervisor ?? .shared
+        self.meetingNotifications = meetingNotifications ?? .shared
+        self.notificationSounds = notificationSounds ?? .shared
+        self.monitor = monitor ?? FeaturesEnvironment.sharedMonitor
+        self.notifyRoot = notifyRoot
+        self.copyText = copyText
+    }
+
+    /// One reader of Monitor's files for every Settings window. It is never
+    /// started, so Settings does not connect to servers.
+    static let sharedMonitor = MonitorStore()
+
+    static func copyToClipboard(_ text: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 }
 
@@ -82,7 +118,10 @@ extension FeatureSetupSnapshot {
             dropShortcut: permissions.dropHotkeyStatus,
             agentOn: environment.agentOn(),
             meetingsOn: environment.meetingsOn(),
-            googleOn: environment.googleOn()
+            googleOn: environment.googleOn(),
+            notifySources: environment.notifySupervisor.sources.count,
+            monitorDashboards: environment.monitor.dashboards.count
+                + (environment.monitor.serverStatusListed ? 1 : 0)
         )
     }
 

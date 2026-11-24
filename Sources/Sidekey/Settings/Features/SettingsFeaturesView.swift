@@ -39,6 +39,12 @@ struct SettingsFeaturesView: View {
             case .drop:
                 DropFeatureView(snapshot: snapshot, selection: selection, models: models,
                                 permissions: permissions, environment: environment)
+            case .hover:
+                HoverFeatureView(selection: selection, environment: environment)
+            case .notify:
+                NotifyFeatureView(snapshot: snapshot, selection: selection, environment: environment)
+            case .monitor:
+                MonitorFeatureView(snapshot: snapshot, selection: selection, environment: environment)
             // Features without their own screen yet open their present place
             // (`SettingsWindowSelection.open`); the list stays underneath.
             case .agent, .meetings, .googleSearch, .translateSubtitles, .screenshots, nil:
@@ -47,6 +53,8 @@ struct SettingsFeaturesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {
+            // Monitor's files are read, not polled: Settings never connects to servers.
+            environment.monitor.reloadFiles()
             await models.onAppear()
             if environment.supportsOnDevice { await onDevice.refresh() }
         }
@@ -60,6 +68,8 @@ struct SettingsFeaturesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyDropModeChanged)) { _ in
             externalChange += 1
         }
+        .onReceive(environment.notifySupervisor.$sources) { _ in externalChange += 1 }
+        .onReceive(environment.monitor.$dashboards) { _ in externalChange += 1 }
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in
             // The Agent counts as on only while its native provider is connected.
             DispatchQueue.main.async { externalChange += 1 }

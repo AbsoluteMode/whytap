@@ -1416,6 +1416,26 @@ and disabled unless the shortcut is Toggle); Vocab and Filler open their
 island editors. The same switches remain in Other and in the island. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
+Hover, Notify and Monitor are features with their own screens too. Hover
+(HoverFeatureView) lists the island's tools in HoverLayoutStore order with
+Settings pinned last, then the tools that are off. A row is held and dragged
+(HoverToolDragModel: over another row the tool takes its place live; a row
+sliding under the pointer is not a new target; an off tool dropped on a row
+joins there; dropped on More tools it leaves); its switch removes it or puts
+it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
+actions. The island observes the same store, so it changes at once. The
+chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
+tool that is off keeps its shortcut and stays in island search. Notify and
+Monitor are Not set up until an agent connected a source or a dashboard.
+Their screens show the shortcut, an Open button for the island panel, the
+sources (NotificationSourcesGroups, shared with the Notifications tab) or the
+dashboards with freshness (a MonitorStore that is only read, never started,
+so Settings never polls servers), and CodingAgentPromptCard: the marks of
+Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
+CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
+enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
+.project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).

@@ -412,7 +412,7 @@ Fast и служебный ответ Smart используют обычный 
 
 **Настройки открываются на Features (Settings → Features):** список того, что
 умеет Whytap — Drop, Agent, Meeting Notes, Google search, Translate & Subtitles,
-Screenshots. У каждой строки название, одна фраза и статус словами: Ready,
+Screenshots, Hover, Notify, Monitor. У каждой строки название, одна фраза и статус словами: Ready,
 Off (выключатель выключен), Needs setup (фича включена, не хватает шага — названа
 первая причина и число остальных) или Not set up (инструмент острова, которым не
 пользуются). Строка открывает экран фичи, а пока его нет — нынешнее место её
@@ -428,6 +428,21 @@ here»; «What it needs» — речевая модель (на Apple Silicon п
 Microphone и «Your shortcut is heard»; настройки Mode, Language you speak, Lower
 other audio while speaking, Stop Drop automatically (только с Toggle); Vocab и
 Filler открывают свои редакторы в острове.
+
+**Экран Hover (Settings → Features → Hover):** инструменты острова списком в
+том же порядке, что в острове (слева направо, по рядам), Settings всегда
+последний. Инструмент зажимают и перетаскивают на новое место — остров меняется
+сразу; тумблер убирает инструмент из острова или возвращает его в конец.
+Выключенные — в «More tools», их можно перетащить обратно. Стрелка строки
+открывает хоткей инструмента и путь к его настройкам; выключенный инструмент
+сохраняет хоткей и находится поиском в острове.
+
+**Экраны Notify и Monitor (Settings → Features):** что делает инструмент, его
+хоткей и кнопка Open, подключённые источники (со звуком и выключателем) или
+дашборды (со свежестью данных) и карточка «Let your coding agent set it up» с
+логотипами Claude Code, Codex, Cursor и Antigravity: Copy prompt копирует
+готовый промпт с путями этого Mac и правилами формата. Пока агент ничего не
+подключил, статус Not set up.
 
 **Настройки API & Models (Settings → API & Models):** четыре внутренних раздела
 API keys, Models, Costs и API hints в одной панели. При открытии выбран Models.

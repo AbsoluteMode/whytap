@@ -14,8 +14,22 @@ struct FeaturesEnvironment {
     var supportsOnDevice: Bool
     var onDevice: OnDeviceSpeechModelController
     var hotkeys: HotkeyPreferences
+    /// Drop's options, which the island also edits.
+    var setDropMode: (TranscriptionMode) -> Void
+    var language: () -> AppLanguage?
+    var setLanguage: (AppLanguage?) -> Void
+    var volumeDuck: VolumeDuckConfig
+    var autoStop: DropAutoStopPreferences
+    /// Shows an island panel (the Vocab and Filler editors live there).
+    var openHoverPanel: (HoverInlinePanel) -> Void
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
+         setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
+         language: @escaping () -> AppLanguage? = { nil },
+         setLanguage: @escaping (AppLanguage?) -> Void = { _ in },
+         volumeDuck: VolumeDuckConfig? = nil,
+         autoStop: DropAutoStopPreferences? = nil,
+         openHoverPanel: @escaping (HoverInlinePanel) -> Void = { _ in },
          agentOn: @escaping () -> Bool = { false },
          meetingsOn: @escaping () -> Bool = { false },
          googleOn: @escaping () -> Bool = { false },
@@ -29,6 +43,12 @@ struct FeaturesEnvironment {
         self.supportsOnDevice = supportsOnDevice
         self.onDevice = onDevice ?? .shared
         self.hotkeys = hotkeys ?? .shared
+        self.setDropMode = setDropMode
+        self.language = language
+        self.setLanguage = setLanguage
+        self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
+        self.autoStop = autoStop ?? .shared
+        self.openHoverPanel = openHoverPanel
     }
 }
 

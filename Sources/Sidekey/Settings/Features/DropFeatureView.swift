@@ -1,0 +1,559 @@
+import SwiftUI
+
+/// Settings -> Features -> Drop: what dictation does, its shortcut and Hold
+/// or Toggle, a field to try it, what it needs with the action in place, and
+/// its options. Everything Drop-related that was spread over API & Models,
+/// Hotkeys, Permissions, Other and the island is reachable from this screen.
+// WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+@MainActor
+struct DropFeatureView: View {
+    let snapshot: FeatureSetupSnapshot
+    @ObservedObject var selection: SettingsWindowSelection
+    @ObservedObject var models: APIAndModelsViewModel
+    @ObservedObject var permissions: PermissionsSettingsViewModel
+    @ObservedObject private var onDevice: OnDeviceSpeechModelController
+    @ObservedObject private var hotkeys: HotkeyPreferences
+    @StateObject private var shortcut: FeatureShortcutEditor
+    private let environment: FeaturesEnvironment
+
+    @State private var language: AppLanguage?
+    @State private var volumeDuck = false
+    @State private var autoStop = false
+
+    init(snapshot: FeatureSetupSnapshot, selection: SettingsWindowSelection, models: APIAndModelsViewModel,
+         permissions: PermissionsSettingsViewModel, environment: FeaturesEnvironment,
+         shortcutEditor: FeatureShortcutEditor? = nil) {
+        self.snapshot = snapshot
+        self.selection = selection
+        self.models = models
+        self.permissions = permissions
+        self.environment = environment
+        self.onDevice = environment.onDevice
+        self.hotkeys = environment.hotkeys
+        _shortcut = StateObject(wrappedValue: shortcutEditor
+            ?? FeatureShortcutEditor(hotkey: .dropVoice, preferences: environment.hotkeys))
+        _language = State(initialValue: environment.language())
+        _volumeDuck = State(initialValue: environment.volumeDuck.isEnabled)
+        _autoStop = State(initialValue: environment.autoStop.isEnabled)
+    }
+
+    private var info: FeatureInfo { FeatureCatalog.info(for: .drop) }
+    private var status: FeatureStatus { FeatureCatalog.status(for: .drop, snapshot: snapshot) }
+    private var checks: [FeatureCheck] { FeatureCatalog.checks(for: .drop, snapshot: snapshot) }
+    private var gesture: HotkeyGesture { FeatureHotkey.dropVoice.gesture(in: hotkeys.configuration) }
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                if case .needsSetup(let missing) = status, let first = missing.first {
+                    FeatureNeedsBox(
+                        consequence: FeatureCatalog.consequence(of: first, for: .drop, snapshot: snapshot),
+                        more: missing.count - 1,
+                        action: first.action,
+                        download: downloadFraction,
+                        modelSize: OnDeviceSpeechModel.parakeetTdtV3.approximateSize,
+                        perform: perform)
+                }
+                shortcutGroup
+                // A newcomer meets the steps before the field they unlock;
+                // once Drop is ready the field comes first.
+                if status.isReady {
+                    tryGroup
+                    needsGroup
+                } else {
+                    needsGroup
+                    tryGroup
+                }
+                settingsGroup
+                wordsGroup
+            }
+            .frame(maxWidth: SettingsFeaturesView.contentWidth, alignment: .topLeading)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 22)
+            .frame(maxWidth: .infinity, alignment: .top)
+        }
+        .onAppear(perform: reload)
+        .onDisappear { shortcut.cancel() }
+    }
+
+    private func reload() {
+        language = environment.language()
+        volumeDuck = environment.volumeDuck.isEnabled
+        autoStop = environment.autoStop.isEnabled
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { selection.shownFeature = nil } label: {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Text("Features").font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(MacSettingsTheme.accent)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Back to Features")
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(info.name)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(MacSettingsTheme.text)
+                    .accessibilityAddTraits(.isHeader)
+                Text(info.kind)
+                    .font(.system(size: 13))
+                    .foregroundStyle(MacSettingsTheme.text2)
+            }
+            Text(FeatureCatalog.dropAbout(gesture: gesture))
+                .font(.system(size: 13))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: - Shortcut
+
+    private var shortcutGroup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Shortcut")
+            MacCard {
+                FeatureShortcutRow(
+                    editor: shortcut,
+                    detail: HotkeysSettingsView.dropDetail(for: gesture, shortcut: hotkeys.configuration.dropVoiceShortcut))
+            }
+        }
+    }
+
+    // MARK: - Try it
+
+    private var tryGroup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Try it here")
+            MacCard {
+                VStack(alignment: .leading, spacing: 8) {
+                    if status.isReady {
+                        OnboardingTryField(placeholder: "Click here, then use the shortcut and say a sentence.",
+                                           onDictated: {})
+                            .frame(height: 46)
+                        HStack(spacing: 6) {
+                            Text(gesture == .hold ? "Your shortcut: hold" : "Your shortcut: press")
+                                .font(.system(size: 11.5))
+                                .foregroundStyle(MacSettingsTheme.text2)
+                            FeatureShortcutKeys(contents: shortcut.contents)
+                        }
+                    } else {
+                        Text("Finish “What it needs” above, then try dictation here.")
+                            .font(.system(size: 13))
+                            .foregroundStyle(MacSettingsTheme.text3)
+                            .frame(maxWidth: .infinity, minHeight: 34, alignment: .topLeading)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 12)
+            }
+        }
+    }
+
+    // MARK: - What it needs
+
+    static func requiredSummary(_ checks: [FeatureCheck]) -> String {
+        let required = checks.filter { !$0.requirement.optional }
+        let done = required.filter { $0.state.isMet }.count
+        return done == required.count ? "All required are set" : "\(done) of \(required.count) required"
+    }
+
+    private var needsGroup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "What it needs", trailing: Self.requiredSummary(checks))
+            MacCard {
+                ForEach(Array(checks.enumerated()), id: \.element.id) { index, check in
+                    if index > 0 { MacRowSeparator() }
+                    FeatureRequirementRow(
+                        check: check,
+                        note: note(for: check),
+                        download: downloadFraction,
+                        perform: perform
+                    ) { modelMenu(for: check) }
+                }
+            }
+        }
+    }
+
+    /// The model dropdown of API & Models, in place: picking a model here is
+    /// the same choice as picking it there.
+    @ViewBuilder
+    private func modelMenu(for check: FeatureCheck) -> some View {
+        if case .model(let feature) = check.requirement.kind,
+           snapshot.selectableModels.contains(feature) {
+            ModelMenu(viewModel: models, feature: feature,
+                      label: models.rows.first { $0.feature == feature }?.selectionLabel ?? "Choose a model",
+                      onAddKey: { selection.select(.apiAndModels) },
+                      // Beside the free model's button the list is the other way.
+                      width: Self.offersOnDevice(check) ? 150 : 230)
+        }
+    }
+
+    static func offersOnDevice(_ check: FeatureCheck) -> Bool {
+        switch check.action {
+        case .downloadOnDeviceModel, .useOnDeviceModel: return true
+        default: return false
+        }
+    }
+
+    /// What the catalog's one sentence cannot know: this Mac's own limits and
+    /// the steps macOS 27.3 wants.
+    private func note(for check: FeatureCheck) -> String? {
+        switch check.requirement.kind {
+        case .model(let feature):
+            let speech = feature.modelUse(on: .onDevice) != nil
+            if speech, !check.state.isMet, snapshot.onDevice == .unsupported {
+                return "The free model that runs on a Mac needs Apple Silicon. Add a key from Soniox, Deepgram, ElevenLabs or OpenAI."
+            }
+            return models.rows.first { $0.feature == feature }?.message
+        case .permission(.keyboard):
+            if permissions.keyboardNeedsRestart { return permissions.restartBlocked }
+            // Override is on: only the last step is left to say.
+            if snapshot.keyboardSetup == .inputMonitoring {
+                return "Override is on. Add Whytap under Input Monitoring, then restart Whytap."
+            }
+            return permissions.settingsOnly && !permissions.keyboardReady
+                ? PermissionsSettingsViewModel.keyboardSettingsGuide : nil
+        case .dropShortcut:
+            guard case .unmet = check.state else { return nil }
+            return FeatureCatalog.consequence(of: check, for: .drop, snapshot: snapshot)
+        case .permission, .subtitlesKey:
+            return nil
+        }
+    }
+
+    private var downloadFraction: Double? {
+        if case .downloading(let fraction) = onDevice.status { return fraction }
+        return nil
+    }
+
+    // MARK: - Actions
+
+    private func perform(_ action: FeatureSetupAction) {
+        switch action {
+        case .downloadOnDeviceModel(let feature):
+            Task {
+                if await onDevice.download() { models.useOnDeviceModel(for: feature) }
+            }
+        case .useOnDeviceModel(let feature):
+            models.useOnDeviceModel(for: feature)
+        case .chooseModel(let feature):
+            selection.focus(feature)
+        case .addKey, .fixKey, .addOpenAIKey:
+            selection.select(.apiAndModels)
+        case .allow(.keyboard):
+            permissions.requestAccessibility()
+        case .allow(.microphone):
+            permissions.requestMicrophone()
+        case .allow(.screenRecording):
+            Task { await permissions.requestScreenRecording() }
+        case .allow(.systemAudio):
+            break
+        case .openInputMonitoring:
+            permissions.requestInputMonitoring()
+        case .restartWhytap:
+            permissions.restartWhytap()
+        case .retryShortcut:
+            permissions.retryDropShortcut()
+        }
+    }
+
+    // MARK: - Settings
+
+    private var settingsGroup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Settings")
+            MacCard {
+                MacRow(title: "Mode",
+                       subtitle: "Fast types exactly what you said. Smart also fixes slips and punctuation with a text model.") {
+                    MacSegmented(
+                        items: [.init(value: TranscriptionMode.fast, label: "Fast"),
+                                .init(value: TranscriptionMode.smart, label: "Smart")],
+                        selection: Binding(get: { snapshot.dropMode }, set: { environment.setDropMode($0) })
+                    )
+                    .frame(width: 132)
+                    .accessibilityLabel("Drop mode")
+                }
+                MacRowSeparator()
+                MacRow(title: "Language you speak",
+                       subtitle: "Detect automatically suits most people; choose one if Drop mixes languages up.") {
+                    MacPopup(
+                        items: [.init(value: "", label: "Detect automatically")]
+                            + AppLanguage.all.map { .init(value: $0.code, label: $0.displayName) },
+                        selection: Binding(
+                            get: { language?.code ?? "" },
+                            set: { code in
+                                let chosen = AppLanguage.all.first { $0.code == code }
+                                language = chosen
+                                environment.setLanguage(chosen)
+                            })
+                    )
+                    .accessibilityLabel("Language you speak")
+                }
+                MacRowSeparator()
+                MacRow(title: "Lower other audio while speaking",
+                       subtitle: "Lowers built-in-speaker volume while you record voice, restores after. External outputs (USB/Bluetooth DACs) are never touched.") {
+                    MacSwitch(isOn: Binding(get: { volumeDuck }, set: {
+                        volumeDuck = $0
+                        environment.volumeDuck.isEnabled = $0
+                    }), label: "Lower other audio while speaking")
+                }
+                MacRowSeparator()
+                // Auto-stop acts only on a Toggle shortcut; with Hold the
+                // release already ends the take, so the switch is not offered.
+                MacRow(title: "Stop Drop automatically",
+                       subtitle: gesture == .tap
+                           ? "Press once, speak, and dictation ends when you stop. Press again to stop sooner."
+                           : "Works when the shortcut above is set to Toggle. With Hold, letting go already stops it.") {
+                    FeatureVideoButton(video: .dropAutoStop, shortcuts: {
+                        SettingsOtherView.dropAutoStopVideoShortcuts(hotkeys.configuration)
+                    })
+                } trailing: {
+                    MacSwitch(isOn: Binding(get: { gesture == .tap && autoStop }, set: {
+                        autoStop = $0
+                        environment.autoStop.isEnabled = $0
+                    }), isEnabled: gesture == .tap, label: "Stop Drop automatically")
+                }
+            }
+        }
+    }
+
+    // MARK: - Your words
+
+    private var wordsGroup: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Your words")
+            MacCard {
+                MacRow(title: "Vocab", subtitle: "Names and terms Whytap should spell right. Opens in the island.") {
+                    MacButton(title: "Edit") { environment.openHoverPanel(.vocabularyEditor) }
+                        .fixedSize()
+                        .accessibilityLabel("Edit Vocab")
+                }
+                MacRowSeparator()
+                MacRow(title: "Filler", subtitle: "Words to cut from your dictation. Opens in the island.") {
+                    MacButton(title: "Edit") { environment.openHoverPanel(.fillerEditor) }
+                        .fixedSize()
+                        .accessibilityLabel("Edit Filler")
+                }
+            }
+        }
+    }
+}
+
+/// The first missing step of a feature that is on, said as what does not
+/// work, with the one action that fixes it. Neutral colours: it is a next
+/// step, not an alarm.
+// WHY: docs/DESIGN.md — Feature status in words.
+struct FeatureNeedsBox: View {
+    let consequence: String
+    let more: Int
+    let action: FeatureSetupAction?
+    /// The on-device download's progress while it runs.
+    let download: Double?
+    let modelSize: String
+    let perform: (FeatureSetupAction) -> Void
+
+    static func buttonTitle(_ action: FeatureSetupAction, modelSize: String) -> String {
+        if case .downloadOnDeviceModel = action {
+            return "Download the free model · \(modelSize.replacingOccurrences(of: "about ", with: ""))"
+        }
+        return action.title
+    }
+
+    static func text(consequence: String, more: Int) -> String {
+        more > 0 ? "\(consequence) \(more) more below." : consequence
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center, spacing: 14) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Needs setup")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(MacSettingsTheme.text)
+                    Text(Self.text(consequence: consequence, more: more))
+                        .font(.system(size: 12))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                if let download {
+                    Text(FeatureRequirementRow<EmptyView>.downloadText(download))
+                        .font(.system(size: 12))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .fixedSize()
+                } else if let action {
+                    MacButton(title: Self.buttonTitle(action, modelSize: modelSize), style: .primary) { perform(action) }
+                        .fixedSize()
+                }
+            }
+            if let download {
+                OnDeviceDownloadBar(fraction: download,
+                                    starting: OnDeviceSpeechCard.Presentation.isStarting(download))
+                    .accessibilityLabel("Download progress")
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(MacSettingsTheme.bgCard,
+                    in: RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous)
+                .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// One requirement: a mark, its name, one sentence, and its state or the
+/// action that satisfies it. A model requirement also carries the model
+/// dropdown (`menu`).
+struct FeatureRequirementRow<Menu: View>: View {
+    let check: FeatureCheck
+    var note: String?
+    var download: Double?
+    let perform: (FeatureSetupAction) -> Void
+    @ViewBuilder var menu: Menu
+
+    static func downloadText(_ fraction: Double) -> String {
+        OnDeviceSpeechCard.Presentation.isStarting(fraction)
+            ? "Starting the download…"
+            : "Downloading… \(OnDeviceSpeechCard.Presentation.percent(fraction))%"
+    }
+
+    /// The short word shown where a done requirement has no control.
+    static func doneWord(_ kind: FeatureRequirement.Kind) -> String {
+        switch kind {
+        case .permission: return "Allowed"
+        case .dropShortcut: return "Heard"
+        case .model, .subtitlesKey: return "Set"
+        }
+    }
+
+    private var isModel: Bool {
+        if case .model = check.requirement.kind { return true }
+        return false
+    }
+
+    /// No keyed provider can serve it: there is no list to choose from yet.
+    private var needsKey: Bool {
+        switch check.action {
+        case .addKey, .fixKey, .addOpenAIKey: return true
+        default: return false
+        }
+    }
+
+    private var isOnDeviceAction: Bool {
+        switch check.action {
+        case .downloadOnDeviceModel, .useOnDeviceModel: return true
+        default: return false
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 11) {
+            mark.frame(width: 16)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 5) {
+                    Text(check.requirement.title)
+                        .font(.system(size: 13))
+                        .foregroundStyle(MacSettingsTheme.text)
+                    if check.requirement.optional {
+                        Text("· optional")
+                            .font(.system(size: 11.5))
+                            .foregroundStyle(MacSettingsTheme.text3)
+                    }
+                }
+                Text(check.requirement.detail)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let note {
+                    Text(note)
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 10)
+            trailing
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder private var trailing: some View {
+        switch check.state {
+        case .met:
+            if isModel {
+                menu
+            } else {
+                stateWord(Self.doneWord(check.requirement.kind))
+            }
+        case .waiting(let reason):
+            stateWord(reason)
+        case .askedLater(let note):
+            stateWord(note)
+        case .unmet(_, let action):
+            HStack(spacing: 8) {
+                if isModel, download != nil, check.action == nil {
+                    stateWord(Self.downloadText(download ?? 0))
+                }
+                if isModel { menu }
+                if let action, !isModel || isOnDeviceAction || needsKey {
+                    MacButton(title: Self.rowTitle(action)) { perform(action) }
+                        .fixedSize()
+                        .accessibilityLabel("\(action.title) for \(check.requirement.title)")
+                }
+            }
+        }
+    }
+
+    /// Row buttons are short: the row's own title names what is allowed.
+    static func rowTitle(_ action: FeatureSetupAction) -> String {
+        switch action {
+        case .allow: return "Allow"
+        case .openInputMonitoring: return "Open Settings"
+        case .retryShortcut: return "Retry"
+        default: return action.title
+        }
+    }
+
+    private func stateWord(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 12))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .multilineTextAlignment(.trailing)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: 220, alignment: .trailing)
+    }
+
+    @ViewBuilder private var mark: some View {
+        switch check.state {
+        case .met:
+            Image(systemName: "checkmark")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(MacSettingsTheme.green)
+                .accessibilityLabel("Done")
+        case .askedLater:
+            Text("?")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text3)
+                .accessibilityLabel("Asked later")
+        case .unmet, .waiting:
+            Circle()
+                .strokeBorder(check.requirement.optional ? MacSettingsTheme.text3 : MacSettingsTheme.text,
+                              style: StrokeStyle(lineWidth: 1.4, dash: check.requirement.optional ? [2.5, 2] : []))
+                .frame(width: 12, height: 12)
+                .accessibilityLabel(check.requirement.optional ? "Optional" : "Missing")
+        }
+    }
+}

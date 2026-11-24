@@ -1397,7 +1397,18 @@ FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
 PermissionsSettingsViewModel the older tabs show. A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
 present place: the Other tab, or its Toolbox pane. The older tabs stay in the
-sidebar with their identifiers. WHY:
+sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
+lead follows Hold or Toggle; a Needs setup box names what does not work and
+carries the first action; the shortcut is recorded in place with the shared
+HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another
+action uses is not saved and recording stays open; Space stays hold-only);
+"Try it here" is the onboarding's native text field; "What it needs" lists the
+catalog's checks with the API & Models ModelMenu in place, Download free model
+or Use the model on this Mac (APIAndModelsViewModel.useOnDeviceModel: that one
+feature, no Assign window), Allow, Restart Whytap and Retry; Settings holds
+Mode, Language you speak, Lower other audio and Stop Drop automatically (off
+and disabled unless the shortcut is Toggle); Vocab and Filler open their
+island editors. The same switches remain in Other and in the island. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

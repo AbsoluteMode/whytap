@@ -646,6 +646,24 @@ final class APIAndModelsViewModel: ObservableObject {
         recompute()
     }
 
+    /// A feature's screen chose the model on this Mac for `feature`: assigned
+    /// as the Assign window's Use does, without a probe and without offering
+    /// it for other features. Nothing changes when the model is not on this
+    /// Mac or the feature cannot run on it.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    @discardableResult
+    func useOnDeviceModel(for feature: AIFeature) -> Bool {
+        guard feature.isActive, onDevice.isReady(),
+              let model = ModelRegistry.recommended(for: feature, kind: .onDevice) else { return false }
+        keyStatuses.set(.valid, for: .thisMac, at: now())
+        routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: feature)
+        checks.clearRefusal(feature: feature, model: model)
+        messages[feature] = nil
+        objectWillChange.send()
+        recompute()
+        return true
+    }
+
     // MARK: - Models
 
     func sections(for feature: AIFeature) -> [PickerSection] {

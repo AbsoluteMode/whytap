@@ -538,9 +538,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // The first launch on a Mac opens the onboarding instead of Settings ->
         // Permissions; a Mac that ran Whytap before never sees it.
         // WHY: .project-docs/decisions/2026-11-21-first-launch-onboarding.md
-        if OnboardingLaunch.consume(in: .standard) {
+        let opensOnboarding = OnboardingLaunch.consume(in: .standard)
+        if opensOnboarding {
             presentOnboarding()
         }
+        // After an update: what changed for the person, once per version.
+        // WHY: .project-docs/decisions/2026-11-24-whats-new-window.md
+        WhatsNewPresenter.shared.openSettings = { [weak self] tab in
+            self?.openSettingsWindow(tab: tab)
+        }
+        WhatsNewPresenter.shared.presentAfterLaunch(isFirstLaunch: opensOnboarding, defaults: .standard)
     }
 
     private func presentOnboarding() {

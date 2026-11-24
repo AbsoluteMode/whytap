@@ -312,6 +312,14 @@ if [ "$BUILD_VERSION" -le "$max_seen_build" ] && [ "${ALLOW_BUILD_VERSION_REUSE:
     die "BUILD_VERSION=${BUILD_VERSION} is not newer than live/installed max ${max_seen_build}"
 fi
 
+# A public release ships the short list a person sees after the update
+# (Resources/WhatsNew.json); without its entry the release does not start.
+# WHY: .project-docs/decisions/2026-11-24-whats-new-window.md
+if [ "$FLAVOR" = "prod" ]; then
+    /usr/bin/python3 "${PROJECT_DIR}/scripts/whats-new.py" check "$SHORT_VERSION" \
+        || die "Resources/WhatsNew.json is not ready for ${SHORT_VERSION} (see docs/build-and-release.md, What's New)"
+fi
+
 export FLAVOR
 export SHORT_VERSION
 export BUILD_VERSION

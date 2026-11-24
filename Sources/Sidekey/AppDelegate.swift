@@ -94,6 +94,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// salvage rung when both the live terminal and batch recovery are unavailable
     /// (offline). Reset at turn start. Length only is ever logged (privacy #3).
     private var lastDropPartial: String = ""
+    /// The live take for allowed dictation clients (`drop_live`).
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+    private let dropLiveFeed = DropLiveFeed()
+    /// The running take's id in `dropLiveFeed`; its session's partials carry it.
+    private var dropLiveTake = ""
     /// True between the synchronous `phase = .transcribing` at the top of
     /// `startStreamingSession()` and the moment the session is assigned (or
     /// setup fails). Distinguishes the streaming-setup window from the
@@ -2651,6 +2656,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         dropBatchFailed = false
         dropFailureSettingsShown = false
         lastDropPartial = ""
+        // `rememberDropTarget()` ran just before: the take's own target.
+        dropLiveTake = dropLiveFeed.beginTake(target: autoPasteEngine.currentDropTarget().pid)
         let trace = DropTurnTrace()
         dropTurnTrace = trace
         dropActivity.begin(reason: "drop voice turn")
@@ -2684,6 +2691,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Returns nil when no turn is in flight (already terminated) — the guard
     /// that prevents a double terminal emit.
     private func endDropTurn() -> DropTurnTrace? {
+        // Pasted, failed, cancelled or parked for retry: no client sees its
+        // words, also when the diagnostic watchdog already dropped the trace.
+        dropLiveFeed.endTake()
         guard let trace = dropTurnTrace else { return nil }
         dropTurnWatchdog?.cancel()
         dropTurnWatchdog = nil
@@ -2956,13 +2966,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             self.streamingSession = session
+            // This session's partials belong to this take only: a late one
+            // from a cancelled session can never reach a later take.
+            let liveTake = dropLiveTake
+            // On-device partials say whether their window has moved past the
+            // start of the take; they reach the feed through that callback.
+            let onDevice = session as? OnDeviceTranscriptionSession
+            onDevice?.onTranscriptWindow = { [weak self] text, shifted in
+                self?.dropLiveFeed.partial(text, take: liveTake, shifted: shifted)
+            }
             // Surface live STT partials in the island recording wing as words
             // land — the same `onTranscriptUpdate` sink the agent voice flow
             // uses (inherited via `StreamingSessionRunning:
             // AgentRealtimeVoiceSessioning`, called on `@MainActor`). The flow
             // store maps the drop phase → wing face on its own (it observes
             // `AppState.phase`), so wiring the transcript is all that's left.
-            session.onTranscriptUpdate = { [weak self] text in
+            session.onTranscriptUpdate = { [weak self, usesOnDeviceWindow = onDevice != nil] text in
                 // Count inbound tokens (count only — never the text) so the
                 // trace can tell "the STT provider transcribed something" from "WS opened
                 // but nothing arrived". First token also stamps `.firstToken`.
@@ -2975,6 +2994,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         text, now: ProcessInfo.processInfo.systemUptime
                     )
                 }
+                if !usesOnDeviceWindow { self?.dropLiveFeed.partial(text, take: liveTake) }
+                // An allowed app showing the words in its own field keeps
+                // them out of the wing; otherwise the wing gets them as before.
+                // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+                guard self?.dropLiveFeed.suppressesWing != true else { return }
                 IslandPanel.shared.agentFlow.dropTranscriptUpdated(text)
             }
             // Close the setup window now that the session exists. From here a
@@ -4012,7 +4036,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         harnessAccessStore = harnessStore
         HarnessAccessStore.active = harnessStore
         let harnessGate = HarnessAccessGate(
-            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals)
+            resolver: HarnessCallerResolver(inspector: inspector), store: harnessStore, presenter: approvals,
+            dropLive: dropLiveFeed)
+        // Feed teardown does not depend on the diagnostic trace: a take that
+        // went idle or parked for Retry has no live words, whatever path got it there.
+        // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+        dropLiveFeed.endTakes(on: AppState.shared.$phase.map { String(describing: $0) }.eraseToAnyPublisher())
         let broker = CaseBroker(
             service: CaseVaultService.shared,
             resolver: CaseSystemCallerResolver(

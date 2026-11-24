@@ -391,6 +391,29 @@ final class OnDeviceDictationTests: XCTestCase {
         XCTAssertEqual(calls.last?.samples, 320_000, "the final pass is the whole take")
     }
 
+    /// drop_live keeps the start of a long take only when the window really moved.
+    func test_each_partial_says_whether_its_window_still_starts_at_the_take() async {
+        for (seconds, shifted) in [(1.0, false), (20.0, true)] {
+            let audio = CapturingStubAudioSource(captured: pcm(seconds: seconds))
+            let session = OnDeviceTranscriptionSession(audioEngine: audio, decoder: FakeDecoder { "decoded \($0)" }, language: nil)
+            let partial = expectation(description: "a live partial")
+            partial.assertForOverFulfill = false
+            var flags: [Bool] = []
+            session.onTranscriptWindow = { _, moved in
+                flags.append(moved)
+                partial.fulfill()
+            }
+            async let result = session.run()
+            await Task.yield()
+            audio.emit(Data(count: 25_600))
+            await fulfillment(of: [partial], timeout: 5)
+            await session.stop()
+            audio.stop()
+            _ = await result
+            XCTAssertEqual(flags.first, shifted, "\(seconds) s")
+        }
+    }
+
     /// Answers each decode with the next line of a script.
     private actor ScriptedDecoder: OnDeviceSpeechDecoding {
         private var lines: [String]

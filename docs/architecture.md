@@ -580,8 +580,13 @@ Translation tools:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
-  Saved targets and secondary actions stay in the
-  context menu; long output scrolls. TextTranslationModel cancels
+  Saved targets and secondary actions stay in the context menu. Long output
+  scrolls. The panel watches clicks on the visible result and hands mouse
+  events to the selectable text. The Toolbox pane watches the same target
+  through a window-scoped local event monitor. Clicking or focusing the result
+  and pressing Return copies it and shows Copied for one second.
+  WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+  TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never

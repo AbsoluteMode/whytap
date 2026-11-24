@@ -23,7 +23,7 @@ sources:
   - type: url
     reference: https://soniox.com/docs/stt/rt/manual-finalization
     confirmed_at: 2026-09-07
-related: [../project.md, 2026-11-22-smart-no-window-context.md]
+related: [../project.md, 2026-11-22-smart-no-window-context.md, 2026-11-24-smart-minimal-reasoning.md]
 ---
 
 # Smart dictation latency
@@ -119,3 +119,6 @@ Clarifies the caller-deadline guarantee of the 2026-06-17 AX timeout decision.
 The window-text collection was removed by
 [2026-11-22-smart-no-window-context.md](2026-11-22-smart-no-window-context.md);
 the deadline now bounds only the local formatting metadata read.
+The direct Anthropic and OpenAI routes, which did not exist here, got their
+own minimal-reasoning policy and stored timing lines in
+[2026-11-24-smart-minimal-reasoning.md](2026-11-24-smart-minimal-reasoning.md).

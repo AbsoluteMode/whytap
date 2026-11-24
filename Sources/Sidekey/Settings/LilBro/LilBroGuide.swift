@@ -30,15 +30,32 @@ enum LilBroReply: Equatable {
     case answer(LilBroAnswer)
     /// Nothing matched; he offers questions he can answer.
     case unknown(suggestions: [String])
+    /// whytap.ai could not be reached: no internet or it did not answer in time.
     case offline
+    /// whytap.ai answered with an error of its own; trying again later may work.
+    case unavailable
+    /// Today's questions are used up, for this Mac or for everyone.
     case limit
+}
+
+/// One question with what he knows around it: the screen the person is on
+/// (`tab` or `tab/feature` raw ids) and up to three earlier exchanges.
+struct LilBroQuestion: Equatable {
+    struct Exchange: Equatable {
+        let question: String
+        let answer: String
+    }
+
+    var text: String
+    var screen: String = ""
+    var history: [Exchange] = []
 }
 
 /// Who answers. Without answers from whytap.ai, the local guide finds
 /// settings by name and says what each feature does from the catalog.
 @MainActor
 protocol LilBroBrain {
-    func reply(to question: String) async -> LilBroReply
+    func reply(to question: LilBroQuestion) async -> LilBroReply
 }
 
 /// Answers without the network, from the feature catalog and the tab names.
@@ -67,8 +84,17 @@ struct LilBroLocalGuide: LilBroBrain {
         ("backup", .tab(.backup)), ("integration", .tab(.integrations)),
     ]
 
-    func reply(to question: String) async -> LilBroReply {
-        Self.match(question)
+    func reply(to question: LilBroQuestion) async -> LilBroReply {
+        Self.match(question.text)
+    }
+
+    /// Pages to open when whytap.ai cannot answer: the place the words name,
+    /// or Features and API keys.
+    static func closestPlaces(for question: String) -> [LilBroDestination] {
+        if case .answer(let answer) = match(question), let destination = answer.destination {
+            return [destination]
+        }
+        return [.tab(.features), .apiKeys]
     }
 
     static func match(_ question: String) -> LilBroReply {

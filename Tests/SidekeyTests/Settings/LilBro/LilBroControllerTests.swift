@@ -21,7 +21,18 @@ final class LilBroControllerTests: XCTestCase {
 
     private struct Fixed: LilBroBrain {
         let reply: LilBroReply
-        func reply(to question: String) async -> LilBroReply { reply }
+        func reply(to question: LilBroQuestion) async -> LilBroReply { reply }
+    }
+
+    /// whytap.ai as the tests see it: what was asked, and a fixed reply.
+    private final class Remote: LilBroBrain {
+        var reply: LilBroReply
+        private(set) var asked: [LilBroQuestion] = []
+        init(_ reply: LilBroReply) { self.reply = reply }
+        func reply(to question: LilBroQuestion) async -> LilBroReply {
+            asked.append(question)
+            return reply
+        }
     }
 
     /// The window at its smallest: sidebar rows, his entry, the Features
@@ -41,12 +52,13 @@ final class LilBroControllerTests: XCTestCase {
     }
 
     private func make(selection given: SettingsWindowSelection? = nil,
-                      brain: LilBroBrain? = nil, mascot: Bool = true,
+                      brain: LilBroBrain? = nil, remote: LilBroBrain? = nil, mascot: Bool = true,
                       reduceMotion: Bool = false) -> LilBroController {
         let selection = given ?? SettingsWindowSelection()
         let preferences = LilBroPreferences(defaults: defaults)
         preferences.mascotVisible = mascot
-        let controller = LilBroController(selection: selection, preferences: preferences, brain: brain,
+        let controller = LilBroController(selection: selection, preferences: preferences, local: brain,
+                                          remote: remote ?? Remote(.unavailable),
                                           reduceMotion: { reduceMotion }, sleep: { _ in await Task.yield() })
         let (spots, blocks) = map()
         controller.update(bounds: CGRect(x: 0, y: 0, width: 960, height: 560))
@@ -132,7 +144,7 @@ final class LilBroControllerTests: XCTestCase {
 
     func test_closing_while_he_is_on_his_way_stops_him_cleanly() async {
         let slow = LilBroController(selection: SettingsWindowSelection(),
-                                    preferences: LilBroPreferences(defaults: defaults), brain: nil,
+                                    preferences: LilBroPreferences(defaults: defaults), local: nil, remote: Remote(.unavailable),
                                     reduceMotion: { false },
                                     sleep: { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) })
         let (spots, blocks) = map()
@@ -215,5 +227,83 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertTrue(controller.stops(for: .feature(.drop)).isEmpty, "already there")
         XCTAssertEqual(controller.stops(for: .apiKeys).map(\.spot), [.tab(.apiAndModels)])
         XCTAssertEqual(controller.stops(for: .tab(.agentMode)).map(\.spot), [.tab(SettingsWindowTab.agentMode.resolved)])
+    }
+
+    // MARK: Answers from whytap.ai (step 2)
+
+    func test_nothing_goes_to_whytap_until_answers_are_turned_on() async {
+        let remote = Remote(.unavailable)
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        XCTAssertFalse(controller.answersFromWhytap, "off by default")
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertTrue(remote.asked.isEmpty)
+        XCTAssertEqual(selection.shownFeature, .drop, "the local guide still finds it")
+    }
+
+    func test_turned_on_he_asks_whytap_with_the_screen_and_earlier_answers() async {
+        let answer = LilBroAnswer(paragraphs: ["Drop types what you say."], bullets: ["Hold its shortcut"],
+                                  destination: .feature(.drop), followUps: ["Does it work offline?"])
+        let remote = Remote(.answer(answer))
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.setAnswersFromWhytap(true)
+        XCTAssertTrue(LilBroPreferences(defaults: defaults).answersFromWhytap, "the choice is remembered")
+        controller.ask("can I talk instead of typing")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(remote.asked.first, LilBroQuestion(text: "can I talk instead of typing", screen: "features"))
+        XCTAssertEqual(selection.shownFeature, .drop, "he opened the place whytap.ai named")
+        XCTAssertEqual(controller.turns.last?.opened, "Drop")
+
+        controller.ask("does it work offline")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 2 }
+        XCTAssertEqual(remote.asked[1].screen, "features/drop")
+        XCTAssertEqual(remote.asked[1].history,
+                       [.init(question: "can I talk instead of typing", answer: "Drop types what you say.\nHold its shortcut")])
+    }
+
+    func test_turning_answers_off_goes_back_to_this_mac() async {
+        let remote = Remote(.unavailable)
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.setAnswersFromWhytap(true)
+        controller.setAnswersFromWhytap(false)
+        controller.ask("Set up dictation")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertTrue(remote.asked.isEmpty)
+        XCTAssertFalse(LilBroPreferences(defaults: defaults).answersFromWhytap)
+    }
+
+    func test_offline_try_again_asks_once_more_in_the_same_place() async {
+        let remote = Remote(.offline)
+        let selection = SettingsWindowSelection(selectedTab: .hotkeys)
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.setAnswersFromWhytap(true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(controller.turns.last?.reply, .offline)
+        XCTAssertEqual(selection.selectedTab, .hotkeys, "nothing changed")
+        XCTAssertEqual(controller.pose, .sad)
+
+        remote.reply = .answer(LilBroAnswer(paragraphs: ["Drop types what you say."], destination: .feature(.drop)))
+        controller.retry()
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 2 }
+        XCTAssertEqual(controller.turns.count, 1, "the failed turn was replaced, not repeated")
+        XCTAssertEqual(selection.shownFeature, .drop)
+    }
+
+    func test_when_whytap_cannot_answer_he_still_opens_the_closest_page() async {
+        let remote = Remote(.limit)
+        let selection = SettingsWindowSelection(selectedTab: .permissions)
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.setAnswersFromWhytap(true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(controller.turns.last?.reply, .limit)
+        XCTAssertEqual(LilBroLocalGuide.closestPlaces(for: "how do I dictate"), [.feature(.drop)])
+        controller.open(.feature(.drop))
+        await until { controller.bubble == .full && !controller.isBusy && selection.shownFeature == .drop }
+        XCTAssertEqual(controller.turns.last?.opened, "Drop")
+        XCTAssertEqual(LilBroLocalGuide.closestPlaces(for: "zzz"), [.tab(.features), .apiKeys])
     }
 }

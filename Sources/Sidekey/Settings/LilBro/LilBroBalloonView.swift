@@ -68,6 +68,9 @@ struct LilBroBalloonView: View {
                 Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
                     controller.setMascotVisible(!controller.mascotVisible)
                 }
+                Button(controller.answersFromWhytap ? "Turn off answers from whytap.ai" : "Turn on answers from whytap.ai") {
+                    controller.setAnswersFromWhytap(!controller.answersFromWhytap)
+                }
                 if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
                 Button("Close") { controller.close() }
             } label: {
@@ -94,16 +97,30 @@ struct LilBroBalloonView: View {
 
     @ViewBuilder private var content: some View {
         if let turn = lastTurn, let reply = turn.reply {
-            LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
-                            ask: controller.ask, retry: { controller.ask(turn.question) }, current: true)
+            LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+                            mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                            actions: actions, current: true)
+        } else if controller.answersFromWhytap {
+            paragraph(LilBroCopy.greetingAnswers)
+            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
+            note(LilBroCopy.answersNote)
         } else {
             paragraph(LilBroCopy.greeting)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
-            Text(LilBroCopy.localNote)
-                .font(.system(size: 11))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
+            LilBroOffer { controller.setAnswersFromWhytap(true) }
         }
+    }
+
+    private var actions: LilBroReplyView.Actions {
+        LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
+                                turnOn: { controller.setAnswersFromWhytap(true) })
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var earlier: some View {
@@ -114,8 +131,9 @@ struct LilBroBalloonView: View {
                         + Text(turn.question).fontWeight(.semibold).foregroundStyle(MacSettingsTheme.text))
                         .font(.system(size: 11.5))
                     if let reply = turn.reply {
-                        LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
-                                        ask: { _ in }, retry: {}, current: false)
+                        LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+                                        mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                                        actions: .none, current: false)
                     }
                 }
                 .padding(.bottom, 4)
@@ -135,12 +153,24 @@ struct LilBroBalloonView: View {
 /// One reply's words: an answer with the place he opened, or why he could
 /// not answer. Earlier replies show the words only.
 struct LilBroReplyView: View {
+    struct Actions {
+        var ask: (String) -> Void
+        var retry: () -> Void
+        var open: (LilBroDestination) -> Void
+        var turnOn: () -> Void
+
+        static let none = Actions(ask: { _ in }, retry: {}, open: { _ in }, turnOn: {})
+    }
+
     let reply: LilBroReply
+    let question: String
     let opened: String?
     let mascot: Bool
-    let ask: (String) -> Void
-    let retry: () -> Void
+    let answersOn: Bool
+    let actions: Actions
     let current: Bool
+
+    private var ask: (String) -> Void { actions.ask }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -168,12 +198,35 @@ struct LilBroReplyView: View {
             case .unknown(let suggestions):
                 paragraph(LilBroCopy.unknown)
                 if current { LilBroChips(items: suggestions.map { q in (q, false, { ask(q) }) }) }
+                if current, !answersOn { LilBroOffer(turnOn: actions.turnOn) }
             case .offline:
                 paragraph(LilBroCopy.offline)
-                if current { LilBroChips(items: [("Try again", true, retry)]) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+            case .unavailable:
+                paragraph(LilBroCopy.unavailable)
+                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
             case .limit:
                 paragraph(LilBroCopy.limit)
+                if current { LilBroChips(items: closest) }
             }
+            if let opened, !isAnswer {
+                (Text(mascot ? "I opened " : "Opened ") + Text(opened).fontWeight(.semibold) + Text("."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text2)
+            }
+        }
+    }
+
+    private var isAnswer: Bool {
+        if case .answer = reply { return true }
+        return false
+    }
+
+    /// "Open <page>" buttons when whytap.ai cannot answer.
+    private var closest: [(String, Bool, () -> Void)] {
+        let open = actions.open
+        return LilBroLocalGuide.closestPlaces(for: question).map { place in
+            ("Open \(place.title)", false, { open(place) })
         }
     }
 
@@ -182,6 +235,28 @@ struct LilBroReplyView: View {
             .font(.system(size: 12.5))
             .foregroundStyle(MacSettingsTheme.text)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The one place answers from whytap.ai are turned on: what goes there, what
+/// stays on this Mac, and the button. Nothing is sent before it is pressed.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+struct LilBroOffer: View {
+    let turnOn: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(LilBroCopy.offer)
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            LilBroChips(items: [(LilBroCopy.turnOn, true, turnOn)])
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Answers from whytap.ai")
     }
 }
 
@@ -293,7 +368,7 @@ struct LilBroReplyField: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Where questions go")
             .popover(isPresented: $info, arrowEdge: .top) {
-                Text(LilBroCopy.localNote)
+                Text(controller.answersFromWhytap ? LilBroCopy.answersNote : LilBroCopy.localNote)
                     .font(.system(size: 12))
                     .frame(width: 220, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)

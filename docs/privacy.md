@@ -1,8 +1,9 @@
 # Privacy
 
-Whytap has no accounts, no Whytap-operated servers and no telemetry. This
-document lists every way data can leave the Mac, so that "no Whytap servers"
-is a verifiable claim rather than a slogan.
+Whytap has no accounts and no telemetry. It uses one Whytap-operated server,
+whytap.ai, and only for Lil Bro's answers in Settings after you turn them on.
+This document lists every way data can leave the Mac, so that these claims
+are verifiable rather than slogans.
 
 ## What stays on the device
 
@@ -133,6 +134,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
+| Lil Bro answers (off by default) | whytap.ai (`/api/ask/lilbro`), which answers with Claude Haiku 5.5 through Anthropic: the question you type to Lil Bro, the Settings screen you are on (for example `features/drop`) and up to three of your earlier questions with his answers. No keys, dictated text, notes, settings or identifier of this Mac. whytap.ai keeps the question text 90 days to improve answers, without your address; it limits questions per address using a keyed hash | only after you press Turn on answers in Lil Bro's balloon; ⋯ → Turn off answers from whytap.ai stops it, and he goes back to finding settings by name on this Mac |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
 OpenAI speech uses the same OpenAI key as its language models. A dictation on

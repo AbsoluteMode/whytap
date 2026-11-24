@@ -1226,6 +1226,26 @@ project can be used without clearing the query manually. Adding explicitly
 expands that project before leaving search; existing cached metadata and
 lazy rendering remain.
 
+### Case add-key position — 2026-11-24
+
+The maintainer added a key to a project with more than a hundred keys and had
+to scroll the whole list to reach + Key, which had stood after the last key
+since the first Case version for no recorded reason. He asked to move it up.
+
+- + Key in <project> is the first row of an expanded project, directly under
+  the project name and above its keys, in the island and in Settings (one
+  panel). The name and value fields stay in the fixed bar above the list, so
+  they are in view wherever the list is scrolled.
+- Keys are listed by name, so a saved key could land far below. The key just
+  saved is therefore listed first in its project, right under + Key, until Case
+  locks; after that it takes its place by name. Only the panel's order changes:
+  stored data, search ranking and what the broker lists are untouched.
+- A key dragged onto + Key moves into that project, like a drop on the project
+  name or on one of its keys, so the row is not a dead spot between them.
+- Rejected: scrolling the list to the saved key. `ScrollViewProxy.scrollTo`
+  does nothing in the offscreen fixture windows, so it could not be checked
+  without launching an app, which feature sessions do not do.
+
 ### Case search ranking — 2026-10-21
 
 Sections follow each project's best match instead of the alphabet, so the

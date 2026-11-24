@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Updates/UpdateControllerTests.swift
     confirmed_at: 2026-11-21
-related: []
+related: [2026-11-24-whats-new-window.md]
 ---
 
 # Update button in the Settings footer; ✕ no longer skips a version

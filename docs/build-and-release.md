@@ -105,6 +105,38 @@ extraction.
 The script chooses a build number newer than the live feed and installed copy;
 set `BUILD_VERSION` explicitly for a first release when neither exists.
 
+### What's New
+
+Every public release ships the short list a person sees in a window after the
+update. Before the `VERSION` change, add the version's entry to
+`Resources/WhatsNew.json` through an ordinary pull request:
+
+```json
+{ "version": "2.2.28", "date": "2026-12-01", "items": [
+  { "title": "Calendar is open", "body": "Your Mac's calendars in the island.",
+    "symbol": "calendar", "video": "agent",
+    "link": { "title": "Open Models", "settings": "apiAndModels" } } ] }
+```
+
+Write it for a person who already uses Whytap: up to five items, the most
+noticeable first, a title of at most 36 characters and one or two plain
+sentences of at most 120, in English, with no pull request numbers and
+nothing only a new install sees. `symbol` is an SF Symbol; `video` (a
+`FeatureVideo` name) and `link` (a Settings tab) are optional, and the first
+item's clip is the one shown. A release that changed nothing a person can
+notice still gets its entry, with `"items": []`: no window opens for it.
+
+```bash
+python3 scripts/whats-new.py check 2.2.28
+```
+
+`user-release.sh` runs this check for the prod flavor, also with `--dry-run`,
+and stops without the entry. The GitHub release body (`RELEASE_NOTES_FILE`)
+stays the complete list; the window is a selection of it. To see the window
+before the release, draw it offscreen:
+`WHYTAP_WHATSNEW_RENDER_DIR=<folder> swift test --filter WhatsNewTests`. WHY:
+`.project-docs/decisions/2026-11-24-whats-new-window.md`.
+
 ### Homebrew cask
 
 `brew install absolutemode/tap/whytap` installs from the public tap

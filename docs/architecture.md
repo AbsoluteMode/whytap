@@ -1127,7 +1127,8 @@ Update flow (download-on-action):
   with a CALayer spinner (IslandUpdateSpinner; SwiftUI .repeatForever would
   freeze during main-thread stalls) -> requested install + relaunch while idle
   -> "Updated" indicator for 5s on the next launch (JustUpdatedIndicator,
-  one-shot marker). A meeting recording, dictation or agent activity defers the
+  one-shot marker), and the What's New window when the new version has
+  something for the person (below). A meeting recording, dictation or agent activity defers the
   app-initiated relaunch into Ready with Restart / Later; returning to idle alone
   never restarts it. Ready-stage Later replies .skip, cancelling the current
   installation without permanently skipping the version. The user approved
@@ -1143,6 +1144,16 @@ Update flow (download-on-action):
   is known this session, also after ✕ or a Later; its click is the pill's own
   action, a hidden update returning as the downloading pill. WHY:
   .project-docs/decisions/2026-11-21-settings-update-button.md
+  What's New: `Resources/WhatsNew.json` (bundled, never fetched) lists, per
+  public version, up to five things a person will notice. The first launch of
+  a newer version opens one window (WhatsNewPresenter, WhatsNewLaunch) with
+  the releases since the remembered version, newest first; a version with
+  `"items": []` opens nothing, a new Mac gets the onboarding instead, a Mac
+  with nothing remembered sees the running version only. It comes forward
+  without taking the keyboard and never returns by itself; the version in
+  the Settings footer reopens the list. The release script refuses a prod
+  version without its entry (`scripts/whats-new.py check`). WHY:
+  .project-docs/decisions/2026-11-24-whats-new-window.md
   Update/Not now and Restart/Later use measured NSWindow down/up dispatch for
   first mouse, including alongside a different open hover tool. Native buttons
   retain keyboard/accessibility activation and hover/pressed/focus feedback.

@@ -183,6 +183,26 @@ Voice flow (Drop / dictation):
        summaries and custom endpoints retain their own defaults. The
        formatting metadata read has a 1.5s caller deadline. Diagnostics stay in local os_log and contain
        timings/counts/IDs only. WHY: docs/decisions/2026-09-07-smart-latency.md
+       On the direct Anthropic and OpenAI routes Smart (client profile .smart)
+       sends the least reasoning the chosen model accepts (SmartDirectReasoning:
+       Anthropic output_config.effort low, plus thinking between_tools on
+       Claude Sonnet 5.5 or disabled on Haiku 5.5 and Sonnet 5; OpenAI
+       reasoning_effort none, minimal or low by model). A model outside the
+       tables gets no field; when a request with a field is refused with HTTP
+       400 (or 422 on Anthropic), it is repeated once without the field, and
+       only if that repeat returns a valid answer is the model left without
+       the field until relaunch.
+       Translation, meetings, OpenRouter and custom servers are unchanged. The
+       cleanup timing lines (category cleanup-llm, "drop processing ok",
+       "drop turn ... completed") are logged at the default level so the system
+       log keeps them; each Smart or translation request that got an HTTP
+       response writes one cleanup line from one structure
+       (CleanupDiagnostics). The saved model name
+       itself is never logged (CleanupDiagnosticModel): Anthropic and OpenAI lines carry one of a
+       fixed list of published family names, OpenRouter lines an ID its own
+       catalog lists; any other saved name is "other" and a user's own server
+       "custom". WHY:
+       .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->
             CGEvent Cmd+V (4-event sequence)

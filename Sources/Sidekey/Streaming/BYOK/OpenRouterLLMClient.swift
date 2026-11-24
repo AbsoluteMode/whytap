@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 struct OpenRouterModelOption: Identifiable, Equatable, Hashable {
     let id: String
@@ -129,26 +128,36 @@ extension OpenRouterLLMClienting {
 }
 
 struct OpenRouterLLMClient: OpenRouterLLMClienting {
-    enum Profile { case standard, dictation }
-    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "cleanup-llm")
-    private let profile: Profile
+    /// `dictation` is the OpenRouter latency profile (Smart and translation);
+    /// `smart` is Drop Smart cleanup, which also asks direct Anthropic and
+    /// OpenAI models for the least reasoning (`SmartDirectReasoning`).
+    enum Profile { case standard, dictation, smart }
+    let profile: Profile
     private let reasoningCatalog: OpenRouterReasoningCatalog
+    let reasoningRefusals: SmartReasoningRefusals
+    private var isDictation: Bool { profile != .standard }
     let baseURL: URL
     let session: URLSession
     let usageSink: (AIUsageEvent) -> Void
+    /// Receives each stored timing line; the default writes it to the log.
+    let diagnostics: (CleanupDiagnostics) -> Void
 
     init(
         baseURL: URL = URL(string: "https://openrouter.ai/api/v1")!,
         session: URLSession = .shared,
         profile: Profile = .standard,
         reasoningCatalog: OpenRouterReasoningCatalog = OpenRouterReasoningCatalog(),
-        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record
+        reasoningRefusals: SmartReasoningRefusals = .shared,
+        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
+        diagnostics: @escaping (CleanupDiagnostics) -> Void = CleanupDiagnostics.write
     ) {
         self.baseURL = baseURL
         self.session = session
         self.profile = profile
         self.reasoningCatalog = reasoningCatalog
+        self.reasoningRefusals = reasoningRefusals
         self.usageSink = usageSink
+        self.diagnostics = diagnostics
     }
 
     func listModels(endpoint: OpenAICompatibleLLMEndpoint) async throws -> [OpenRouterModelOption] {
@@ -222,7 +231,7 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         let discoveryStarted = ProcessInfo.processInfo.systemUptime
         let reasoning: OpenRouterReasoningSetting?
-        if profile == .dictation, endpoint.sendsOpenRouterHeaders {
+        if isDictation, endpoint.sendsOpenRouterHeaders {
             reasoning = await reasoningCatalog.setting(model: trimmedModel, baseURL: endpoint.baseURL, session: session)
         } else {
             reasoning = nil
@@ -230,32 +239,75 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         try Task.checkCancellation()
         let discoveryMs = Int((ProcessInfo.processInfo.systemUptime - discoveryStarted) * 1000)
         let provider = providerPreferences(for: endpoint)
+        // WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
+        var directEffort: String? = nil
+        if profile == .smart, endpoint.textAPI == .openAI, !reasoningRefusals.contains(.openAI, model: trimmedModel) {
+            directEffort = SmartDirectReasoning.openAIEffort(model: trimmedModel)
+        }
         struct ChatRequest: Encodable {
             let model: String
             let messages: [OpenRouterChatMessage]
             let temperature: Double?
             let stream: Bool
             let reasoning: OpenRouterReasoningSetting?
+            let reasoning_effort: String?
             let provider: ProviderPreferences?
         }
-        request.httpBody = try JSONEncoder().encode(
-            ChatRequest(model: trimmedModel, messages: messages,
-                        temperature: endpoint.textAPI == .openAI ? nil : 0.1,
-                        stream: false, reasoning: reasoning, provider: provider)
-        )
+        func body(effort: String?) throws -> Data {
+            try JSONEncoder().encode(
+                ChatRequest(model: trimmedModel, messages: messages,
+                            temperature: endpoint.textAPI == .openAI ? nil : 0.1,
+                            stream: false, reasoning: reasoning, reasoning_effort: effort, provider: provider)
+            )
+        }
+        func send() async throws -> (Data, URLResponse) {
+            do {
+                return try await session.data(for: request)
+            } catch {
+                if let context = AIUsageTaskScope.context {
+                    usageSink(AIUsageEvent(context: context, currency: .usd, amount: nil, basis: .unavailable))
+                }
+                throw error
+            }
+        }
+        request.httpBody = try body(effort: directEffort)
 
         let requestStarted = ProcessInfo.processInfo.systemUptime
-        let data: Data
-        let response: URLResponse
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            if let context = AIUsageTaskScope.context {
-                usageSink(AIUsageEvent(context: context, currency: .usd, amount: nil, basis: .unavailable))
-            }
-            throw error
+        var (data, response) = try await send()
+        var refusedEffort = false
+        if directEffort != nil, (response as? HTTPURLResponse)?.statusCode == 400 {
+            // The request goes once more exactly as before this policy. The
+            // model is marked below, only once that repeat returns an answer;
+            // a request refused both ways (too long an input, a model that is
+            // gone) says nothing about the field.
+            refusedEffort = true
+            try Task.checkCancellation()
+            request.httpBody = try body(effort: nil)
+            (data, response) = try await send()
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
+        let effortLabel = reasoning?.diagnosticLabel ?? (refusedEffort ? nil : directEffort) ?? "default"
+        if isDictation {
+            // Fixed words, verified catalog names and numbers only; the saved
+            // model name, the reply and an error body never get here.
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let usage = object?["usage"] as? [String: Any]
+            var line = CleanupDiagnostics(provider: "custom", model: "custom", effort: effortLabel,
+                                          status: (response as? HTTPURLResponse)?.statusCode ?? -1, llmMs: requestMs)
+            if endpoint.sendsOpenRouterHeaders {
+                line.provider = "openrouter"
+                line.model = CleanupDiagnosticModel.openRouter(trimmedModel, listed: await reasoningCatalog.lists(trimmedModel))
+                line.requestID = Self.openRouterRequestID(object?["id"] as? String)
+            } else if endpoint.textAPI == .openAI {
+                line.provider = "openai"
+                line.model = CleanupDiagnosticModel.openAI(trimmedModel)
+            }
+            line.catalogMs = discoveryMs
+            line.outputTokens = (usage?["completion_tokens"] as? Int) ?? -1
+            line.reasoningTokens = ((usage?["completion_tokens_details"] as? [String: Any])?["reasoning_tokens"] as? Int) ?? -1
+            line.effortRefused = refusedEffort
+            diagnostics(line)
+        }
         try validate(response: response, body: data)
         if let context = AIUsageTaskScope.context {
             let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
@@ -284,22 +336,15 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         do {
             let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
-            if profile == .dictation {
-                // No prompt, reply, reasoning text, key, URL, or provider error body.
-                // Only catalog identifiers (OpenRouter) and numeric diagnostics.
-                let modelID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(trimmedModel) : "custom"
-                let requestID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(decoded.id) : "unavailable"
-                os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d",
-                       log: Self.log, type: .info,
-                       modelID, requestID, reasoning?.diagnosticLabel ?? "default",
-                       discoveryMs, requestMs, decoded.usage?.completion_tokens ?? -1,
-                       decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1)
-            }
             guard let content = decoded.choices.first?.message.content,
                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
                 throw OpenRouterLLMError.emptyContent
             }
+            // The repeat without the field produced a real answer: the field
+            // was the reason, and this model gets none again. A status alone
+            // does not prove it (a proxy can answer 200 with its own page).
+            if refusedEffort { reasoningRefusals.record(.openAI, model: trimmedModel) }
             return content
         } catch let error as OpenRouterLLMError {
             throw error
@@ -332,12 +377,14 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             return ProviderPreferences(order: [pinned], allow_fallbacks: false)
         }
         // WHY: docs/decisions/2026-09-07-smart-latency.md
-        return profile == .dictation ? ProviderPreferences(sort: "throughput") : nil
+        return isDictation ? ProviderPreferences(sort: "throughput") : nil
     }
 
-    private static func safeDiagnosticID(_ value: String?) -> String {
-        guard let value, !value.isEmpty, value.count <= 150,
-              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_/.:~").contains($0) })
+    /// OpenRouter's generation ID (`gen-…`), for looking a request up in its
+    /// dashboard. Anything of another shape in the response is not logged.
+    static func openRouterRequestID(_ value: String?) -> String {
+        guard let value, value.hasPrefix("gen-"), value.count <= 80,
+              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-").contains($0) })
         else { return "unavailable" }
         return value
     }

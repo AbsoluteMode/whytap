@@ -25,13 +25,13 @@ struct PostProcessor {
     init() {
         self.init(
             llmRoute: .live(.dropSmartCleanup),
-            openRouterClient: OpenRouterLLMClient(profile: .dictation)
+            openRouterClient: OpenRouterLLMClient(profile: .smart)
         )
     }
 
     init(
         llmRoute: DirectLLMRouteResolver,
-        openRouterClient: any OpenRouterLLMClienting = OpenRouterLLMClient(profile: .dictation),
+        openRouterClient: any OpenRouterLLMClienting = OpenRouterLLMClient(profile: .smart),
         checks: ModelCheckStore? = nil
     ) {
         self.llmRoute = llmRoute

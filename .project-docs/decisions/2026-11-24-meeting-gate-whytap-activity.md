@@ -1,11 +1,11 @@
 ---
 id: whytap-meeting-gate-whytap-activity-2026-11-24
 type: decision
-title: The meeting gate defers on Whytap's own capture and real call apps, not on Discord voice chat, and the owner can let one waiting install through
-summary: Any microphone user no longer defers an install. Whytap's own audio capture, call apps, browsers with a microphone and unknown microphone users still do; Discord and macOS CoreSpeech do not. The owner's allow-install records a bounded override on the waiting ticket that never covers Whytap's own recording.
+title: The meeting gate defers on Whytap's own capture and real call apps, not on Discord voice chat
+summary: Any microphone user no longer defers an install. Whytap's own audio capture, call apps, browsers with a microphone and unknown microphone users still do; Discord and macOS CoreSpeech do not. An owner override is left to a separate change.
 status: confirmed
 tags: [build, queue, builder, install, meetings]
-canonical_for: [builder-meeting-gate-whytap-activity, builder-meeting-gate-owner-override]
+canonical_for: [builder-meeting-gate-whytap-activity]
 verified_at: 2026-11-24
 sources:
   - type: user-confirmed
@@ -18,15 +18,12 @@ sources:
     reference: scripts/build-queue-meeting-gate.py
     confirmed_at: 2026-11-24
   - type: repository
-    reference: scripts/build-queue.py
-    confirmed_at: 2026-11-24
-  - type: repository
     reference: Sources/Sidekey/Meetings/CoreAudioSystemAudioSource.swift
     confirmed_at: 2026-11-24
 related: [2026-10-20-meeting-aware-builder-refresh.md, 2026-11-23-builder-queue-group-install.md, ../processes/shared-app-development.md]
 ---
 
-# Meeting gate: Whytap's own activity, and the owner's override
+# Meeting gate: Whytap's own activity
 
 ## Context
 
@@ -61,15 +58,11 @@ decides in this order:
 3. An incomplete snapshot stays unknown; output rules are unchanged (call app
    output busy, browser output unknown), except that Discord output is ignored.
 
-The owner can let one waiting install through with
-`build-queue.py allow-install --ticket N --by <owner> --said "<their words>"
-[--minutes M]` (default 30, at most 120; `--revoke` ends it). The helper
-refuses the configured builder, refuses a ticket that is not
-`pending_install`, stores the override in the queue and records an event on
-the ticket with who allowed it, when, until when, who recorded it and the
-owner's words. The gate honours it only while it is current, that ticket is
-still `pending_install` and three fresh snapshots could see every process;
-Whytap's own capture still defers.
+An owner command to let one waiting install through despite the gate was
+part of the first draft and was withdrawn after the builder's review: the
+helper had no real owner authorization (any non-builder identity could grant
+or revoke it), the gate cannot tell which install a grant is for, and private
+chat text would have entered queue events. It needs its own design.
 
 ## Rationale
 
@@ -78,8 +71,7 @@ The gate protects what an install interrupts. Whytap's own input flag answers
 lists of other apps, and it covers every capture path. Real call apps still
 defer because Whytap may be about to record them (its detector offers that)
 and the maintainer named no change for them. An unknown microphone user still
-defers because it may be a call app the list does not know; widening that is
-the owner's call, available per install through the override.
+defers because it may be a call app the list does not know.
 
 CoreSpeech is macOS speech recognition; on this Mac it ran input alongside
 Discord. Earlier installs passed with it because no process had running input
@@ -96,10 +88,6 @@ bundle IDs, so CoreSpeech had no special handling before.
 - `python3 scripts/build-queue-meeting-gate.py` on the maintainer's Mac with
   Discord in a voice channel and CoreSpeech running: `clear`. The old gate
   returned `busy / microphone_in_use` for the same state.
-- `scripts/test-build-queue.py`: the override is recorded on the ticket,
-  refused for the builder, for a ticket that is not waiting, without words or
-  outside 1..120 minutes; the gate honours it only while current and while its
-  ticket waits, and never over Whytap's capture or an unreadable snapshot.
 
 ## Rejected
 
@@ -107,17 +95,14 @@ bundle IDs, so CoreSpeech had no special handling before.
   and a harness approval; a hung app would read as idle.
 - Ignore every non-Whytap microphone user: would also pass unknown call apps
   that Whytap might be about to record; not asked for.
-- A standing "not in a meeting" switch: easy to forget on; the override is
-  tied to one waiting ticket and expires.
+- A standing "not in a meeting" switch: easy to forget on.
 
 ## Limits
 
 After this change an install can still interrupt what matters to the user
 when: a call runs in an app that is neither Whytap nor on the call list and
 holds no microphone (listen only); a work call takes place in Discord, which
-Whytap does not record, so the install only relaunches Whytap; the owner's
-override is used during a call that Whytap is not yet recording (Whytap's
-offer to record that call is lost for the restart); or Whytap is about to
+Whytap does not record, so the install only relaunches Whytap; or Whytap is about to
 start a recording in the seconds between the gate and the quit.
 
 2026-11-24, ORCH-TASK 102.

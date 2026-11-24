@@ -164,8 +164,7 @@ holds it, leave the tickets queued and end your turn.
    higher `CFBundleVersion`.
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
-   fresh `status: clear` allows it (`reason: owner_override` included: record
-   its `owner_override` in the evidence; never run `allow-install` yourself). Otherwise record
+   fresh `status: clear` allows it. Otherwise record
    `set --status pending_install --retry-install --note <candidate evidence>`
    (for a group or an isolated PR, use `--install-first`; the helper keeps an
    existing `--install-first` or `--hold` anyway, a deferral never lifts it),

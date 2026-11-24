@@ -601,9 +601,7 @@ Under the lock:
    user, browser audio that could be a muted call, or an unknown result means
    **pending**: record `pending_install --retry-install`, release the lock and
    let the watcher retry silently. Discord voice chat and macOS CoreSpeech do
-   not defer. `reason: owner_override` is clear: the owner allowed this
-   waiting install (see the probe section); record it in the install evidence.
-   The builder never runs `allow-install` itself.
+   not defer.
    Do not ask for a saved/idle confirmation on each build. On 2026-10-20 the
    user gave standing permission to interrupt other work outside meetings,
    including dictation, agent work, editors and backup. The conservative probe
@@ -632,15 +630,6 @@ muted call and media share this signal. Merely leaving Zoom or a browser open
 is not a meeting signal. Property/list failures, stale results and the
 20-second timeout defer.
 
-Only on the owner's own words in chat, the orchestrator or the owner runs
-`python3 scripts/build-queue.py allow-install --ticket <id> --by <owner>
---said "<their words>" [--minutes 30]` (at most 120; `--revoke` ends it) for
-a `pending_install` ticket. The helper refuses the builder and records on the
-ticket who allowed it, when and until when. While that ticket waits and the
-window is open, the gate answers `clear / owner_override` for anything except
-Whytap's own capture or an unreadable snapshot; the watcher's next recheck
-(at most five minutes) starts the install.
-
 This is an activity check, not a guarantee that every possible meeting can be
 detected: a call with both input and output fully closed is invisible, a
 listening-only call in an unrecognized native app may be missed, and a work
@@ -650,7 +639,7 @@ than claiming an authoritative in-process meeting status. A future reliable
 runtime signal may strengthen this gate; it must not invent an idle result.
 The decision and standing authorization are recorded in
 [meeting-aware builder refresh](../decisions/2026-10-20-meeting-aware-builder-refresh.md);
-Whytap's own activity and the owner's override in
+Whytap's own activity in
 [meeting gate and Whytap activity](../decisions/2026-11-24-meeting-gate-whytap-activity.md).
 
 ## Local build backup retention

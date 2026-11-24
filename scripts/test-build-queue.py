@@ -2,8 +2,6 @@
 """Exercise concurrency and recovery using disposable repositories only."""
 
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta, timezone
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -643,107 +641,6 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.call("claim")["held_for_install"], [queued])
         self.update(ticket, "done")
         self.assertFalse(self.call("status")["install_boundary"])
-
-    # WHY: .project-docs/decisions/2026-11-24-meeting-gate-whytap-activity.md
-    def waiting_install(self):
-        ticket = self.enqueue()["ticket"]["id"]
-        self.call("claim")
-        self.call("set", "--ticket", str(ticket), "--status", "pending_install",
-                  "--retry-install", "--note", "candidate ready")
-        return ticket
-
-    def gate(self):
-        spec = importlib.util.spec_from_file_location(
-            "meeting_gate", SCRIPT.with_name("build-queue-meeting-gate.py"))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
-
-    def report(self, *reasons):
-        samples = [{"status": "busy" if r != "no_call_audio_observed" else "clear", "reason": r}
-                   for r in reasons]
-        observed = datetime.now(timezone.utc) - timedelta(seconds=1)
-        return {"observed_at": observed.isoformat(), "samples": samples}
-
-    def database(self):
-        return Path(self.git("rev-parse", "--path-format=absolute", "--git-common-dir")
-                    .strip()) / "exodia-build-queue.sqlite3"
-
-    def test_the_owner_allows_a_waiting_install_and_it_is_recorded_on_the_ticket(self):
-        ticket = self.waiting_install()
-        allowed = self.call("allow-install", "--ticket", str(ticket), "--by", "owner",
-                            "--said", "  install it,   I am not in a meeting ",
-                            "--minutes", "20", actor="orchestrator")["allowed"]
-        self.assertEqual((allowed["ticket"], allowed["by"], allowed["requested_by"]),
-                         (ticket, "owner", "orchestrator"))
-        self.assertEqual(allowed["said"], "install it, I am not in a meeting")
-        note = self.call("events", "--ticket", str(ticket))[-1]["note"]
-        self.assertIn("Owner owner allowed this install despite the meeting gate", note)
-        self.assertIn(allowed["granted_at"], note)
-        self.assertIn("recorded by orchestrator", note)
-        # The ticket itself is unchanged: still waiting for the same install.
-        self.assertEqual(self.call("status", "--ticket", str(ticket))["tickets"][0]["status"],
-                         "pending_install")
-
-    def test_the_builder_never_allows_an_install_itself(self):
-        ticket = self.waiting_install()
-        refused = self.call("allow-install", "--ticket", str(ticket), "--said", "go",
-                            actor="builder", ok=False)
-        self.assertIn("never does", refused["error"])
-
-    def test_an_override_needs_a_waiting_install_words_and_a_bounded_window(self):
-        ticket = self.waiting_install()
-        queued = self.enqueue(2)["ticket"]["id"]
-        self.call("allow-install", "--ticket", str(queued), "--said", "go", actor="o", ok=False)
-        self.call("allow-install", "--ticket", str(ticket), "--said", " ", actor="o", ok=False)
-        for minutes in ("0", "121"):
-            self.call("allow-install", "--ticket", str(ticket), "--said", "go",
-                      "--minutes", minutes, actor="o", ok=False)
-        self.call("allow-install", "--ticket", "999", "--said", "go", actor="o", ok=False)
-
-    def test_the_gate_honours_a_current_override_only_while_its_install_waits(self):
-        gate = self.gate()
-        ticket = self.waiting_install()
-        now = datetime.now(timezone.utc)
-        self.assertIsNone(gate.active_override(self.database(), now))
-        self.call("allow-install", "--ticket", str(ticket), "--said", "go", "--minutes", "30",
-                  actor="orchestrator")
-        override = gate.active_override(self.database(), datetime.now(timezone.utc))
-        self.assertEqual(override["ticket"], ticket)
-        self.assertIsNone(gate.active_override(self.database(), now + timedelta(minutes=31)))
-        self.assertIsNone(gate.active_override(self.database(), now - timedelta(minutes=1)))
-        self.update(ticket, "done")
-        self.assertIsNone(gate.active_override(self.database(), datetime.now(timezone.utc)))
-        self.assertIsNone(gate.active_override(Path(self.temp.name) / "missing.sqlite3", now))
-
-    def test_a_revoked_override_no_longer_lets_the_install_through(self):
-        gate = self.gate()
-        ticket = self.waiting_install()
-        self.call("allow-install", "--ticket", str(ticket), "--said", "go", actor="o")
-        self.call("allow-install", "--ticket", str(ticket), "--revoke", actor="o")
-        self.assertIsNone(gate.active_override(self.database(), datetime.now(timezone.utc)))
-        self.assertIn("revoked", self.call("events", "--ticket", str(ticket))[-1]["note"])
-
-    def test_an_override_clears_a_call_but_never_whytap_recording_or_a_blind_probe(self):
-        gate = self.gate()
-        owner = {"ticket": 1, "by": "owner", "granted_at": "x", "until": "y"}
-        call = self.report("call_app_microphone_in_use", "microphone_in_use",
-                           "no_call_audio_observed")
-        now = datetime.now(timezone.utc)
-        self.assertEqual(gate.evaluate(call, now), ("busy", "call_app_microphone_in_use"))
-        self.assertEqual(gate.evaluate(call, now, owner), ("clear", "owner_override"))
-        recording = self.report("no_call_audio_observed", "whytap_capturing_audio",
-                                "no_call_audio_observed")
-        self.assertEqual(gate.evaluate(recording, now, owner), ("busy", "whytap_capturing_audio"))
-        blind = self.report("microphone_in_use", "incomplete_audio_snapshot",
-                            "microphone_in_use")
-        self.assertEqual(gate.evaluate(blind, now, owner), ("busy", "microphone_in_use"))
-        stale = dict(call, observed_at=(now - timedelta(seconds=30)).isoformat())
-        self.assertEqual(gate.evaluate(stale, now, owner)[0], "unknown")
-        quiet = self.report(*["no_call_audio_observed"] * 3)
-        self.assertEqual(gate.evaluate(quiet, now),
-                         ("clear", "three_current_snapshots_without_call_audio"))
-
 
 if __name__ == "__main__":
     unittest.main()

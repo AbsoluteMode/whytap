@@ -8,7 +8,7 @@ directory; queue metadata stays local and survives build/ cleanup.
 
 import argparse
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -55,10 +55,6 @@ GROUP_LIMIT = 4  # merged runtime PRs that one install may carry
 # automatic and before any other runtime work, 'hold' a person must act and other
 # runtime work waits. 'first' and 'hold' are the install boundary.
 BOUNDARY = ("first", "hold")
-# The owner's one-off "no meeting now" for a waiting install, read by
-# build-queue-meeting-gate.py while that ticket is still pending_install.
-MEETING_OVERRIDE = "meeting_override"
-OVERRIDE_MAX_MINUTES = 120
 # Paths that never reach the app bundle; anything else makes a PR a runtime change.
 NOT_RUNTIME = re.compile(r"(docs/|\.project-docs/|Tests/|\.github/|scripts/build-queue|"
                          r"scripts/test-|[^/]+\.md$)")
@@ -506,43 +502,6 @@ def run(args):
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 
-        if args.command == "allow-install":
-            # WHY: .project-docs/decisions/2026-11-24-meeting-gate-whytap-activity.md
-            # The owner's word that no meeting is on, recorded on the ticket. The
-            # builder never grants it to itself.
-            if args.actor and args.actor == config(db).get("builder_thread"):
-                raise ValueError("Only the owner allows an install despite the meeting gate; "
-                                 "the builder never does")
-            item = row(db, args.ticket)
-            if args.revoke:
-                db.execute("DELETE FROM config WHERE key=?", (MEETING_OVERRIDE,))
-                note = f"Owner meeting-gate override revoked by {args.by} at {now()}"
-                event(db, args.ticket, item["status"], note)
-                return {"revoked": True, "ticket": args.ticket}
-            if item["status"] != "pending_install":
-                raise ValueError("allow-install applies only to a pending_install ticket; "
-                                 f"#{args.ticket} is {item['status']}")
-            if not 1 <= args.minutes <= OVERRIDE_MAX_MINUTES:
-                raise ValueError(f"--minutes must be 1..{OVERRIDE_MAX_MINUTES}")
-            said = " ".join(args.said.split())
-            if not args.by.strip() or not said:
-                raise ValueError("--by and --said (the owner's own words) are required")
-            granted = datetime.now(timezone.utc)
-            override = {"ticket": args.ticket, "by": args.by.strip(), "said": said[:500],
-                        "granted_at": granted.isoformat(timespec="seconds"),
-                        "until": (granted + timedelta(minutes=args.minutes))
-                        .isoformat(timespec="seconds"),
-                        "requested_by": args.actor or "unknown"}
-            db.execute("INSERT INTO config(key, value) VALUES (?, ?) ON CONFLICT(key) "
-                       "DO UPDATE SET value=excluded.value",
-                       (MEETING_OVERRIDE, json.dumps(override, ensure_ascii=False)))
-            event(db, args.ticket, "pending_install",
-                  f"Owner {override['by']} allowed this install despite the meeting gate at "
-                  f"{override['granted_at']} until {override['until']} (recorded by "
-                  f"{override['requested_by']}); owner said: {override['said']}. Whytap's own "
-                  "recording still defers it.")
-            return {"allowed": override}
-
         if args.command == "events":
             query = ("SELECT e.*,t.pr,t.head,t.title,t.source,t.session,t.host FROM events e "
                      "JOIN tickets t ON t.id=e.ticket WHERE 1=1")
@@ -602,14 +561,6 @@ def main():
     update.add_argument("--hold", action="store_true",
                         help="pending_install only: a person must act; no other runtime work "
                              "is claimed until this install is resolved")
-    allow = commands.add_parser(
-        "allow-install", help="Owner only: the meeting gate lets this waiting install through "
-                              "for a while; Whytap's own recording still defers it")
-    allow.add_argument("--ticket", type=int, required=True)
-    allow.add_argument("--by", default="owner", help="who allowed it (the owner)")
-    allow.add_argument("--said", default="", help="the owner's own words, quoted")
-    allow.add_argument("--minutes", type=int, default=30)
-    allow.add_argument("--revoke", action="store_true")
     events = commands.add_parser("events")
     events.add_argument("--ticket", type=int)
     events.add_argument("--pending", action="store_true")

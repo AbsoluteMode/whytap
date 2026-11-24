@@ -313,6 +313,14 @@ struct FeatureInfo: Equatable, Identifiable {
     let hotkeys: [FeatureHotkey]
     let activation: FeatureActivation
     let place: FeaturePlace
+    /// The lead paragraph of the feature's screen. Names no key.
+    var about: String = ""
+    /// What the clip shows, in one line; said beside the clip, or in its
+    /// place while the clip is not made.
+    var clipCaption: String = ""
+    /// Things to ask or do, shown at the bottom of the screen.
+    var examples: [String] = []
+    var examplesTitle = "Things to try"
 
     var id: AppFeature { feature }
     var hasSwitch: Bool { activation == .userSwitch }
@@ -332,8 +340,9 @@ enum FeatureCatalog {
             return FeatureInfo(
                 feature: feature, name: "Drop", kind: "Dictation",
                 line: "Dictation. Use its shortcut in any text field and speak: your words are typed there.",
-                // The Drop clip is not made yet; the screen shows no placeholder.
-                video: nil, hotkeys: [.dropVoice], activation: .alwaysOn, place: .screen)
+                // The Drop clip is not made yet: the screen keeps its place.
+                video: nil, hotkeys: [.dropVoice], activation: .alwaysOn, place: .screen,
+                clipCaption: "A cursor in an email, the shortcut, one sentence: the text is there.")
         case .agent:
             return FeatureInfo(
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",

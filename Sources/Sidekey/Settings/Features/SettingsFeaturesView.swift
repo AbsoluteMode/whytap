@@ -35,13 +35,16 @@ struct SettingsFeaturesView: View {
     var body: some View {
         let snapshot = snapshot
         Group {
-            switch selection.shownFeature {
-            case .drop:
+            if selection.shownFeature == .drop {
                 DropFeatureView(snapshot: snapshot, selection: selection, models: models,
                                 permissions: permissions, environment: environment)
-            // Features without their own screen yet open their present place
-            // (`SettingsWindowSelection.open`); the list stays underneath.
-            case .agent, .meetings, .googleSearch, .translateSubtitles, .screenshots, nil:
+            } else if let feature = selection.shownFeature, FeatureCatalog.info(for: feature).place == .screen {
+                FeatureScreens(feature: feature,
+                               context: FeatureScreenContext(snapshot: snapshot, selection: selection, models: models,
+                                                             permissions: permissions, environment: environment))
+            } else {
+                // Features without their own screen yet open their present
+                // place (`SettingsWindowSelection.open`); the list stays here.
                 FeatureListView(snapshot: snapshot) { selection.open($0) }
             }
         }
@@ -63,6 +66,23 @@ struct SettingsFeaturesView: View {
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in
             // The Agent counts as on only while its native provider is connected.
             DispatchQueue.main.async { externalChange += 1 }
+        }
+    }
+}
+
+/// The screen of each feature that has one, other than Drop: the template
+/// with the feature's own settings. A new screen is one case here and its
+/// `place: .screen` in the catalog.
+// WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+@MainActor
+struct FeatureScreens: View {
+    let feature: AppFeature
+    let context: FeatureScreenContext
+
+    var body: some View {
+        switch feature {
+        default:
+            FeatureScreenView(feature: feature, context: context) { EmptyView() }
         }
     }
 }

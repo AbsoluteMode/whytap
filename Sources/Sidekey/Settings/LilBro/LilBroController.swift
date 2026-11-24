@@ -122,7 +122,7 @@ final class LilBroController: ObservableObject {
 
     /// The pose to draw: a wave while the pointer is over him at rest.
     var shownPose: LilBroPose {
-        hovering && pose == .idle && !busy && bubble == .closed ? .hover : pose
+        hovering && pose == .idle && segment == nil && canCatch ? .hover : pose
     }
 
     func position(at date: Date) -> CGPoint {
@@ -194,9 +194,14 @@ final class LilBroController: ObservableObject {
 
     // MARK: What the person does
 
+    /// Whether a click on him opens the balloon: whenever it is closed, even
+    /// while he strolls or walks home (that stops).
+    var canCatch: Bool { bubble == .closed }
+    var reducesMotion: Bool { reduceMotion() }
+
     /// A click on him: a surprised hop, then the balloon.
     func catchHim() {
-        guard !busy, bubble == .closed else { return }
+        guard canCatch else { return }
         cancelJob()
         setPose(.caught)
         job = Task { [weak self] in
@@ -205,12 +210,21 @@ final class LilBroController: ObservableObject {
             guard !Task.isCancelled else { return }
             setPose(.idle)
             bubble = .full
+            job = nil
         }
     }
 
     /// The sidebar entry: opens or closes the balloon.
     func toggleFromSidebar() {
-        if bubble == .closed { bubble = .full } else { close() }
+        if bubble == .closed { openBalloon() } else { close() }
+    }
+
+    /// Every way the full balloon opens: he stops where he is first, so he
+    /// never runs under an open message.
+    private func openBalloon() {
+        cancelJob()
+        setPose(.idle)
+        bubble = .full
     }
 
     func close() {
@@ -223,7 +237,11 @@ final class LilBroController: ObservableObject {
         holding = false
         guard mascotVisible else { return }
         // Only now, with the balloon gone, he runs home.
-        job = Task { [weak self] in await self?.goHome() }
+        job = Task { [weak self] in
+            await self?.goHome()
+            guard !Task.isCancelled else { return }
+            self?.job = nil
+        }
     }
 
     func clear() {
@@ -275,8 +293,10 @@ final class LilBroController: ObservableObject {
             switch reply {
             case .answer(let answer):
                 if let destination = answer.destination {
-                    turns[index].opened = destination.title
                     await guide(to: destination)
+                    // Said only once the place is really open.
+                    guard !Task.isCancelled else { return }
+                    turns[index].opened = destination.title
                     if case .feature = destination { offerNextStep() }
                 }
             case .offline, .unavailable, .limit, .unknown:
@@ -286,6 +306,7 @@ final class LilBroController: ObservableObject {
             busy = false
             bubble = .full
             announce(turns[index])
+            job = nil
         }
     }
 
@@ -311,6 +332,7 @@ final class LilBroController: ObservableObject {
             if case .feature = destination { offerNextStep() }
             busy = false
             bubble = .full
+            job = nil
         }
     }
 
@@ -369,6 +391,7 @@ final class LilBroController: ObservableObject {
             busy = false
             bubble = .full
             announce(LilBroCopy.pressed(step.action))
+            job = nil
         }
     }
 
@@ -406,9 +429,14 @@ final class LilBroController: ObservableObject {
 
     private func guide(to destination: LilBroDestination) async {
         let stops = stops(for: destination)
+        // WHY: a closed balloon or a new question cancels this job; after every
+        // wait it checks before pressing a row or moving him, so a cancelled
+        // guide never navigates.
         guard mascotVisible, !reduceMotion() else {
+            guard !Task.isCancelled else { return }
             stops.forEach { $0.press() }
             await settle()
+            guard !Task.isCancelled else { return }
             if mascotVisible { arrive() }
             return
         }
@@ -416,16 +444,19 @@ final class LilBroController: ObservableObject {
         for stop in stops {
             guard !Task.isCancelled else { return }
             if let rect = await visibleSpot(stop.spot) {
+                guard !Task.isCancelled else { return }
                 await walk(to: LilBroPlanner.perch(on: rect))
                 guard !Task.isCancelled else { return }
                 await punch(rect)
             }
+            guard !Task.isCancelled else { return }
             stop.press()
             await settle()
         }
         guard !Task.isCancelled else { return }
         if let block = firstPaneBlock() {
             await walk(to: LilBroPlanner.perch(on: block))
+            guard !Task.isCancelled else { return }
             target = block
             holding = true
         }
@@ -453,6 +484,7 @@ final class LilBroController: ObservableObject {
         for _ in 0..<8 {
             if let rect = map.visible(spot) { return rect }
             await sleep(0.05)
+            if Task.isCancelled { return nil }
         }
         return nil
     }
@@ -482,6 +514,7 @@ final class LilBroController: ObservableObject {
             face(to.x)
             setPose(.jump)
             await animate(.jump(from: feet, to: to, at: now()))
+            guard !Task.isCancelled else { return }
             setPose(.land)
             await sleep(0.12)
         case .ladder(let from, let to):
@@ -489,8 +522,10 @@ final class LilBroController: ObservableObject {
             ladder = Ladder(x: from.x + 2, top: to.y - 5, bottom: from.y)
             setPose(.prop)
             await sleep(0.28)
+            guard !Task.isCancelled else { return }
             setPose(.climb)
             await animate(.climb(from: from, to: to, at: now()))
+            guard !Task.isCancelled else { return }
             ladder = nil
             setPose(.idle)
             await sleep(0.15)
@@ -502,11 +537,10 @@ final class LilBroController: ObservableObject {
     private func animate(_ next: LilBroSegment) async {
         segment = next
         await sleep(next.duration)
-        if Task.isCancelled {
-            feet = next.position(at: now())
-        } else {
-            feet = next.to
-        }
+        // Cancelled: whoever cancelled already stopped him where he was and
+        // may have started a new move; this one touches nothing.
+        guard !Task.isCancelled else { return }
+        feet = next.to
         segment = nil
     }
 
@@ -516,6 +550,7 @@ final class LilBroController: ObservableObject {
         setPose(.hit)
         flash = rect
         await sleep(0.43)
+        guard !Task.isCancelled else { return }
         flash = nil
         setPose(.idle)
     }
@@ -523,12 +558,14 @@ final class LilBroController: ObservableObject {
     func goHome() async {
         guard mascotVisible, let home = map.home else { return }
         busy = true
-        defer { busy = false }
         let stand = abs(feet.y - (home.minY + 1)) < 3
             ? CGPoint(x: min(max(feet.x, home.minX + 16), home.maxX - 14), y: home.minY + 1)
             : map.homeStand
         await walk(to: stand)
-        if !Task.isCancelled { facingRight = true }
+        // A cancelled walk home leaves `busy` to the job that replaced it.
+        guard !Task.isCancelled else { return }
+        busy = false
+        facingRight = true
     }
 
     // MARK: Idle life
@@ -546,11 +583,17 @@ final class LilBroController: ObservableObject {
                       now() >= nextStroll, let home = map.home else { continue }
                 nextStroll = now().addingTimeInterval(random(9...18))
                 let x = home.minX + 16 + CGFloat(random(0...1)) * max(10, home.width - 30)
-                job = Task { [weak self] in
-                    await self?.walk(to: CGPoint(x: x, y: home.minY + 1), stroll: true)
-                    self?.job = nil
-                }
+                stroll(to: CGPoint(x: x, y: home.minY + 1))
             }
+        }
+    }
+
+    /// A slow walk along his entry, as its own job: anything else cancels it.
+    func stroll(to point: CGPoint) {
+        job = Task { [weak self] in
+            await self?.walk(to: point, stroll: true)
+            guard !Task.isCancelled else { return }
+            self?.job = nil
         }
     }
 

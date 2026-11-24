@@ -204,6 +204,23 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(destination("change island tools"), .feature(.hover))
     }
 
+    func test_exact_names_win_over_broader_words() {
+        // macOS settings are Permissions, though "monitor" is a feature word.
+        for question in ["Where is Input Monitoring?", "allow accessibility", "Keyboard control is off",
+                         "screen recording for screenshots", "microphone access"] {
+            XCTAssertEqual(destination(question), .tab(.permissions), question)
+        }
+        // The most specific feature word wins over an earlier feature's alias.
+        XCTAssertEqual(destination("How do I use Google voice search?"), .feature(.googleSearch))
+        XCTAssertEqual(destination("google search shortcut"), .feature(.googleSearch))
+        // Ordinary questions keep their place.
+        XCTAssertEqual(destination("how do I dictate"), .feature(.drop))
+        XCTAssertEqual(destination("voice typing"), .feature(.drop))
+        XCTAssertEqual(destination("dictation shortcut"), .feature(.drop))
+        XCTAssertEqual(destination("server monitor dashboard"), .feature(.monitor))
+        XCTAssertEqual(destination("Turn on meeting notes"), .feature(.meetings))
+    }
+
     func test_a_hotkey_is_not_an_api_key() {
         XCTAssertEqual(destination("change a hotkey"), .tab(.hotkeys))
         XCTAssertEqual(destination("where do I paste my OpenAI key"), .apiKeys)

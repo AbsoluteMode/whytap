@@ -10,6 +10,8 @@ struct ToolboxTranslationPane: View {
     @StateObject private var presentation = TranslationWindowController.Presentation()
     @State private var controller: TranslationWindowController?
     @State private var embeddingID: UUID?
+    /// The pane's own click-to-copy target, fed by a local monitor.
+    @StateObject private var hitTargets = SubtitleOverlayHitTargets()
 
     var body: some View {
         Group {
@@ -20,7 +22,7 @@ struct ToolboxTranslationPane: View {
                                     controller.endEmbedding(embeddingID)
                                     // The containing Settings window owns navigation.
                                     openFeature(feature)
-                                }, embedded: true)
+                                }, embedded: true, hitTargets: hitTargets, copier: controller.copier)
             } else {
                 Text("Translation is unavailable. Reopen Settings to reconnect the tool.")
                     .font(.caption).foregroundStyle(.secondary)

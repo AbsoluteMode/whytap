@@ -76,6 +76,13 @@ struct LilBroLocalGuide: LilBroBrain {
         .monitor: ["monitor", "dashboard"],
     ]
 
+    /// macOS settings people name exactly. They mean Permissions even when a
+    /// word in them is also a feature's ("Input Monitoring" is not Monitor).
+    private static let settingNames = [
+        "input monitoring", "accessibility", "keyboard control", "screen recording",
+        "microphone", "system audio", "post event",
+    ]
+
     private static let tabWords: [(String, LilBroDestination)] = [
         // Before "key": a hotkey is not an API key.
         ("hotkey", .tab(.hotkeys)), ("shortcut", .tab(.hotkeys)),
@@ -99,6 +106,10 @@ struct LilBroLocalGuide: LilBroBrain {
 
     static func match(_ question: String) -> LilBroReply {
         let q = question.lowercased()
+        if settingNames.contains(where: { q.contains($0) }) {
+            let destination = LilBroDestination.tab(.permissions)
+            return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))
+        }
         // The feature words win over generic ones ("dictation shortcut" is Drop).
         if let feature = firstFeature(in: q) {
             return .answer(answer(for: feature))
@@ -109,14 +120,24 @@ struct LilBroLocalGuide: LilBroBrain {
         return .unknown(suggestions: starters)
     }
 
+    /// The feature a question names: a feature's exact name first (the
+    /// longest, so "Google search" beats "search"), then the most specific
+    /// alias, so "Google voice search" is Google search, not Drop's "voice".
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
     static func firstFeature(in question: String) -> AppFeature? {
         let q = question.lowercased()
-        return AppFeature.allCases.first { feature in
-            let info = FeatureCatalog.info(for: feature)
-            // Not `kind`: several tools share "Island tools".
-            let words = [info.name.lowercased()] + (aliases[feature] ?? [])
-            return words.contains { !$0.isEmpty && q.contains($0) }
+        func best(_ words: (AppFeature) -> [String]) -> AppFeature? {
+            var found: (feature: AppFeature, length: Int)?
+            for feature in AppFeature.allCases {
+                for word in words(feature) where !word.isEmpty && q.contains(word) {
+                    if word.count > (found?.length ?? 0) { found = (feature, word.count) }
+                }
+            }
+            return found?.feature
         }
+        // Not `kind`: several tools share "Island tools".
+        return best { [FeatureCatalog.info(for: $0).name.lowercased()] }
+            ?? best { aliases[$0] ?? [] }
     }
 
     static func answer(for feature: AppFeature) -> LilBroAnswer {

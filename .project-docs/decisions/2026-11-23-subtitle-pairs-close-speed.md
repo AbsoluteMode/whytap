@@ -41,7 +41,7 @@ sources:
   - type: repository
     reference: docs/bugs/2026-09-04-island-answer-close-first-mouse.md
     confirmed_at: 2026-11-23
-related: [2026-11-23-subtitle-steady-overlay.md, 2026-11-21-subtitle-speech-translation.md, 2026-11-23-subtitle-realtime-audio.md]
+related: [2026-11-23-subtitle-steady-overlay.md, 2026-11-21-subtitle-speech-translation.md, 2026-11-23-subtitle-realtime-audio.md, 2026-11-24-click-to-copy-translation.md]
 ---
 
 # Subtitle pairs that keep a joined sentence, × and Stop that act at once, and where the delay comes from

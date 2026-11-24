@@ -195,10 +195,12 @@ Voice flow (Drop / dictation):
        Translation, meetings, OpenRouter and custom servers are unchanged. The
        cleanup timing lines (category cleanup-llm, "drop processing ok",
        "drop turn ... completed") are logged at the default level so the system
-       log keeps them. A model name is logged only when it is a public catalog
-       name (CleanupDiagnosticModel: a published Anthropic or OpenAI name, or
-       an ID OpenRouter's catalog lists); any other saved name is "other" and
-       a user's own server "custom". WHY:
+       log keeps them; each Smart or translation request writes one cleanup
+       line from one structure (CleanupDiagnostics). The saved model name
+       itself is never logged (CleanupDiagnosticModel): Anthropic and OpenAI lines carry one of a
+       fixed list of published family names, OpenRouter lines an ID its own
+       catalog lists; any other saved name is "other" and a user's own server
+       "custom". WHY:
        .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
        -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
             wait for modifiers released -> restore target focus -> settle ->

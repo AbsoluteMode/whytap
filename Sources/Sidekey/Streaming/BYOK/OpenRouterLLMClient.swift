@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 struct OpenRouterModelOption: Identifiable, Equatable, Hashable {
     let id: String
@@ -133,7 +132,6 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
     /// `smart` is Drop Smart cleanup, which also asks direct Anthropic and
     /// OpenAI models for the least reasoning (`SmartDirectReasoning`).
     enum Profile { case standard, dictation, smart }
-    static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "cleanup-llm")
     let profile: Profile
     private let reasoningCatalog: OpenRouterReasoningCatalog
     let reasoningRefusals: SmartReasoningRefusals
@@ -141,6 +139,8 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
     let baseURL: URL
     let session: URLSession
     let usageSink: (AIUsageEvent) -> Void
+    /// Receives each stored timing line; the default writes it to the log.
+    let diagnostics: (CleanupDiagnostics) -> Void
 
     init(
         baseURL: URL = URL(string: "https://openrouter.ai/api/v1")!,
@@ -148,7 +148,8 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         profile: Profile = .standard,
         reasoningCatalog: OpenRouterReasoningCatalog = OpenRouterReasoningCatalog(),
         reasoningRefusals: SmartReasoningRefusals = .shared,
-        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record
+        usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
+        diagnostics: @escaping (CleanupDiagnostics) -> Void = CleanupDiagnostics.write
     ) {
         self.baseURL = baseURL
         self.session = session
@@ -156,6 +157,7 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         self.reasoningCatalog = reasoningCatalog
         self.reasoningRefusals = reasoningRefusals
         self.usageSink = usageSink
+        self.diagnostics = diagnostics
     }
 
     func listModels(endpoint: OpenAICompatibleLLMEndpoint) async throws -> [OpenRouterModelOption] {
@@ -284,24 +286,27 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
             (data, response) = try await send()
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
-        // Only a public catalog name is logged; a user's own server, a
-        // fine-tuned model and any other saved name are fixed words.
-        let diagnosticModel: String
-        if !isDictation {
-            diagnosticModel = "custom"
-        } else if endpoint.sendsOpenRouterHeaders {
-            diagnosticModel = CleanupDiagnosticModel.openRouter(trimmedModel, listed: await reasoningCatalog.lists(trimmedModel))
-        } else if endpoint.textAPI == .openAI {
-            diagnosticModel = CleanupDiagnosticModel.openAI(trimmedModel)
-        } else {
-            diagnosticModel = "custom"
-        }
         let effortLabel = reasoning?.diagnosticLabel ?? (refusedEffort ? nil : directEffort) ?? "default"
-        if isDictation, let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
-            os_log("cleanup failed model=%{public}@ effort=%{public}@ status=%{public}d llm_ms=%{public}d effort_refused=%{public}d",
-                   log: Self.log, type: .default,
-                   diagnosticModel, effortLabel, status, requestMs,
-                   refusedEffort ? 1 : 0)
+        if isDictation {
+            // Fixed words, verified catalog names and numbers only; the saved
+            // model name, the reply and an error body never get here.
+            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            let usage = object?["usage"] as? [String: Any]
+            var line = CleanupDiagnostics(provider: "custom", model: "custom", effort: effortLabel,
+                                          status: (response as? HTTPURLResponse)?.statusCode ?? -1, llmMs: requestMs)
+            if endpoint.sendsOpenRouterHeaders {
+                line.provider = "openrouter"
+                line.model = CleanupDiagnosticModel.openRouter(trimmedModel, listed: await reasoningCatalog.lists(trimmedModel))
+                line.requestID = Self.openRouterRequestID(object?["id"] as? String)
+            } else if endpoint.textAPI == .openAI {
+                line.provider = "openai"
+                line.model = CleanupDiagnosticModel.openAI(trimmedModel)
+            }
+            line.catalogMs = discoveryMs
+            line.outputTokens = (usage?["completion_tokens"] as? Int) ?? -1
+            line.reasoningTokens = ((usage?["completion_tokens_details"] as? [String: Any])?["reasoning_tokens"] as? Int) ?? -1
+            line.effortRefused = refusedEffort
+            diagnostics(line)
         }
         try validate(response: response, body: data)
         if let context = AIUsageTaskScope.context {
@@ -331,19 +336,6 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
 
         do {
             let decoded = try JSONDecoder().decode(ChatResponse.self, from: data)
-            if isDictation {
-                // No prompt, reply, reasoning text, key, URL, or provider error body.
-                // Only verified catalog identifiers (OpenRouter, OpenAI) and numeric
-                // diagnostics, at the default level so the system log keeps them.
-                let modelID = diagnosticModel
-                let requestID = endpoint.sendsOpenRouterHeaders ? Self.safeDiagnosticID(decoded.id) : "unavailable"
-                os_log("cleanup model=%{public}@ request_id=%{public}@ effort=%{public}@ catalog_ms=%{public}d llm_ms=%{public}d completion_tokens=%{public}d reasoning_tokens=%{public}d effort_refused=%{public}d",
-                       log: Self.log, type: .default,
-                       modelID, requestID, effortLabel,
-                       discoveryMs, requestMs, decoded.usage?.completion_tokens ?? -1,
-                       decoded.usage?.completion_tokens_details?.reasoning_tokens ?? -1,
-                       refusedEffort ? 1 : 0)
-            }
             guard let content = decoded.choices.first?.message.content,
                   !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else {
@@ -388,9 +380,11 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         return isDictation ? ProviderPreferences(sort: "throughput") : nil
     }
 
-    private static func safeDiagnosticID(_ value: String?) -> String {
-        guard let value, !value.isEmpty, value.count <= 150,
-              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_/.:~").contains($0) })
+    /// OpenRouter's generation ID (`gen-…`), for looking a request up in its
+    /// dashboard. Anything of another shape in the response is not logged.
+    static func openRouterRequestID(_ value: String?) -> String {
+        guard let value, value.hasPrefix("gen-"), value.count <= 80,
+              value.unicodeScalars.allSatisfy({ CharacterSet(charactersIn: "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-").contains($0) })
         else { return "unavailable" }
         return value
     }

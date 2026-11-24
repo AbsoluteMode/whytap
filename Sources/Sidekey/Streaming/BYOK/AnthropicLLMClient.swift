@@ -1,5 +1,4 @@
 import Foundation
-import OSLog
 
 extension OpenRouterLLMClient {
     /// Direct Anthropic text requests use Messages, whose system prompt is a
@@ -63,16 +62,14 @@ extension OpenRouterLLMClient {
         }
         let usage = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["usage"] as? [String: Any]
         if profile != .standard {
-            // A verified catalog model name and numbers only, at the default
-            // level so the system log keeps them; no prompt, reply, key or
-            // error body.
+            // A verified family name and numbers only; no prompt, reply, key
+            // or error body.
             let details = usage?["output_tokens_details"] as? [String: Any]
-            os_log("cleanup model=%{public}@ provider=anthropic effort=%{public}@ status=%{public}d llm_ms=%{public}d output_tokens=%{public}d thinking_tokens=%{public}d effort_refused=%{public}d",
-                   log: Self.log, type: .default,
-                   CleanupDiagnosticModel.anthropic(model), reasoning.map(\.diagnosticLabel) ?? "default",
-                   http.statusCode, requestMs,
-                   (usage?["output_tokens"] as? Int) ?? -1, (details?["thinking_tokens"] as? Int) ?? -1,
-                   refused ? 1 : 0)
+            diagnostics(CleanupDiagnostics(
+                provider: "anthropic", model: CleanupDiagnosticModel.anthropic(model),
+                effort: reasoning.map(\.diagnosticLabel) ?? "default", status: http.statusCode, llmMs: requestMs,
+                outputTokens: (usage?["output_tokens"] as? Int) ?? -1,
+                reasoningTokens: (details?["thinking_tokens"] as? Int) ?? -1, effortRefused: refused))
         }
         guard (200..<300).contains(http.statusCode) else {
             // Keep response bodies, prompts and keys out of diagnostic errors.

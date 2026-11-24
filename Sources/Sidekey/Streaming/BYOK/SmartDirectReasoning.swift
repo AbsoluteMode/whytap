@@ -86,33 +86,60 @@ enum SmartDirectReasoning {
 
 /// The model name a stored timing line may carry. Model names are saved text:
 /// a user can type any name, and a fine-tuned or self-hosted one can hold an
-/// organization or a private label. Only a name of a public catalog is
-/// written; anything else is the fixed word `other`.
+/// organization or a private label. The line therefore never carries the
+/// saved string itself: for Anthropic and OpenAI it carries one of the fixed
+/// names below (the family the saved name belongs to), for OpenRouter an ID
+/// its own catalog lists, and otherwise the fixed word `other`.
 enum CleanupDiagnosticModel {
     static let other = "other"
 
-    /// Direct Anthropic: the published families, an alias or a dated ID.
-    static func anthropic(_ model: String) -> String {
-        let pattern = #"^claude-(fable|mythos|opus|sonnet|haiku)-(preview|[0-9]{1,2}(-[0-9]{1,2})?)(-(latest|[0-9]{8}))?$"#
-        return matches(model, pattern) ? model : other
-    }
+    static let anthropicFamilies = [
+        "claude-fable-5-2", "claude-fable-5-1", "claude-fable-5",
+        "claude-mythos-5-2", "claude-mythos-5-1", "claude-mythos-5", "claude-mythos-preview",
+        "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+        "claude-opus-4-5", "claude-opus-4-1",
+        "claude-sonnet-5-5", "claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5",
+        "claude-haiku-5-5", "claude-haiku-4-5",
+    ]
 
-    /// Direct OpenAI: the published GPT and o-series names, an alias or a
-    /// dated snapshot. A fine-tuned `ft:` ID never matches.
-    static func openAI(_ model: String) -> String {
-        let gpt = #"gpt-[0-9]{1,2}(\.[0-9]{1,2})?[a-z]?(-(mini|nano|pro|turbo|chat-latest|luna|sol|terra|astra))?"#
-        let oSeries = #"o[0-9](-(mini|pro|preview))?"#
-        let pattern = "^(\(gpt)|\(oSeries))(-[0-9]{4}-[0-9]{2}-[0-9]{2})?$"
-        return matches(model, pattern) ? model : other
-    }
+    static let openAIFamilies = [
+        "gpt-4.1", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4o", "gpt-4o-mini",
+        "gpt-5", "gpt-5-mini", "gpt-5-nano", "gpt-5.1", "gpt-5.2",
+        "gpt-5.4", "gpt-5.4-mini", "gpt-5.4-nano", "gpt-5.5",
+        "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra",
+        "gpt-6-astra", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-sol", "gpt-6.1-terra",
+        "gpt-6.2-astra", "gpt-6.2-sol", "o3", "o4-mini",
+    ]
 
-    /// OpenRouter: an ID its own catalog listed at the last read.
+    /// Direct Anthropic: the published family this name is, as an alias or a
+    /// dated ID.
+    static func anthropic(_ model: String) -> String { family(of: model, in: anthropicFamilies) }
+
+    /// Direct OpenAI: the published model this name is, as an alias or a dated
+    /// snapshot. A fine-tuned `ft:` ID is `other`.
+    static func openAI(_ model: String) -> String { family(of: model, in: openAIFamilies) }
+
+    /// OpenRouter: the ID itself, when its own catalog listed it at the last
+    /// read; that catalog is public, so a listed ID is not private text.
     static func openRouter(_ model: String, listed: Bool) -> String {
-        listed && matches(model, #"^[a-z0-9][a-z0-9._-]{0,60}/[a-z0-9][a-z0-9._:-]{0,80}$"#) ? model : other
+        listed && model.count <= 150 ? model : other
     }
 
-    private static func matches(_ model: String, _ pattern: String) -> Bool {
-        model.count <= 150 && model.range(of: pattern, options: .regularExpression) != nil
+    /// The fixed family name, never the saved string: the name must equal a
+    /// family or be that family followed by `-latest` or a date
+    /// (`-20251001`, `-2026-03-17`).
+    private static func family(of model: String, in families: [String]) -> String {
+        let id = model.lowercased()
+        for family in families {
+            if id == family { return family }
+            guard id.hasPrefix(family + "-") else { continue }
+            let rest = id.dropFirst(family.count + 1)
+            let digits = rest.filter { $0 != "-" }
+            let isDate = digits.count == 8 && digits.allSatisfy { $0.isASCII && $0.isNumber }
+                && (rest.count == 8 || (rest.count == 10 && rest.split(separator: "-").map(\.count) == [4, 2, 2]))
+            if rest == "latest" || isDate { return family }
+        }
+        return other
     }
 }
 

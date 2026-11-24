@@ -105,16 +105,20 @@ below), and that time is spent on every dictation.
   error, a rate limit, an outage and a connection failure are not repeated.
 - **Timings survive.** The numeric lines `cleanup …` (category `cleanup-llm`),
   `drop processing ok …` and `drop turn … completed …` are logged at the
-  default level, which the unified system log stores, instead of info. The
-  direct Anthropic path now writes the same line (model ID, requested
-  setting, HTTP status, milliseconds, output and thinking tokens, whether the
-  field was refused), and a failed request writes its status and
-  milliseconds. A model name is saved text that a user can type, so it is
-  logged only when it is a public catalog name (`CleanupDiagnosticModel`): a
-  published Anthropic or OpenAI model name, or an ID that OpenRouter's catalog
-  listed at its last read. Any other name, a fine-tuned OpenAI model included,
-  is logged as `other`, and a user's own server as `custom`. No text, key, URL
-  or error body.
+  default level, which the unified system log stores, instead of info. Every
+  Smart and translation request, successful or failed, on any route now
+  writes one `cleanup` line built from one structure (`CleanupDiagnostics`):
+  provider, model, OpenRouter request ID, the reasoning setting that was
+  answered, HTTP status, catalog and request milliseconds, output and
+  reasoning tokens, and whether the field was refused. A model name is saved
+  text that a user can type, so it is never logged as saved
+  (`CleanupDiagnosticModel`). An Anthropic or OpenAI line carries one of a
+  fixed list of published family names (the family the saved name is, as an
+  alias or a dated ID); an OpenRouter line carries the ID only when
+  OpenRouter's catalog listed it at its last read, and its request ID only in
+  OpenRouter's own `gen-` form. Any other name, a fine-tuned OpenAI model
+  included, is logged as `other`, and a user's own server as `custom`. No
+  text, key, URL or error body.
   Read them with the system tool by its full path (in zsh a bare `log` is
   a shell builtin and prints nothing useful):
 
@@ -148,9 +152,10 @@ pasted); the per-model table for Anthropic with dated IDs; an older Claude
 and models that get no field; a refused field on each provider (cleaned text,
 second dictation sent without the field, no refusal badge); a repeat answered
 with a proxy page or an empty reply under HTTP 200 (the dictation fails, the
-model is not marked); the stored lines read back from the unified log of the
-test process (a private alias, a fine-tuned ID and a name on a user's own
-server never appear, on success and on failure, on all three providers); a rejected input,
+model is not marked); every field of the stored line, captured where the client hands
+it to the log (a private alias, a fine-tuned ID, a name on a user's own
+server and a foreign reply ID never appear, on success and on failure, on
+all three providers; a dated ID is logged as its family); a rejected input,
 a refused model, HTTP 401, 429, 500 and 529 and a timeout; OpenRouter
 unchanged (catalog effort, throughput sorting, none of the direct fields); a
 user's own server named like an OpenAI model; translation and meeting profiles

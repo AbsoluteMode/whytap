@@ -1,4 +1,3 @@
-import OSLog
 import XCTest
 @testable import Sidekey
 
@@ -366,79 +365,121 @@ final class SmartMinimalReasoningTests: XCTestCase {
     // MARK: Stored timing lines
 
     func testOnlyPublicCatalogNamesBecomeALoggedModel() {
-        for model in ["claude-sonnet-5-5", "claude-haiku-4-5-20251001", "claude-opus-4-5-20251101",
-                      "claude-sonnet-5-20260601", "claude-mythos-preview", "claude-fable-5-2"] {
-            XCTAssertEqual(CleanupDiagnosticModel.anthropic(model), model)
-        }
-        for model in ["gpt-5.5", "gpt-4o-mini", "gpt-5.4-mini-2026-03-17", "gpt-6.2-sol", "gpt-5-chat-latest", "o3", "o4-mini"] {
-            XCTAssertEqual(CleanupDiagnosticModel.openAI(model), model)
-        }
+        let anthropic = ["claude-sonnet-5-5": "claude-sonnet-5-5", "claude-haiku-4-5-20251001": "claude-haiku-4-5",
+                         "claude-opus-4-5-20251101": "claude-opus-4-5", "claude-sonnet-5-20260601": "claude-sonnet-5",
+                         "claude-opus-5-latest": "claude-opus-5", "Claude-Fable-5-2": "claude-fable-5-2"]
+        for (saved, logged) in anthropic { XCTAssertEqual(CleanupDiagnosticModel.anthropic(saved), logged, saved) }
+        let openAI = ["gpt-5.5": "gpt-5.5", "gpt-4o-mini": "gpt-4o-mini", "gpt-5.4-mini-2026-03-17": "gpt-5.4-mini",
+                      "gpt-6.2-sol": "gpt-6.2-sol", "gpt-5-2025-08-07": "gpt-5", "o3": "o3"]
+        for (saved, logged) in openAI { XCTAssertEqual(CleanupDiagnosticModel.openAI(saved), logged, saved) }
+        // What is logged is always one of the fixed names, never saved text.
         for name in ["acme-private-claude", "claude-sonnet-5-5 for Ivan", "claude-acme-5", "my-claude-sonnet-5-5",
-                     "ft:gpt-5.1:acme-corp:ivan-notes:abc123", "gpt-acme", "gpt-5.5-acme-internal", "", "o3-acme"] {
+                     "claude-opus-5-acme", "claude-opus-99-12345678", "claude-sonnet-5-5-1234567", "claude-sonnet-5-5\n",
+                     "ft:gpt-5.1:acme-corp:ivan-notes:abc123", "gpt-acme", "gpt-5.5-acme-internal", "gpt-99x-pro-1234-56-78",
+                     "gpt-5.5-2026-0317", "gpt-5.5\n", "", "o3-acme"] {
             XCTAssertEqual(CleanupDiagnosticModel.anthropic(name), "other", name)
             XCTAssertEqual(CleanupDiagnosticModel.openAI(name), "other", name)
         }
         XCTAssertEqual(CleanupDiagnosticModel.openRouter("google/gemini-3.8-flash", listed: true), "google/gemini-3.8-flash")
         XCTAssertEqual(CleanupDiagnosticModel.openRouter("acme/private-alias", listed: false), "other")
-        XCTAssertEqual(CleanupDiagnosticModel.openRouter("Ivan's model", listed: true), "other")
+        // Only OpenRouter's own generation IDs are a request ID.
+        XCTAssertEqual(OpenRouterLLMClient.openRouterRequestID("gen-1763980000-AbC123"), "gen-1763980000-AbC123")
+        for id in ["acme-secret", "gen-acme secret", "gen-" + String(repeating: "a", count: 90), nil] {
+            XCTAssertEqual(OpenRouterLLMClient.openRouterRequestID(id), "unavailable")
+        }
     }
 
-    /// The lines the system log now keeps, read back from the real unified
-    /// log of this process. A saved model name the catalogs do not know (a
-    /// private alias, a fine-tuned model, a name on a user's own server)
-    /// never appears in them, on a successful and on a failed request, on
-    /// direct Anthropic, direct OpenAI and OpenRouter; a catalog name does.
+    /// Every field of the lines the system log now keeps, captured where
+    /// the client hands them to the log. A saved model name the catalogs do
+    /// not know (a private alias, a fine-tuned model, a name on a user's own
+    /// server) and a foreign reply ID never appear in them, on a successful
+    /// and on a failed request, on direct Anthropic, direct OpenAI and
+    /// OpenRouter; a catalog name appears as its fixed family name.
     func testStoredTimingLinesCarryNoUnverifiedModelName() async throws {
-        let store = try OSLogStore(scope: .currentProcessIdentifier)
-        let started = Date().addingTimeInterval(-1)
         let secret = "acme-secret-\(UUID().uuidString.prefix(8).lowercased())"
         let server = routing.addServer(name: "Local", baseURL: "http://127.0.0.1:11434/v1")
-        let routes: [(ProviderAccount, String)] = [
-            (.anthropic, secret), (.openAI, secret), (.openAI, "ft:gpt-5.1:\(secret):notes:abc"),
-            (.openRouter, "\(secret)/model"), (.server(server.id), secret),
-            (.anthropic, "claude-sonnet-5-5"), (.openAI, "gpt-5.5"), (.openRouter, "google/gemini-3.8-flash"),
+        let routes: [(ProviderAccount, String, String, String)] = [
+            (.anthropic, secret, "anthropic", "other"),
+            (.openAI, secret, "openai", "other"),
+            (.openAI, "ft:gpt-5.1:\(secret):notes:abc", "openai", "other"),
+            (.openRouter, "\(secret)/model", "openrouter", "other"),
+            (.server(server.id), secret, "custom", "custom"),
+            (.anthropic, "claude-sonnet-5-5-20261001", "anthropic", "claude-sonnet-5-5"),
+            (.openAI, "gpt-5.5", "openai", "gpt-5.5"),
+            (.openRouter, "google/gemini-3.8-flash", "openrouter", "google/gemini-3.8-flash"),
         ]
-        for (account, model) in routes {
+        for (account, model, provider, logged) in routes {
             for status in [200, 500] {
+                var lines: [CleanupDiagnostics] = []
                 try route(account, model)
-                provider { [unowned self] body, _ in
+                self.provider { [unowned self] body, _ in
                     if urls.last?.hasSuffix("/models") == true {
                         return (200, #"{"data":[{"id":"google/gemini-3.8-flash"}]}"#)
                     }
-                    if status != 200 { return (status, #"{"error":{"message":"unavailable"}}"#) }
-                    return (200, body["max_tokens"] == nil ? Self.openAIReply : Self.anthropicReply)
+                    if status != 200 { return (status, #"{"error":{"message":"\#(secret)"}}"#) }
+                    // The reply's own ID is not OpenRouter's: it is not logged either.
+                    return (200, body["max_tokens"] == nil
+                        ? Self.openAIReply.replacingOccurrences(of: #"{"usage""#, with: #"{"id":"\#(secret)","usage""#)
+                        : Self.anthropicReply)
                 }
-                let client = OpenRouterLLMClient(session: session, profile: .smart, reasoningRefusals: refusals, usageSink: { _ in })
+                let client = OpenRouterLLMClient(session: session, profile: .smart, reasoningRefusals: refusals,
+                                                 usageSink: { _ in }, diagnostics: { lines.append($0) })
                 let processor = PostProcessor(
                     llmRoute: DirectLLMRouteResolver(feature: .dropSmartCleanup, routing: routing, keys: keys),
                     openRouterClient: client, checks: checks)
                 _ = try? await dictate(processor)
+
+                let label = "\(provider) \(model.replacingOccurrences(of: secret, with: "<name>")) HTTP \(status)"
+                XCTAssertEqual(lines.count, 1, "\(label): every request, successful or failed, leaves one line")
+                guard let line = lines.first else { continue }
+                XCTAssertEqual(line.provider, provider, label)
+                XCTAssertEqual(line.model, logged, label)
+                XCTAssertEqual(line.status, status, label)
+                XCTAssertEqual(line.requestID, "unavailable", label)
+                XCTAssertGreaterThanOrEqual(line.llmMs, 0, label)
+                XCTAssertEqual(line.outputTokens, status == 200 ? 14 : -1, label)
+                XCTAssertEqual(line.reasoningTokens, status == 200 ? 0 : -1, label)
+                // Every text field of the line, whatever it is called.
+                let text = Mirror(reflecting: line).children.compactMap { $0.value as? String }
+                XCTAssertEqual(text.count, 4, "provider, model, request ID, effort")
+                XCTAssertFalse(text.contains { $0.contains(secret) || $0.contains("20261001") }, label)
             }
         }
+    }
 
-        // The log store can lag the write by a moment.
-        var lines: [String] = []
-        for _ in 0..<40 {
-            let entries = try store.getEntries(
-                at: store.position(date: started),
-                matching: NSPredicate(format: "subsystem == %@ AND category == %@", "com.rootwise.sidekey", "cleanup-llm"))
-            lines = entries.compactMap { ($0 as? OSLogEntryLog)?.composedMessage }
-            if lines.filter({ $0.hasPrefix("cleanup") }).count >= routes.count * 2 { break }
-            try await Task.sleep(for: .milliseconds(50))
+    /// What the dictation's line says on the maintainer's route, and after a
+    /// refused field: the setting that was answered, one line for both requests.
+    func testTheTimingLineNamesTheSettingThatWasAnswered() async throws {
+        var lines: [CleanupDiagnostics] = []
+        func processor() -> PostProcessor {
+            PostProcessor(
+                llmRoute: DirectLLMRouteResolver(feature: .dropSmartCleanup, routing: routing, keys: keys),
+                openRouterClient: OpenRouterLLMClient(session: session, profile: .smart, reasoningRefusals: refusals,
+                                                      usageSink: { _ in }, diagnostics: { lines.append($0) }),
+                checks: checks)
         }
-        XCTAssertGreaterThanOrEqual(lines.count, routes.count * 2, "Every request, successful or failed, leaves a line")
-        XCTAssertFalse(lines.contains { $0.contains(secret) }, "An unverified model name reached the log")
-        for known in ["claude-sonnet-5-5", "gpt-5.5", "google/gemini-3.8-flash"] {
-            // Earlier tests of this process may have logged the same name.
-            XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=\(known) ") }.count, 2,
-                                        "\(known): a successful and a failed line")
-            XCTAssertTrue(lines.contains { $0.hasPrefix("cleanup failed") && $0.contains("model=\(known) ") }
-                          || known.hasPrefix("claude"), "\(known): the failed request is logged")
+        try route(.anthropic, "claude-sonnet-5-5")
+        provider { _, _ in (200, Self.anthropicReply) }
+        _ = try await dictate(processor())
+        XCTAssertEqual(lines.map(\.effort), ["low+between_tools"])
+        XCTAssertEqual(lines.map(\.effortRefused), [false])
+
+        try route(.openAI, "gpt-5.5")
+        provider { body, _ in body["reasoning_effort"] == nil ? (200, Self.openAIReply) : (400, "{}") }
+        _ = try await dictate(processor())
+        XCTAssertEqual(lines.map(\.effort), ["low+between_tools", "default"])
+        XCTAssertEqual(lines.map(\.effortRefused), [false, true])
+        XCTAssertEqual(lines.last?.status, 200)
+
+        // Translation and meetings: a line for translation, none for meetings.
+        lines = []
+        for profile in [OpenRouterLLMClient.Profile.dictation, .standard] {
+            let client = OpenRouterLLMClient(session: session, profile: profile, reasoningRefusals: refusals,
+                                             usageSink: { _ in }, diagnostics: { lines.append($0) })
+            _ = try await client.complete(endpoint: .openAI(apiKey: "key"), model: "gpt-4.1",
+                                          messages: [.init(role: "user", content: "example")])
         }
-        XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=other ") }.count, 8)
-        XCTAssertGreaterThanOrEqual(lines.filter { $0.contains("model=custom ") }.count, 2, "A user's own server stays custom")
-        XCTAssertTrue(lines.contains { $0.contains("provider=anthropic") && $0.contains("status=500") },
-                      "A failed Anthropic request is logged with its status")
+        XCTAssertEqual(lines.map(\.effort), ["default"])
     }
 
     // MARK: Routes that must not change

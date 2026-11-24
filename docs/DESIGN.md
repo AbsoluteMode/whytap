@@ -1,5 +1,29 @@
 # Interface decisions
 
+## What's New window — 2026-11-24
+
+Opens once after an update and from the version in Settings. 440 pt wide, as
+tall as its list up to 740 pt, then the middle scrolls. Settings tokens,
+following the system appearance; a transparent title bar with the close
+button only. A mono caption ("WHAT'S NEW", or "WHAT'S NEW SINCE 2.2.25"
+after a jump over releases), then the onboarding's serif at 34 pt: "Whytap"
+and the version in italic. One card per release (14 pt radius, hairline
+border); with several releases each card has its version above it in mono.
+A row is a 28 pt accent-tinted tile with an SF Symbol, a 13 pt semibold
+title, a 12 pt secondary body and, when the item has one, a quiet accent
+action ("Open Models ›") that opens that Settings tab. The first row of the
+newest release carries its clip at 368 × 207 pt above the text: the still
+frame at once, the silent loop over it, the still frame alone under Reduce
+Motion. One primary button on the right, Got it (Return); Escape and the
+close button do the same.
+
+Why: a person who just updated wants to know in a few seconds what is
+different. Five short rows are read at a glance, one clip shows the main
+change at work, and one button ends it. The look is Settings', because the
+window belongs to the app's ordinary surfaces, with the serif headline as
+the one thing shared with the first launch. See
+`.project-docs/decisions/2026-11-24-whats-new-window.md`.
+
 ## Server window — 2026-11-22
 
 The person comes to connect their own server and say what runs on it. First

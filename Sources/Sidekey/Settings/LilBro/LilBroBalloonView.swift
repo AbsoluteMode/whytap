@@ -10,6 +10,7 @@ struct LilBroBalloonView: View {
     let tail: LilBroBalloonLayout.Tail
     let tailOffset: CGFloat
     let maxHeight: CGFloat
+    @State private var menuHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -58,11 +59,10 @@ struct LilBroBalloonView: View {
             }
             Spacer(minLength: 4)
             if controller.turns.count > 1 {
-                Button(controller.showEarlier ? "hide ⌄" : "earlier ⌃") { controller.showEarlier.toggle() }
-                    .buttonStyle(.plain)
-                    .font(.system(size: 11))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .accessibilityLabel(controller.showEarlier ? "Hide earlier questions" : "Show earlier questions")
+                LilBroTextButton(title: controller.showEarlier ? "hide ⌄" : "earlier ⌃",
+                                 label: controller.showEarlier ? "Hide earlier questions" : "Show earlier questions") {
+                    controller.showEarlier.toggle()
+                }
             }
             Menu {
                 Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
@@ -78,17 +78,13 @@ struct LilBroBalloonView: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .frame(width: 22, height: 22)
+            .background(LilBroHoverCircle(hovered: menuHovered))
+            .contentShape(Circle())
+            .onHover { menuHovered = $0 }
             .accessibilityLabel("Options")
-            Button { controller.close() } label: {
-                Image(systemName: "xmark")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .keyboardShortcut(.cancelAction)
-            .accessibilityLabel("Close")
+            LilBroIconButton(systemName: "xmark", label: "Close", action: controller.close)
+                .keyboardShortcut(.cancelAction)
         }
     }
 
@@ -212,17 +208,105 @@ struct LilBroChip: View {
                 .foregroundStyle(primary ? Color.white : MacSettingsTheme.text)
                 .padding(.horizontal, 11)
                 .frame(height: 26)
-                .background(Capsule().fill(primary ? MacSettingsTheme.accentFill
+                .background(Capsule().fill(primary ? MacSettingsTheme.accentFill.opacity(hovered ? 0.86 : 1)
                                            : (hovered ? MacSettingsTheme.hover : MacSettingsTheme.bgCard)))
                 .overlay(Capsule().strokeBorder(primary ? Color.clear : MacSettingsTheme.sepStrong, lineWidth: 1))
                 .overlay(Capsule().strokeBorder(MacSettingsTheme.accent, lineWidth: 2).opacity(focused ? 1 : 0))
                 .contentShape(Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(LilBroPressStyle())
         // Its own focus ring follows the capsule; the default one is square.
         .focusEffectDisabled()
         .focused($focused)
         .onHover { hovered = $0 }
+    }
+}
+
+/// Pressed: a little dimmer and smaller, over the whole hit area.
+struct LilBroPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.72 : 1)
+            .scaleEffect(configuration.isPressed ? 0.95 : 1)
+    }
+}
+
+/// A circle that appears under a small control while the pointer is on it.
+struct LilBroHoverCircle: View {
+    let hovered: Bool
+
+    var body: some View {
+        Circle().fill(MacSettingsTheme.hover).opacity(hovered ? 1 : 0)
+    }
+}
+
+/// A round icon control of the balloon and the field: hover, press and its
+/// own focus ring over the full circle.
+struct LilBroIconButton: View {
+    enum Style { case plain, filled, accent, off }
+
+    let systemName: String
+    let label: String
+    var size: CGFloat = 18
+    var glyph: CGFloat = 11
+    var style: Style = .plain
+    let action: () -> Void
+    @State private var hovered = false
+    @FocusState private var focused: Bool
+    @Environment(\.isEnabled) private var enabled
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: glyph, weight: .bold))
+                .foregroundStyle(style == .accent || style == .off ? Color.white : MacSettingsTheme.text2)
+                .frame(width: size, height: size)
+                .background(Circle().fill(fill))
+                .opacity(enabled ? 1 : 0.55)
+                .contentShape(Circle())
+        }
+        .buttonStyle(LilBroPressStyle())
+        .focusEffectDisabled()
+        .focused($focused)
+        .overlay(Circle().strokeBorder(MacSettingsTheme.accent, lineWidth: 2).padding(-2).opacity(focused ? 1 : 0))
+        .onHover { hovered = $0 }
+        .accessibilityLabel(label)
+    }
+
+    private var fill: Color {
+        switch style {
+        case .plain: return hovered ? MacSettingsTheme.hover : .clear
+        case .filled: return hovered ? MacSettingsTheme.hover : MacSettingsTheme.controlBg
+        case .accent: return MacSettingsTheme.accentFill.opacity(hovered ? 0.86 : 1)
+        case .off: return MacSettingsTheme.text3
+        }
+    }
+}
+
+/// A small text control ("earlier ⌃") with hover, press and focus feedback.
+struct LilBroTextButton: View {
+    let title: String
+    let label: String
+    let action: () -> Void
+    @State private var hovered = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 11))
+                .foregroundStyle(hovered ? MacSettingsTheme.text : MacSettingsTheme.text2)
+                .padding(.horizontal, 6)
+                .frame(height: 20)
+                .background(Capsule().fill(MacSettingsTheme.hover).opacity(hovered ? 1 : 0))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(LilBroPressStyle())
+        .focusEffectDisabled()
+        .focused($focused)
+        .overlay(Capsule().strokeBorder(MacSettingsTheme.accent, lineWidth: 2).opacity(focused ? 1 : 0))
+        .onHover { hovered = $0 }
+        .accessibilityLabel(label)
     }
 }
 
@@ -272,26 +356,13 @@ struct LilBroReplyField: View {
                 .focused($focused)
                 .onSubmit { controller.ask(controller.draft) }
                 .accessibilityLabel("Ask Lil Bro")
-            Button { controller.ask(controller.draft) } label: {
-                Image(systemName: "arrow.up")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(width: 20, height: 20)
-                    .background(Circle().fill(controller.draft.trimmingCharacters(in: .whitespaces).isEmpty
-                                              ? MacSettingsTheme.text3 : MacSettingsTheme.accentFill))
+            let canSend = !controller.draft.trimmingCharacters(in: .whitespaces).isEmpty && !controller.isBusy
+            LilBroIconButton(systemName: "arrow.up", label: "Send", size: 20, glyph: 10,
+                             style: canSend ? .accent : .off) { controller.ask(controller.draft) }
+                .disabled(!canSend)
+            LilBroIconButton(systemName: "info", label: "Where questions go", size: 18, glyph: 9, style: .filled) {
+                info.toggle()
             }
-            .buttonStyle(.plain)
-            .disabled(controller.draft.trimmingCharacters(in: .whitespaces).isEmpty || controller.isBusy)
-            .accessibilityLabel("Send")
-            Button { info.toggle() } label: {
-                Image(systemName: "info")
-                    .font(.system(size: 9, weight: .bold))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .frame(width: 18, height: 18)
-                    .background(Circle().fill(MacSettingsTheme.controlBg))
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("Where questions go")
             .popover(isPresented: $info, arrowEdge: .top) {
                 Text(LilBroCopy.localNote)
                     .font(.system(size: 12))

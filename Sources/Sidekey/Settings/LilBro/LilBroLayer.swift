@@ -98,19 +98,32 @@ struct LilBroMascot: View {
     @ObservedObject var controller: LilBroController
     let origin: CGPoint
     let dark: Bool
+    @FocusState private var focused: Bool
 
     var body: some View {
         // Smooth while he moves; at rest his frames change every ~80-500 ms.
-        TimelineView(.animation(minimumInterval: controller.segment == nil ? 0.05 : 1.0 / 30)) { context in
+        // With Reduce Motion he holds each pose's first frame: no timeline runs.
+        let still = controller.reducesMotion && controller.segment == nil
+        TimelineView(.animation(minimumInterval: controller.segment == nil ? 0.05 : 1.0 / 30, paused: still)) { context in
             let feet = controller.position(at: context.date)
             let pose = controller.shownPose
-            let elapsed = context.date.timeIntervalSince(controller.poseStart)
+            let elapsed = still ? 0 : max(0, context.date.timeIntervalSince(controller.poseStart))
             ZStack(alignment: .bottom) {
+                // Hover and focus show wherever a click catches him.
+                Ellipse()
+                    .fill(MacSettingsTheme.accent.opacity(0.22))
+                    .frame(width: 26, height: 6)
+                    .offset(y: 3)
+                    .opacity(controller.canCatch && controller.hovering ? 1 : 0)
                 Button { controller.catchHim() } label: {
                     LilBroSprite(pose: pose, elapsed: elapsed, dark: dark, facingRight: controller.facingRight)
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(LilBroPressStyle())
+                // His own ring follows the sprite; the default one is square and offset.
                 .focusEffectDisabled()
+                .focused($focused)
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MacSettingsTheme.accent, lineWidth: 2)
+                    .padding(-3).opacity(focused ? 1 : 0))
                 .onHover { controller.hovering = $0 }
                 .help("Lil Bro")
                 .accessibilityLabel("Lil Bro")
@@ -128,7 +141,7 @@ struct LilBroMascot: View {
             LilBroTag(text: text).fixedSize().offset(y: -30)
         case .thinking:
             LilBroTag(text: nil).fixedSize().offset(y: -30)
-        case .closed where controller.hovering && !controller.isBusy:
+        case .closed where controller.hovering && controller.canCatch:
             LilBroTag(text: LilBroCopy.catchMe).fixedSize().offset(y: -30)
         default:
             EmptyView()

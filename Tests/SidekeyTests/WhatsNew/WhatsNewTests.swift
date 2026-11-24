@@ -217,6 +217,36 @@ final class WhatsNewTests: XCTestCase {
         XCTAssertEqual(WhatsNewVersion("Unknown version"), WhatsNewVersion("0"))
     }
 
+    /// Builder review, ticket 518: the release check and the app read the
+    /// same texts as versions. Full-width digits and numbers too long for
+    /// the rule are not versions in either, so no entry can pass the check
+    /// and then never open, or collide with another entry.
+    func testOnlyPlainNumbersAreVersionsLikeInTheReleaseCheck() throws {
+        for fine in ["2", "2.3", "2.3.0", "999999.999999.999999.999999", "02.03"] {
+            XCTAssertTrue(WhatsNewVersion.isCatalogVersion(fine), fine)
+        }
+        for odd in ["２.２.２７", "٢.٢", "9223372036854775808.0.3", String(repeating: "9", count: 4_400), "1234567",
+                    "1.2.3.4.5", "2..3", ".2", "2.", "", "2.2.27-rc1", "v2.2"] {
+            XCTAssertFalse(WhatsNewVersion.isCatalogVersion(odd), String(odd.prefix(30)))
+        }
+        XCTAssertEqual(WhatsNewVersion("２.２.２７"), WhatsNewVersion("0"), "full-width digits are not numbers")
+        XCTAssertNotEqual(WhatsNewVersion("9223372036854775808.0.3"), WhatsNewVersion("0.0.3"), "no overflow onto another version")
+        XCTAssertEqual(WhatsNewVersion("9223372036854775808.0.3"), WhatsNewVersion("0"))
+        XCTAssertEqual(WhatsNewVersion("2.2.28-rc1"), WhatsNewVersion("2.2.28"), "the running app's version may carry a suffix")
+
+        // An entry the check would refuse never opens and never hides a real one.
+        let mixed = WhatsNewCatalog(releases: [release("２.２.２７", "Full-width"), release("9223372036854775808.0.3", "Too long"),
+                                               release("2.2.27", "Calendar is open")])
+        XCTAssertEqual(mixed.releases(after: nil, through: "2.2.27").map(\.version), ["2.2.27"])
+        XCTAssertNil(launch("2.2.26", catalog: mixed), "nothing for 2.2.26 in this list")
+        XCTAssertEqual(try XCTUnwrap(launch("2.2.27", catalog: mixed)).releases.map(\.version), ["2.2.27"])
+        let script = try String(contentsOf: Self.resources.deletingLastPathComponent()
+            .appendingPathComponent("scripts/whats-new.py"), encoding: .utf8)
+        XCTAssertTrue(script.contains("MAX_COMPONENTS = \(WhatsNewVersion.maxComponents)"))
+        XCTAssertTrue(script.contains("MAX_COMPONENT_DIGITS = \(WhatsNewVersion.maxComponentDigits)"))
+        XCTAssertTrue(script.contains(#"[0-9]{1,6}(?:\.[0-9]{1,6}){0,3}"#), "the same shape, ASCII digits only")
+    }
+
     // MARK: - The bundled list
 
     /// The list that ships: short, in plain words, and every clip, symbol

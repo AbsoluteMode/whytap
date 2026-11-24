@@ -141,4 +141,11 @@ list (all types are checked); Escape never reached the close action in a
 window without a text field (the window takes the key itself). Each has a
 test named after the finding in `WhatsNewTests` or `test_whats_new.py`.
 
+Ticket 518 found one more disagreement between the check and the app: the
+check read full-width digits and numbers beyond the app's integer as
+versions, so an entry could pass and never open, or collide with another.
+Both now use one rule, tested on each side: a version is one to four
+components of one to six ASCII digits ("2.3" still equals "2.3.0"); the app
+ignores a list entry that is not such a version.
+
 2026-11-24 · ORCH-TASK 98

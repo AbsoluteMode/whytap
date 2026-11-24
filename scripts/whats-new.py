@@ -31,14 +31,24 @@ def version_key(text):
     return tuple(parts)
 
 
+# One to four components of one to six ASCII digits: the rule of
+# WhatsNewVersion in the app (maxComponents, maxComponentDigits). "\d" would
+# also take full-width digits, which the app does not read as numbers.
+VERSION = re.compile(r"[0-9]{1,6}(?:\.[0-9]{1,6}){0,3}")
+MAX_COMPONENTS = 4
+MAX_COMPONENT_DIGITS = 6
+
+
 def is_version(value):
-    return isinstance(value, str) and re.fullmatch(r"\d+(\.\d+)*", value) is not None
+    return isinstance(value, str) and VERSION.fullmatch(value) is not None
 
 
 def numeric_prefix(text):
     """The numbers a display version starts with ("2.2.28-rc1" is 2.2.28), like the app."""
-    match = re.match(r"\d+(\.\d+)*", text) if isinstance(text, str) else None
-    return match.group(0) if match else None
+    if not isinstance(text, str):
+        return None
+    prefix = re.match(r"[0-9.]*", text).group(0)
+    return prefix if is_version(prefix) else None
 
 
 def text_problem(value):
@@ -99,7 +109,9 @@ def problems(catalog, version):
             continue
         name = release.get("version")
         if not is_version(name):
-            found.append(f"a release has no numeric version: {name!r}")
+            shown = name if not isinstance(name, str) or len(name) <= 40 else name[:40] + "…"
+            found.append(f"a release has no numeric version (up to {MAX_COMPONENTS} numbers of up to "
+                         f"{MAX_COMPONENT_DIGITS} plain digits): {shown!r}")
             continue
         key = version_key(name)
         if key in keys:

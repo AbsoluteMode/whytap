@@ -86,6 +86,25 @@ class WhatsNewCheckTests(unittest.TestCase):
         self.assertEqual(whats_new.problems(catalog(release("2.2.28")), "2.2.28-rc1"), [], "the app compares the numbers")
         self.assertTrue(any("not numeric" in p for p in whats_new.problems(catalog(release("2.2.28")), "beta")))
 
+    def test_only_versions_the_app_reads_as_numbers_are_accepted(self):
+        """Builder ticket 518: the check and the app must agree on which entry is which."""
+        full_width = catalog(release("２.２.２７", "Calendar is open"))
+        found = whats_new.problems(full_width, "2.2.27")
+        self.assertTrue(any("no numeric version" in p for p in found), found)
+        self.assertTrue(any("no entry for 2.2.27" in p for p in found), found)
+        self.assertTrue(any("not numeric" in p for p in whats_new.problems(catalog(release("2.2.27")), "２.２.２７")))
+        for odd in ("9223372036854775808.0.3", "9" * 4400, "1234567", "1.2.3.4.5", "2..3", ".2", "2.", "", "٢.٢", "2.2.27-rc1"):
+            found = whats_new.problems(catalog(release(odd, "One"), release("0.0.3", "Two")), "0.0.3")
+            self.assertEqual(len([p for p in found if "no numeric version" in p]), 1, odd[:30])
+            self.assertFalse(any("the same version" in p for p in found), odd[:30])
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "WhatsNew.json"
+            path.write_text(json.dumps(catalog(release("9" * 4400, "One"))), encoding="utf-8")
+            self.assertEqual(whats_new.main(["check", "9" * 4400, "--file", str(path)]), 1, "refused, not a crash")
+        for fine in ("2", "2.3", "2.3.0", "999999.999999.999999.999999", "02.03"):
+            self.assertEqual(whats_new.problems(catalog(release(fine, "One")), fine), [], fine)
+        self.assertEqual(whats_new.problems(catalog(release("2.3", "One")), "2.3.0"), [], "2.3 and 2.3.0 stay one version")
+
     def test_the_command_fails_on_a_missing_or_damaged_file(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "WhatsNew.json"

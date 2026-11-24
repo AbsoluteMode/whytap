@@ -64,7 +64,7 @@ struct WhatsNewCatalog: Codable, Equatable {
         let current = WhatsNewVersion(current)
         let seen = seen.map(WhatsNewVersion.init)
         return releases
-            .filter { !$0.items.isEmpty }
+            .filter { !$0.items.isEmpty && WhatsNewVersion.isCatalogVersion($0.version) }
             .filter { release in
                 let version = WhatsNewVersion(release.version)
                 if let seen, version <= seen { return false }
@@ -75,15 +75,39 @@ struct WhatsNewCatalog: Codable, Equatable {
 }
 
 /// A display version compared by its numbers: "2.2.9" < "2.2.27",
-/// "0.0.0-dev" is 0.0.0.
+/// "2.3" equals "2.3.0", "0.0.0-dev" is 0.0.0.
+///
+/// The numbers are one to four components of one to six ASCII digits, the
+/// same rule as `scripts/whats-new.py`; anything else at the start of the
+/// text (full-width digits, a longer number) has no numbers and compares as
+/// zero. A list entry must be exactly such numbers (`isCatalogVersion`), so
+/// the release check and the app always agree on which entry is which.
 struct WhatsNewVersion: Comparable, Equatable {
+    static let maxComponents = 4
+    static let maxComponentDigits = 6
+
     let parts: [Int]
 
     init(_ text: String) {
-        let numeric = text.prefix { $0.isNumber || $0 == "." }
-        var parts = numeric.split(separator: ".").map { Int($0) ?? 0 }
+        var parts = Self.components(text.prefix { Self.isDigit($0) || $0 == "." }) ?? []
         while parts.last == 0 { parts.removeLast() }
         self.parts = parts
+    }
+
+    /// `true` for a version a list entry may have: the numbers and nothing else.
+    static func isCatalogVersion(_ text: String) -> Bool {
+        text.allSatisfy { isDigit($0) || $0 == "." } && components(text[...]) != nil
+    }
+
+    private static func isDigit(_ character: Character) -> Bool {
+        character.isASCII && character.isNumber
+    }
+
+    private static func components(_ numeric: Substring) -> [Int]? {
+        let pieces = numeric.split(separator: ".", omittingEmptySubsequences: false)
+        guard (1...maxComponents).contains(pieces.count),
+              pieces.allSatisfy({ (1...maxComponentDigits).contains($0.count) }) else { return nil }
+        return pieces.compactMap { Int($0) }
     }
 
     static func < (lhs: WhatsNewVersion, rhs: WhatsNewVersion) -> Bool {

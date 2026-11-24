@@ -105,6 +105,58 @@ final class SwitchFeatureScreensTests: XCTestCase {
         XCTAssertEqual(HotkeyPreferences(defaults: fixture.defaults).configuration.googleSearchVoiceGesture, .hold)
     }
 
+    /// A saved and reloaded Google combo reaches the key monitor's real
+    /// registration plan and fires Google's callbacks, not the Agent's.
+    func testSavedGoogleCombosRegisterAndFireGoogleSearch() async throws {
+        let fixture = try await fixture(.usual)
+        var draft = fixture.hotkeys.configuration
+        draft.agentTextShortcut = .combo(.optionFour)
+        draft.googleSearchTextShortcut = .combo(.optionD)
+        draft.googleSearchVoiceShortcut = .combo(.optionPeriod)
+        draft.googleSearchVoiceGesture = .tap
+        XCTAssertTrue(draft.conflicts.isEmpty)
+        try fixture.hotkeys.apply(draft)
+        let loaded = HotkeyPreferences(defaults: fixture.defaults).configuration
+
+        let planned = RightCmdGestureMonitor.plannedCombosForTesting(for: loaded)
+        let agent = try XCTUnwrap(planned.first { $0.combo == .optionFour })
+        XCTAssertFalse(agent.google)
+        XCTAssertEqual(agent.tapAction, .text)
+        let text = try XCTUnwrap(planned.first { $0.combo == .optionD }, "Google text combo must register")
+        XCTAssertTrue(text.google)
+        XCTAssertEqual(text.tapAction, .text)
+        XCTAssertEqual(text.hotKeyIDValue, CarbonHotkeyMonitor.googleTextHotKeyID)
+        let voice = try XCTUnwrap(planned.first { $0.combo == .optionPeriod }, "Google voice combo must register")
+        XCTAssertTrue(voice.google)
+        XCTAssertEqual(voice.tapAction, .voice)
+        XCTAssertFalse(voice.holdEnabled)
+        XCTAssertEqual(voice.hotKeyIDValue, CarbonHotkeyMonitor.googleVoiceHotKeyID)
+        XCTAssertEqual(Set(planned.map(\.hotKeyIDValue)).count, planned.count, "Every registration has its own id")
+
+        var fired: [String] = []
+        for combo in [HotkeyTapCombo.optionFour, .optionD, .optionPeriod] {
+            RightCmdGestureMonitor.tapPlannedComboForTesting(
+                combo, in: loaded,
+                agentText: { fired.append("agent text") }, agentVoice: { fired.append("agent voice") },
+                googleText: { fired.append("google text") }, googleVoice: { fired.append("google voice") })
+        }
+        XCTAssertEqual(fired, ["agent text", "google text", "google voice"])
+
+        var hold = loaded
+        hold.googleSearchVoiceGesture = .hold
+        XCTAssertEqual(RightCmdGestureMonitor.plannedCombosForTesting(for: hold)
+            .first { $0.combo == .optionPeriod }?.holdEnabled, true)
+    }
+
+    /// The default Right Option split stays on the modifier path: no Google
+    /// combo is registered for it.
+    func testDefaultGoogleRightOptionRegistersNoCombo() {
+        let planned = RightCmdGestureMonitor.plannedCombosForTesting(for: HotkeyConfiguration.defaults)
+        XCTAssertFalse(planned.contains { $0.google })
+        XCTAssertEqual(HotkeyConfiguration.defaults.googleSearchTextShortcut, .modifier(.rightOption))
+        XCTAssertEqual(HotkeyConfiguration.defaults.googleSearchVoiceShortcut, .modifier(.rightOption))
+    }
+
     func testMeetingNotesLeadsToTheNotes() {
         let selection = SettingsWindowSelection()
         selection.open(.meetings)

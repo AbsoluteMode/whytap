@@ -469,13 +469,23 @@ final class AgentController: ObservableObject {
         }
         hotkeyPreferencesCancellable?.cancel()
         configurableMonitor.setConfiguration(HotkeyPreferences.shared.configuration)
-        hotkeyPreferencesCancellable = Publishers.CombineLatest3(
-            HotkeyPreferences.shared.$agentTextShortcut,
-            HotkeyPreferences.shared.$agentVoiceShortcut,
-            HotkeyPreferences.shared.$agentVoiceGesture
+        // Google search's shortcuts register on the same monitor, so a
+        // Google-only change rebinds it too.
+        let preferences = HotkeyPreferences.shared
+        hotkeyPreferencesCancellable = Publishers.CombineLatest(
+            Publishers.CombineLatest3(
+                preferences.$agentTextShortcut,
+                preferences.$agentVoiceShortcut,
+                preferences.$agentVoiceGesture
+            ),
+            Publishers.CombineLatest3(
+                preferences.$googleSearchTextShortcut,
+                preferences.$googleSearchVoiceShortcut,
+                preferences.$googleSearchVoiceGesture
+            )
         )
             .dropFirst()
-            .sink { [weak configurableMonitor] _, _, _ in
+            .sink { [weak configurableMonitor] _, _ in
                 configurableMonitor?.setConfiguration(HotkeyPreferences.shared.configuration)
             }
     }

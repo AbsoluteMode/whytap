@@ -102,7 +102,11 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
             onTextTap: onTextTap,
             onVoiceTap: onVoiceTap,
             onVoiceHoldStart: onVoiceHoldStart,
-            onVoiceHoldEnd: onVoiceHoldEnd
+            onVoiceHoldEnd: onVoiceHoldEnd,
+            onGoogleTextTap: onGoogleTextTap,
+            onGoogleVoiceTap: onGoogleVoiceTap,
+            onGoogleHoldStart: onGoogleHoldStart,
+            onGoogleHoldEnd: onGoogleHoldEnd
         )
 
         // Two monitors run in parallel:
@@ -271,49 +275,120 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
         comboMonitors.removeAll()
     }
 
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    // Google search's text and voice shortcuts can be key combos too (the
+    // Settings screen and Hotkeys accept them). Its modifier-key defaults
+    // (Right Option) stay on the state machine; only combos register here,
+    // with Google's own callbacks and hot-key ids, so a combo saved for
+    // Google search works like the same kind of combo saved for the Agent.
     private static func agentComboRegistrations(
         for configuration: HotkeyConfiguration,
         callbacks: AgentComboCallbacks
     ) -> [AgentComboRegistration] {
         var registrations: [HotkeyTapCombo: AgentComboRegistrationDraft] = [:]
 
-        if let textCombo = configuration.agentTextShortcut.combo {
-            registrations[textCombo, default: AgentComboRegistrationDraft(combo: textCombo)]
-                .tapAction = .text
+        func add(
+            _ owner: AgentComboRegistrationDraft.Owner,
+            text: HotkeyShortcut,
+            voice: HotkeyShortcut,
+            gesture: HotkeyGesture
+        ) {
+            if let textCombo = text.combo {
+                var draft = registrations[textCombo, default: AgentComboRegistrationDraft(combo: textCombo, owner: owner)]
+                // A combo already taken by the other feature stays theirs;
+                // conflict checks keep this from being saved in the first place.
+                guard draft.owner == owner else { return }
+                draft.tapAction = .text
+                registrations[textCombo] = draft
+            }
+            if let voiceCombo = voice.combo {
+                var draft = registrations[voiceCombo, default: AgentComboRegistrationDraft(combo: voiceCombo, owner: owner)]
+                guard draft.owner == owner else { return }
+                switch gesture {
+                case .tap:
+                    if draft.tapAction == nil {
+                        draft.tapAction = .voice
+                    }
+                case .hold:
+                    draft.holdEnabled = true
+                }
+                registrations[voiceCombo] = draft
+            }
         }
 
-        if let voiceCombo = configuration.agentVoiceShortcut.combo {
-            var draft = registrations[voiceCombo, default: AgentComboRegistrationDraft(combo: voiceCombo)]
-            switch configuration.agentVoiceGesture {
-            case .tap:
-                if draft.tapAction == nil {
-                    draft.tapAction = .voice
-                }
-            case .hold:
-                draft.holdEnabled = true
-            }
-            registrations[voiceCombo] = draft
-        }
+        add(.agent,
+            text: configuration.agentTextShortcut,
+            voice: configuration.agentVoiceShortcut,
+            gesture: configuration.agentVoiceGesture)
+        add(.google,
+            text: configuration.googleSearchTextShortcut,
+            voice: configuration.googleSearchVoiceShortcut,
+            gesture: configuration.googleSearchVoiceGesture)
 
         return registrations.values
             .sorted { $0.hotKeyIDValue < $1.hotKeyIDValue }
             .map { draft in
-                AgentComboRegistration(
+                let google = draft.owner == .google
+                return AgentComboRegistration(
                     combo: draft.combo,
                     hotKeyIDValue: draft.hotKeyIDValue,
+                    owner: draft.owner,
+                    tapAction: draft.tapAction,
+                    holdEnabled: draft.holdEnabled,
                     controller: AgentComboGestureController(
                         tapAction: draft.tapAction,
                         holdEnabled: draft.holdEnabled,
                         captureSnapshot: FocusSnapshot.capture,
                         onSnapshot: callbacks.onSnapshot,
-                        onTextTap: callbacks.onTextTap,
-                        onVoiceTap: callbacks.onVoiceTap,
-                        onHoldStart: callbacks.onVoiceHoldStart,
-                        onHoldEnd: callbacks.onVoiceHoldEnd
+                        onTextTap: google ? callbacks.onGoogleTextTap : callbacks.onTextTap,
+                        onVoiceTap: google ? callbacks.onGoogleVoiceTap : callbacks.onVoiceTap,
+                        onHoldStart: google ? callbacks.onGoogleHoldStart : callbacks.onVoiceHoldStart,
+                        onHoldEnd: google ? callbacks.onGoogleHoldEnd : callbacks.onVoiceHoldEnd
                     )
                 )
             }
     }
+
+    #if DEBUG
+    /// The combos `start` would register for `configuration`, with whose
+    /// callbacks they fire and how — the production plan, without Carbon.
+    struct PlannedCombo: Equatable {
+        let combo: HotkeyTapCombo
+        let hotKeyIDValue: UInt32
+        let google: Bool
+        let tapAction: AgentComboGestureController.TapAction?
+        let holdEnabled: Bool
+    }
+
+    static func plannedCombosForTesting(for configuration: HotkeyConfiguration) -> [PlannedCombo] {
+        agentComboRegistrations(
+            for: configuration,
+            callbacks: AgentComboCallbacks(onSnapshot: { _ in }, onTextTap: {}, onVoiceTap: {},
+                                           onVoiceHoldStart: {}, onVoiceHoldEnd: {})
+        ).map {
+            PlannedCombo(combo: $0.combo, hotKeyIDValue: $0.hotKeyIDValue, google: $0.owner == .google,
+                         tapAction: $0.tapAction, holdEnabled: $0.holdEnabled)
+        }
+    }
+
+    /// Fires the planned registration's own controller as a press and
+    /// release, so a test sees which callback a combo really reaches.
+    static func tapPlannedComboForTesting(
+        _ combo: HotkeyTapCombo,
+        in configuration: HotkeyConfiguration,
+        agentText: @escaping Callback, agentVoice: @escaping Callback,
+        googleText: @escaping Callback, googleVoice: @escaping Callback
+    ) {
+        let callbacks = AgentComboCallbacks(
+            onSnapshot: { _ in }, onTextTap: agentText, onVoiceTap: agentVoice,
+            onVoiceHoldStart: {}, onVoiceHoldEnd: {},
+            onGoogleTextTap: googleText, onGoogleVoiceTap: googleVoice)
+        guard let registration = agentComboRegistrations(for: configuration, callbacks: callbacks)
+            .first(where: { $0.combo == combo }) else { return }
+        registration.controller.pressed()
+        registration.controller.released()
+    }
+    #endif
 
     private struct AgentComboCallbacks {
         let onSnapshot: SnapshotCallback
@@ -321,21 +396,36 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
         let onVoiceTap: Callback
         let onVoiceHoldStart: Callback
         let onVoiceHoldEnd: Callback
+        var onGoogleTextTap: Callback = {}
+        var onGoogleVoiceTap: Callback = {}
+        var onGoogleHoldStart: Callback = {}
+        var onGoogleHoldEnd: Callback = {}
     }
 
     private struct AgentComboRegistration {
         let combo: HotkeyTapCombo
         let hotKeyIDValue: UInt32
+        let owner: AgentComboRegistrationDraft.Owner
+        let tapAction: AgentComboGestureController.TapAction?
+        let holdEnabled: Bool
         let controller: AgentComboGestureController
     }
 
     private struct AgentComboRegistrationDraft {
+        enum Owner: Equatable { case agent, google }
+
         let combo: HotkeyTapCombo
+        let owner: Owner
         var tapAction: AgentComboGestureController.TapAction?
         var holdEnabled = false
 
         var hotKeyIDValue: UInt32 {
-            tapAction == .text ? CarbonHotkeyMonitor.agentTextHotKeyID : CarbonHotkeyMonitor.agentVoiceHotKeyID
+            switch owner {
+            case .agent:
+                return tapAction == .text ? CarbonHotkeyMonitor.agentTextHotKeyID : CarbonHotkeyMonitor.agentVoiceHotKeyID
+            case .google:
+                return tapAction == .text ? CarbonHotkeyMonitor.googleTextHotKeyID : CarbonHotkeyMonitor.googleVoiceHotKeyID
+            }
         }
     }
 }

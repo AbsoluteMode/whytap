@@ -94,6 +94,9 @@ final class CarbonHotkeyMonitor {
     static let toolHotKeyIDBase: UInt32 = 100
 
     static let meetingRecordHotKeyID: UInt32 = 18
+    /// Google search's text and voice shortcuts when they are key combos.
+    static let googleTextHotKeyID: UInt32 = 19
+    static let googleVoiceHotKeyID: UInt32 = 20
 
     /// kVK_Escape from Carbon HIToolbox/Events.h. Consumed by
     /// `EscapeCloseEventMonitor`'s bare-Escape predicate.

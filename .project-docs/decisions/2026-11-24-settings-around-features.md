@@ -126,7 +126,11 @@ accepted the second version.
 - Google search's shortcuts are saved now (`hotkeys.googleSearchTextShortcut`,
   `…VoiceShortcut`, `…VoiceGesture`, also in backup and settings sync). They
   never were: a change on its screen or in Hotkeys was dropped at once and the
-  key monitor kept Right Option (builder review of #458). An Agent turned on
+  key monitor kept Right Option (builder review of #458). A Google shortcut
+  saved as a key combo now registers like an Agent combo, with Google's own
+  callbacks and hot-key ids 19/20, and the Agent controller rebinds on a
+  Google-only change; the Right Option default stays on the modifier path
+  (builder review 537). An Agent turned on
   elsewhere clears the screen's earlier "why it did not turn on".
 
 ## Why

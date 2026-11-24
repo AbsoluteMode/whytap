@@ -45,14 +45,17 @@ extension FeatureSetupSnapshot {
             statuses[feature, default: .notSet] != .notSet
                 || models.sections(for: feature).contains { !$0.options.isEmpty || $0.acceptsModelName }
         })
+        let alternatives = Set(AIFeature.activeCases.filter { hasAlternative(in: models.sections(for: $0)) })
         return FeatureSetupSnapshot(
             dropMode: environment.dropMode(),
             models: statuses,
             selectableModels: selectable,
+            modelAlternatives: alternatives,
             subtitlesKeyPresent: models.audioTranslate.isActive,
             onDevice: environment.supportsOnDevice ? .available(environment.onDevice.status) : .unsupported,
             keyboardReady: permissions.keyboardReady,
             keyboardNeedsRestart: permissions.keyboardNeedsRestart,
+            keyboardSetup: permissions.settingsOnly ? permissions.keyboardSetup : nil,
             microphoneGranted: permissions.snapshot.microphoneGranted,
             screenRecordingGranted: permissions.screenRecordingGranted,
             screenNeedsRestart: permissions.screenNeedsRestart,
@@ -61,5 +64,21 @@ extension FeatureSetupSnapshot {
             meetingsOn: environment.meetingsOn(),
             googleOn: environment.googleOn()
         )
+    }
+
+    /// Whether the picker holds a model that would work instead of the
+    /// current one: another listed model the feature can use, or a typed
+    /// name, under a key the provider has not refused.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    static func hasAlternative(in sections: [PickerSection]) -> Bool {
+        sections.contains { section in
+            guard section.keyProblem == nil else { return false }
+            if section.acceptsModelName { return true }
+            return section.options.contains { option in
+                guard !option.isSelected else { return false }
+                if case .notSupported = option.state { return false }
+                return true
+            }
+        }
     }
 }

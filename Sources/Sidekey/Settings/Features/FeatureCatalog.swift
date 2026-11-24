@@ -156,6 +156,9 @@ enum FeatureSetupAction: Equatable {
     case chooseModel(AIFeature)
     /// No provider that can serve the feature has a key yet.
     case addKey(AIFeature)
+    /// The route's key is refused and no other model would work: the key
+    /// has to be fixed or replaced in API & Models.
+    case fixKey(AIFeature)
     case addOpenAIKey
     case allow(FeaturePermission)
     case openInputMonitoring
@@ -168,6 +171,7 @@ enum FeatureSetupAction: Equatable {
         case .useOnDeviceModel: return "Use the model on this Mac"
         case .chooseModel: return "Choose a model"
         case .addKey: return "Add a key"
+        case .fixKey: return "Fix the key"
         case .addOpenAIKey: return "Add an OpenAI key"
         case .allow(let permission): return "Allow \(permission.title)"
         case .openInputMonitoring: return "Open Input Monitoring"
@@ -271,13 +275,19 @@ struct FeatureSetupSnapshot: Equatable {
     var dropMode: TranscriptionMode = .fast
     /// The model row status of each route; a missing entry is `notSet`.
     var models: [AIFeature: ModelRowStatus] = [:]
-    /// Features some keyed provider could serve: "Choose a model" has a list.
+    /// Features whose model picker has a list at all (the dropdown is shown).
     var selectableModels: Set<AIFeature> = []
+    /// Features with a model that would work instead of the current route: a
+    /// listed model other than the selected one, or a typed name, under a key
+    /// that is not refused. Only then does "Choose a model" fix anything.
+    var modelAlternatives: Set<AIFeature> = []
     var subtitlesKeyPresent = false
     var onDevice: OnDeviceSpeechAvailability = .unsupported
     var keyboardReady = false
     /// macOS 27.3: the grant is made, a restart makes it work.
     var keyboardNeedsRestart = false
+    /// macOS 27.3: the current step of keyboard control; nil on older macOS.
+    var keyboardSetup: PermissionsSettingsViewModel.KeyboardSetup?
     var microphoneGranted = false
     var screenRecordingGranted = false
     var screenNeedsRestart = false
@@ -433,11 +443,15 @@ enum FeatureCatalog {
                                    detail: "Only for searching by voice.", optional: true),
             ]
         case .translateSubtitles:
+            // Two tools that start on their own: each needs only its own
+            // part, and either one alone is a working feature.
             return [
                 FeatureRequirement(kind: .model(.translation), title: "Text model for Translate",
-                                   detail: "Translates the text you type or paste."),
+                                   detail: "Translates the text you type or paste. Subtitles work without it.",
+                                   optional: true),
                 FeatureRequirement(kind: .subtitlesKey, title: "OpenAI key for Subtitles",
-                                   detail: "Live subtitles run only on OpenAI's live translation model.", optional: true),
+                                   detail: "Live subtitles run only on OpenAI's live translation model. Translate works without it.",
+                                   optional: true),
                 FeatureRequirement(kind: .permission(.systemAudio), title: FeaturePermission.systemAudio.title,
                                    detail: "Subtitles listen to your Mac's sound.", optional: true),
             ]
@@ -478,18 +492,23 @@ enum FeatureCatalog {
         case .notSet:
             return .unmet(reason: isSpeech ? "No speech-to-text model" : "No text model",
                           action: missingModelAction(feature, snapshot: snapshot))
+        // A set route that stopped working: "Choose a model" only when the
+        // picker holds a model that would work; a refused key with nothing
+        // else to pick is fixed at the key.
         case .keyProblem:
-            return .unmet(reason: "Its provider key isn't working", action: .chooseModel(feature))
+            return .unmet(reason: "Its provider key isn't working",
+                          action: snapshot.modelAlternatives.contains(feature) ? .chooseModel(feature) : .fixKey(feature))
         case .removedByProvider:
-            return .unmet(reason: "Its model was removed by the provider", action: .chooseModel(feature))
+            return .unmet(reason: "Its model was removed by the provider",
+                          action: missingModelAction(feature, snapshot: snapshot))
         case .notSupported(let reason):
-            return .unmet(reason: reason, action: .chooseModel(feature))
+            return .unmet(reason: reason, action: missingModelAction(feature, snapshot: snapshot))
         }
     }
 
     /// The free way first: the model on this Mac, where this Mac can run it
-    /// and the feature can use it. Otherwise a model of a keyed provider, or a
-    /// key when none can serve the feature.
+    /// and the feature can use it. Otherwise another model that would work,
+    /// or a key when no keyed provider offers one.
     private static func missingModelAction(_ feature: AIFeature, snapshot: FeatureSetupSnapshot) -> FeatureSetupAction? {
         if feature.modelUse(on: .onDevice) != nil, case .available(let status) = snapshot.onDevice {
             switch status {
@@ -499,7 +518,7 @@ enum FeatureCatalog {
             case .ready: return .useOnDeviceModel(feature)
             }
         }
-        return snapshot.selectableModels.contains(feature) ? .chooseModel(feature) : .addKey(feature)
+        return snapshot.modelAlternatives.contains(feature) ? .chooseModel(feature) : .addKey(feature)
     }
 
     private static func permissionState(_ permission: FeaturePermission,
@@ -507,8 +526,13 @@ enum FeatureCatalog {
         switch permission {
         case .keyboard:
             if snapshot.keyboardNeedsRestart { return .unmet(reason: "Restart Whytap", action: .restartWhytap) }
-            return snapshot.keyboardReady ? .met
-                : .unmet(reason: "Allow \(permission.title)", action: .allow(.keyboard))
+            if snapshot.keyboardReady { return .met }
+            // 27.3 with Override already on: the one step left is Input
+            // Monitoring, the same step Permissions shows.
+            if snapshot.keyboardSetup == .inputMonitoring {
+                return .unmet(reason: "Allow Input Monitoring", action: .openInputMonitoring)
+            }
+            return .unmet(reason: "Allow \(permission.title)", action: .allow(.keyboard))
         case .microphone:
             return snapshot.microphoneGranted ? .met
                 : .unmet(reason: "Allow the \(permission.title)", action: .allow(.microphone))
@@ -535,6 +559,11 @@ enum FeatureCatalog {
             return snapshot.microphoneGranted ? .unmet(reason: "Shortcut isn't heard", action: .retryShortcut)
                 : .waiting(reason: "Waits for the Microphone")
         case .inputMonitoringRequired:
+            // On 27.3 that grant is keyboard control's own last step, listed
+            // on its row; on older macOS it is this row's step.
+            if snapshot.keyboardSetup == .inputMonitoring, !snapshot.keyboardReady {
+                return .waiting(reason: "Waits for Input Monitoring")
+            }
             return .unmet(reason: "Allow Input Monitoring", action: .openInputMonitoring)
         case .shortcutInUse:
             return .unmet(reason: "Shortcut is in use", action: .retryShortcut)
@@ -558,6 +587,7 @@ enum FeatureCatalog {
         let info = info(for: feature)
         guard isOn(feature, snapshot: snapshot) else { return .off }
         let checks = checks(for: feature, snapshot: snapshot)
+        if feature == .translateSubtitles { return translateSubtitlesStatus(checks) }
         let missing = checks.filter(\.isBlocking)
         guard missing.isEmpty else {
             // An island tool the person never set up is not a problem to
@@ -566,6 +596,25 @@ enum FeatureCatalog {
             return .needsSetup(missing)
         }
         return .ready(note: readyNote(for: feature, checks: checks))
+    }
+
+    /// Translate and Subtitles start on their own, so the row says which one
+    /// works. System audio is asked by macOS later and never decides it.
+    private static func translateSubtitlesStatus(_ checks: [FeatureCheck]) -> FeatureStatus {
+        let tools = checks.filter { check in
+            switch check.requirement.kind {
+            case .model(.translation), .subtitlesKey: return true
+            default: return false
+            }
+        }
+        let translate = tools.first { $0.requirement.kind == .model(.translation) }?.state.isMet ?? false
+        let subtitles = tools.first { $0.requirement.kind == .subtitlesKey }?.state.isMet ?? false
+        switch (translate, subtitles) {
+        case (true, true): return .ready(note: nil)
+        case (true, false): return .ready(note: "Translate only")
+        case (false, true): return .ready(note: "Subtitles only")
+        case (false, false): return .notSetUp(tools.filter { !$0.state.isMet })
+        }
     }
 
     /// What a ready feature still cannot do, in two words.
@@ -588,37 +637,61 @@ enum FeatureCatalog {
     }
 
     /// What does not work until `check` is done, as one sentence for the
-    /// feature's screen.
-    static func consequence(of check: FeatureCheck, for feature: AppFeature) -> String {
+    /// feature's screen. An optional part names only what it serves, and an
+    /// alternative is offered only when it works now.
+    static func consequence(of check: FeatureCheck, for feature: AppFeature,
+                            snapshot: FeatureSetupSnapshot) -> String {
         let name = info(for: feature).name
         let subject = feature == .agent ? "The Agent" : name
         switch check.requirement.kind {
         case .model(.dropFast), .model(.dropSmart):
-            if case .unmet(_, .chooseModel) = check.state, snapshotIndependentBroken(check) {
-                return "Drop can’t type what you say: \(lowercasedFirst(check.reason ?? "its model needs attention"))."
+            // Which dictation stops: all of Drop in its active mode, or only
+            // the other mode (Fast, optional while Smart is on).
+            let who: String
+            if check.requirement.optional { who = "Fast mode" }
+            else if check.requirement.kind == .model(.dropSmart) { who = "Smart mode" }
+            else { who = "Drop" }
+            if isBroken(check) {
+                return "\(who) can’t type what you say: \(lowercasedFirst(check.reason ?? "its model needs attention"))."
             }
-            return "Drop can’t type what you say until it has a speech-to-text model."
+            if check.requirement.optional {
+                return "Fast mode can’t type what you say until it has its own speech-to-text model. Smart doesn’t use it."
+            }
+            return "\(who) can’t type what you say until it has a speech-to-text model."
         case .model(.dropSmartCleanup):
-            return "Smart mode can’t tidy your text until it has a text model. Switch to Fast to dictate now."
+            let tidy = "Smart mode can’t tidy your text until it has a text model."
+            return isFastWorking(snapshot) ? tidy + " Fast mode has a working model: switch to it to dictate without tidying." : tidy
         case .model(.agent):
             return "The Agent can’t answer until it has a text model that can use tools."
+        case .model(.agentVoice):
+            return "Talking to the Agent needs a speech-to-text model. Typing to it works without one."
+        case .model(.voiceSearch):
+            return "Searching by voice needs a speech-to-text model. Typed searches work without one."
         case .model(.meetings):
             return "Calls can’t be transcribed until you pick a speech-to-text model."
         case .model(.meetingNotes):
             return "Notes can’t be written until you pick a text model."
         case .model(.translation):
-            return "Translate can’t translate until it has a text model."
+            return "Translate can’t translate until it has a text model. Subtitles don’t use it."
         case .model:
             return "\(subject) can’t work until it has a model."
         case .subtitlesKey:
-            return "Subtitles can’t start until Whytap has an OpenAI key."
+            return "Subtitles can’t start until Whytap has an OpenAI key. Translate doesn’t need it."
         case .permission(.keyboard):
-            if case .unmet(_, .restartWhytap) = check.state {
+            switch check.state {
+            case .unmet(_, .restartWhytap):
                 return "Keyboard control is allowed. Restart Whytap to make it work."
+            case .unmet(_, .openInputMonitoring):
+                return "\(subject) can’t hear its shortcut until you allow Input Monitoring."
+            default:
+                return feature == .drop ? "Drop can’t type into other apps until you allow Keyboard control."
+                    : "\(subject) can’t paste its results until you allow Keyboard control."
             }
-            return feature == .drop ? "Drop can’t type into other apps until you allow Keyboard control."
-                : "\(subject) can’t paste its results until you allow Keyboard control."
         case .permission(.microphone):
+            if check.requirement.optional {
+                return feature == .agent ? "Talking to the Agent needs the Microphone. Typing to it works without it."
+                    : "Searching by voice needs the Microphone. Typed searches work without it."
+            }
             return "\(subject) can’t hear you until you allow the Microphone."
         case .permission(.screenRecording):
             if case .unmet(_, .restartWhytap) = check.state {
@@ -640,9 +713,14 @@ enum FeatureCatalog {
     }
 
     /// A set model that stopped working reads differently from no model.
-    private static func snapshotIndependentBroken(_ check: FeatureCheck) -> Bool {
-        guard let reason = check.reason else { return false }
+    private static func isBroken(_ check: FeatureCheck) -> Bool {
+        guard case .unmet(let reason, _) = check.state else { return false }
         return reason != "No speech-to-text model" && reason != "No text model"
+    }
+
+    /// Fast dictates right now: its speech model works.
+    private static func isFastWorking(_ snapshot: FeatureSetupSnapshot) -> Bool {
+        modelState(.dropFast, snapshot: snapshot).isMet
     }
 
     private static func lowercasedFirst(_ text: String) -> String {

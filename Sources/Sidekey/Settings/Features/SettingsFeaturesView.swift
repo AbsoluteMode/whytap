@@ -35,7 +35,15 @@ struct SettingsFeaturesView: View {
     var body: some View {
         let snapshot = snapshot
         Group {
-            FeatureListView(snapshot: snapshot) { selection.open($0) }
+            switch selection.shownFeature {
+            case .drop:
+                DropFeatureView(snapshot: snapshot, selection: selection, models: models,
+                                permissions: permissions, environment: environment)
+            // Features without their own screen yet open their present place
+            // (`SettingsWindowSelection.open`); the list stays underneath.
+            case .agent, .meetings, .googleSearch, .translateSubtitles, .screenshots, nil:
+                FeatureListView(snapshot: snapshot) { selection.open($0) }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .task {

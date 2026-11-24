@@ -105,6 +105,8 @@ struct FeaturesFixture {
         await controller.refresh()
         environment = FeaturesEnvironment(
             dropMode: { dropMode },
+            volumeDuck: VolumeDuckConfig(defaults: defaults),
+            autoStop: DropAutoStopPreferences(defaults: defaults),
             agentOn: { usual }, meetingsOn: { false }, googleOn: { usual },
             supportsOnDevice: state != .freshIntel,
             onDevice: controller,

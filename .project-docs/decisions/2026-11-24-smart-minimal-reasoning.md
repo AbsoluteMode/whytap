@@ -39,10 +39,28 @@ default: high effort with adaptive thinking on Claude Sonnet 5.5 and Fable,
 medium on Claude Opus 5.5, Haiku 5.5 and the current OpenAI reasoning models.
 
 On 2026-11-24 a Smart dictation of 8 seconds of speech (70 characters) on
-`anthropic` / `claude-sonnet-5-5` waited about 46 seconds, and the next one
-about 10, against the usual 1 to 4. The cause of that wait is not known: the
-only records were `os_log` lines at the info level, which the system log does
-not keep, and the direct Anthropic path logged nothing at all.
+`anthropic` / `claude-sonnet-5-5` waited about 46 seconds, and a later one
+about a minute, against the usual 1 to 4. The maintainer asked whether Smart
+ran with long reasoning and asked for the minimum.
+
+Reasoning was not the cause of those two waits. The system log of the running
+app (CFNetwork lines, default level) shows that Anthropic answered both
+requests in 2.6 to 2.8 seconds. The Mac sends its traffic through a local
+system proxy (127.0.0.1:7897), and for about a minute each time that proxy
+opened no new outbound connection: the first Smart request went to an idle
+connection that was already dead and failed after 9 seconds with "network
+connection lost" (a POST is not resent by the system), the island showed
+"Smart unavailable" with Retry, and the retried request waited 31 and 9
+seconds for the proxy before it was sent. In the second case the live
+ElevenLabs stream stalled the same way (the session stopped the take after
+12 seconds without progress) and the batch upload of the retained audio never
+connected within its 30-second deadline. The app's own timing lines were
+missing from that log because they were written at the info level, and the
+direct Anthropic path wrote none.
+
+The request stands on its own: without a setting the models do reason on this
+task (16 to 640 reasoning tokens per dictation on OpenAI, see the table
+below), and that time is spent on every dictation.
 
 ## Decision
 
@@ -90,10 +108,11 @@ not keep, and the direct Anthropic path logged nothing at all.
   field was refused), and a failed request writes its status and
   milliseconds. Model IDs are logged for OpenRouter, OpenAI and Anthropic
   only; a user's own server stays `custom`. No text, key, URL or error body.
-  Read them with:
+  Read them with the system tool by its full path (in zsh a bare `log` is
+  a shell builtin and prints nothing useful):
 
   ```bash
-  log show --last 2d --predicate 'subsystem == "com.rootwise.sidekey" AND (category == "cleanup-llm" OR eventMessage CONTAINS "drop processing" OR eventMessage CONTAINS "drop turn")'
+  /usr/bin/log show --last 2d --predicate 'subsystem == "com.rootwise.sidekey" AND (category == "cleanup-llm" OR eventMessage CONTAINS "drop processing" OR eventMessage CONTAINS "drop turn")'
   ```
 
 ## Why
@@ -167,5 +186,9 @@ left as a follow-up.
   store (or a schema change inside the backed-up Costs history) for what the
   system log already keeps for days.
 - Streaming the answer or changing the Smart prompt: outside this task.
+- Resending a Smart request automatically after "network connection lost":
+  it would have saved the manual Retry in both cases above, but it sends a
+  paid request twice when only the answer was lost. Left to the maintainer
+  as a separate decision.
 
 2026-11-24, branch `claude/quizzical-cannon-53ee1d`.

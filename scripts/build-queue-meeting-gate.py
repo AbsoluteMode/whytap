@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Read-only, fail-closed meeting check for the local build queue. No audio capture."""
+"""Read-only, fail-closed meeting check for the local build queue. No audio capture.
+
+WHY: .project-docs/decisions/2026-11-24-meeting-gate-whytap-activity.md
+"""
 import json
 import subprocess
 import sys
@@ -34,7 +37,8 @@ def main():
         now = datetime.now(timezone.utc)
         status, reason = evaluate(report, now)
         evidence = {'status': status, 'reason': reason, 'observed_at': report['observed_at'],
-                    'sample_count': len(report['samples']), 'audio_captured': False}
+                    'sample_count': len(report['samples']), 'audio_captured': False,
+                    'samples': [s['reason'] for s in report['samples']]}
     except (OSError, subprocess.TimeoutExpired, ValueError, KeyError, TypeError):
         status = 'unknown'
         evidence = {'status': status, 'reason': 'probe_failed_or_timed_out',

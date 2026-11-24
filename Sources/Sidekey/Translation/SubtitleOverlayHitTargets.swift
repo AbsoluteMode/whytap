@@ -15,11 +15,9 @@ import SwiftUI
 /// shown. Leaving the button, hiding the panel or a new mode cancels it for
 /// good, and its mouse-up is still consumed.
 ///
-/// A click on the translation column (`copy`) copies the translation. It
-/// acts on a mouse-up within `clickSlop` of its mouse-down; a press that moves
-/// further drags the panel, which is movable by its background. A click level
-/// with × or the session button is theirs, never a copy (while running, the
-/// controls cover the caption's top).
+/// A click on the text translation (`copy`) copies it. The press is only
+/// watched and goes on to the selectable text, so a drag still selects part of
+/// it: a mouse-up within `clickSlop` of a single click's mouse-down copies.
 // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
 // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
 @MainActor
@@ -28,9 +26,6 @@ final class SubtitleOverlayHitTargets: ObservableObject {
 
     /// How far a press on the translation may move and still be a click.
     static let clickSlop: CGFloat = 3
-
-    /// Moves the panel when a press on the translation becomes a drag.
-    var startWindowDrag: (NSEvent, NSWindow) -> Void = { event, window in window.performDrag(with: event) }
 
     /// The control under a press that would still act, for its pressed look.
     @Published private(set) var pressed: Control?
@@ -44,7 +39,7 @@ final class SubtitleOverlayHitTargets: ObservableObject {
     }
     private var reporters: [Control: Entry] = [:]
     private var press: Press?
-    /// A press on the translation that has not moved yet.
+    /// A watched press on the translation that has not moved yet.
     private var copyPress: (view: SubtitleOverlayHitReporterView, start: CGPoint)?
     /// The current mouse-down was ours: its drags and mouse-up are consumed.
     private var consumes = false
@@ -134,20 +129,16 @@ final class SubtitleOverlayHitTargets: ObservableObject {
                 consumes = true
                 return true
             }
-            // Control-click is the context menu's; a double click selects a word.
-            guard !event.modifierFlags.contains(.control), event.clickCount <= 1,
-                  frame(of: .copy, in: window)?.contains(point) == true, let view = shownView(.copy, in: window),
-                  !buttons.contains(where: { control in
-                      frame(of: control, in: window).map { point.y >= $0.minY - 6 && point.y <= $0.maxY + 6 } == true
-                  }) else { return false }
-            copyPress = (view, point)
-            // Selectable text keeps its mouse for selecting a part.
-            consumes = !view.passive
-            return consumes
+            // Control-click is the context menu's; a double click selects a
+            // word. The text keeps the press either way.
+            if !event.modifierFlags.contains(.control), event.clickCount <= 1,
+               frame(of: .copy, in: window)?.contains(point) == true, let view = shownView(.copy, in: window) {
+                copyPress = (view, point)
+            }
+            return false
         case .leftMouseDragged:
             if let copyPress, hypot(point.x - copyPress.start.x, point.y - copyPress.start.y) > Self.clickSlop {
                 self.copyPress = nil
-                if consumes { startWindowDrag(event, window) }
             }
             guard consumes else { return false }
             if press != nil, !pressHolds(at: point, in: window) { cancelPress() }
@@ -179,16 +170,12 @@ final class SubtitleOverlayHitReporterView: NSView {
     /// never fires an action other than the one it began on.
     var action: String
     var activate: () -> Void
-    /// The press also goes to the view under it (selectable text): it is
-    /// only watched, so a drag still selects part of the text.
-    var passive: Bool
 
     init(control: SubtitleOverlayHitTargets.Control, targets: SubtitleOverlayHitTargets?, action: String,
-         passive: Bool = false, activate: @escaping () -> Void) {
+         activate: @escaping () -> Void) {
         self.control = control
         self.targets = targets
         self.action = action
-        self.passive = passive
         self.activate = activate
         super.init(frame: .zero)
     }
@@ -209,17 +196,14 @@ struct SubtitleOverlayHitReporter: NSViewRepresentable {
     let control: SubtitleOverlayHitTargets.Control
     let targets: SubtitleOverlayHitTargets?
     let action: String
-    var passive = false
     let activate: () -> Void
 
     func makeNSView(context: Context) -> SubtitleOverlayHitReporterView {
-        SubtitleOverlayHitReporterView(control: control, targets: targets, action: action, passive: passive,
-                                       activate: activate)
+        SubtitleOverlayHitReporterView(control: control, targets: targets, action: action, activate: activate)
     }
 
     func updateNSView(_ view: SubtitleOverlayHitReporterView, context: Context) {
         view.action = action
-        view.passive = passive
         view.activate = activate
         if view.window != nil { targets?.register(view) }
     }

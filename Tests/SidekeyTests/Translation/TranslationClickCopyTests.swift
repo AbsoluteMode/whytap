@@ -3,8 +3,8 @@ import SwiftUI
 @testable import Sidekey
 import XCTest
 
-/// A click on a translation copies all of it and says "Copied ✓" for a
-/// second. Real mouse events go to the real panel, placed far outside every
+/// A click on the Translate palette's translation copies all of it and says
+/// "Copied ✓" for a second. Real mouse events go to the real panel, placed far outside every
 /// screen, and copies land on a private pasteboard, never the user's.
 // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
 @MainActor
@@ -159,16 +159,16 @@ final class TranslationClickCopyTests: XCTestCase {
         XCTAssertNil(controller.hitTargets.frame(of: .copy, in: controller.window))
     }
 
-    // MARK: Subtitles
-
-    /// A stopped session with pairs in the 760 x 190 pt overlay.
-    private func stoppedOverlay() async throws -> (TranslationWindowController, LiveSubtitleModel) {
+    /// Subtitles stay as they were: no click-to-copy target in the overlay,
+    /// and a click on its caption copies nothing (the user's choice).
+    func testSubtitlesDoNotCopyOnClick() async throws {
         let speech = FakeSpeechTranslation()
         let model = LiveSubtitleModel(flushInterval: .milliseconds(5), makeAudio: { FixtureSubtitleAudio() },
                                       openTranslator: { _, _ in speech })
         model.sourceCode = "en"
         model.targetCode = "ru"
         let controller = try controller(subtitles: model)
+        defer { controller.dismiss() }
         model.start()
         for _ in 0..<200 where model.phase != .listening { try await Task.sleep(for: .milliseconds(5)) }
         speech.yieldRecorded(until: 20_000)
@@ -176,62 +176,11 @@ final class TranslationClickCopyTests: XCTestCase {
         model.stop()
         for _ in 0..<400 where model.phase != .idle { try await Task.sleep(for: .milliseconds(10)) }
         showOffScreen(controller, .subtitles, size: NSSize(width: 760, height: 190))
-        return (controller, model)
-    }
-
-    /// A click on the translation column copies every translated phrase;
-    /// the original's column and the controls do not.
-    func testClickingTheSubtitleTranslationCopiesTheWholeTranslation() async throws {
-        let (controller, model) = try await stoppedOverlay()
-        defer { controller.dismiss() }
         let panel = controller.window
-        XCTAssertFalse(panel.isKeyWindow, "the overlay never takes focus from the video")
-        let expected = TranslationView.subtitleTranslation(model.lines)
-        XCTAssertFalse(expected.isEmpty)
-        XCTAssertEqual(expected, model.lines.compactMap(\.translation).joined(separator: "\n\n"))
-
-        let column = try XCTUnwrap(controller.hitTargets.frame(of: .copy, in: panel))
+        XCTAssertTrue(model.lines.contains { $0.translation != nil })
+        XCTAssertNil(controller.hitTargets.frame(of: .copy, in: panel))
         let content = try XCTUnwrap(panel.contentView).bounds
-        XCTAssertGreaterThan(column.minX, content.width * 0.3, "the original's column is not a copy target")
-        let close = try XCTUnwrap(controller.hitTargets.frame(of: .close, in: panel))
-        XCTAssertFalse(column.intersects(close))
-
-        // The original does nothing.
-        try click(panel, at: NSPoint(x: column.minX - 40, y: column.midY))
-        XCTAssertNil(copied)
-        XCTAssertTrue(panel.isVisible)
-
-        try click(panel, at: NSPoint(x: column.midX, y: column.midY))
-        XCTAssertEqual(copied, expected)
-        XCTAssertTrue(controller.copier.copied)
-        settle(0.3)
-        try snapshot(panel, "click-copy-subtitles")
-        try await Task.sleep(for: .milliseconds(1_300))
-        XCTAssertFalse(controller.copier.copied)
-        XCTAssertTrue(panel.isVisible, "copying keeps the overlay open")
-    }
-
-    /// The overlay is moved by dragging it: a press on the translation that
-    /// moves becomes a window drag and copies nothing.
-    func testDraggingTheSubtitlesMovesTheOverlayInsteadOfCopying() async throws {
-        let (controller, _) = try await stoppedOverlay()
-        defer { controller.dismiss() }
-        let panel = controller.window
-        var drags = 0
-        controller.hitTargets.startWindowDrag = { _, _ in drags += 1 }
-        let column = try XCTUnwrap(controller.hitTargets.frame(of: .copy, in: panel))
-        let start = NSPoint(x: column.midX, y: column.midY)
-
-        XCTAssertTrue(controller.hitTargets.handle(try mouse(.leftMouseDown, at: start, in: panel), in: panel))
-        XCTAssertTrue(controller.hitTargets.handle(
-            try mouse(.leftMouseDragged, at: NSPoint(x: start.x + 2, y: start.y), in: panel), in: panel),
-            "a tremor is still a click")
-        XCTAssertEqual(drags, 0)
-        XCTAssertTrue(controller.hitTargets.handle(
-            try mouse(.leftMouseDragged, at: NSPoint(x: start.x + 30, y: start.y + 10), in: panel), in: panel))
-        XCTAssertEqual(drags, 1, "the press became a window drag")
-        XCTAssertTrue(controller.hitTargets.handle(
-            try mouse(.leftMouseUp, at: NSPoint(x: start.x + 30, y: start.y + 10), in: panel), in: panel))
+        try click(panel, at: NSPoint(x: content.width * 0.7, y: 50))
         XCTAssertNil(copied)
         XCTAssertFalse(controller.copier.copied)
     }

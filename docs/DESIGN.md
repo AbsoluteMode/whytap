@@ -1796,6 +1796,10 @@ the horizontal division without an extra border or inset field container; the
 native caret indicates input focus.
 Use a borderless rounded text panel to remove the empty title bar and native rim.
 Secondary text on the dark fixture remains 5.45:1.
+A click on the result copies the whole translation and shows a "Copied ✓"
+capsule (12pt semibold, 72% black) at its bottom-right corner for 1 s; a drag
+still selects part of it (2026-11-24, user request). Subtitles do not copy on
+click.
 Loading, empty, over-limit and failure messages replace the second row rather
 than adding rows. Setup failures are actionable with full-area hover/press and
 keyboard focus feedback. Long source text stays in the native horizontal field;
@@ -1834,10 +1838,7 @@ Models) replaces the caption. One row inside the box holds source → target,
 Start/Stop (Cancel while connecting/finishing) and ×; it shows while idle and on
 hover while running, easing over 0.15 s (none with Reduce Motion). No title,
 mode switch, labels, audio status, Original/Follow, empty-state screen or
-footer. Copy translation, Clear and Translate text live in the context menu;
-a click on the translation column copies too and shows a "Copied ✓" capsule
-at the caption's bottom-right corner for 1 s (the palette shows it at the
-result's corner).
+footer. Copy translation, Clear and Translate text live in the context menu.
 Showing subtitles does not make the panel key. Toolbox shows the same row and
 box (15 pt caption) only when there is text. Offscreen renders cover idle,
 result and Toolbox listening; hover and live focus are unverified. WHY:

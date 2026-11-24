@@ -84,8 +84,9 @@ enum SmartDirectReasoning {
     }
 }
 
-/// Models whose provider refused a Smart reasoning field while this app runs:
-/// they get no field again until relaunch, so one refusal costs one extra
+/// Models whose provider refused a Smart reasoning field and then accepted
+/// the same request without it, while this app runs: they get no field again
+/// until relaunch, so one refusal costs one extra
 /// request, not one per dictation. Nothing is stored on disk.
 final class SmartReasoningRefusals: @unchecked Sendable {
     static let shared = SmartReasoningRefusals()

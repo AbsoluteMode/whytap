@@ -274,16 +274,22 @@ struct OpenRouterLLMClient: OpenRouterLLMClienting {
         var (data, response) = try await send()
         var refusedEffort = false
         if directEffort != nil, (response as? HTTPURLResponse)?.statusCode == 400 {
-            // The model refused the request with the field: it goes once more
-            // exactly as before this policy, and the model gets no field again.
-            reasoningRefusals.record(.openAI, model: trimmedModel)
+            // The request goes once more exactly as before this policy. Only
+            // when that works was the field the reason, and the model gets no
+            // field again; a request refused both ways (too long an input, a
+            // model that is gone) says nothing about the field.
             refusedEffort = true
             try Task.checkCancellation()
             request.httpBody = try body(effort: nil)
             (data, response) = try await send()
+            if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
+                reasoningRefusals.record(.openAI, model: trimmedModel)
+            }
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
-        let logsModel = endpoint.sendsOpenRouterHeaders || endpoint.textAPI == .openAI
+        // A fine-tuned ID carries the organization and a name the user chose.
+        let logsModel = endpoint.sendsOpenRouterHeaders
+            || (endpoint.textAPI == .openAI && !trimmedModel.lowercased().hasPrefix("ft:"))
         let effortLabel = reasoning?.diagnosticLabel ?? (refusedEffort ? nil : directEffort) ?? "default"
         if isDictation, let status = (response as? HTTPURLResponse)?.statusCode, !(200..<300).contains(status) {
             os_log("cleanup failed model=%{public}@ effort=%{public}@ status=%{public}d llm_ms=%{public}d effort_refused=%{public}d",

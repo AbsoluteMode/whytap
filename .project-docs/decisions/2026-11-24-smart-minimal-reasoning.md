@@ -96,9 +96,10 @@ below), and that time is spent on every dictation.
 - **A refused field never costs the dictation.** When a request that carried
   one of these fields comes back with HTTP 400 (422 on Anthropic too), the
   same request goes once more without the fields, exactly as before this
-  decision, and the model gets no field again until the app is relaunched
-  (`SmartReasoningRefusals`, memory only). A second refusal is the error it
-  was before: a rejected input, or a refused model with its badge. A key
+  decision. When that repeat succeeds, the model gets no field again until
+  the app is relaunched (`SmartReasoningRefusals`, memory only). A second
+  refusal is the error it was before (a rejected input, or a refused model
+  with its badge) and changes nothing for the next dictation. A key
   error, a rate limit, an outage and a connection failure are not repeated.
 - **Timings survive.** The numeric lines `cleanup …` (category `cleanup-llm`),
   `drop processing ok …` and `drop turn … completed …` are logged at the
@@ -107,7 +108,7 @@ below), and that time is spent on every dictation.
   setting, HTTP status, milliseconds, output and thinking tokens, whether the
   field was refused), and a failed request writes its status and
   milliseconds. Model IDs are logged for OpenRouter, OpenAI and Anthropic
-  only; a user's own server stays `custom`. No text, key, URL or error body.
+  only; a user's own server and a fine-tuned OpenAI model stay `custom`. No text, key, URL or error body.
   Read them with the system tool by its full path (in zsh a bare `log` is
   a shell builtin and prints nothing useful):
 
@@ -212,4 +213,4 @@ stayed in the text.
   paid request twice when only the answer was lost. Left to the maintainer
   as a separate decision.
 
-2026-11-24, branch `claude/quizzical-cannon-53ee1d`.
+2026-11-24, branch `claude/smart-minimal-reasoning`; an independent review's finding (a request refused both ways must not mark the model) folded in the same day.

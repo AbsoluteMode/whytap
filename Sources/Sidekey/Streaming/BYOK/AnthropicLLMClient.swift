@@ -48,14 +48,17 @@ extension OpenRouterLLMClient {
         try Task.checkCancellation()
         var refused = false
         if reasoning != nil, let status = (response as? HTTPURLResponse)?.statusCode, status == 400 || status == 422 {
-            // The model refused the request with these fields: it goes once
-            // more exactly as before this policy, and gets no field again.
-            reasoningRefusals.record(.anthropic, model: model)
+            // The request goes once more exactly as before this policy. Only
+            // when that works were the fields the reason, and the model gets
+            // none again; an input refused both ways says nothing about them.
             refused = true
             reasoning = nil
             request.httpBody = try body(nil)
             (data, response) = try await session.data(for: request)
             try Task.checkCancellation()
+            if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
+                reasoningRefusals.record(.anthropic, model: model)
+            }
         }
         let requestMs = Int((ProcessInfo.processInfo.systemUptime - requestStarted) * 1000)
         guard let http = response as? HTTPURLResponse else {

@@ -217,6 +217,7 @@ final class SmartMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(bodies.map { $0["reasoning_effort"] as? String }, ["none", nil])
         XCTAssertEqual(bodies[1]["model"] as? String, "gpt-5.5", "The retry keeps the chosen model")
         XCTAssertNil(checks.refusedModel(for: .dropSmartCleanup), "The model works: no refusal badge")
+        XCTAssertTrue(refusals.contains(.openAI, model: "gpt-5.5"))
 
         let second = try await dictate(processor)
         XCTAssertEqual(second.text, Self.cleaned)
@@ -260,6 +261,15 @@ final class SmartMinimalReasoningTests: XCTestCase {
         }
         XCTAssertEqual(bodies.count, 2)
         XCTAssertNil(checks.refusedModel(for: .dropSmartCleanup))
+
+        // The input was the problem, not the fields: the next dictation
+        // still asks for minimal reasoning.
+        XCTAssertFalse(refusals.contains(.anthropic, model: "claude-sonnet-5-5"))
+        bodies = []
+        provider { _, _ in (200, Self.anthropicReply) }
+        _ = try await dictate(smart())
+        XCTAssertEqual(bodies.count, 1)
+        XCTAssertEqual(bodies[0]["thinking"] as? [String: String], ["type": "between_tools"])
     }
 
     /// An outage, a bad key or a rate limit is not retried and changes nothing
@@ -313,6 +323,7 @@ final class SmartMinimalReasoningTests: XCTestCase {
         }
         XCTAssertEqual(bodies.count, 2)
         XCTAssertEqual(checks.refusedModel(for: .dropSmartCleanup), "gpt-5.5")
+        XCTAssertFalse(refusals.contains(.openAI, model: "gpt-5.5"), "The field was not the reason")
     }
 
     // MARK: Routes that must not change

@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/SmartMinimalReasoningTests.swift
     confirmed_at: 2026-11-24
-related: [2026-09-07-smart-latency.md, 2026-11-23-agent-low-effort.md]
+related: [2026-09-07-smart-latency.md, 2026-11-23-agent-low-effort.md, 2026-11-24-agent-minimal-reasoning.md]
 ---
 
 # Drop Smart: minimal reasoning on direct routes

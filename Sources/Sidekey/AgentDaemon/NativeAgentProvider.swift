@@ -14,6 +14,7 @@ final class NativeAgentProvider: CLIProvider {
     private let usageSink: (AIUsageEvent) -> Void
     private let diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
     private let http: NativeAgentHTTP
+    private let reasoningRefusals: SmartReasoningRefusals
     private let workspace: () throws -> URL
     private let appControl: @MainActor () -> NativeAgentAppControl.Handler?
 
@@ -21,8 +22,10 @@ final class NativeAgentProvider: CLIProvider {
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
          appControl: @escaping @MainActor () -> NativeAgentAppControl.Handler? = { NativeAgentAppControl.installed },
          usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
-         diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record) {
+         diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record,
+         reasoningRefusals: SmartReasoningRefusals = NativeAgentEffort.refusals) {
         self.keys = keys; self.http = http; self.workspace = workspace; self.usageSink = usageSink
+        self.reasoningRefusals = reasoningRefusals
         self.appControl = appControl
         self.diagnosticsSink = diagnosticsSink
     }
@@ -110,6 +113,7 @@ final class NativeAgentProvider: CLIProvider {
                                      history: history, prompt: prompt, http: http, usageSink: usageSink,
                                      diagnosticsSink: diagnosticsSink)
         model.builtInSearch = search.isBuiltIn
+        model.reasoningRefusals = reasoningRefusals
         let turn = UUID().uuidString
         continuation.yield(.started(turnId: turn, requestId: turn, sessionId: conversation.id))
         // Completion is one validated tool object, never free text beside cards.

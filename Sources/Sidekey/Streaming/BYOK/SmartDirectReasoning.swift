@@ -7,7 +7,9 @@ import Foundation
 /// with the field goes again without it. OpenRouter keeps its catalog policy
 /// (`OpenRouterReasoningPolicy`); custom servers, translation and meetings get
 /// nothing from here. The model and provider are never changed.
+/// The built-in Agent reads the same tables (`NativeAgentEffort`).
 // WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
+// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
 enum SmartDirectReasoning {
     /// `reasoning_effort` for direct OpenAI Chat Completions, or `nil` to send
     /// none. Values are what each model accepted on 2026-11-24:

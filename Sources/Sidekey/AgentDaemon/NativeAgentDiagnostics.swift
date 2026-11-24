@@ -29,6 +29,12 @@ enum NativeAgentDiagnostics {
         /// match; no provider text is kept.
         /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
         let rejectsWebSearch: Bool?
+        /// The provider's error names a reasoning setting (`reasoning`,
+        /// `thinking`, `effort`, `output_config`) in its message, its `param`
+        /// or the upstream text OpenRouter quotes. A keyword hint: it allows
+        /// one repeat of the request without those fields and nothing else.
+        /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+        let namesReasoning: Bool?
 
         /// Affirmative, tool-specific evidence only; an ambiguous error stays
         /// on the selected route. Only the provider's own `message` counts
@@ -137,6 +143,8 @@ enum NativeAgentDiagnostics {
             let text = [error?["message"] as? String, metadata?["raw"] as? String]
                 .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
+            let named = text + " " + (error?["param"] as? String ?? "").prefix(200).lowercased()
+            namesReasoning = ["reasoning", "thinking", "effort", "output_config"].contains(where: named.contains)
             rejectsWebSearch = Self.refusesWebSearch(error: error, category: category, searchToolIndex: searchToolIndex)
             self.truncated = truncated
             parsed = object != nil
@@ -202,8 +210,14 @@ enum NativeAgentDiagnostics {
             missingResults = callIDs.subtracting(resultIDs).count
         }
     }
-    /// The level the request asked for; `nil` when none was sent.
-    enum Effort: String, Codable { case low }
+    /// The reasoning level the request asked for; `nil` when none was sent.
+    /// `noReasoning` is the provider's own level `none`; `off` is OpenRouter's
+    /// `reasoning.enabled: false`.
+    enum Effort: String, Codable {
+        case noReasoning = "none", minimal, low, medium, high, xhigh, max, off
+    }
+    /// Anthropic `thinking.type` the request sent; `nil` when none was sent.
+    enum Thinking: String, Codable { case disabled, betweenTools = "between_tools" }
     /// Token counts the provider reported for one response; a count it did
     /// not report stays `nil`. Counts only, never content.
     struct Usage: Codable, Equatable {
@@ -248,6 +262,10 @@ enum NativeAgentDiagnostics {
         let failure: Failure?
         let finish: Finish?
         var effort: Effort? = nil
+        var thinking: Thinking? = nil
+        /// This request repeats the previous one without the reasoning fields
+        /// the provider refused.
+        var effortRetry: Bool? = nil
         var usage: Usage? = nil
 
         var json: String? {
@@ -263,6 +281,8 @@ enum NativeAgentDiagnostics {
         let toolsCount: Int
         let outputLimit: Int
         var effort: Effort? = nil
+        var thinking: Thinking? = nil
+        var effortRetry: Bool? = nil
         let sink: (Event) -> Void
         private let started = ContinuousClock.now
 
@@ -275,7 +295,8 @@ enum NativeAgentDiagnostics {
                 scope: .agent,
                 pinned: pinned, toolsCount: toolsCount, outputLimit: outputLimit, stage: stage,
                 status: status, bytes: bytes, elapsedMS: Int(elapsed.seconds * 1000 + elapsed.attoseconds / 1_000_000_000_000_000),
-                shape: shape, error: error, failure: failure, finish: finish, effort: effort, usage: usage))
+                shape: shape, error: error, failure: failure, finish: finish, effort: effort, thinking: thinking, effortRetry: effortRetry,
+                usage: usage))
         }
     }
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "native-agent")

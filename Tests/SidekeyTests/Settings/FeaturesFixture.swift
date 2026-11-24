@@ -155,13 +155,16 @@ struct FeaturesFixture {
     }
 
     /// The whole Settings shell on `tab`.
-    func shell(selection: SettingsWindowSelection) -> SettingsWindowView {
+    func shell(selection: SettingsWindowSelection, lilBro: LilBroController? = nil) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
             selection: selection, agentModeViewModel: agent,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
-            featuresEnvironment: environment)
+            featuresEnvironment: environment,
+            lilBro: lilBro ?? LilBroController(selection: selection,
+                                               preferences: LilBroPreferences(defaults: defaults),
+                                               reduceMotion: { true }))
     }
 
     /// Draws `view` in a window that never reaches the screen and returns the

@@ -1,0 +1,102 @@
+import SwiftUI
+
+/// A place in the Settings window that Lil Bro knows by name: where he lives,
+/// a sidebar row, a feature's row in the list, the detail pane.
+enum LilBroSpot: Hashable {
+    /// The "Lil Bro" entry at the bottom of the sidebar: his home.
+    case home
+    case sidebar
+    case pane
+    case tab(SettingsWindowTab)
+    case feature(AppFeature)
+}
+
+/// The window as Lil Bro sees it: named spots and the blocks (cards) he can
+/// stand on, all in the Settings shell's coordinates. Built from what the
+/// views report about themselves, so it follows every screen without those
+/// screens knowing about him.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+struct LilBroMap: Equatable {
+    var bounds: CGRect = .zero
+    var spots: [LilBroSpot: CGRect] = [:]
+    /// Every card on screen, visible or scrolled away.
+    var blocks: [CGRect] = []
+
+    /// Where a block's top edge can be stood on: inside the visible pane or
+    /// sidebar, not under the title bar or below the bottom.
+    var platforms: [CGRect] {
+        let areas = [spots[.pane], spots[.sidebar]].compactMap { $0 }
+        return blocks.compactMap { block in
+            for area in areas where block.minY >= area.minY + 6 && block.minY <= area.maxY - 40 {
+                let clipped = CGRect(x: max(block.minX, area.minX), y: block.minY,
+                                     width: min(block.maxX, area.maxX) - max(block.minX, area.minX),
+                                     height: block.height)
+                if clipped.width >= 60 { return clipped }
+            }
+            return nil
+        }
+    }
+
+    /// The top edge of a spot, if it is on screen.
+    func visible(_ spot: LilBroSpot) -> CGRect? {
+        guard let rect = spots[spot], rect.width > 0 else { return nil }
+        let areas = [spots[.pane], spots[.sidebar]].compactMap { $0 }
+        guard areas.isEmpty || areas.contains(where: { rect.minY >= $0.minY + 2 && rect.minY <= $0.maxY - 20 })
+        else { return nil }
+        return rect
+    }
+
+    /// The line he stands on at home: the top of his sidebar entry.
+    var home: CGRect? { spots[.home] }
+
+    /// Where he waits at home: on the entry, near its right end.
+    var homeStand: CGPoint {
+        guard let home else { return CGPoint(x: 60, y: max(bounds.maxY - 10, 0)) }
+        return CGPoint(x: home.maxX - 34, y: home.minY + 1)
+    }
+
+    /// The lowest line he can always drop to: the bottom of the window.
+    var floorY: CGFloat { max(bounds.maxY - 6, 0) }
+
+    /// The platform under a point he stands on, if any.
+    func platform(under point: CGPoint) -> CGRect? {
+        if let home, abs(home.minY - point.y) < 4, point.x >= home.minX - 2, point.x <= home.maxX + 2 { return home }
+        return platforms.first { abs($0.minY - point.y) < 4 && point.x >= $0.minX - 2 && point.x <= $0.maxX + 2 }
+    }
+}
+
+enum LilBroSpace {
+    static let name = "lilBro.window"
+}
+
+struct LilBroSpotsKey: PreferenceKey {
+    static let defaultValue: [LilBroSpot: CGRect] = [:]
+    static func reduce(value: inout [LilBroSpot: CGRect], nextValue: () -> [LilBroSpot: CGRect]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+struct LilBroBlocksKey: PreferenceKey {
+    static let defaultValue: [CGRect] = []
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+extension View {
+    /// Tells Lil Bro where this view is, by name.
+    func lilBroSpot(_ spot: LilBroSpot) -> some View {
+        background(GeometryReader { proxy in
+            Color.clear.preference(key: LilBroSpotsKey.self,
+                                   value: [spot: proxy.frame(in: .named(LilBroSpace.name))])
+        })
+    }
+
+    /// Tells Lil Bro this view is a block he can stand on.
+    func lilBroBlock() -> some View {
+        background(GeometryReader { proxy in
+            Color.clear.preference(key: LilBroBlocksKey.self,
+                                   value: [proxy.frame(in: .named(LilBroSpace.name))])
+        })
+    }
+}

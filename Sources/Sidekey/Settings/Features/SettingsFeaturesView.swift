@@ -173,6 +173,7 @@ struct FeatureListRow: View {
         }
         .buttonStyle(MacButtonInteractionStyle(focused: focused))
         .focused($focused)
+        .lilBroSpot(.feature(info.feature))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(info.name)
         .accessibilityValue(Self.accessibilityValue(info: info, status: status))

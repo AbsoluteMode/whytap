@@ -27,6 +27,9 @@ struct SettingsWindowView: View {
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
+    /// Lil Bro, the guide drawn over the window.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    @StateObject private var lilBro: LilBroController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedSidebarControl: String?
 
@@ -48,7 +51,8 @@ struct SettingsWindowView: View {
         otherOnGoogleToggle: @escaping (Bool) -> Void = { _ in },
         privacyPreferences: PrivacyPreferences? = nil,
         screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
-        featuresEnvironment: FeaturesEnvironment? = nil
+        featuresEnvironment: FeaturesEnvironment? = nil,
+        lilBro: LilBroController? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
@@ -65,6 +69,7 @@ struct SettingsWindowView: View {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
+        _lilBro = StateObject(wrappedValue: lilBro ?? LilBroController(selection: selection))
     }
 
     /// The live environment: this window's own switches and Drop mode.
@@ -103,7 +108,16 @@ struct SettingsWindowView: View {
 
             detailPane
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .lilBroSpot(.pane)
         }
+        // The overlay goes inside the named space, so it shares the
+        // coordinates the rows and cards report.
+        .overlay { LilBroLayer(controller: lilBro) }
+        .coordinateSpace(name: LilBroSpace.name)
+        .onPreferenceChange(LilBroSpotsKey.self) { lilBro.update(spots: $0) }
+        .onPreferenceChange(LilBroBlocksKey.self) { lilBro.update(blocks: $0) }
+        .onAppear { lilBro.startWandering() }
+        .onDisappear { lilBro.stopWandering() }
     }
 
     @ViewBuilder
@@ -120,6 +134,11 @@ struct SettingsWindowView: View {
                 .padding(.vertical, SettingsSidebarStyle.verticalPadding)
             }
             .frame(maxHeight: .infinity, alignment: .top)
+            .lilBroSpot(.sidebar)
+
+            LilBroSidebarEntry(controller: lilBro)
+                .padding(.horizontal, SettingsSidebarStyle.horizontalPadding)
+                .padding(.bottom, 8)
 
             // Pinned project footer and Quit row stay visible even when the settings
             // tab list grows beyond the available window height.
@@ -176,6 +195,7 @@ struct SettingsWindowView: View {
         .buttonStyle(SettingsSidebarButtonStyle(isSelected: selection.selectedTab == tab && !isHighlighted,
                                                 focused: focusedSidebarControl == tab.id))
         .focused($focusedSidebarControl, equals: tab.id)
+        .lilBroSpot(.tab(tab))
         .accessibilityAddTraits(selection.selectedTab == tab ? .isSelected : [])
         .accessibilityLabel(tab.title)
     }

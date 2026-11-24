@@ -1445,6 +1445,27 @@ CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
+Lil Bro is a guide drawn over the whole Settings window (Settings/LilBro): a
+pixel boy ("Hood", 14x16 cells at 2 pt per pixel) who lives on the "Lil Bro ·
+ask anything" entry at the bottom of the sidebar. The window is his map:
+views report themselves with lilBroSpot (sidebar rows, his entry, each
+Features row, the pane) and every MacCard with lilBroBlock, in the
+"lilBro.window" coordinate space. LilBroPlanner turns that map into runs along
+a block, arc jumps (up to 90 pt) and his amber ladder for higher blocks; the
+layer samples LilBroSegment every frame, Reduce Motion makes him appear at
+the place. A click catches him and opens his balloon (variant C) with the
+reply field at his feet; LilBroBalloonLayout keeps both inside the window at
+every edge. Asked where something is, he runs to the sidebar row and then the
+Features row a person would click, punches each and opens it through the same
+SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
+never a synthetic click. While the balloon is open he stands still; he goes
+home only after it is closed. The ⋯ menu hides the little guy
+(LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
+same balloon. Answers come from LilBroLocalGuide: the feature catalog and tab
+names, on this Mac, no network. The sprite sheet is Resources/LilBro, embedded
+into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
+.project-docs/decisions/2026-11-24-lil-bro.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).

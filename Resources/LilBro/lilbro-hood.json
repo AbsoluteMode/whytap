@@ -1,0 +1,214 @@
+{
+  "version": 1,
+  "name": "Hood",
+  "cell": {
+    "width": 14,
+    "height": 16
+  },
+  "columns": 8,
+  "pointsPerPixel": 2,
+  "faces": "right",
+  "anchor": {
+    "x": 7,
+    "y": 16
+  },
+  "frames": [
+    "idle_1",
+    "idle_2",
+    "idle_blink",
+    "idle_look",
+    "run_1",
+    "run_2",
+    "run_3",
+    "run_4",
+    "run_5",
+    "run_6",
+    "jump_takeoff",
+    "jump_air",
+    "fall",
+    "land",
+    "climb_1",
+    "climb_2",
+    "climb_3",
+    "climb_4",
+    "ladder_pull",
+    "ladder_set",
+    "punch_windup",
+    "punch_hit",
+    "punch_recoil",
+    "caught_1",
+    "caught_2",
+    "think_1",
+    "think_2",
+    "sad_1",
+    "sad_2",
+    "ask_1",
+    "ask_2",
+    "done_1",
+    "done_2",
+    "wave_1",
+    "wave_2",
+    "wave_3",
+    "point_1",
+    "point_2"
+  ],
+  "animations": {
+    "idle": {
+      "frames": [
+        "idle_1",
+        "idle_1",
+        "idle_1",
+        "idle_1",
+        "idle_2",
+        "idle_2",
+        "idle_2",
+        "idle_2",
+        "idle_1",
+        "idle_1",
+        "idle_blink",
+        "idle_1",
+        "idle_2",
+        "idle_2",
+        "idle_look",
+        "idle_2"
+      ],
+      "ms": 260,
+      "loop": true
+    },
+    "walk": {
+      "frames": [
+        "run_1",
+        "run_2",
+        "run_3",
+        "run_4",
+        "run_5",
+        "run_6"
+      ],
+      "ms": 135,
+      "loop": true
+    },
+    "run": {
+      "frames": [
+        "run_1",
+        "run_2",
+        "run_3",
+        "run_4",
+        "run_5",
+        "run_6"
+      ],
+      "ms": 80,
+      "loop": true
+    },
+    "jump": {
+      "frames": [
+        "jump_takeoff",
+        "jump_air"
+      ],
+      "ms": 90,
+      "loop": false
+    },
+    "fall": {
+      "frames": [
+        "fall"
+      ],
+      "ms": 100,
+      "loop": true
+    },
+    "land": {
+      "frames": [
+        "land"
+      ],
+      "ms": 120,
+      "loop": false
+    },
+    "climb": {
+      "frames": [
+        "climb_1",
+        "climb_2",
+        "climb_3",
+        "climb_4"
+      ],
+      "ms": 125,
+      "loop": true
+    },
+    "prop": {
+      "frames": [
+        "ladder_pull",
+        "ladder_set"
+      ],
+      "ms": 150,
+      "loop": false
+    },
+    "hit": {
+      "frames": [
+        "punch_windup",
+        "punch_hit",
+        "punch_recoil"
+      ],
+      "ms": 75,
+      "loop": true
+    },
+    "caught": {
+      "frames": [
+        "caught_1",
+        "caught_2"
+      ],
+      "ms": 210,
+      "loop": false
+    },
+    "think": {
+      "frames": [
+        "think_1",
+        "think_1",
+        "think_2"
+      ],
+      "ms": 420,
+      "loop": true
+    },
+    "sad": {
+      "frames": [
+        "sad_1",
+        "sad_1",
+        "sad_2"
+      ],
+      "ms": 500,
+      "loop": true
+    },
+    "ask": {
+      "frames": [
+        "ask_1",
+        "ask_1",
+        "ask_2",
+        "ask_1"
+      ],
+      "ms": 330,
+      "loop": true
+    },
+    "done": {
+      "frames": [
+        "done_1",
+        "done_2"
+      ],
+      "ms": 200,
+      "loop": true
+    },
+    "hover": {
+      "frames": [
+        "wave_1",
+        "wave_2",
+        "wave_3",
+        "wave_2"
+      ],
+      "ms": 180,
+      "loop": true
+    },
+    "point": {
+      "frames": [
+        "point_1",
+        "point_2"
+      ],
+      "ms": 420,
+      "loop": true
+    }
+  }
+}

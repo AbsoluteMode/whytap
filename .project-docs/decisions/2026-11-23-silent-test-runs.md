@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Support/SystemSoundGuardTests.swift
     confirmed_at: 2026-11-23
-related: [../processes/shared-app-development.md]
+related: [../processes/shared-app-development.md, 2026-11-24-windowless-test-runs.md]
 ---
 
 # Silent test runs

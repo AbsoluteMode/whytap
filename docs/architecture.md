@@ -1407,7 +1407,8 @@ FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
 PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
 keys from the Keychain on the main thread, so it is rebuilt only when a value
 it shows changes: Notify and Monitor reach it through
-FeaturesEnvironment.snapshotCountChanges (their counts), and
+FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
+Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
 (.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its

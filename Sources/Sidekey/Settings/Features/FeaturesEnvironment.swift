@@ -100,15 +100,13 @@ struct FeaturesEnvironment {
     /// started, so Settings does not connect to servers.
     static let sharedMonitor = MonitorStore()
 
-    /// Fires when a count the Features snapshot reads changes: how many Notify
-    /// sources and Monitor dashboards there are. Both stores republish the same
-    /// list on every reread (Notify every 2 s, Monitor's screen every 5 s), and
-    /// each snapshot reads every provider key from the Keychain on the main
-    /// thread, so only a changed count rebuilds it.
+    /// Fires when the number of Notify sources or available Monitor dashboards
+    /// changes. Each snapshot reads provider keys on the main thread, so a
+    /// reread with the same counts leaves it alone.
     // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
     var snapshotCountChanges: AnyPublisher<Void, Never> {
         notifySupervisor.$sources.map(\.count).removeDuplicates()
-            .combineLatest(monitor.$dashboards.map(\.count).removeDuplicates())
+            .combineLatest(monitor.$availableDashboardCount)
             .dropFirst()
             .map { _ in () }
             .eraseToAnyPublisher()
@@ -153,8 +151,7 @@ extension FeatureSetupSnapshot {
             meetingsOn: environment.meetingsOn(),
             googleOn: environment.googleOn(),
             notifySources: environment.notifySupervisor.sources.count,
-            monitorDashboards: environment.monitor.dashboards.count
-                + (environment.monitor.serverStatusListed && environment.monitor.serverError == nil ? 1 : 0)
+            monitorDashboards: environment.monitor.availableDashboardCount
         )
     }
 

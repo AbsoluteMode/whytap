@@ -18,6 +18,9 @@ sources:
     reference: Sources/Sidekey/Notifications/NotifyScriptSupervisor.swift
     confirmed_at: 2026-11-25
   - type: repository
+    reference: Sources/Sidekey/Monitor/MonitorStore.swift
+    confirmed_at: 2026-11-25
+  - type: repository
     reference: Tests/SidekeyTests/Settings/SettingsFeaturesRefreshTests.swift
     confirmed_at: 2026-11-25
 related: [2026-11-24-settings-around-features.md]
@@ -35,6 +38,9 @@ text) stuttered while the rest of the Mac stayed smooth. Restarting Whytap did n
 - `SettingsFeaturesView` listens to `FeaturesEnvironment.snapshotCountChanges` instead of the
   raw `NotifyScriptSupervisor.$sources` and `MonitorStore.$dashboards` publishers. The snapshot
   reads only their counts, so only a changed count bumps `externalChange`.
+- `MonitorStore` publishes its available-dashboard count after completing a local reload.
+  It includes saved dashboards and Server status when configured and readable. The Features
+  snapshot uses this same count.
 - `NotifyScriptSupervisor.reconcile` and its loop publish `sources` and `error` only when the
   value differs.
 
@@ -70,9 +76,12 @@ Measured in the running build 1752 with `sample` (read-only; the app was not res
     recorded take at 120 fps, with 260 wing-width publishes over 44 s.
   - **whytap#454's `drop_live`.** With no client opted in it is a single nil check per
     partial, with no timer.
-- `SettingsFeaturesRefreshTests` fails with 8 assertions against the old behaviour. It passes
-  with this change, including a running supervisor with an installed source that stays quiet
-  over 2.6 s.
+- The original three `SettingsFeaturesRefreshTests` failed with eight assertions on the previous
+  implementation. They pass with this change, including a running supervisor with an installed
+  source that stays quiet for 2.6 s.
+- In an isolated Monitor store, adding, breaking, repairing and removing the only Server
+  status board updates the snapshot once per change. Repeated valid and invalid configurations
+  with the same available count stay quiet.
 
 ## Rejected
 

@@ -74,6 +74,39 @@ final class SettingsFeaturesRefreshTests: XCTestCase {
         XCTAssertEqual(supervisor.sources.map(\.script.name), ["builds", "Inbox"])
     }
 
+    func testServerStatusRefreshesTheSnapshotWhenItsEffectiveCountChanges() async throws {
+        let fixture = try await fixture()
+        let root = fixture.monitor.root
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let config = root.appendingPathComponent("servers.json")
+        let validServers = #"{"servers":[{"id":"web","name":"Web","group":"Prod","sshTarget":"web-alias"}]}"#
+
+        var rebuilds = 0
+        let watch = fixture.environment.snapshotCountChanges.sink { rebuilds += 1 }
+        defer { watch.cancel() }
+
+        let steps: [(configuration: String?, count: Int, rebuilds: Int)] = [
+            ("invalid JSON", 0, 0),
+            (validServers, 1, 1),
+            (validServers, 1, 1),
+            ("invalid JSON", 0, 2),
+            ("still invalid", 0, 2),
+            (validServers, 1, 3),
+            (nil, 0, 4),
+        ]
+        for step in steps {
+            if let configuration = step.configuration {
+                try Data(configuration.utf8).write(to: config)
+            } else {
+                try FileManager.default.removeItem(at: config)
+            }
+            fixture.monitor.reloadFiles()
+            XCTAssertTrue(fixture.monitor.dashboards.isEmpty, "Server status is the only dashboard")
+            XCTAssertEqual(fixture.snapshot.monitorDashboards, step.count)
+            XCTAssertEqual(rebuilds, step.rebuilds)
+        }
+    }
+
     /// The running app: the supervisor rereads its folder every 2 s while a
     /// source is installed. Settings must not hear from it in between.
     func testARunningSupervisorWithAnInstalledSourceStaysQuietBetweenRereads() async throws {

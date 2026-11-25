@@ -65,7 +65,7 @@ sources:
   - type: trace
     reference: Independent throwaway consent, HIToolbox and InputMethodKit probes on build 26C5047e. Results and execution context are recorded below.
     confirmed_at: 2026-11-23
-related: [2026-11-19-permission-request-before-settings.md, 2026-11-22-onboarding-journey.md]
+related: [2026-11-19-permission-request-before-settings.md, 2026-11-22-onboarding-journey.md, 2026-11-24-settings-around-features.md]
 ---
 
 # Decision

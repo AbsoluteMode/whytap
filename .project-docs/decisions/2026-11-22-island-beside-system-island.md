@@ -67,7 +67,7 @@ the hardware yet.
 - Notification cards go left of that band instead of left of the capsule.
 - A built-in touch display that reports no notch is ranked before the primary
   display (not under the Sidecar caveat).
-- Settings -> Other -> Display -> Island position: Automatic (default), Beside
+- Settings -> General -> Display -> Island position: Automatic (default), Beside
   the camera (also a preview on a notched Mac) and Around the camera (the
   earlier layout). The choice is per Mac: backed up, not synced.
 - The reserved width can be calibrated without UI through the

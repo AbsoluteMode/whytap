@@ -11,9 +11,6 @@ final class WhatsNewPresenter {
     struct Request: Equatable {
         let releases: [WhatsNewRelease]
         let since: String?
-        /// From Settings the window takes the keyboard; after an update it
-        /// comes forward without taking it from the app the person is in.
-        let activates: Bool
     }
 
     var catalog: WhatsNewCatalog
@@ -41,14 +38,14 @@ final class WhatsNewPresenter {
         let releases = WhatsNewLaunch.consume(currentVersion: currentVersion, isFirstLaunch: isFirstLaunch,
                                               catalog: catalog, defaults: defaults)
         guard !releases.isEmpty else { return }
-        display(Request(releases: releases, since: seen, activates: false))
+        display(Request(releases: releases, since: seen))
     }
 
     /// The same list from Settings, with the earlier releases under it.
     func presentHistory() {
         let releases = history
         guard !releases.isEmpty else { return }
-        display(Request(releases: releases, since: nil, activates: true))
+        display(Request(releases: releases, since: nil))
     }
 
     private func open(_ request: Request) {
@@ -87,8 +84,7 @@ final class WhatsNewWindowController: NSWindowController, NSWindowDelegate {
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.hidesOnDeactivate = false
-        window.level = .normal
-        window.collectionBehavior = [.managed, .fullScreenNone]
+        Self.placeAboveSettings(window)
         window.standardWindowButton(.miniaturizeButton)?.isHidden = true
         window.standardWindowButton(.zoomButton)?.isHidden = true
         super.init(window: window)
@@ -117,6 +113,15 @@ final class WhatsNewWindowController: NSWindowController, NSWindowDelegate {
         return ceil(probe.fittingSize.height)
     }
 
+    /// Settings stays at the island's overlay level above ordinary windows
+    /// (`configureHoverOverlayPolicy`). What's New takes the same level, so
+    /// ordered front after Settings it is above it, and like Settings it
+    /// shows on the Space and full-screen app the person is in.
+    // WHY: .project-docs/decisions/2026-11-24-whats-new-window.md
+    static func placeAboveSettings(_ window: NSWindow) {
+        SidekeyWindowChrome.configureHoverOverlayPolicy(window)
+    }
+
     /// As tall as the list, up to the window's limit and a small screen.
     static func height(natural: CGFloat, screen: CGFloat?) -> CGFloat {
         let limit = min(WhatsNewView.maxHeight, (screen ?? .infinity) - 60)
@@ -126,12 +131,10 @@ final class WhatsNewWindowController: NSWindowController, NSWindowDelegate {
     func show() {
         guard let window else { return }
         SidekeyWindowChrome.centerOnMainScreen(window)
-        if request.activates {
-            NSApp.activate(ignoringOtherApps: true)
-            window.makeKeyAndOrderFront(nil)
-        } else {
-            window.orderFrontRegardless()
-        }
+        // Right after an update and from Settings alike: in front, with
+        // the keyboard, so Got it, Return and Escape answer at once.
+        NSApp.activate(ignoringOtherApps: true)
+        window.makeKeyAndOrderFront(nil)
     }
 
     override func cancelOperation(_ sender: Any?) { close() }

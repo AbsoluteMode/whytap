@@ -371,6 +371,15 @@ struct VoiceOrbView: View {
         return CGFloat(max(0, min(1, last)))
     }
 
+    /// Stages 1 and 2 of the voice orb's energy, before its smoothing: 0 at
+    /// or below the adaptive gate, otherwise the raw sample in the user's
+    /// learned range. `drop_live` hands this to clients that draw their own orb.
+    static func voiceEnergy(raw: CGFloat, floor: Float, normalize: (Float) -> Float) -> CGFloat {
+        let dynamicGate = max(0.02, min(0.1, CGFloat(floor) + 0.01))
+        guard raw > dynamicGate else { return 0 }
+        return CGFloat(normalize(Float(raw)))
+    }
+
     static func displayEnergy(levels: [Float], time: Double, mode: VoiceOrbMode) -> CGFloat {
         switch mode {
         case .idle, .agentTextInputActive, .googleTextInputActive:
@@ -388,15 +397,10 @@ struct VoiceOrbView: View {
             //   3. Asymmetric follower smooths normalized energy
             //      (moderate attack, fast decay so pauses register
             //      instantly).
-            let rawAudio = audioEnergy(levels: levels)
-            let rawGate = CGFloat(NoiseFloorEstimator.shared.floor) + 0.01
-            let dynamicGate = max(0.02, min(0.1, rawGate))
-            if rawAudio <= dynamicGate {
-                let decayed = AudioEnergyFollower.shared.observe(0)
-                return CGFloat(decayed)
-            }
-            let normalized = NoiseFloorEstimator.shared.normalize(Float(rawAudio))
-            let smoothed = AudioEnergyFollower.shared.observe(normalized)
+            let voice = voiceEnergy(raw: audioEnergy(levels: levels),
+                                    floor: NoiseFloorEstimator.shared.floor,
+                                    normalize: NoiseFloorEstimator.shared.normalize)
+            let smoothed = AudioEnergyFollower.shared.observe(Float(voice))
             return min(1.0, CGFloat(smoothed))
         case .dropProcessing, .agentProcessing:
             return 0.22 + CGFloat((sin(time * 2.6) + 1) * 0.10)

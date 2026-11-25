@@ -39,11 +39,23 @@ struct CaseApprovalView: View {
 
     /// The harness access prompt. WHY: .project-docs/decisions/2026-11-20-harness-access.md
     static func harnessTitle(_ client: HarnessClient) -> String {
-        "Give \(client.name) access to Whytap?"
+        switch client.scope {
+        case .harness: return "Give \(client.name) access to Whytap?"
+        // A dictation app gets one thing, and the question names it.
+        // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+        case .liveDictation: return "Let \(client.name) show your dictation?"
+        }
     }
 
     /// Not shown on the card (the user asked for one line); read by VoiceOver.
     static let harnessDetail = "It can read your meetings and change settings for you. Case keys keep their own approval."
+    static func liveDictationDetail(_ name: String) -> String {
+        "While you dictate into \(name), it shows your words in its own field as you speak, and Whytap's island does not. It gets nothing you dictate into other apps, and no meetings, settings or Case keys."
+    }
+
+    static func harnessDetail(for client: HarnessClient) -> String {
+        client.scope == .liveDictation ? liveDictationDetail(client.name) : harnessDetail
+    }
 
     /// The card overlaps the island's bottom edge by this much, so no line of
     /// the island's rim or of the desktop shows between the two surfaces.
@@ -98,7 +110,7 @@ struct CaseApprovalView: View {
         }
         .environment(\.colorScheme, .dark)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(request.harness.map { "\(Self.harnessTitle($0)) \(Self.harnessDetail)" }
+        .accessibilityLabel(request.harness.map { "\(Self.harnessTitle($0)) \(Self.harnessDetail(for: $0))" }
             ?? "\(Self.titleText(request)). \(Self.keysText(request))")
     }
 

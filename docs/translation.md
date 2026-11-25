@@ -1,5 +1,8 @@
 # Translation and system-audio subtitles
 
+**Settings → Features → Translate & Subtitles** shows both tools on one screen:
+their shortcuts, what each needs, and buttons that open them.
+
 Open **Translate** or **Subtitles** from the island's tool search. Add either
 button in **Settings → Toolbox** if you want it pinned. Each tool can have its
 own shortcut in **Settings → Hotkeys**; no existing shortcut or layout changes.
@@ -60,12 +63,16 @@ palette closes before the text arrives, Drop saves it in **History → Drop**
 and shows a notice.
 
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
-Russian. Right-click the palette for **Translate to**, **Copy translation**,
+Russian. Click the translation to copy all of it: **Copied ✓** shows for a
+second at the corner of the result. Dragging over it still selects a part to
+copy with ⌘C, and a double click selects a word. With keyboard navigation
+enabled, Tab can focus the result and Return copies it. Right-click the palette for
+**Translate to**, **Copy translation**,
 **Clear** or **Cancel translation**. The floating palette also offers **Subtitles**;
 in Toolbox select its separate tile. Explicit language choices
-are retained, including existing saved choices. Native text selection also
-supports copying. Only language choices are saved, never submitted text or
-subtitle content; the clipboard is accessed only by an explicit Copy action.
+are retained, including existing saved choices. Only language choices are saved, never submitted text or
+subtitle content; the clipboard is accessed only by a click on the
+translation or an explicit Copy action.
 
 Editing the input or changing the target cancels the old request and clears
 its result. Late responses cannot replace a newer translation. Inputs are

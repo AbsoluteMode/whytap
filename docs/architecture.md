@@ -309,7 +309,7 @@ Live text in the recording wing (Drop and agent voice):
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
-Drop auto-stop (opt-in, Settings -> Other -> Drop, off by default):
+Drop auto-stop (opt-in, Settings -> Features -> Drop, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
@@ -570,8 +570,13 @@ Translation tools:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
-  Saved targets and secondary actions stay in the
-  context menu; long output scrolls. TextTranslationModel cancels
+  Saved targets and secondary actions stay in the context menu. Long output
+  scrolls. The panel watches clicks on the visible result and hands mouse
+  events to the selectable text. The Toolbox pane watches the same target
+  through a window-scoped local event monitor. Clicking or focusing the result
+  and pressing Return copies it and shows Copied for one second.
+  WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+  TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never
@@ -1086,7 +1091,7 @@ Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
-  (Settings -> Other -> "Show island on") -> screen with a real notch ->
+  (Settings -> General -> "Show island on") -> screen with a real notch ->
   built-in touch display -> primary display -> first. NSScreen.main is NEVER
   used (it is the key window's screen and moves with every click). All
   overlay panels position through currentDescriptor()/currentVisibleFrame()
@@ -1098,7 +1103,7 @@ Island beside the system Dynamic Island (touch MacBook Pro, macOS 27):
   and camera indicators) around the camera there, so the capsule must not
   cover it. NSScreen.touchCapabilities (read by selector: the project builds
   with the macOS 26 SDK; absent before macOS 27 = no touch) and
-  CGDisplayIsBuiltin mark the touch MacBook's own display. Settings -> Other
+  CGDisplayIsBuiltin mark the touch MacBook's own display. Settings -> General
   -> Display -> Island position: Automatic (beside the system island only on
   that display; when every screen reports touch, Apple's Sidecar caveat, it
   changes nothing), Beside the camera (also a preview on a notched Mac),
@@ -1155,7 +1160,7 @@ Island idle-hide:
   agent flow, drop, update pill, music, hover, held modifiers, programmatic
   expansion, "Updated" indicator). Wake = cursor in the pill rect + 24px, any
   of our hotkeys, or a blocker rising. Toggle "Auto-hide island" in
-  Settings -> Other. WHY:
+  Settings -> General. WHY:
   docs/decisions/2026-07-09-island-idle-hide-settings-toggle.md
 
 Update flow (download-on-action):
@@ -1190,7 +1195,7 @@ Update flow (download-on-action):
   with nothing remembered sees the running version only, and the highest
   launched version is what is remembered (a rollback repeats nothing). It
   comes forward
-  without taking the keyboard and never returns by itself; the version in
+  with the keyboard at the Settings level (above Settings) and never returns by itself; the version in
   the Settings footer reopens the list. The release script refuses a prod
   version without its entry (`scripts/whats-new.py check`). WHY:
   .project-docs/decisions/2026-11-24-whats-new-window.md
@@ -1398,15 +1403,111 @@ centers the menu and enable switch, moving Notification type into the adjacent
 question-mark tooltip/popover. Bindings and saved selections are unchanged.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
-Settings -> Other rows explain themselves with a short subtitle that names no
+Settings rows explain themselves with a short subtitle that names no
 remappable key, plus, where an accepted clip exists, a ▶ FeatureVideoButton:
 a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
-show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Meeting Notes, Google search, Agent, Screenshot protection,
-Auto-hide island); rows that are plain options have none. WHY:
+show default or example keys. Today: Stop Drop automatically on the Drop
+screen, Screenshot protection and Auto-hide island in General; the Agent,
+Meeting Notes and Google search clips play on their feature screens
+(FeatureVideoStrip); rows that are plain options have none. Settings ->
+General (raw id still other, whytap://settings/other) keeps only the island
+(auto-hide, display) and screenshot protection; Other's Drop, Meeting Notes,
+Google search and Agent rows moved to their feature screens, and
+AgentOtherSection is only the shared switch logic and words. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
+
+Settings is being rebuilt around features, in steps. FeatureCatalog
+(Settings/Features) is the list of features as data: for each AppFeature (Drop,
+Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots) its
+name, one phrase, bundled clip if any, shortcuts (FeatureHotkey, keys read live
+from HotkeyConfiguration), how it is turned on, where its settings are shown
+today, and its requirements (a model route, a macOS permission, the OpenAI key
+of Subtitles, Drop's shortcut being delivered). Readiness is computed from
+FeatureSetupSnapshot, plain values without stores, and reported in words:
+Ready, Off (a feature with a switch that is off), Needs setup (on, a required
+step missing, with the first reason and the count of the rest) and Not set up
+(an island tool without a switch; quiet). System audio is never shown as
+allowed or missing: macOS cannot be asked in advance. A missing speech model
+offers the model on this Mac first, where the Mac (Apple Silicon) and the
+feature can use it; "Choose a model" only when another model would work
+(modelAlternatives), otherwise "Fix the key" for a refused key or "Add a key".
+Translate & Subtitles is Ready with "Translate only" or "Subtitles only" when
+one tool works, Not set up when neither does. On macOS 27.3 the Input
+Monitoring stage of keyboard control (KeyboardSetup.inputMonitoring) is one
+step, on Keyboard control's row, not counted again for the shortcut. A
+sentence about an optional part names only what it stops. No catalog text
+names a key. Settings opens on the
+Features tab (SettingsWindowTab.features, whytap://settings/features):
+SettingsFeaturesView lists the catalog with each status, read through
+FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
+PermissionsSettingsViewModel the older tabs show. A row opens the feature's
+own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
+present place. Every feature has its own screen now. The older tabs stay in the
+sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
+lead follows Hold or Toggle; a Needs setup box names what does not work and
+carries the first action; the shortcut is recorded in place with the shared
+HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another
+action uses is not saved and recording stays open; Space stays hold-only);
+"Try it here" is the onboarding's native text field; "What it needs" lists the
+catalog's checks with the API & Models ModelMenu in place, Download free model
+or Use the model on this Mac (APIAndModelsViewModel.useOnDeviceModel: that one
+feature, no Assign window; after a download only if the feature's route is
+still the one it had when the download began, so a model picked meanwhile
+stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
+API & Models on API keys; the sidebar entry still opens Models), Allow,
+Restart Whytap and Retry; the back link to Features uses
+MacButtonInteractionStyle like the Features rows; Settings holds
+Mode, Language you speak, Lower other audio and Stop Drop automatically (off
+and disabled unless the shortcut is Toggle); Vocab and Filler open their
+island editors. The same switches remain in the island. Every
+feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
+(snapshot, view models, environment, the setup actions and the per-check
+notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
+setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
+one a "Video coming" row says what it will show), FeatureShortcutsGroup
+(one recording session shared by the shortcut rows), FeatureNeedsGroup, the
+feature's own settings and FeatureExamplesGroup. FeatureScreens maps each
+feature with place .screen to its screen. Drop keeps DropFeatureView around
+the same parts. The Agent,
+Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
+the switch (FeatureSwitchModel) writes the same flag as Other and the island
+through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
+connects the native Agent first (AgentOtherSection.turn) and moves only once
+it is on, otherwise the card says why. The Agent screen adds Allow file edits
+and commands and things to ask; Meeting Notes adds the note-ready notification
+and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
+setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
+Features). Translate & Subtitles, Screenshots, To-do (AppFeature.todo) and
+Case (AppFeature.caseVault, raw value "case") are island tools with their own
+screens too: no switch (the card points to Toolbox), their tool shortcuts, what
+they need, and a "Use it" group (IslandToolActions) that opens the tool:
+Translate and Subtitles in their Toolbox panes, Shot's capture
+(FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
+Case need nothing and read Ready. WHY:
+.project-docs/decisions/2026-11-24-settings-around-features.md
+
+Hover, Notify and Monitor are features with their own screens too. Hover
+(HoverFeatureView) lists the island's tools in HoverLayoutStore order with
+Settings pinned last, then the tools that are off. A row is held and dragged
+(HoverToolDragModel: over another row the tool takes its place live; a row
+sliding under the pointer is not a new target; an off tool dropped on a row
+joins there; dropped on More tools it leaves). Only the internal tool drag
+type can update the list. A tool's switch removes it or puts
+it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
+actions. The island observes the same store, so it changes at once. The
+chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
+tool that is off keeps its shortcut and stays in island search. Notify and
+Monitor are Not set up until an agent connected a source or a dashboard.
+Their screens show the shortcut, an Open button for the island panel, the
+sources (NotificationSourcesGroups, shared with the Notifications tab) or the
+dashboards with freshness (a MonitorStore that is only read, never started,
+so Settings never polls servers), and CodingAgentPromptCard: the marks of
+Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
+CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
+enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
+.project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
@@ -1848,6 +1949,28 @@ except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
+
+Live dictation clients: whytap_drop_live (DropLiveFeed) is a separate
+allowlist, DropLiveFeed.allowedClients (Whycode, UVBKCN5PPV /
+com.rootwise.whycode), resolved like a harness (direct parent, Apple-vouched)
+but with HarnessScope.liveDictation: it reaches liveDictationOperations only
+and gets unsupported_client for every gated tool, and a coding harness gets
+unsupported_client for drop_live. Same one Yes and store; the card asks "Let
+Whycode show your dictation?" and its VoiceOver detail and Settings row name
+that scope only. The gate answers it itself with the client's pid: phase,
+takeId, level, energy (VoiceOrbView.voiceEnergy, the orb before
+AudioEnergyFollower, recording only) and the take's words only while the
+phase can still deliver and the take's target pid (captured at
+startDropTurnTelemetry) is the caller. Partials carry the take id of their
+session; endTake() runs from endDropTurn (before the trace guard) and on
+every idle/deliveryFailed phase (endTakes(on:)). On-device partials report
+through onTranscriptWindow whether their ~14 s window has shifted; only
+shifted windows are stitched onto the words already sent (DropLiveFeed.stitch,
+words or characters). showsLiveText keeps an opt-in for
+1.5 s; while it holds for the take's target, onTranscriptUpdate skips the
+wing. Not listed in tools/list, unknown to AppControlController (the built-in
+Agent cannot reach it), never logged. WHY:
+.project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 with a sole finish_answer call containing status, answer, insert_text, sources

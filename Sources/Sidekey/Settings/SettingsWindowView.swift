@@ -21,6 +21,9 @@ struct SettingsWindowView: View {
     let privacyPreferences: PrivacyPreferences
     /// Applies the screenshot-protection toggle to the live island panel.
     let screenshotProtectionChanged: (Bool) -> Void
+    /// What the Features screens read besides the view models; tests and
+    /// previews replace it to show a Mac in another state.
+    let featuresEnvironment: FeaturesEnvironment?
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
@@ -44,7 +47,8 @@ struct SettingsWindowView: View {
         otherOnMeetingsToggle: @escaping (Bool) -> Void = { _ in },
         otherOnGoogleToggle: @escaping (Bool) -> Void = { _ in },
         privacyPreferences: PrivacyPreferences? = nil,
-        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in }
+        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
+        featuresEnvironment: FeaturesEnvironment? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
@@ -60,6 +64,33 @@ struct SettingsWindowView: View {
         self.otherOnGoogleToggle = otherOnGoogleToggle
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
+        self.featuresEnvironment = featuresEnvironment
+    }
+
+    /// The live environment: this window's own switches and Drop mode.
+    private var liveFeaturesEnvironment: FeaturesEnvironment {
+        FeaturesEnvironment(
+            dropMode: toolboxDeps.currentDropMode,
+            // The island owns the mode switch; Settings asks it to flip.
+            setDropMode: { [toolboxDeps] mode in
+                if toolboxDeps.currentDropMode() != mode { _ = toolboxDeps.toggleDropMode() }
+            },
+            language: toolboxDeps.currentLanguage,
+            setLanguage: toolboxDeps.setLanguage,
+            volumeDuck: otherVolumeDuckConfig,
+            openHoverPanel: toolboxDeps.openHoverPanel,
+            agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),
+                                              activeProvider: AgentProviderStore.shared.activeProvider) },
+            meetingsOn: otherMeetingsEnabled,
+            googleOn: otherGoogleEnabled,
+            setAgent: { [agentModeViewModel, onAgentToggle] on in
+                await AgentOtherSection.turn(on, viewModel: agentModeViewModel, settings: .shared,
+                                             store: .shared, onAgentToggle: onAgentToggle)?.message
+            },
+            setMeetings: otherOnMeetingsToggle,
+            setGoogle: otherOnGoogleToggle,
+            openScreenshot: toolboxDeps.openScreenshot
+        )
     }
 
     var body: some View {
@@ -187,29 +218,20 @@ struct SettingsWindowView: View {
         .accessibilityLabel(AppBuildIdentity.current.quitActionTitle)
     }
 
-    /// The Agent group in Other; a `whytap://settings/agentMode` link or the
-    /// Agent setup prompt highlights it for a second.
-    private var agentSection: AgentOtherSection {
-        let highlighted: Bool = {
-            if case .tab(.agentMode) = selection.highlightedTarget { return true }
-            return false
-        }()
-        return AgentOtherSection(
-            viewModel: agentModeViewModel,
-            settings: AgentSettingsStore.shared,
-            store: AgentProviderStore.shared,
-            agentEnabled: agentEnabled,
-            onAgentToggle: onAgentToggle,
-            openAPIAndModels: { selection.focus($0) },
-            highlighted: highlighted
-        )
-    }
-
     @ViewBuilder
     private var detailPane: some View {
         switch selection.selectedTab {
+        case .features:
+            SettingsFeaturesView(
+                selection: selection,
+                models: apiAndModelsViewModel,
+                permissions: permissionsViewModel,
+                environment: featuresEnvironment ?? liveFeaturesEnvironment
+            )
         case .apiAndModels:
-            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature)
+            APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature,
+                             initialSection: selection.requestedAPISection ?? .models)
+                .onAppear { selection.requestedAPISection = nil }
         case .hotkeys:
             HotkeysSettingsView()
         case .permissions:
@@ -225,14 +247,8 @@ struct SettingsWindowView: View {
         case .other:
             SettingsOtherView(
                 displayPicker: displayPickerViewModel,
-                volumeDuckConfig: otherVolumeDuckConfig,
-                meetingsEnabled: otherMeetingsEnabled,
-                googleEnabled: otherGoogleEnabled,
-                onMeetingsToggle: otherOnMeetingsToggle,
-                onGoogleToggle: otherOnGoogleToggle,
                 privacyPreferences: privacyPreferences,
-                screenshotProtectionChanged: screenshotProtectionChanged,
-                agentSection: agentSection
+                screenshotProtectionChanged: screenshotProtectionChanged
             )
         case .agentMode:
             // Never selected: `select` resolves it to Other.
@@ -337,6 +353,11 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
+    /// The feature whose own screen Features shows; nil is the list.
+    @Published var shownFeature: AppFeature?
+    /// The part of API & Models to open on next (API keys from a feature's
+    /// screen); API & Models takes it once and clears it.
+    @Published var requestedAPISection: APIAndModelsSection?
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?
@@ -344,10 +365,11 @@ final class SettingsWindowSelection: ObservableObject {
     private var previousNonNotesTab: SettingsWindowTab
     private var highlightTask: Task<Void, Never>?
 
-    init(selectedTab: SettingsWindowTab = .apiAndModels) {
+    init(selectedTab: SettingsWindowTab = .features) {
         let resolvedTab = selectedTab.resolved
         let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         self.selectedTab = availableTab
+        if selectedTab == .agentMode { shownFeature = .agent }
         previousNonNotesTab = availableTab == .notes ? SettingsWindowTab.defaultAvailable : availableTab
     }
 
@@ -361,13 +383,39 @@ final class SettingsWindowSelection: ObservableObject {
         } else {
             previousNonNotesTab = availableTab
         }
+        // The sidebar's Features row is "Features home": back to the list.
+        // A link to the old Agents tab opens the Agent's own screen.
+        if availableTab == .features { shownFeature = tab == .agentMode ? .agent : nil }
         selectedTab = availableTab
+    }
+
+    /// Opens a feature from the Features list: its own screen when it has one,
+    /// otherwise the place its settings are shown today.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    func open(_ feature: AppFeature) {
+        switch FeatureCatalog.info(for: feature).place {
+        case .screen:
+            select(.features)
+            shownFeature = feature
+        case .tab(let tab):
+            setHighlight(.tab(tab))
+        case .tool(let tool):
+            focus(tool)
+        }
     }
 
     /// Opens API & Models on one feature's row.
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
         focusedFeature = feature
+    }
+
+    /// Opens API & Models on API keys, where a key is added or replaced:
+    /// "Add a key" and "Fix the key" on a feature's screen.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    func showAPIKeys() {
+        requestedAPISection = .keys
+        select(.apiAndModels)
     }
 
     /// Opens Toolbox on one tool's pane without running its action.

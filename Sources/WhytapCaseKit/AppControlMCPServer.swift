@@ -208,8 +208,13 @@ public final class AppControlMCPServer {
         (try? JSONEncoder().encode(value)).flatMap { try? JSONSerialization.jsonObject(with: $0, options: [.fragmentsAllowed]) }
     }
 
+    /// `whytap_drop_live` is callable but not listed: it answers only the
+    /// dictation apps Whytap allows for it (never a coding harness), so it is
+    /// kept out of every harness's tool list. Its contract is in
+    /// docs/customization/app-control.md.
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
     private static let operations = Dictionary(uniqueKeysWithValues:
-        ["get_state", "get_settings", "list_models", "set_model", "list_providers", "set_provider", "set_setting",
+        ["drop_live", "get_state", "get_settings", "list_models", "set_model", "list_providers", "set_provider", "set_setting",
          "toolbox_get", "toolbox_set", "hotkey_set", "vocab_add", "filler_add",
          "todo_add", "todo_update", "todo_list",
          "meetings_search", "meeting_get", "meeting_transcript", "meeting_open"].map {

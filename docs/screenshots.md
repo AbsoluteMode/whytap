@@ -1,5 +1,8 @@
 # Screenshots
 
+**Settings → Features → Screenshots** shows Shot's shortcut, Screen Recording
+and a Capture button.
+
 Find **Screenshot** in the island's **Search all tools**, or add it from
 Settings → Toolbox. Settings → Hotkeys → Tools can assign its optional named
 shortcut. Existing layouts and shortcuts are preserved.

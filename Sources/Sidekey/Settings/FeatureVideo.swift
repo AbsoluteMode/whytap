@@ -12,6 +12,11 @@ enum FeatureVideo: String, CaseIterable {
     case dropAutoStop = "drop-auto-stop"
     case screenshotProtection = "screen-protect"
     case autoHide = "auto-hide"
+    // The feature screens' clips, named after their motion kit scenes.
+    // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+    case dropFast = "drop-fast"
+    case screenshot
+    case translate
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -26,6 +31,9 @@ enum FeatureVideo: String, CaseIterable {
         case .dropAutoStop: return "Stop Drop automatically"
         case .screenshotProtection: return "Screenshot protection"
         case .autoHide: return "Auto-hide island"
+        case .dropFast: return "Drop"
+        case .screenshot: return "Shot"
+        case .translate: return "Translate"
         }
     }
 

@@ -1457,6 +1457,21 @@ final class HotkeyPreferences: ObservableObject {
         didSet { save(meetingRecordShortcut.rawValue, forKey: Self.meetingRecordShortcutDefaultsKey) }
     }
 
+    /// Google search's shortcuts. Until 2026-11-24 they were never saved, so
+    /// a change in Hotkeys or on the feature's screen was lost at once.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    @Published var googleSearchTextShortcut: HotkeyShortcut {
+        didSet { save(googleSearchTextShortcut.rawValue, forKey: Self.googleSearchTextShortcutDefaultsKey) }
+    }
+
+    @Published var googleSearchVoiceShortcut: HotkeyShortcut {
+        didSet { save(googleSearchVoiceShortcut.rawValue, forKey: Self.googleSearchVoiceShortcutDefaultsKey) }
+    }
+
+    @Published var googleSearchVoiceGesture: HotkeyGesture {
+        didSet { save(googleSearchVoiceGesture.rawValue, forKey: Self.googleSearchVoiceGestureDefaultsKey) }
+    }
+
     var configuration: HotkeyConfiguration {
         HotkeyConfiguration(
             agentTextShortcut: agentTextShortcut,
@@ -1470,6 +1485,9 @@ final class HotkeyPreferences: ObservableObject {
             usefulLinksNextShortcut: usefulLinksNextShortcut,
             usefulLinksPreviousShortcut: usefulLinksPreviousShortcut,
             toolShortcuts: toolShortcuts,
+            googleSearchTextShortcut: googleSearchTextShortcut,
+            googleSearchVoiceShortcut: googleSearchVoiceShortcut,
+            googleSearchVoiceGesture: googleSearchVoiceGesture,
             meetingRecordShortcut: meetingRecordShortcut,
             screenshotArrowBindings: screenshotArrowBindings
         )
@@ -1529,6 +1547,9 @@ final class HotkeyPreferences: ObservableObject {
     private static let dropVoiceShortcutDefaultsKey = "hotkeys.dropVoiceShortcut"
     private static let agentCloseComboDefaultsKey = "hotkeys.agentCloseCombo"
     private static let agentCloseShortcutDefaultsKey = "hotkeys.agentCloseShortcut"
+    private static let googleSearchTextShortcutDefaultsKey = "hotkeys.googleSearchTextShortcut"
+    private static let googleSearchVoiceShortcutDefaultsKey = "hotkeys.googleSearchVoiceShortcut"
+    private static let googleSearchVoiceGestureDefaultsKey = "hotkeys.googleSearchVoiceGesture"
     private static let usefulLinksInsertComboDefaultsKey = "hotkeys.usefulLinksInsertCombo"
     private static let usefulLinksInsertShortcutDefaultsKey = "hotkeys.usefulLinksInsertShortcut"
     private static let usefulLinksOpenComboDefaultsKey = "hotkeys.usefulLinksOpenCombo"
@@ -1653,6 +1674,16 @@ final class HotkeyPreferences: ObservableObject {
             defaults, Self.meetingRecordShortcutDefaultsKey,
             default: HotkeyConfiguration.defaults.meetingRecordShortcut
         )
+        self.googleSearchTextShortcut = Self.loadShortcut(
+            defaults, Self.googleSearchTextShortcutDefaultsKey,
+            default: HotkeyConfiguration.defaults.googleSearchTextShortcut
+        )
+        self.googleSearchVoiceShortcut = Self.loadShortcut(
+            defaults, Self.googleSearchVoiceShortcutDefaultsKey,
+            default: HotkeyConfiguration.defaults.googleSearchVoiceShortcut
+        )
+        self.googleSearchVoiceGesture = defaults.string(forKey: Self.googleSearchVoiceGestureDefaultsKey)
+            .flatMap(HotkeyGesture.init(rawValue:)) ?? HotkeyConfiguration.defaults.googleSearchVoiceGesture
     }
 
     /// Settings sync wrote another Mac's shortcuts. Only changed values are
@@ -1673,6 +1704,9 @@ final class HotkeyPreferences: ObservableObject {
         if loaded.screenshotArrowBindings != screenshotArrowBindings { screenshotArrowBindings = loaded.screenshotArrowBindings }
         if loaded.toolShortcuts != toolShortcuts { toolShortcuts = loaded.toolShortcuts }
         if loaded.meetingRecordShortcut != meetingRecordShortcut { meetingRecordShortcut = loaded.meetingRecordShortcut }
+        if loaded.googleSearchTextShortcut != googleSearchTextShortcut { googleSearchTextShortcut = loaded.googleSearchTextShortcut }
+        if loaded.googleSearchVoiceShortcut != googleSearchVoiceShortcut { googleSearchVoiceShortcut = loaded.googleSearchVoiceShortcut }
+        if loaded.googleSearchVoiceGesture != googleSearchVoiceGesture { googleSearchVoiceGesture = loaded.googleSearchVoiceGesture }
     }
 
     private static func loadScreenshotArrows(_ defaults: UserDefaults) -> ScreenshotArrowBindings {
@@ -1764,6 +1798,9 @@ final class HotkeyPreferences: ObservableObject {
         usefulLinksPreviousShortcut = configuration.usefulLinksPreviousShortcut
         screenshotArrowBindings = configuration.screenshotArrowBindings
         meetingRecordShortcut = configuration.meetingRecordShortcut
+        googleSearchTextShortcut = configuration.googleSearchTextShortcut
+        googleSearchVoiceShortcut = configuration.googleSearchVoiceShortcut
+        googleSearchVoiceGesture = configuration.googleSearchVoiceGesture
         toolShortcuts = configuration.toolShortcuts
     }
 
@@ -1781,6 +1818,9 @@ final class HotkeyPreferences: ObservableObject {
         usefulLinksPreviousShortcut = HotkeyConfiguration.defaults.usefulLinksPreviousShortcut
         screenshotArrowBindings = .defaults
         meetingRecordShortcut = HotkeyConfiguration.defaults.meetingRecordShortcut
+        googleSearchTextShortcut = HotkeyConfiguration.defaults.googleSearchTextShortcut
+        googleSearchVoiceShortcut = HotkeyConfiguration.defaults.googleSearchVoiceShortcut
+        googleSearchVoiceGesture = HotkeyConfiguration.defaults.googleSearchVoiceGesture
     }
 
     private func save(_ value: String, forKey key: String) {

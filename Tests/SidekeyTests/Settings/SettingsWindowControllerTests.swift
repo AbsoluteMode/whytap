@@ -35,10 +35,10 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertFalse(window?.isReleasedWhenClosed ?? true)
     }
 
-    func test_window_controller_opens_api_and_models_by_default() {
+    func test_window_controller_opens_features_by_default() {
         let controller = SettingsWindowController()
 
-        XCTAssertEqual(controller.selectedTab, .apiAndModels)
+        XCTAssertEqual(controller.selectedTab, .features)
     }
 
     func test_show_with_feature_focuses_that_row() {
@@ -192,7 +192,7 @@ final class SettingsWindowControllerTests: XCTestCase {
         XCTAssertTrue(source.contains("openSettingsWindow(tab: .notes)"))
     }
 
-    func test_dynamic_island_routes_settings_tile_to_api_and_models_tab() throws {
+    func test_dynamic_island_routes_settings_tile_to_features_tab() throws {
         let root = try projectRoot()
         let sourceURL = root
             .appendingPathComponent("Sources")
@@ -201,7 +201,7 @@ final class SettingsWindowControllerTests: XCTestCase {
         let source = try String(contentsOf: sourceURL, encoding: .utf8)
 
         XCTAssertTrue(source.contains("openSettings: { [weak self] in"))
-        XCTAssertTrue(source.contains("self?.openSettingsWindow(tab: .apiAndModels)"))
+        XCTAssertTrue(source.contains("self?.openSettingsWindow(tab: .features)"))
     }
 
     func test_window_controller_show_close_show_does_not_crash() {

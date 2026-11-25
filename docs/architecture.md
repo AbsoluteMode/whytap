@@ -1053,6 +1053,12 @@ Hover tool search and pointer routing:
   Internal endEditing does not resign the key window between button down/up;
   captured activation or actual window resignation releases text-entry focus.
   Up/Down select, Return activates, Escape clears the query then releases focus.
+  Result rows (IslandHoverSearchResultsList) are identified by their tool, never
+  by position: a position id froze the visible rows at the first letter typed.
+  While searching, the footer reads the same selected index as the one row
+  highlight (hover moves it; an arrow key clears hover), the selected row has
+  the VoiceOver selected trait, and an arrow key scrolls it into view. WHY:
+  .project-docs/decisions/2026-11-25-hover-search-row-identity.md
   IslandHoverHitBridge measures target NSView frames at event time and clips
   results to their visible scroll viewport. NSWindow down/up must target the
   same unchanged control; drag-out, context/layout change, Escape and panel

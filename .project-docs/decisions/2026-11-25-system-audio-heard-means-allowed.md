@@ -52,7 +52,10 @@ grant opens the process tap without error and delivers exact zeros.
 - `SystemAudioAccess` remembers, in user defaults
   (`sidekey.systemAudio.heard.v1`), that some capture has heard sound.
   `CoreAudioSystemAudioSource` records it from its IO queue on the first input
-  buffer with any non-zero sample. That source is the only process tap in the
+  buffer with any non-zero sample, measured on the delivered PCM of every
+  channel (interleaved or planar) before the channels are mixed to mono:
+  opposite stereo channels average to zero but are sound. The first-proof
+  write is serialized, so concurrent first callbacks notify once. That source is the only process tap in the
   app, so Subtitles, Meeting Notes, the meeting detector and the onboarding
   question all count.
 - `FeatureSetupSnapshot.systemAudioHeard` feeds the catalog: System audio is
@@ -60,7 +63,9 @@ grant opens the process tap without error and delivers exact zeros.
   Features refreshes on `SystemAudioAccess.didChange`, posted once.
 - `LiveSubtitleModel.silenceMayMeanNoAccess` drives the overlay link. It
   becomes true only when the session is listening, nothing was heard for 5 s,
-  and no capture has ever heard sound on this Mac. The first sound clears it.
+  and no capture has ever heard sound on this Mac. The first sound clears it,
+  and so does `SystemAudioAccess.didChange` when another capture (a meeting,
+  the detector) proves the grant while the hint is already shown.
 
 ## Why
 
@@ -75,9 +80,16 @@ later says nothing new.
 - `SubtitleAudioAccessHintTests`: a quiet Mac heard before never shows the
   hint; silence before any proof shows it only after the delay; the first
   sound clears it; sound before the delay means no hint; proof arriving from
-  another capture while waiting cancels it; a new Start begins without it.
+  another capture while waiting cancels it; proof from another capture clears
+  an already visible hint; a new Start begins without it.
+- `SystemAudioInputSignalTests`: +0.25/-0.25 interleaved float, planar float
+  and interleaved Int16 stereo count as sound; exact zeros in every layout do
+  not; one tiny sample in one plane does.
 - `SystemAudioAccessTests`: the proof persists, only the first record
-  notifies, only exact zeros are not a signal.
+  notifies, 16 concurrent first records notify once (20 rounds).
+- Build queue review 555 found the three gaps above (visible hint not cleared
+  by outside proof, signal measured after the mono mix, racy first write);
+  each now has a regression test.
 - `FeatureCatalogTests`: System audio reads `.met` on Meeting Notes and
   Translate & Subtitles once heard, `askedLater` before, and never blocks.
 - The live grant path (real TCC, real tap) was not exercised by tests; it is

@@ -107,6 +107,9 @@ final class LiveSubtitleModel: ObservableObject {
     private let systemAudioHeard: () -> Bool
     private let accessHintDelay: Duration
     private var accessHint: Task<Void, Never>?
+    /// Another capture (a meeting, the detector) can prove the grant while
+    /// the hint is already shown: it goes away then too.
+    nonisolated(unsafe) private var accessObserver: NSObjectProtocol?
     /// Opens Subtitles' one engine, OpenAI live speech translation, or says
     /// why it cannot (no OpenAI key).
     private let openTranslator: (_ source: String?, _ target: String) async throws -> SpeechTranslationSession
@@ -169,6 +172,22 @@ final class LiveSubtitleModel: ObservableObject {
         self.makeAudio = makeAudio
         self.accessHintDelay = accessHintDelay
         self.systemAudioHeard = systemAudioHeard
+        accessObserver = NotificationCenter.default.addObserver(
+            forName: SystemAudioAccess.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.accessMayBeProven() }
+        }
+    }
+
+    deinit {
+        if let accessObserver { NotificationCenter.default.removeObserver(accessObserver) }
+    }
+
+    /// The grant was proven elsewhere: no hint, now or later this session.
+    private func accessMayBeProven() {
+        guard systemAudioHeard() else { return }
+        accessHint?.cancel(); accessHint = nil
+        silenceMayMeanNoAccess = false
     }
 
     @discardableResult func start() -> Task<Void, Never>? {

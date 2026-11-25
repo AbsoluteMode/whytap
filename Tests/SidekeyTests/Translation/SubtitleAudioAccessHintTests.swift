@@ -1,3 +1,4 @@
+import CoreAudio
 import XCTest
 @testable import Sidekey
 
@@ -82,6 +83,24 @@ final class SubtitleAudioAccessHintTests: XCTestCase {
         await model.cancel().value
     }
 
+    /// Queue review 555, 1: the hint is already shown when a meeting or the
+    /// detector proves the grant; it goes away without this capture's sound.
+    func testAProofFromAnotherCaptureClearsAnAlreadyVisibleHint() async throws {
+        let audio = FixtureSubtitleAudio()
+        var heard = false
+        let model = model(heard: { heard }, audio: audio, session: FakeSpeechTranslation())
+        model.start()
+        try await wait(model.silenceMayMeanNoAccess)
+        XCTAssertTrue(model.silenceMayMeanNoAccess)
+        heard = true
+        NotificationCenter.default.post(name: SystemAudioAccess.didChange, object: nil)
+        try await wait(!model.silenceMayMeanNoAccess)
+        XCTAssertFalse(model.silenceMayMeanNoAccess)
+        XCTAssertFalse(model.hasAudio, "this capture still heard nothing")
+        XCTAssertEqual(model.phase, .listening)
+        await model.cancel().value
+    }
+
     func testANewStartClearsAnOldHint() async throws {
         let model = LiveSubtitleModel(flushInterval: .milliseconds(5), accessHintDelay: .milliseconds(30),
                                       systemAudioHeard: { false }, makeAudio: { FixtureSubtitleAudio() },
@@ -133,12 +152,100 @@ final class SystemAudioAccessTests: XCTestCase {
         XCTAssertEqual(count, 1)
     }
 
-    /// A refused grant delivers exact zeros; any sound at all is the proof.
-    func testOnlyExactSilenceIsNotASignal() {
-        XCTAssertFalse(SystemAudioAccess.containsSignal([]))
-        XCTAssertFalse(SystemAudioAccess.containsSignal([Float](repeating: 0, count: 512)))
-        XCTAssertFalse(SystemAudioAccess.containsSignal([0, -0, 0]))
-        XCTAssertTrue(SystemAudioAccess.containsSignal([0, 0, -0.0001, 0]))
-        XCTAssertTrue(SystemAudioAccess.containsSignal([Float](repeating: 0, count: 511) + [1e-7]))
+    /// Queue review 555, 3: two captures' first callbacks at once write and
+    /// notify Settings once.
+    func testConcurrentFirstProofsNotifyOnce() {
+        RunLoop.main.run(until: Date().addingTimeInterval(0.1))
+        var count = 0
+        let observer = NotificationCenter.default.addObserver(
+            forName: SystemAudioAccess.didChange, object: nil, queue: nil) { _ in count += 1 }
+        defer { NotificationCenter.default.removeObserver(observer) }
+        let defaults = self.defaults!
+        for _ in 0..<20 {
+            defaults.removeObject(forKey: SystemAudioAccess.heardKey)
+            count = 0
+            DispatchQueue.concurrentPerform(iterations: 16) { _ in SystemAudioAccess.recordHeard(defaults: defaults) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            XCTAssertEqual(count, 1)
+        }
+    }
+}
+
+/// Queue review 555, 2: the proof is measured on the delivered PCM, before
+/// channels are mixed to mono.
+final class SystemAudioInputSignalTests: XCTestCase {
+    private func format(float: Bool, planar: Bool, channels: UInt32 = 2) -> AudioStreamBasicDescription {
+        var flags: AudioFormatFlags = float ? kAudioFormatFlagIsFloat : kAudioFormatFlagIsSignedInteger
+        if planar { flags |= kAudioFormatFlagIsNonInterleaved }
+        let bits: UInt32 = float ? 32 : 16
+        let frameBytes = planar ? bits / 8 : bits / 8 * channels
+        return AudioStreamBasicDescription(
+            mSampleRate: 48_000, mFormatID: kAudioFormatLinearPCM, mFormatFlags: flags,
+            mBytesPerPacket: frameBytes, mFramesPerPacket: 1, mBytesPerFrame: frameBytes,
+            mChannelsPerFrame: channels, mBitsPerChannel: bits, mReserved: 0)
+    }
+
+    /// Builds an AudioBufferList over `buffers` (one per plane, or one
+    /// interleaved) and runs `body` with it.
+    private func withList(_ buffers: [[UInt8]], channelsPerBuffer: UInt32,
+                             _ body: (UnsafePointer<AudioBufferList>) -> Bool) -> Bool {
+        let list = AudioBufferList.allocate(maximumBuffers: buffers.count)
+        defer { free(list.unsafeMutablePointer) }
+        var storage = buffers.map { bytes -> UnsafeMutableRawPointer in
+            let pointer = UnsafeMutableRawPointer.allocate(byteCount: bytes.count, alignment: 16)
+            bytes.withUnsafeBytes { pointer.copyMemory(from: $0.baseAddress!, byteCount: bytes.count) }
+            return pointer
+        }
+        defer { storage.forEach { $0.deallocate() }; storage.removeAll() }
+        for (index, bytes) in buffers.enumerated() {
+            list[index] = AudioBuffer(mNumberChannels: channelsPerBuffer, mDataByteSize: UInt32(bytes.count),
+                                      mData: storage[index])
+        }
+        return body(UnsafePointer(list.unsafePointer))
+    }
+
+    private func bytes(_ samples: [Float]) -> [UInt8] { samples.withUnsafeBytes { Array($0) } }
+    private func bytes(_ samples: [Int16]) -> [UInt8] { samples.withUnsafeBytes { Array($0) } }
+
+    func testOppositeInterleavedStereoIsSoundThoughItMixesToSilence() {
+        let frames = (0..<256).flatMap { _ in [Float(0.25), Float(-0.25)] }
+        XCTAssertTrue(withList([bytes(frames)], channelsPerBuffer: 2) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: true, planar: false))
+        })
+    }
+
+    func testOppositePlanarStereoIsSound() {
+        let left = [Float](repeating: 0.25, count: 256), right = [Float](repeating: -0.25, count: 256)
+        XCTAssertTrue(withList([bytes(left), bytes(right)], channelsPerBuffer: 1) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: true, planar: true))
+        })
+    }
+
+    func testOppositeIntegerStereoIsSound() {
+        let frames = (0..<256).flatMap { _ in [Int16(8_000), Int16(-8_000)] }
+        XCTAssertTrue(withList([bytes(frames)], channelsPerBuffer: 2) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: false, planar: false))
+        })
+    }
+
+    /// A refused grant delivers exact zeros, in every layout.
+    func testExactZerosAreNotSound() {
+        let zeros = [Float](repeating: 0, count: 512)
+        XCTAssertFalse(withList([bytes(zeros)], channelsPerBuffer: 2) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: true, planar: false))
+        })
+        XCTAssertFalse(withList([bytes(zeros), bytes(zeros)], channelsPerBuffer: 1) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: true, planar: true))
+        })
+        XCTAssertFalse(withList([bytes([Int16](repeating: 0, count: 512))], channelsPerBuffer: 2) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: false, planar: false))
+        })
+    }
+
+    func testOneQuietSampleInOneChannelIsSound() {
+        var right = [Float](repeating: 0, count: 256); right[200] = 1e-6
+        XCTAssertTrue(withList([bytes([Float](repeating: 0, count: 256)), bytes(right)], channelsPerBuffer: 1) {
+            CoreAudioSystemAudioSource.inputContainsSignal($0, format: format(float: true, planar: true))
+        })
     }
 }

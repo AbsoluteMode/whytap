@@ -1,4 +1,3 @@
-import Accelerate
 import Foundation
 
 /// What Whytap knows about System Audio Recording (TCC `AudioCapture`).
@@ -23,22 +22,21 @@ enum SystemAudioAccess {
         defaults.bool(forKey: heardKey)
     }
 
+    /// Serializes the first-proof transition: two captures' first callbacks
+    /// at once must write and notify once.
+    private static let lock = NSLock()
+
     /// Remembers that a capture heard sound. Safe from any thread; only the
     /// first call writes and notifies.
     static func recordHeard(defaults: UserDefaults = .standard) {
-        guard !defaults.bool(forKey: heardKey) else { return }
-        defaults.set(true, forKey: heardKey)
+        let first: Bool = lock.withLock {
+            guard !defaults.bool(forKey: heardKey) else { return false }
+            defaults.set(true, forKey: heardKey)
+            return true
+        }
+        guard first else { return }
         DispatchQueue.main.async {
             NotificationCenter.default.post(name: didChange, object: nil)
         }
-    }
-
-    /// Whether a buffer carries any sound at all. Without the grant every
-    /// sample is exactly zero.
-    static func containsSignal(_ samples: [Float]) -> Bool {
-        guard !samples.isEmpty else { return false }
-        var peak: Float = 0
-        vDSP_maxmgv(samples, 1, &peak, vDSP_Length(samples.count))
-        return peak > 0
     }
 }

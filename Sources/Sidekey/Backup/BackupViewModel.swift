@@ -1347,7 +1347,7 @@ final class BackupViewModel: ObservableObject {
             if let latest = previous.first, latest.preferences == values,
                let previousCredentials = latest.credentials,
                (previousCredentials == credentials || ConfigBackupRegistry.settingsCredentialsMatch(previousCredentials, credentials)) { return }
-            let reason = warnings.isEmpty ? "Saved on this Mac" : "Saved on this Mac · API & Models needs review"
+            let reason = warnings.isEmpty ? "Saved on this Mac" : "Saved on this Mac · Keys & models needs review"
             let snapshot = ConfigBackupSnapshot(reason: reason, preferences: values, credentials: credentials)
             _ = try await settingsFiles.save(ConfigBackupArchive.seal(snapshot, key: key), id: snapshot.id)
             localSettingsVersions.insert(snapshot, at: 0)

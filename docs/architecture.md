@@ -46,7 +46,7 @@ Voice flow (Drop / dictation):
             dropSmart) when the take starts; Retry and recovery read the
             latch, never the current preference
        -> realtime STT via TranscriptionSessionFactory
-            (route of the take's feature, Settings -> API & Models):
+            (route of the take's feature, Settings -> Keys & models):
             FeatureRouteResolver turns the feature's route (provider account +
             model, AIRoutingStore) into a ResolvedRoute with the account's
             Keychain key; RealtimeAdapterFactory builds the adapter. Your key
@@ -79,7 +79,7 @@ Voice flow (Drop / dictation):
             A feature without a route (Not set: never chosen on Apple Silicon,
             the retired Local route, or its key removed), or whose key is
             missing or unreadable, throws .notConfigured / .missingKey and
-            opens Settings -> API & Models on that feature's row; nothing
+            opens Settings -> Keys & models on that feature's row; nothing
             moves to another provider on its own. Deepgram's language policy
             is checked before the key (invalidLanguageConfiguration). WHY:
             .project-docs/decisions/2026-10-18-remove-local-models.md,
@@ -87,7 +87,7 @@ Voice flow (Drop / dictation):
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
             the same route mechanism, for every speech feature (Drop Fast,
             Drop Smart, Agent voice, Voice search, Meetings; no text feature;
-            Subtitles run only on OpenAI Audio translate). The API
+            Subtitles run on Soniox or OpenAI live translation). The API
             keys tab has an On this Mac card above the key tiles
             (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
             button is in the card, with an animated progress bar and symbol
@@ -142,7 +142,7 @@ Voice flow (Drop / dictation):
             Decision-only catalog entries stay excluded from text/agent pickers.
             WHY: .project-docs/decisions/2026-10-22-smart-editor-pass.md
             Smart failures retain the transcript in memory and show Retry with
-            the original mode and target; configuration errors open API & Models on
+            the original mode and target; configuration errors open Keys & models on
             the Drop Smart cleanup row.
             Full, batch-recovered and partial transcripts use the same rule.
             In both modes DropPunctuationSpacing then removes an ordinary
@@ -230,7 +230,7 @@ Voice flow (Drop / dictation):
             Retry, the recorder fallback and agent batch voice: the whole
             take goes to the provider of the feature that led it (Drop Fast
             or Drop Smart; agent batch voice: Agent voice) in Settings ->
-            API & Models, with that provider's own Keychain key and its
+            Keys & models, with that provider's own Keychain key and its
             recorded model from the built-in registry (Soniox file API, Deepgram
             pre-recorded, ElevenLabs speech-to-text, self-hosted
             /v1/audio/transcriptions over https), with the realtime
@@ -252,7 +252,7 @@ Voice flow (Drop / dictation):
             "<Provider> refused the key" and the like, and a take whose
             partial was pasted after all changes nothing. A refused key,
             missing permission or empty balance also marks the key's tile and
-            the feature row (KeyStatusStore) and opens API & Models on the
+            the feature row (KeyStatusStore) and opens Keys & models on the
             take's row once per take; a 403 is shown but not recorded against
             the key. The audio stays for Retry. A later dictation that works
             forgets the mark; the free key check on opening Settings does not
@@ -309,7 +309,7 @@ Live text in the recording wing (Drop and agent voice):
   Display only: paste and auto-stop still use the provider's text. WHY:
   .project-docs/decisions/2026-11-13-live-text-sand.md
 
-Drop auto-stop (opt-in, Settings -> Other -> Drop, off by default):
+Drop auto-stop (opt-in, Settings -> Features -> Drop, off by default):
   With "Stop Drop automatically" on, a Toggle Drop shortcut starts a take that
   ends by itself; a second press still stops it at once, and hold shortcuts
   are unchanged. It is an ordinary Drop take. DropAutoStopRule stops it 2 s
@@ -336,7 +336,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
   One provider has one mark: an OpenAI or Anthropic account shows that same
   bundled model-author mark wherever its provider is drawn (Drop and cleanup
-  tickers, API & Models, first-run keys), never a second asset or an SF Symbol.
+  tickers, Keys & models, first-run keys), never a second asset or an SF Symbol.
   A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
   without keys/content/model requests; recording never waits for it. Cache I/O
   is off the main actor, failed refreshes retain usable artwork, and stale view
@@ -356,7 +356,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Whytap key window skips it; text/voice submission continues without selection.
   No CLI installation, binary/version probe, MCP bootstrap, provider discovery,
   model catalog fetch or paid connection probe is needed to start a request.
-  Settings -> API & Models chooses the exact Agent route/key. OpenRouter uses
+  Settings -> Keys & models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
   Anthropic uses Messages. Every route asks for the least reasoning the model
@@ -472,7 +472,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
   OpenRouter's reported cost includes search; OpenAI stays unpriced.
   WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-  Settings -> API & Models -> API keys saves a separate Tavily key in Keychain
+  Settings -> Keys & models -> API keys saves a separate Tavily key in Keychain
   (byok.tavily.search_api_key), after a GET /usage check without a search. The
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
@@ -523,15 +523,36 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  The caption is 146 pt high while connecting or listening. The audio
-  permissions link sits inside it. Stop immediately shows Start and a
-  108 pt caption if there are rows. With no rows the stopped box shows
-  only its controls, and a problem hugs its message. The caption takes the
-  panel's width up to 708 pt and the height the controls leave, so the
-  360 x 190 pt minimum panel fits every state. The live pair
-  settles in place under LiveSubtitleModel.liveID; its original shows only up
-  to the audio position its translation has reached (and its first sentence
-  end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
+  The box fills the panel (less a 10 pt transparent margin for its shadow),
+  so its size depends only on the panel, never on what it shows: the
+  controls row above the caption when stopped, the caption alone while
+  running (controls on hover), a hint before the first session. The audio
+  permissions link sits inside the caption. The user drags the box anywhere
+  and resizes it by its edges and corners (margin plus 6 pt inside the edge,
+  18 pt corners; minimum 480 x 150 pt, SubtitleOverlayFrame); the panel's
+  sendEvent runs both (SubtitleOverlayFrameTracker) except on controls
+  (language menus, session button, ×, fix buttons), and a tracking area shows
+  the resize cursor. The frame is saved after each move or resize
+  (sidekey.translation.subtitleFrame: the display's UUID and the frame
+  relative to its visible frame) and restored at the same place on that
+  display, clamped to it; when that display is gone, the saved size returns
+  at the bottom centre of the island's display. The fix buttons (Open Keys &
+  models, Open audio permissions) act on the first click through the panel's
+  sendEvent, like Stop; a Control-click is always the context menu's. A scroll over the box
+  scrolls the caption back (SubtitleCaptionScroll): it then anchors to the
+  pair at its top, new pairs arrive below without moving it, a bottom fade
+  and "Latest" show, and scrolling to the newest pair or Latest follows
+  again, also when the newest pair is already in view. A session keeps 200
+  pairs (SubtitleCaption.historyPairs); following lays out at least 24 and
+  enough to fill the caption's height, so every pair is in view or above it.
+  A scroll reads the rows' placement at the caption's on-screen size, not a
+  measurement pass's; Clear, a new session or mode drop it. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+  The live pair
+  settles in place under LiveSubtitleModel.liveID; with OpenAI its original
+  shows only up to the audio position its translation has reached (and its
+  first sentence end; Soniox shows it as heard, below), and
+  SubtitleSpeechPairer.showLive remembers what the row showed, so
   the settled pair keeps at least that much of both streams through any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
   newest lines (NewestLinesColumn), so a long original never hides its
   translation; older lines leave at the top behind a fade, a line at a time. On hover
@@ -540,13 +561,24 @@ Translation tools:
   (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
   acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
-  Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
-  -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
-  holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
-  choice. It runs exactly when the OpenAI key from API keys can be read;
-  without one the card has the usual setup contour, its menu adds "Add an
-  OpenAI key…", it counts as a feature without a model, and Start names the
-  missing key and opens API & Models (no system audio is captured). A session
+  Subtitles run on Soniox stt-rt-v6 one-way live translation
+  (SonioxRealtimeTranslateAdapter: original and translation in one WebSocket,
+  a translation placed at its original's end_ms; each frame is one .update
+  applied whole before the caption is published; the live row shows the
+  original as heard from non-final tokens (.sourcePreview), past sentences
+  still waiting for translation, and a frame's translated subwords as one
+  whole .translationPiece; target-language text keeps word-boundary
+  handling; pairs hold final words only. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md) whenever
+  the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
+  only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
+  -> Subtitles is an ordinary row whose model is preselected by the key:
+  "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate"; no switch,
+  engine, Speech or LLM choice. Without either key the card has the usual
+  setup contour, its menu adds "Add a Soniox key…", it counts as a feature
+  without a model, and Start names the missing key and opens Keys & models
+  (no system audio is captured). WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md A session
   stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
   no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
   like Decision: their IDs stay for Costs and history, saved routes are
@@ -564,8 +596,8 @@ Translation tools:
   sentence that ended (elapsed_ms) before it, plus later sentences the model
   joined: of the sentence ends heard by the cut, the one whose length (the
   session's translation-to-original ratio) and delay (the session's median)
-  fit the translation best. The live pair shows whole words only; a held last
-  word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
+  fit the translation best. The live pair shows whole words only (a whole
+  Soniox piece at once); a held last word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
   TranslationPanel.sendEvent from frames they measured
   (SubtitleOverlayHitTargets), like the island: a press acts only on the
   button view, action and frame it began on, while the panel shows
@@ -1042,6 +1074,12 @@ Hover tool search and pointer routing:
   Internal endEditing does not resign the key window between button down/up;
   captured activation or actual window resignation releases text-entry focus.
   Up/Down select, Return activates, Escape clears the query then releases focus.
+  Result rows (IslandHoverSearchResultsList) are identified by their tool, never
+  by position: a position id froze the visible rows at the first letter typed.
+  While searching, the footer reads the same selected index as the one row
+  highlight (hover moves it; an arrow key clears hover), the selected row has
+  the VoiceOver selected trait, and an arrow key scrolls it into view. WHY:
+  .project-docs/decisions/2026-11-25-hover-search-row-identity.md
   IslandHoverHitBridge measures target NSView frames at event time and clips
   results to their visible scroll viewport. NSWindow down/up must target the
   same unchanged control; drag-out, context/layout change, Escape and panel
@@ -1105,7 +1143,7 @@ Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
 
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
-  (Settings -> Other -> "Show island on") -> screen with a real notch ->
+  (Settings -> General -> "Show island on") -> screen with a real notch ->
   primary display -> first. NSScreen.main is NEVER used (it is the key
   window's screen and moves with every click). All overlay panels position
   through currentDescriptor()/currentVisibleFrame() and follow
@@ -1136,7 +1174,7 @@ Island idle-hide:
   agent flow, drop, update pill, music, hover, held modifiers, programmatic
   expansion, "Updated" indicator). Wake = cursor in the pill rect + 24px, any
   of our hotkeys, or a blocker rising. Toggle "Auto-hide island" in
-  Settings -> Other. WHY:
+  Settings -> General. WHY:
   docs/decisions/2026-07-09-island-idle-hide-settings-toggle.md
 
 Update flow (download-on-action):
@@ -1197,7 +1235,7 @@ Update flow (download-on-action):
   docs/decisions/2026-07-08-update-download-spinner-and-post-relaunch-updated-indicator.md
 ```
 
-Presentation: Settings -> API & Models has four internal tabs: API keys,
+Presentation: Settings -> Keys & models has four internal tabs: API keys,
 Models (the initial tab), Costs and API hints. API keys holds the provider keys (Soniox,
 Deepgram, ElevenLabs, OpenRouter, OpenAI, Anthropic, and the user's
 OpenAI-compatible servers) and one model per AI feature (Drop Fast, Drop
@@ -1379,14 +1417,19 @@ centers the menu and enable switch, moving Notification type into the adjacent
 question-mark tooltip/popover. Bindings and saved selections are unchanged.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
-Settings -> Other rows explain themselves with a short subtitle that names no
+Settings rows explain themselves with a short subtitle that names no
 remappable key, plus, where an accepted clip exists, a ▶ FeatureVideoButton:
 a popover with the bundled silent clip (Resources/FeatureVideos, copied by
 dev-run.sh and build-dmg.sh, never fetched) looping muted after the click, and
 "Your shortcut:" with the live keys from HotkeyConfiguration, since the clips
-show default or example keys. Today: every Other feature row (Stop Drop
-automatically, Meeting Notes, Google search, Agent, Screenshot protection,
-Auto-hide island); rows that are plain options have none. WHY:
+show default or example keys. Today: Stop Drop automatically on the Drop
+screen, Screenshot protection and Auto-hide island in General; the Agent,
+Meeting Notes and Google search clips play on their feature screens
+(FeatureVideoStrip); rows that are plain options have none. Settings ->
+General (raw id still other, whytap://settings/other) keeps only the island
+(auto-hide, display) and screenshot protection; Other's Drop, Meeting Notes,
+Google search and Agent rows moved to their feature screens, and
+AgentOtherSection is only the shared switch logic and words. WHY:
 .project-docs/decisions/2026-11-20-other-feature-videos.md
 
 Settings is being rebuilt around features, in steps. FeatureCatalog
@@ -1411,45 +1454,73 @@ step, on Keyboard control's row, not counted again for the shortcut. A
 sentence about an optional part names only what it stops. No catalog text
 names a key. Settings opens on the
 Features tab (SettingsWindowTab.features, whytap://settings/features):
-SettingsFeaturesView lists the catalog with each status, read through
+SettingsFeaturesView lists the catalog with each status and icon
+(AppFeature.symbol: the island tool's icon, else the one its Hotkeys row
+carries; FeatureIcon, also in each screen's header), read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
-PermissionsSettingsViewModel the older tabs show. A row opens the feature's
+PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
+keys from the Keychain on the main thread, so it is rebuilt only when a value
+it shows changes: Notify and Monitor reach it through
+FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
+Server status after the Monitor reload completes), and
+NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
+(.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
-present place: the Other tab, or its Toolbox pane. The older tabs stay in the
-sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
+present place. Every feature has its own screen now. The sidebar
+(SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,
+Hotkeys and General. Meeting notes and Toolbox open from Meeting Notes and
+Hover; Notifications, Backup and Integrations from General's More group
+(SettingsOtherView.moreRows). Each keeps its identifier and link, its
+sidebarHome row stays selected, and SettingsBackBar above it leads back
+(SettingsWindowSelection.backLink). Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
 HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another
 action uses is not saved and recording stays open; Space stays hold-only);
 "Try it here" is the onboarding's native text field; "What it needs" lists the
-catalog's checks with the API & Models ModelMenu in place, Download free model
+catalog's checks with the Keys & models ModelMenu in place, Download free model
 or Use the model on this Mac (APIAndModelsViewModel.useOnDeviceModel: that one
 feature, no Assign window; after a download only if the feature's route is
 still the one it had when the download began, so a model picked meanwhile
 stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
-API & Models on API keys; the sidebar entry still opens Models), Allow,
+Keys & models on API keys; the sidebar entry still opens Models), Allow,
 Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
 Mode, Language you speak, Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
-island editors. The same switches remain in Other and in the island. Every
+island editors. The same switches remain in the island. Every
 feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
 (snapshot, view models, environment, the setup actions and the per-check
 notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
-setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
-one a "Video coming" row says what it will show), FeatureShortcutsGroup (one
-recording session shared by its rows), FeatureNeedsGroup, the feature's own
-settings and FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
-its screen; Drop keeps DropFeatureView around the same parts. WHY:
+setup box, FeatureVideoStrip (a frame of the bundled clip at
+FeatureVideo.posterSeconds with a play mark, read once by FeatureVideoPoster;
+the clip plays in place on click; without one a "Video coming" row says what
+it will show), FeatureShortcutsGroup
+(one recording session shared by the shortcut rows), FeatureNeedsGroup, the
+feature's own settings and FeatureExamplesGroup. FeatureScreens maps each
+feature with place .screen to its screen. Drop keeps DropFeatureView around
+the same parts. The Agent,
+Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
+the switch (FeatureSwitchModel) writes the same flag as Other and the island
+through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
+connects the native Agent first (AgentOtherSection.turn) and moves only once
+it is on, otherwise the card says why. The Agent screen adds Allow file edits
+and commands and things to ask; Meeting Notes adds the note-ready notification
+and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
+setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
+Features). Translate & Subtitles, Screenshots, To-do (AppFeature.todo) and
+Case (AppFeature.caseVault, raw value "case") are island tools with their own
+screens too: no switch (the card points to Toolbox), their tool shortcuts, what
+they need, and a "Use it" group (IslandToolActions) that opens the tool:
+Translate and Subtitles in their Toolbox panes, Shot's capture
+(FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
+Case need nothing and read Ready. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
 
 Hover, Notify and Monitor are features with their own screens too. Hover
 (HoverFeatureView) lists the island's tools in HoverLayoutStore order with
-Settings pinned last, then the tools that are off. A row is held and dragged
-(HoverToolDragModel: over another row the tool takes its place live; a row
-sliding under the pointer is not a new target; an off tool dropped on a row
-joins there; dropped on More tools it leaves). Only the internal tool drag
-type can update the list. A tool's switch removes it or puts
+Settings pinned last, then the tools that are off. The list is not dragged:
+tools are reordered in the island (below). A tool's switch removes it or puts
 it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
 actions. The island observes the same store, so it changes at once. The
 chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
@@ -1464,6 +1535,33 @@ CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
+Island tool reorder: in the hover drawer's tool grid, a tile pressed and moved
+IslandHoverHitBridge.dragThreshold (4 pt) lifts at once, with no hold delay
+(liftPressedTool; Settings and coming-soon tools never lift). The bridge
+measures the grid's cells once (IslandHoverReorder.cells); while the button is
+held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
+so the island and Settings -> Features -> Hover change at once and a tile
+sliding under the pointer cannot send the tool back. A lifted tool is drawn
+larger with a shadow, holds the drawer open (IslandView interactionHeld and
+isHoverExpanded), and its release never activates it. A release more than
+24 pt outside the tools restores the order before the lift (Escape only when
+the island already has keyboard focus); a layout change the drag did not
+write (Settings Sync) ends it without undoing that change; hide, drawer close
+or the next press end the drag with the order reached. A shorter press stays
+an ordinary click. Motion: the lifted tool is drawn by IslandHoverFloatingTile
+above the grid (outside the glass container), starting over its cell
+(IslandHoverTileFramesKey frames) and following the pointer through
+IslandHoverReorderMotion, which only it observes; the layer
+(IslandHoverFloatingLayer, fed by IslandHoverReorderStage) is an overlay of the
+whole island in hoverZoneSpace, outside the drawer's glass clip. Its cell stays
+as an empty place sliding with the neighbours; release lands it, cancel flies
+it back from the release point, with damped springs
+(IslandHoverReorderMotionCurve); the drawer is held until it has landed
+(settlingTool / holdsDrawer). Moves are unsaved (placeTool persist: false)
+until release (saveLayout); a cancel restores the screen only; any Settings
+Sync reload (externalReloads) ends the drag. WHY:
+.project-docs/decisions/2026-11-25-island-hover-reorder.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
@@ -1474,7 +1572,7 @@ panes (Vocab, Filler, Case, languages, Notify, History, Monitor) sit on the
 Settings background and follow its appearance through IslandInk (white in the
 always-dark island). WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
 UI decisions and verification limits: docs/DESIGN.md.
-API & Models separates function rows; missing setup uses a static orange contour
+Keys & models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and
 recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
@@ -1627,7 +1725,7 @@ nothing in the window takes is dropped without the alert sound
 (OnboardingJourneyWindow), and the Try Drop field takes Escape quietly. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
 .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
-Settings -> API & Models (the agent's model is chosen there too; Settings ->
+Settings -> Keys & models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow
 file edits and commands; the workspace path is in the Whytap plugin's
 get_state; the former Agents tab is gone, its whytap://settings/agentMode link
@@ -1635,7 +1733,7 @@ opens Other. WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md),
 and permissions in
 Settings -> Permissions. A feature can request the permission it needs when
 invoked. Drop without a chosen provider, key or endpoint opens
-Settings -> API & Models on that feature's row. Settings opens on API &
+Settings -> Keys & models on that feature's row. Settings opens on API &
 Models; screenshot protection is in
 Other (default off). The former tour, resume state, preview target and
 voice demos were removed. WHY:
@@ -1846,7 +1944,22 @@ registrations, project scope and approvals; an unregistered client gets only
 the app tools. Case -> Connect writes this `whytap` entry and removes its older
 `case` entry; Disconnect removes only that older entry. Secret use stays in
 `whytap case run` through the agent's own terminal. WHY:
-.project-docs/decisions/2026-11-21-one-whytap-mcp-server.md The app-control server reads
+.project-docs/decisions/2026-11-21-one-whytap-mcp-server.md A long-lived
+`whytap mcp` / `app mcp` / `app screen-mcp` / `case mcp` started before an
+update follows the new build in place: when the broker denies it as an
+untrusted helper and the helper file on disk is a different build (or the same
+build while this process lost its own file, as a byte-identical promotion does) that strictly
+validates (all architectures) against the designated requirement the helper
+recorded from itself at start (kernel cdhash vs. the file's), it copies that
+file into a private 0700 folder (Application Support/<bundle id>/helper-handover,
+kept while the process runs because the app reads the helper's executable
+path), verifies the copy and `execve`s exactly it with the same pid, parent and stdio, carrying the MCP handshake and every
+unanswered, uncancelled request (`MCPBuildHandover`, `FileDescriptorLineSource`);
+the new image resumes only as the verified code. A rollback build without the
+protocol gets the carried requests answered with an explicit retry error first.
+At most three relaunches per 120 s; ad-hoc helpers never follow. The broker
+check is unchanged. WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+The app-control server reads
 live build/activity/route metadata and changes allowlisted models, provider pins,
 Drop mode, languages and idle
 auto-hide through existing app stores. Every write requires the current value;
@@ -2179,7 +2292,7 @@ means Exodia-Backup); reconnecting the same account keeps the saved one, and a
 token that cannot see it gets an access error without moving the destination. Release tags and formats are unchanged. WHY:
 .project-docs/decisions/2026-11-21-whytap-backup-repository.md
 Connection alone never backs up data.
-API & Models routes, server registrations and their provider keys are included.
+Keys & models routes, server registrations and their provider keys are included.
 Costs history is exported by the live AIUsageStore actor and verified with a
 strict schema/row validator. Restore retains target-only spending and the best
 known price per request ID; older archives without Costs leave it untouched.
@@ -2371,7 +2484,13 @@ is separate from the removed app-managed speech/LLM models. Guide:
   tap used for the other side of a meeting. Requires
   `NSAudioCaptureUsageDescription` (contract: `PackagingRebrandTests`);
   without the grant the tap silently yields zeros, so `SystemAudioVADProbe`
-  rebuilds it at every recording start.
+  rebuilds it at every recording start. macOS has no status check for it:
+  the first non-zero sample any capture hears (`CoreAudioSystemAudioSource`)
+  is remembered by `SystemAudioAccess`, after which Settings shows System audio
+  as Allowed ("?" and "macOS asks at the first recording" only before that).
+  The Subtitles overlay offers "Open audio permissions" only after 5 s of
+  silence while no capture has ever heard sound. A grant withdrawn later is
+  not noticed. WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
 - **Microphone** for Drop, agent voice and meetings.
 
 Drop reconciles failed installations and permission changes on activation,

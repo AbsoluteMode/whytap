@@ -5,7 +5,7 @@ enum ConfigBackupSection: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .models: return "API & Models · languages"
+        case .models: return "Keys & models · languages"
         case .hotkeys: return "Hotkeys"
         case .vocabulary: return "Vocabulary & replacements"
         case .toolbox: return "Toolbox layout"
@@ -51,7 +51,8 @@ enum ConfigBackupRegistry {
             "agentCloseCombo", "agentCloseShortcut", "usefulLinksInsertCombo", "usefulLinksInsertShortcut",
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
-            "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
+            "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut",
+            "googleSearchTextShortcut", "googleSearchVoiceShortcut", "googleSearchVoiceGesture"].map { "hotkeys." + $0 })
         // The shelved Drop learning's Replace rules stay readable so older
         // archives and settings history restore; nothing applies them.
         // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md
@@ -202,7 +203,7 @@ enum ConfigBackupRegistry {
                     var copy: [String: Any] = ["routing": value]
                     if let previous = defaults.object(forKey: aiRoutingPreservedKey) { copy["previousCopy"] = previous }
                     values[aiRoutingPreservedKey] = try preserved(copy)
-                    warnings.append("Some API & Models settings could not be read. Their original value is preserved in this backup. Keys for unreadable server entries could not be included; review those servers after recovery.")
+                    warnings.append("Some Keys & models settings could not be read. Their original value is preserved in this backup. Keys for unreadable server entries could not be included; review those servers after recovery.")
                 }
             case .calendarAccounts:
                 guard let data = value as? Data else { throw ConfigBackupError.invalidArchive }

@@ -73,7 +73,7 @@ struct AgentRunOptions: Equatable {
     var screenMCPCommand: [String]?
     /// OpenRouter endpoint tag the agent's model is pinned to; `nil` is Auto.
     var openRouterProvider: String?
-    /// The user picked Tavily in API & Models → Models → Search.
+    /// The user picked Tavily in Keys & models → Models → Search.
     var preferTavilySearch: Bool
     /// The catalog's statement of built-in web search support (Anthropic's
     /// Models API), read even when the catalog gives no token limits; `nil`

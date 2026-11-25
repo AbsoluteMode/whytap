@@ -8,6 +8,16 @@ import os
 enum SpeechTranslationEvent: Equatable {
     case source(String, elapsedMs: Int?)
     case translation(String, elapsedMs: Int?)
+    /// The original heard after the last `.source`, not final yet: the
+    /// provider may still revise it. Each one replaces the previous; empty
+    /// clears it. Only sessions with `streamsOriginalPreview` send it.
+    case sourcePreview(String)
+    /// A whole translated piece (Soniox: one frame's clause), complete words
+    /// only, unlike `.translation`'s deltas that may end inside a word.
+    case translationPiece(String, elapsedMs: Int?)
+    /// One provider frame's events, applied together before the caption is
+    /// published: a frame never shows half-applied.
+    case update([SpeechTranslationEvent])
     /// The provider flushed the last audio and closed the session.
     case closed
     case failed(SpeechTranslationFailure)
@@ -22,6 +32,10 @@ enum SpeechTranslationFailure: Error, Equatable {
     case unsupportedLanguage
     case connectionLost
     case provider
+    /// The key works but may not use live translation (Soniox 403).
+    case permissionDenied
+    /// The provider does not offer the model to this key or region.
+    case modelUnavailable
 }
 
 /// One live audio-in, translation-out session (OpenAI `gpt-realtime-translate`).
@@ -36,6 +50,20 @@ protocol SpeechTranslationSession: AnyObject {
     func close() async
     /// Seconds of audio the provider accepted, for Costs.
     func acceptedAudioSeconds() -> Double
+    /// The provider a message about this session names.
+    var providerName: String { get }
+    /// The provider's reference for this session in its usage logs, if any.
+    var usageReference: String? { get }
+    /// The session sends `.sourcePreview` and its translation as
+    /// `.translationPiece`s, grouped per frame in `.update`: the live row
+    /// shows the original as heard and each translated piece at once.
+    var streamsOriginalPreview: Bool { get }
+}
+
+extension SpeechTranslationSession {
+    var providerName: String { "OpenAI" }
+    var usageReference: String? { nil }
+    var streamsOriginalPreview: Bool { false }
 }
 
 /// OpenAI's live speech translation: audio goes in, the model returns the
@@ -358,6 +386,9 @@ final class AIUsageMeteredSpeechTranslation: SpeechTranslationSession {
     }
 
     var events: AsyncStream<SpeechTranslationEvent> { session.events }
+    var providerName: String { session.providerName }
+    var usageReference: String? { session.usageReference }
+    var streamsOriginalPreview: Bool { session.streamsOriginalPreview }
     func sendAudio(_ pcm: Data) async { await session.sendAudio(pcm) }
     func endInput() async { await session.endInput() }
     func acceptedAudioSeconds() -> Double { session.acceptedAudioSeconds() }
@@ -369,6 +400,10 @@ final class AIUsageMeteredSpeechTranslation: SpeechTranslationSession {
             return !recorded
         }
         let seconds = session.acceptedAudioSeconds()
-        if first, seconds > 0 { record(AIUsageEvent.speech(context, seconds: seconds, at: started)) }
+        guard first, seconds > 0 else { return }
+        // Soniox logs the session's client reference: an id of `soniox:<ref>`
+        // lets Costs replace this estimate with the charge (SonioxUsagePrices).
+        let id = context.account == .soniox ? session.usageReference.map { "soniox:\($0)" } : nil
+        record(AIUsageEvent.speech(context, seconds: seconds, id: id ?? UUID().uuidString, at: started))
     }
 }

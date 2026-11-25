@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/TranslationTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-23-subtitle-steady-overlay.md, 2026-10-20-translation-tools.md, 2026-11-21-subtitle-phrase-pairs.md]
+related: [2026-11-23-subtitle-steady-overlay.md, 2026-10-20-translation-tools.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-11-25-subtitle-overlay-move-resize-scroll.md]
 ---
 
 # Compact subtitle overlay

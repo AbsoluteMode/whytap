@@ -32,6 +32,8 @@ public final class UnixSocketBrokerClient: CancellableCaseBrokerCalling {
         guard cancellation?.isCancelled != true else { throw CaseBrokerClientError.protocolFailure }
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw CaseBrokerClientError.unavailable }
+        // Closed, not inherited, when an MCP helper execs a new build.
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
         cancellation?.attach(fd)
         defer { cancellation?.detach(); close(fd) }
         var noSigPipe: Int32 = 1

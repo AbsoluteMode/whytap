@@ -3,7 +3,7 @@ import Foundation
 /// Per-provider model / reasoning / speed settings chosen in Settings,
 /// persisted in UserDefaults. Codex models and controls come from its registry;
 /// the same resolution feeds both the Settings UI and per-turn CLI flags.
-/// The Agent's web search pick in API & Models → Models → Search.
+/// The Agent's web search pick in Keys & models → Models → Search.
 enum AgentWebSearchChoice: String, Sendable {
     /// The Agent model's built-in search; Tavily for a model without it.
     case auto
@@ -27,7 +27,7 @@ final class AgentSettingsStore: ObservableObject {
     @Published var codexEffort: String?       { didSet { write(Keys.codexEffort, codexEffort) } }
     @Published var codexServiceTier: String?  { didSet { write(Keys.codexServiceTier, codexServiceTier) } }
     @Published var openCodeAllowActions: Bool { didSet { defaults.set(openCodeAllowActions, forKey: Keys.openCodeAllowActions) } }
-    /// API & Models → Models → Search. `.auto` (default): the Agent model's
+    /// Keys & models → Models → Search. `.auto` (default): the Agent model's
     /// built-in search, else Tavily. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
     @Published var webSearchChoice: AgentWebSearchChoice { didSet { defaults.set(webSearchChoice.rawValue, forKey: Keys.webSearchChoice) } }
 

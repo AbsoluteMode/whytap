@@ -419,7 +419,9 @@ struct IslandView: View {
             panelHovering: panelHovering,
             wasExpanded: mouseExpanded,
             glance: hoverPanelGlance,
-            interactionHeld: holdsHoverMenu,
+            // A tool lifted for reordering holds the drawer, even when the
+            // pointer passes outside it mid-drag.
+            interactionHeld: holdsHoverMenu || hoverHitBridge.holdsDrawer,
             screenshotPreparing: appState.screenshotPreparing
         )
         if mouseExpanded != next {
@@ -602,7 +604,8 @@ struct IslandView: View {
         // ⌥N press — D4), then gate the result on the policy so neither path
         // forces the drawer open during a meeting suggestion / agent flow.
         !displayPreferences.hideIslandHoverWidgets
-            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu || appState.programmaticHoverExpansion)
+            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
+                || hoverHitBridge.holdsDrawer || appState.programmaticHoverExpansion)
             && IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
@@ -1296,6 +1299,12 @@ struct IslandView: View {
             alignment: .top
         )
         .coordinateSpace(name: Self.hoverZoneSpace)
+        // The lifted tool while reordering: above the drawer's clip (the
+        // macOS 14/15 backdrop clips everything inside the drawer).
+        // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+        .overlay(alignment: .topLeading) {
+            IslandHoverFloatingLayer(stage: hoverHitBridge.stage, motion: hoverHitBridge.motion)
+        }
         // Preview bubble for the hovered History row. Lives OUTSIDE the
         // clipped drawer (which would cut anything beyond its bounds) and
         // renders leftward into the window's permanently reserved left
@@ -1375,6 +1384,8 @@ struct IslandView: View {
         // closed drawer before the cursor reaches the pill.
         .onChange(of: pillHovering) { _, _ in recomputeMouseExpanded() }
         .onChange(of: panelHovering) { _, _ in recomputeMouseExpanded() }
+        // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+        .onChange(of: hoverHitBridge.holdsDrawer) { _, _ in recomputeMouseExpanded() }
         .onChange(of: appState.screenshotPreparing) { _, preparing in
             guard !preparing else { return }
             recomputeMouseExpanded()
@@ -2602,6 +2613,9 @@ private struct IslandDropModeHoverPanel: View {
     @State private var outputFastNoticeGeneration = 0
     /// Currently-hovered tile in the icons row; `nil` when nothing is hovered.
     @State private var hoveredTool: HoverTool? = nil
+    /// Island tool reorder: each tile's frame in the grid's space, and the
+    /// tool drawn above the grid while it is lifted and while it settles.
+    @State private var tileFrames: [HoverTool: CGRect] = [:]
     @State private var searchQuery = ""
     @State private var searchFocused = false
     @State private var selectedSearchIndex = 0
@@ -2735,6 +2749,7 @@ private struct IslandDropModeHoverPanel: View {
             contentsVisible = true
             hoverHitBridge.setSurface(hitTargetSurface)
             hoverHitBridge.setContext(hitTargetContext)
+            hoverHitBridge.layoutStore = hoverStore
             // Brightness keys may have changed the level since the last hover.
             if hoverStore.slots.contains(.brightness) { brightness.refresh() }
         }
@@ -2743,6 +2758,7 @@ private struct IslandDropModeHoverPanel: View {
             setSearchFocus(false)
         }
         .onChange(of: hoverStore.slots) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
+        .onChange(of: hoverHitBridge.reorderPhase) { _, phase in reorderPhaseChanged(phase) }
         .onChange(of: mode) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: searchQuery) { _, _ in
             hoverHitBridge.setSurface(hitTargetSurface)
@@ -2799,8 +2815,17 @@ private struct IslandDropModeHoverPanel: View {
                     ScrollView(.vertical) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: IslandHoverControlsLayout.columnSpacing),
                                                  count: HoverLayoutStore.columns), spacing: IslandHoverControlsLayout.rowSpacing) {
-                            ForEach(Array(hoverStore.slots.enumerated()), id: \.offset) { offset, tool in
+                            // Identity by tool, so a reorder slides tiles instead of redrawing
+                            // them; an identity transition keeps a replaced tool from fading out
+                            // as a tail after the animation.
+                            ForEach(hoverStore.slots, id: \.self) { tool in
                                 tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
+                                    .transition(.identity)
+                                    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+                                    // The lifted tool is drawn by the floating layer; its cell
+                                    // stays as an empty place that slides with the others.
+                                    .background(IslandHoverTileFrameReporter(tool: tool, space: IslandView.hoverZoneSpace))
+                                    .opacity(hoverHitBridge.reorderingTool == tool || hoverHitBridge.settlingTool == tool ? 0 : 1)
                                     .islandHoverHitTarget(
                                         bridge: hoverHitBridge,
                                         id: IslandHoverHitTargetID(surface: .tile, tool: tool),
@@ -2810,7 +2835,7 @@ private struct IslandDropModeHoverPanel: View {
                                     .disabled(tool.isComingSoon)
                                     .overlay(alignment: .top) {
                                         toolHotkeyHint(for: tool)
-                                            .opacity(hoveredTool == tool ? 1 : 0)
+                                            .opacity(hoveredTool == tool && !hoverHitBridge.isReordering ? 1 : 0)
                                             .offset(y: -IslandHoverControlsLayout.hintOffset)
                                             .animation(.easeInOut(duration: 0.15), value: hoveredTool)
                                             .allowsHitTesting(false)
@@ -2830,6 +2855,7 @@ private struct IslandDropModeHoverPanel: View {
                     // Measure the clipped viewport, never the entire scrolling grid.
                     .islandHoverHitRegion(bridge: hoverHitBridge, surface: .tile)
                 }
+                .onPreferenceChange(IslandHoverTileFramesKey.self) { tileFrames = $0 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
             }
@@ -2875,10 +2901,13 @@ private struct IslandDropModeHoverPanel: View {
 
     private var searchMatches: [HoverTool] { IslandHoverToolSearch.results(for: searchQuery) }
 
+    /// While searching, the footer reads the same index as the row highlight,
+    /// so the two can never disagree; hovering a row moves that index.
     private var descriptionTool: HoverTool? {
-        if let hoveredTool { return hoveredTool }
-        let matches = searchMatches
-        return matches.indices.contains(selectedSearchIndex) ? matches[selectedSearchIndex] : nil
+        if IslandHoverToolSearch.isFiltering(searchQuery) {
+            return IslandHoverToolSearch.selectedTool(in: searchMatches, at: selectedSearchIndex)
+        }
+        return hoveredTool
     }
 
     private func setSearchFocus(_ focused: Bool) {
@@ -2893,7 +2922,12 @@ private struct IslandDropModeHoverPanel: View {
         case .previous, .next:
             if let next = IslandHoverToolSearch.nextSelection(
                 current: selectedSearchIndex, direction: command == .next ? 1 : -1, count: matches.count
-            ) { selectedSearchIndex = next }
+            ) {
+                // The latest input wins: the arrow moves the one highlight
+                // away from a row the pointer still rests on.
+                hoveredTool = nil
+                selectedSearchIndex = next
+            }
         case .activate:
             guard matches.indices.contains(selectedSearchIndex) else { return }
             activateSearchTool(matches[selectedSearchIndex])
@@ -2963,88 +2997,22 @@ private struct IslandDropModeHoverPanel: View {
     }
 
     private var searchResults: some View {
-        let matches = searchMatches
-        return ScrollViewReader { scroll in
-            ScrollView {
-                if matches.isEmpty {
-                    VStack(spacing: 5) {
-                        Text("No tools found")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text("Try “language” or “monitor”.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
-                            let info = HoverToolRegistry.info(for: tool)
-                            let label = IslandHoverToolSearch.resultLabel(for: tool, query: searchQuery)
-                            let isPressed = hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
-                            let highlight = isPressed ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
-                            Button { activateSearchTool(tool) } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: info.sfSymbol)
-                                        .font(.system(size: 15))
-                                        .frame(width: 24)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(label.title)
-                                            .font(.system(size: 12, weight: .medium))
-                                        Text(label.description)
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(.white.opacity(0.5))
-                                            .lineLimit(1)
-                                    }
-                                    Spacer(minLength: 0)
-                                    if let soon = tool.comingSoonBadge {
-                                        IslandSoonBadge(text: soon)
-                                    }
-                                    if tool == .notifs && notificationHub.unreadCount > 0 {
-                                        Circle().fill(.red).frame(width: 6, height: 6)
-                                            .accessibilityHidden(true)
-                                    }
-                                }
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 10)
-                                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 9)
-                                        .fill(.white.opacity(tool.isComingSoon ? 0 : highlight))
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .islandHoverHitTarget(
-                                bridge: hoverHitBridge,
-                                id: IslandHoverHitTargetID(surface: .result, tool: tool),
-                                context: hitTargetContext,
-                                action: { activateSearchTool(tool) }
-                            )
-                            .disabled(tool.isComingSoon)
-                            .accessibilityLabel(label.title)
-                            .accessibilityHint(label.description)
-                            .accessibilityValue(tool.comingSoonBadge
-                                ?? (tool == .notifs && notificationHub.unreadCount > 0
-                                    ? "\(notificationHub.unreadCount) new notifications" : ""))
-                            .opacity(tool.isComingSoon ? 0.6 : 1)
-                            .id(index)
-                            .onHover { inside in
-                                if inside, !tool.isComingSoon {
-                                    hoveredTool = tool
-                                    selectedSearchIndex = index
-                                } else if hoveredTool == tool { hoveredTool = nil }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 5)
-                }
+        // WHY: .project-docs/decisions/2026-11-25-hover-search-row-identity.md
+        IslandHoverSearchResultsList(
+            query: searchQuery,
+            matches: searchMatches,
+            selectedIndex: selectedSearchIndex,
+            bridge: hoverHitBridge,
+            hitContext: hitTargetContext,
+            unreadNotifications: notificationHub.unreadCount,
+            onActivate: activateSearchTool,
+            onHover: { tool, index, inside in
+                if inside, !tool.isComingSoon {
+                    hoveredTool = tool
+                    selectedSearchIndex = index
+                } else if hoveredTool == tool { hoveredTool = nil }
             }
-            .onChange(of: selectedSearchIndex) { _, index in scroll.scrollTo(index, anchor: .center) }
-            .onChange(of: searchQuery) { _, _ in scroll.scrollTo(0, anchor: .top) }
-        }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .islandHoverHitRegion(bridge: hoverHitBridge, surface: .result)
     }
@@ -3056,6 +3024,66 @@ private struct IslandDropModeHoverPanel: View {
             ?? (tool == .meetingRecord ? hotkeys.configuration.meetingRecordShortcut : nil)
         if let shortcut {
             HotkeyHintView(contents: shortcut.contents, style: .keycaps, size: .tiny)
+        }
+    }
+
+    // MARK: - Island tool reorder motion
+    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+
+    /// Lift: hand the floating layer (drawn above the drawer's clip) this
+    /// tile's picture and its place. Release or cancel: once the grid laid out
+    /// the final order, land the tile on its cell, then tell the bridge. The
+    /// phase carries the lift's generation, so a release and a new lift of the
+    /// same tile in one display pass still start a new picture.
+    private func reorderPhaseChanged(_ phase: IslandHoverHitBridge.ReorderPhase) {
+        let stage = hoverHitBridge.stage
+        let generation = phase.generation
+        /// This lift's picture over its cell (replacing any older lift's).
+        func stagePicture(_ tool: HoverTool) -> Bool {
+            guard let frame = tileFrames[tool] else { return false }
+            let picture = tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
+                .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
+            stage.begin(tool, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
+                        generation: generation)
+            return true
+        }
+        switch phase.state {
+        case .idle:
+            return
+        case .lifted:
+            guard let tool = phase.tool, stage.generation != generation || stage.tool == nil,
+                  stagePicture(tool) else { return }
+            withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.lift) { stage.lifted = true }
+        case .settling:
+            guard let tool = phase.tool else {
+                hoverHitBridge.didSettle(generation: generation)
+                return
+            }
+            if stage.tool != tool || stage.generation != generation {
+                // This lift and its release reached the view in one display
+                // pass: give this lift its picture (it replaces an older
+                // one) and land it like any other.
+                guard stagePicture(tool) else {
+                    stage.clear(generation: stage.generation)
+                    hoverHitBridge.didSettle(generation: generation)
+                    return
+                }
+                stage.lifted = true
+            }
+            // A cancel restores the order in the same pass; land on the final cell.
+            DispatchQueue.main.async {
+                guard hoverHitBridge.reorderPhase == phase, stage.generation == generation else { return }
+                let motion = hoverHitBridge.motion.translation
+                let target = tileFrames[tool].map { CGPoint(x: $0.midX, y: $0.midY) }
+                    ?? CGPoint(x: stage.origin.x + motion.width, y: stage.origin.y + motion.height)
+                withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.land) {
+                    stage.settle = target
+                    stage.lifted = false
+                } completion: {
+                    // A newer lift owns the layer now; its own landing ends it.
+                    hoverHitBridge.didSettle(generation: generation)
+                }
+            }
         }
     }
 

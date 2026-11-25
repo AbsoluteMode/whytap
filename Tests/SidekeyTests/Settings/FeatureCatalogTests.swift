@@ -38,8 +38,8 @@ final class FeatureCatalogTests: XCTestCase {
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word),
                        ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
-                        "Ready", "Not set up", "Not set up"])
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "1 ready · 1 needs setup")
+                        "Ready", "Ready", "Ready", "Not set up", "Not set up"])
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "3 ready · 1 needs setup")
     }
 
     func testShortcutWaitingForKeyboardControlIsNotCountedTwice() {
@@ -133,13 +133,31 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.status(for: .drop, snapshot: snapshot).reason, "Shortcut isn't heard")
     }
 
-    func testSystemAudioIsNeverShownAsAllowedOrMissing() {
+    func testSystemAudioIsAskedLaterUntilACaptureHearsSoundAndNeverMissing() {
         var snapshot = readyDrop()
         snapshot.meetingsOn = true
         snapshot.models[.meetings] = .ok
         snapshot.models[.meetingNotes] = .ok
         let audio = FeatureCatalog.checks(for: .meetings, snapshot: snapshot).last
         XCTAssertEqual(audio?.state, .askedLater(note: "macOS asks at the first recording"))
+        XCTAssertEqual(FeatureCatalog.status(for: .meetings, snapshot: snapshot), .ready(note: nil))
+    }
+
+    /// Subtitles or a meeting heard the Mac's sound: the grant exists, and
+    /// the row reads Allowed like every other permission, on both screens
+    /// that list it (task 110).
+    func testSystemAudioReadsAllowedOnceACaptureHeardSound() {
+        var snapshot = readyDrop()
+        snapshot.systemAudioHeard = true
+        snapshot.meetingsOn = true
+        snapshot.models[.meetings] = .ok
+        snapshot.models[.meetingNotes] = .ok
+        for feature in [AppFeature.meetings, .translateSubtitles] {
+            let audio = FeatureCatalog.checks(for: feature, snapshot: snapshot)
+                .first { $0.requirement.kind == .permission(.systemAudio) }
+            XCTAssertEqual(audio?.state, .met, "\(feature)")
+            XCTAssertEqual(audio?.reason, nil)
+        }
         XCTAssertEqual(FeatureCatalog.status(for: .meetings, snapshot: snapshot), .ready(note: nil))
     }
 
@@ -433,7 +451,7 @@ final class FeatureCatalogTests: XCTestCase {
         var everything = FeatureSetupSnapshot()
         everything.dropMode = .smart
         for info in FeatureCatalog.all {
-            texts += [info.name, info.kind, info.line] + info.hotkeys.map(\.label)
+            texts += [info.name, info.kind, info.line, info.about, info.clipCaption] + info.examples + info.hotkeys.map(\.label)
             for snapshot in [FeatureSetupSnapshot(), everything] {
                 for check in FeatureCatalog.checks(for: info.feature, snapshot: snapshot) {
                     texts += [check.requirement.title, check.requirement.detail, check.reason ?? "",
@@ -460,25 +478,29 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.all.map(\.feature), AppFeature.allCases)
         XCTAssertEqual(FeatureCatalog.all.map(\.name),
                        ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots",
-                        "Hover", "Notify", "Monitor"])
+                        "To-do", "Case", "Hover", "Notify", "Monitor"])
     }
 
     func testClipsAreTheOnesThatExist() {
         // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
         XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
         XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
+        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).clips.map(\.video), [.translate, .subtitles])
         XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)
     }
 
-    func testFeaturesWithoutAScreenPointAtTheirPresentPlace() {
-        XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .tab(.agentMode))
-        XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .tab(.other))
-        XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .tab(.other))
-        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).place, .tool(.translate))
-        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).place, .tool(.screenshot))
+    func testEveryFeatureHasItsOwnScreen() {
+        for info in FeatureCatalog.all { XCTAssertEqual(info.place, .screen, "\(info.feature)") }
+    }
+
+    func testToDoAndCaseNeedNothingAndAreReadyFromTheStart() {
+        for feature in [AppFeature.todo, .caseVault] {
+            XCTAssertTrue(FeatureCatalog.requirements(for: feature, snapshot: FeatureSetupSnapshot()).isEmpty)
+            XCTAssertEqual(FeatureCatalog.status(for: feature, snapshot: FeatureSetupSnapshot()), .ready(note: nil))
+        }
+        XCTAssertEqual(AppFeature.caseVault.rawValue, "case")
     }
 }

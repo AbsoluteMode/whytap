@@ -42,6 +42,12 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
     private var resamplerGeneration: UUID?
     private var callbackRateMonitor = SystemAudioCallbackRateMonitor()
     private var callbackRateMismatchWindows = 0
+    /// Called once, from `ioQueue`, with the first buffer that is not pure
+    /// silence: proof that System Audio Recording is allowed.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+    private let onFirstSignal: @Sendable () -> Void
+    /// Touched only from `handleInput` on the serial `ioQueue`.
+    private var heardSignal = false
     private var defaultOutputListenerInstalled = false
     private var defaultOutputListenerBlock: AudioObjectPropertyListenerBlock?
     private var outputPropertyListenerDeviceID = AudioObjectID(0)
@@ -68,8 +74,10 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
         ioQueue: DispatchQueue = DispatchQueue(label: "com.sidekey.meetings.coreaudio.tap", qos: .userInitiated),
         buffers: SystemAudioBufferBroadcast = SystemAudioBufferBroadcast(),
         targetSampleRate: Double = 16_000,
-        antiAlias: Bool = false
+        antiAlias: Bool = false,
+        onFirstSignal: @escaping @Sendable () -> Void = { SystemAudioAccess.recordHeard() }
     ) {
+        self.onFirstSignal = onFirstSignal
         self.ioQueue = ioQueue
         self.buffers = buffers
         resampler = SystemAudioStreamingResampler(targetSampleRate: targetSampleRate)
@@ -503,6 +511,12 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
         stateLock.unlock()
         guard isCurrentGeneration else { return }
 
+        // Measured on the PCM as delivered, before channels are mixed:
+        // opposite stereo channels average to silence but are still sound.
+        if !heardSignal, Self.inputContainsSignal(inputData, format: decodeFormat) {
+            heardSignal = true
+            onFirstSignal()
+        }
         let inputSamples = Self.monoFloatSamples(from: inputData, format: decodeFormat)
         guard !inputSamples.isEmpty else { return }
 
@@ -561,6 +575,30 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
         guard !outputSamples.isEmpty else { return }
 
         buffers.yield(outputSamples)
+    }
+
+    /// Whether any sample of any channel, interleaved or planar, is not
+    /// zero. Without the System Audio Recording grant every one is zero.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+    static func inputContainsSignal(
+        _ inputData: UnsafePointer<AudioBufferList>,
+        format: AudioStreamBasicDescription
+    ) -> Bool {
+        let buffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
+        let isFloat = (format.mFormatFlags & kAudioFormatFlagIsFloat) != 0
+        let bitsPerChannel = Int(format.mBitsPerChannel)
+        let bytesPerSample = max(bitsPerChannel / 8, 1)
+        for buffer in buffers {
+            guard let data = buffer.mData else { continue }
+            let count = Int(buffer.mDataByteSize) / bytesPerSample
+            let raw = UnsafeRawBufferPointer(start: data, count: count * bytesPerSample)
+            for index in 0..<count where readSample(
+                raw, offset: index * bytesPerSample, isFloat: isFloat, bitsPerChannel: bitsPerChannel
+            ) != 0 {
+                return true
+            }
+        }
+        return false
     }
 
     private static func monoFloatSamples(

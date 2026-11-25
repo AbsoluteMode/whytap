@@ -70,7 +70,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// provider said so. Applied when the take ends undelivered.
     private var dropBatchFailed = false
     private var pendingDropProviderFailure: ProviderFailure?
-    /// API & Models was opened for this take's failure; a Retry that is
+    /// Keys & models was opened for this take's failure; a Retry that is
     /// refused again does not take the user out of their app a second time.
     private var dropFailureSettingsShown = false
     /// Batch transcriber for the agent's voice path: the Agent voice route.
@@ -439,7 +439,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Restore standard text-editing shortcuts (⌘V/⌘C/⌘X/⌘A) for the app's
         // text fields. Accessory apps have no menu bar, so without this the
-        // Settings → API & Models API-key field (and any other field) can't paste.
+        // Settings → Keys & models API-key field (and any other field) can't paste.
         AppMainMenu.installIfNeeded()
 
         // Avoid a cold PDF decode in the Dynamic Island's first drop-recording
@@ -2908,7 +2908,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // The problem is one the user fixes in Settings (no model set
                 // for the feature yet, key or endpoint missing). On a fresh
                 // install nothing is set, so idling silently would look like
-                // a dead hotkey: open API & Models on the failing feature's
+                // a dead hotkey: open Keys & models on the failing feature's
                 // row, where its key and model are one click away.
                 if case StreamingSessionSetupError.byokMisconfigured(let routeError) = error {
                     if let onboarding = visibleOnboarding {
@@ -3477,7 +3477,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// The take ends undelivered after a batch attempt. A provider's refusal
     /// is named next to Retry instead of "offline", its key is marked in
-    /// API & Models, and that row opens once per take when only the user can
+    /// Keys & models, and that row opens once per take when only the user can
     /// fix it. Any other batch failure clears an earlier reason, so a Retry
     /// that fails differently does not keep blaming the key. The audio stays
     /// for Retry.
@@ -3504,7 +3504,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// A take produced a transcript on its provider: a refusal recorded for
     /// that key by an earlier take is out of date. The next visit to
-    /// API & Models checks the key afresh.
+    /// Keys & models checks the key afresh.
     private func forgetDropKeyRefusal() {
         guard let account = DropTake.shared.route?.account, account != .thisMac,
               case .rejected = KeyStatusStore.shared.record(for: account)?.status else { return }

@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/DropFeatureTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md, 2026-11-25-settings-features-refresh.md]
 ---
 
 ## Context
@@ -116,6 +116,60 @@ accepted the second version.
   feature's own settings and its examples. A new screen is one case in
   `FeatureScreens` and `place: .screen` in the catalog; Drop keeps its own
   order around the same parts.
+- The Agent, Meeting Notes and Google search get their own screens. Their
+  switches stay in Other until Other is taken apart, so both write the same
+  flag. The Agent's switch connects first and stays off with the reason
+  ("Choose an Agent model in API & Models.") when it cannot. The old Agents
+  link (`whytap://settings/agentMode`, the setup prompt) opens the Agent
+  screen. The Agent's examples are only things its tools do today (files,
+  a command, the screen, web search, To-do, Whytap's own settings).
+- Google search's shortcuts are saved now (`hotkeys.googleSearchTextShortcut`,
+  `…VoiceShortcut`, `…VoiceGesture`, also in backup and settings sync). They
+  never were: a change on its screen or in Hotkeys was dropped at once and the
+  key monitor kept Right Option (builder review of #458). A Google shortcut
+  saved as a key combo now registers like an Agent combo, with Google's own
+  callbacks and hot-key ids 19/20, and the Agent controller rebinds on a
+  Google-only change; the Right Option default stays on the modifier path
+  (builder review 537). The rebind builds the monitor's configuration from
+  the six emitted values: `@Published` emits before it stores, so rereading
+  the preferences left the changed field stale (a Google gesture Hold → Tap
+  stayed Hold; builder review 540). An Agent turned on
+  elsewhere clears the screen's earlier "why it did not turn on".
+- Every catalog feature now has a screen. To-do and Case join the catalog as
+  island tools (they need nothing, so they read Ready on a fresh Mac and the
+  list's summary counts them). Translate and Subtitles keep one shared screen,
+  as in the mockup: they share requirements, a window and a Toolbox pane.
+  Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
+- A screen can hold more than one clip (`FeatureInfo.moreClips`, one strip
+  each). Translate & Subtitles shows a Translate clip and a Subtitles clip
+  (`FeatureVideo.subtitles`, Resources/FeatureVideos/subtitles.mp4, bundled
+  2026-11-25).
+- Other is taken apart. Its Drop, Meeting Notes, Google search and Agent rows
+  live on their feature screens; what belongs to no feature (auto-hide, which
+  display, screenshot protection) stays under the same raw id `other`, now
+  titled **General**, so `whytap://settings/other` and the landing's catalog
+  parser keep working (the parser reads ids, not titles; the title change
+  needs a catalog refresh there).
+- API & Models keeps its name for now. The mockup calls it "Keys & models",
+  but about fifty messages and eleven documents say "API & Models", some in
+  files other sessions own (the window controller, the main menu); a rename
+  is its own change, decided by Maxim.
+
+- API & Models is called "Keys & models" (approved mockup): in the sidebar,
+  in every message that sends the reader there and in the current documents.
+  The raw tab id `apiAndModels`, `whytap://settings/apiAndModels`, type and
+  file names stay. Dated decisions and old plans keep the name they had.
+  The OpenCode install hint now points to Settings → Features → Agent instead
+  of the removed Settings → Other.
+
+- The sidebar is the mockup's: Features, Keys & models, Permissions, Hotkeys,
+  General. Meeting notes opens from Meeting Notes ("Open notes") and Toolbox
+  from Hover (its tools' panes), with "‹ Meeting Notes" / "‹ Hover" above
+  them; Notifications, Backup and Integrations are rows of General → More,
+  with "‹ General". Their ids and `whytap://settings/…` links stay, and the
+  row they belong to stays selected. The mockup's "Island tools" row is not
+  added: Hover is that list now. Backup and Integrations stay two screens
+  (the mockup's "Backup & integrations" would merge them; not done here).
 
 ## Why
 

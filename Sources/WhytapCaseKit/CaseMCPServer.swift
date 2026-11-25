@@ -25,16 +25,43 @@ public final class CaseMCPServer {
         To use a known key, run in your terminal: \(Self.quoted(executablePath)) case run --only KEY_NAME '<command using $KEY_NAME>'
         Use single quotes so your shell does not expand $KEY_NAME; Case injects values and hides them in output.
         If several projects have that key, Case lists them: rerun with -p <project>, choosing by description or asking the user.
-        Case keys are for commands you run. Whytap's own dictation, model and meeting provider keys are separate, in Whytap Settings → API & Models.
+        Case keys are for commands you run. Whytap's own dictation, model and meeting provider keys are separate, in Whytap Settings → Keys & models.
         Nothing here shows, copies, edits or deletes a key value.
         """
     }
 
     /// Reads lines until EOF. Never throws on a bad request.
-    public func run(readLine: () -> String?, write: (String) -> Void) {
-        while let line = readLine() {
+    public func run(readLine: @escaping () -> String?, write: (String) -> Void) {
+        run(source: ClosureLineSource(readLine), write: write, handover: nil)
+    }
+
+    /// Sequential, so a request denied as a stale helper is simply carried
+    /// over with the unread input when the helper execs the new build.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    public func run(source: MCPLineSource, write: (String) -> Void, handover: MCPBuildHandover?) {
+        while source.waitForLine() {
+            guard let line = source.takeLine() else { continue }
             if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
-            if let reply = handle(line: line) { write(reply) }
+            guard let handover else {
+                if let reply = handle(line: line) { write(reply) }
+                continue
+            }
+            let (reply, replayable) = handover.track { handle(line: line) }
+            if replayable {
+                let unread = source.drainForHandover()
+                switch handover.handOver(initialized: true, probed: true, held: [line], waiting: [],
+                                         unread: unread, write: write) {
+                case .replaced:
+                    source.close()
+                    return
+                case .answered(let rest):
+                    source.restore(rest) // this request already got its explicit answer
+                    continue
+                case .answerHere:
+                    source.restore(unread)
+                }
+            }
+            if let reply { write(reply) }
         }
     }
 

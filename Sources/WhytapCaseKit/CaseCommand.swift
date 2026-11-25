@@ -14,6 +14,9 @@ public struct CaseCommand {
     private let cwd: URL
     private let stdout: FileHandle
     private let stderr: FileHandle
+    /// `case mcp` of the installed helper follows a Whytap update in place.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    private let mcpHandover: MCPBuildHandover?
 
     /// `client == nil` means the app could not be located (exit 4 with `unavailableMessage`).
     public init(
@@ -22,8 +25,10 @@ public struct CaseCommand {
         unavailableMessage: String = "Whytap is not available. Open the Whytap app and try again.",
         cwd: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath),
         stdout: FileHandle = .standardOutput,
-        stderr: FileHandle = .standardError
+        stderr: FileHandle = .standardError,
+        mcpHandover: MCPBuildHandover? = nil
     ) {
+        self.mcpHandover = mcpHandover
         self.client = client
         self.executablePath = executablePath
         self.unavailableMessage = unavailableMessage
@@ -56,9 +61,13 @@ public struct CaseCommand {
     // MARK: mcp
 
     private func serveMCP() -> Int32 {
-        CaseMCPServer(client: client, executablePath: executablePath).run(
-            readLine: { Swift.readLine(strippingNewline: true) },
-            write: { write(stdout, $0 + "\n") })
+        let server = CaseMCPServer(client: client, executablePath: executablePath)
+        if let mcpHandover {
+            server.run(source: FileDescriptorLineSource(prefill: mcpHandover.resumed?.input ?? Data()),
+                       write: { write(stdout, $0 + "\n") }, handover: mcpHandover)
+        } else {
+            server.run(readLine: { Swift.readLine(strippingNewline: true) }, write: { write(stdout, $0 + "\n") })
+        }
         return 0
     }
 

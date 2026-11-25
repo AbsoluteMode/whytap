@@ -291,6 +291,46 @@ final class LilBroLocalGuideTests: XCTestCase {
         }
     }
 
+    /// The builder's matrix for ticket 585: a setting qualified by where it
+    /// lives or who gets it is still asked for directly, and a marker that
+    /// introduces the feature ("With Drop …", "When using Screenshots …")
+    /// does not make the setting context. The context cases stay context.
+    func test_qualified_settings_and_feature_introductions_still_ask_for_the_setting() {
+        let settings = ["Input Monitoring", "Accessibility", "Keyboard control",
+                        "Screen Recording", "Microphone", "System audio", "Post Event"]
+        let features: [(String, AppFeature)] = [
+            ("Drop", .drop), ("Agent", .agent), ("Meeting Notes", .meetings),
+            ("Screenshots", .screenshots), ("Subtitles", .translateSubtitles), ("Case", .caseVault),
+        ]
+        let permissions = LilBroDestination.tab(.permissions)
+        typealias Template = (String, String, AppFeature) -> (String, LilBroDestination)
+        let templates: [Template] = [
+            { f, s, _ in ("For \(f), where can I open the macOS \(s) settings?", permissions) },
+            { f, s, _ in ("For \(f), how can I grant Whytap \(s) access?", permissions) },
+            { f, s, _ in ("For \(f), where do I allow Whytap to use \(s)?", permissions) },
+            { f, s, _ in ("With \(f) can I enable \(s)?", permissions) },
+            { f, s, _ in ("When using \(f) can I allow \(s)?", permissions) },
+            { f, s, _ in ("For \(f), where can I open the \(s) settings?", permissions) },
+            { f, s, _ in ("While using \(f), where do I give Whytap access to \(s)?", permissions) },
+            { f, s, _ in ("With \(f), how do I turn on the System \(s) permission?", permissions) },
+            { f, s, id in ("How do I use \(f) after I grant Whytap \(s) access?", .feature(id)) },
+            { f, s, id in ("Can I use \(f) with my \(s) permission?", .feature(id)) },
+            { f, s, id in ("Where is \(f) once I allow Whytap to use \(s)?", .feature(id)) },
+            { f, s, id in ("Can I use \(f) with the macOS \(s) setting?", .feature(id)) },
+        ]
+        var checked = 0
+        for template in templates {
+            for (name, id) in features {
+                for setting in settings {
+                    let (question, expected) = template(name, setting, id)
+                    XCTAssertEqual(destination(question), expected, question)
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertEqual(checked, 504)
+    }
+
     func test_a_hotkey_is_not_an_api_key() {
         XCTAssertEqual(destination("change a hotkey"), .tab(.hotkeys))
         XCTAssertEqual(destination("where do I paste my OpenAI key"), .apiKeys)

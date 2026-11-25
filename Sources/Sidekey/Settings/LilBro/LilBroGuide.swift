@@ -93,7 +93,7 @@ struct LilBroLocalGuide: LilBroBrain {
         if !named.isEmpty {
             let rest = named.reduce(q) { blank($0, pattern: NSRegularExpression.escapedPattern(for: $1.0)) }
             let found = featureMatch(in: rest)
-            let direct = named.filter { !isContext(at: $0.1, in: q) }
+            let direct = named.filter { !isContext(at: $0.1, in: q, settingsBlanked: rest) }
             let permissions = LilBroDestination.tab(.permissions)
             let toPermissions = LilBroAnswer(paragraphs: [line(for: permissions)], destination: permissions)
             // Every setting is context ("after enabling …", "with my …"): the feature.
@@ -121,22 +121,43 @@ struct LilBroLocalGuide: LilBroBrain {
         "after", "once", "when", "whenever", "while", "before", "with", "using", "if", "until", "since",
     ]
 
-    /// A marker among the five words before the setting, within the same
-    /// part of the sentence: "after enabling", "once I enable", "when I turn
-    /// on", "with my".
-    private static func isContext(at offset: Int, in q: String) -> Bool {
-        let before = String(q.prefix(offset))
-        let part = before.split(omittingEmptySubsequences: false) { ",;:.?!".contains($0) }.last.map(String.init) ?? before
-        let words = part.split { !$0.isLetter && $0 != "'" }.suffix(5)
-        return words.contains { contextMarkers.contains(String($0)) }
+    /// A marker among the seven words before the setting, within the same
+    /// part of the sentence, that leads to the setting itself: "after
+    /// enabling", "once I allow Whytap to use", "with my". A marker
+    /// followed by a feature belongs to that feature ("With Drop can I enable
+    /// Microphone?", "When using Screenshots can I allow …"), so the setting
+    /// is still the question.
+    private static func isContext(at offset: Int, in q: String, settingsBlanked rest: String) -> Bool {
+        let before = Array(q.prefix(offset))
+        let clauseStart = before.lastIndex { ",;:.?!".contains($0) }.map { $0 + 1 } ?? 0
+        var words: [(word: String, end: Int)] = []
+        var index = clauseStart
+        while index < before.count {
+            guard before[index].isLetter || before[index] == "'" else { index += 1; continue }
+            let start = index
+            while index < before.count, before[index].isLetter || before[index] == "'" { index += 1 }
+            words.append((String(before[start..<index]), index))
+        }
+        guard let marker = words.suffix(7).last(where: { contextMarkers.contains($0.word) }) else { return false }
+        let blanked = Array(rest)
+        guard marker.end <= offset, offset <= blanked.count else { return true }
+        return featureMatch(in: String(blanked[marker.end..<offset])) == nil
     }
 
     /// "allow / grant / enable / find / where is <setting>": the verb takes
-    /// the setting itself, with at most an article or "my" between.
+    /// the setting itself. Between them only an article or possessive, who
+    /// gets it ("Whytap", "it", "the app", "Whytap to use", "access to") or
+    /// where it lives ("macOS", "System"): "open the macOS Accessibility
+    /// settings", "grant Whytap Microphone access", "allow Whytap to use
+    /// Screen Recording".
     private static func asksForSetting(_ q: String, named: [String]) -> Bool {
         let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
+        let article = "(?:(?:the|my|a|an|its|your)\\s+)?"
+        let recipient = "(?:(?:whytap's|whytap|it|the app|this app)\\s+)?"
+        let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
+        let place = "(?:(?:macos|mac|system|apple)\\s+)?"
         return named.contains { name in
-            let pattern = "\\b(\(verbs))\\s+(?:(?:the|my|a|an|its)\\s+)?"
+            let pattern = "\\b(\(verbs))\\s+" + article + recipient + reach + article + place
                 + NSRegularExpression.escapedPattern(for: name)
             return q.range(of: pattern, options: .regularExpression) != nil
         }

@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/Features/FeatureCatalog.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-24-settings-around-features.md, 2026-11-24-click-to-copy-translation.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-24-settings-around-features.md, 2026-11-24-click-to-copy-translation.md, 2026-11-25-feature-clip-posters.md]
 ---
 
 # Feature screens get their clips (Drop, Shot, Translate)

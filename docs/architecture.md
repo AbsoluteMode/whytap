@@ -1886,8 +1886,10 @@ the app tools. Case -> Connect writes this `whytap` entry and removes its older
 update follows the new build in place: when the broker denies it as an
 untrusted helper and the helper file on disk is a different build that strictly
 validates (all architectures) against the designated requirement the helper
-recorded from itself at start (kernel cdhash vs. the file's), it `execve`s that
-file with the same pid, parent and stdio, carrying the MCP handshake and every
+recorded from itself at start (kernel cdhash vs. the file's), it copies that
+file into a private 0700 folder (Application Support/<bundle id>/helper-handover,
+kept while the process runs because the app reads the helper's executable
+path), verifies the copy and `execve`s exactly it with the same pid, parent and stdio, carrying the MCP handshake and every
 unanswered, uncancelled request (`MCPBuildHandover`, `FileDescriptorLineSource`);
 the new image resumes only as the verified code. A rollback build without the
 protocol gets the carried requests answered with an explicit retry error first.

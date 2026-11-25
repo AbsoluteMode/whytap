@@ -42,8 +42,14 @@ public final class AppControlCommand {
         FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
     }) -> Int32 {
         let server = AppControlMCPServer(screenOnly: screenOnly, todo: todo.map { todo in { todo.respond($0, $1) } },
-                                         accessProbe: direct.map { direct in
-                                             { _ = try? direct.send(.appControl(AppControlRequest("request_access", arguments: [:]))) }
+                                         confirmedAccessProbe: direct.map { direct in
+                                             {
+                                                 // Confirmed only by an answer from the app that trusts this image.
+                                                 if case .appControl? = try? direct.send(.appControl(AppControlRequest("request_access", arguments: [:]))) {
+                                                     return true
+                                                 }
+                                                 return false
+                                             }
                                          },
                                          caseServer: caseServer,
                                          cancellableCall: { self.call($0, cancellation: $1) })

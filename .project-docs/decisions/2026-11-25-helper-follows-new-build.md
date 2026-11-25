@@ -72,24 +72,42 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   beyond which the handover is abandoned and everything is answered here);
   cancellations still reach calls in flight, and a held call its client
   cancels is dropped. The exec happens once nothing is in flight.
-- **Exec, bound to the verified file.** Right before `execve` the file is
-  verified again. The carried bytes (held calls, waiting lines, unread stdin)
-  drop every request whose cancellation is already among them. The envelope
-  carries those bytes, the handshake state and the verified cdhashes through an
-  unlinked temporary file whose descriptor survives exec
-  (`WHYTAP_MCP_RESUME_V1_FD`). The writer refuses an envelope above the bound the
-  reader accepts (16 MB) and any file it could not unlink first; then the old
-  image answers everything itself. The new image resumes only if the code it
-  runs is one of the verified cdhashes; otherwise each carried request gets an
-  explicit JSON-RPC error and nothing is replayed.
+- **Exec, bound to the verified file.** Right before `execve` the helper
+  copies the replacement's bytes into a new private folder (0700, files created
+  with `O_EXCL | O_NOFOLLOW`) under
+  the app's Application Support folder (`<bundle id>/helper-handover/<pid>-…`), mirroring
+  `<App>.app/Contents/Helpers/whytap` with the app's `Info.plist`, and verifies
+  that copy against the same requirement. `execve` runs exactly that copy, so
+  what was verified is what runs; if staging or its verification fails, the old
+  image stays and answers. The carried bytes (held calls, waiting lines, unread
+  stdin) drop every request whose cancellation is already among them. The
+  envelope carries those bytes, the handshake state, the verified cdhashes, the
+  installed helper's path and the copy's folder through an unlinked temporary
+  file whose descriptor survives exec (`WHYTAP_MCP_RESUME_V1_FD`). The writer
+  refuses an envelope above the bound the reader accepts (16 MB) and any file it
+  could not unlink first; then the old image answers everything itself. The new
+  image resumes only if the code it runs is one of the verified cdhashes
+  (otherwise each carried request gets an explicit JSON-RPC error), and then
+  serves as the installed helper path (bundle, socket, signer baseline, Case
+  guide).
+- **The copy lives as long as the process.** The app identifies a helper
+  through its executable path (`proc_pidpath` in `CaseCallerResolver` and the
+  harness-access gate); once the file is deleted that lookup fails and the
+  caller would no longer be recognised. A copy is therefore removed only when
+  its process has ended, or by the same process once it runs from a newer copy
+  (swept at the start of every MCP helper). Application Support, unlike the
+  temporary folder, is not cleaned by macOS behind a long-running session.
 - **Rollback.** A replacement whose file lacks the versioned key cannot resume
-  the envelope. The old image waits for a half-written request to complete,
-  answers every carried request with an explicit "retry" error, and then execs
-  it without state; that build serves the following calls.
-- **Access probe.** It is carried as done only once the app answered it. A
-  probe still in flight at exec is closed with the process (broker sockets are
-  close-on-exec) and the new image probes once more; a stored answer means no
-  second card.
+  the envelope. Every complete carried request is answered at once with an
+  explicit "retry" error, independently of any unfinished next request. The
+  exec into that build waits until no half-written request would be cut in two
+  (the next complete request then gets the same answer and the exec follows);
+  that build, running from its private copy, serves the following calls.
+- **Access probe.** It is carried as done only once the app trusting this
+  image answered it (an application-control response). No answer, an
+  unavailable app or a stale denial count as not done. A probe still in flight
+  at exec is closed with the process (broker sockets are close-on-exec) and the
+  new image probes once more; a stored answer means no second card.
 - MCP modes read stdin with `FileDescriptorLineSource` instead of stdio: stdio's
   read-ahead buffer would vanish on exec. `read()` happens only under the lock
   the handover takes, so no byte is lost between the two images. An
@@ -132,7 +150,7 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
 
 ## What was tested
 
-- `HelperBuildHandoverTests` (23): an open client keeps working after the
+- `HelperBuildHandoverTests` (26): an open client keeps working after the
   replacement, each call answered once by the new build and no second
   handshake or probe; a partial line read before the handover survives it;
   Whytap not running answers `unavailable` without relaunch; a file that does
@@ -144,23 +162,29 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   during the handover, or whose cancellation is already buffered, is never
   dispatched; a stale access probe and a probe still in flight are repeated
   once; `case mcp` follows; a rollback build gets every carried request
-  answered and waits for a half-written frame; the file is verified again
+  answered at once and the exec waits for a half-written frame; a probe the
+  app never answered is not carried as done; without a verified private copy
+  nothing is executed and every call is answered; staging folders are removed
+  only under their root and after their process (or for an older copy of the
+  same process); exec always gets the staged copy; the copy is verified again
   right before exec; an envelope over the shared bound and too many waiting
   lines are answered here; an image that is not the verified replacement
   refuses carried requests; unterminated frames are bounded; the resume file
   is read only from an inherited regular file; without a baseline nothing is a
   replacement.
-- `scripts/check-helper-follows-build.py` (live, real `execve`, 21 checks): a
+- `scripts/check-helper-follows-build.py` (live, real `execve`, 25 checks): a
   throwaway `Selftest.app`, a throwaway keychain (never in the search list)
   with two self-signed code-signing certificates, debug helpers that differ by
   LC_UUID, and a fake broker that trusts a peer only when the kernel's running
   cdhash equals the valid file's. Two atomic replacements: the same pid answers
-  from the new build and runs its code; pipelined calls answered once; the
+  from the new build and runs its code, from its private copy whose path stays
+  readable, with older copies removed; pipelined calls answered once; the
   broker always sees the harness as the parent; the fourth relaunch within two
   minutes is refused; an invalidly signed file, a valid file of another signer
   and a valid ad-hoc file are not executed (one denied request each); a
-  rollback build without the protocol: explicit answer for the triggering call,
-  same pid runs it and answers later calls; an ad-hoc helper never follows;
+  rollback build without the protocol: explicit answer for the triggering call
+  while the next request is still half written, then for that request, same pid
+  runs it from its private copy and answers later calls; an ad-hoc helper never follows;
   `case mcp` and `app mcp` follow; without a broker the call answers
   `unavailable`; EOF exits.
 - Builder review 565 (2026-11-25) found five gaps in the first revision, all
@@ -168,12 +192,22 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   whole-file check; a buffered cancellation and a pending-to-held gap; the
   probe carried as done when only scheduled; unbounded envelope and frames and
   an unchecked unlink; and a rollback build dropping the triggering call.
+- Builder review 569 found three more, fixed here: exec reopened a path
+  instead of running the verified bytes; a probe that got no answer was
+  carried as done; a rollback held the triggering call's answer behind an
+  unfinished next request. Found while fixing: deleting the private copy
+  breaks the app's `proc_pidpath` lookup of the helper, so copies live as long
+  as their process.
 - Not tested: the installed `/Applications/Whytap.app` (feature sessions do not
   install or launch it) and a Rosetta helper.
 
 ## Rejected
 
 - Relay through a fresh child helper: loses the harness identity (above).
+- `execve` of the installed path after verifying it: the path can name
+  another file by then; nothing binds the check to what runs.
+- Deleting the private copy once the new image runs: the app's
+  `proc_pidpath` lookup of the helper then fails.
 - Relaxing the broker to accept an older helper of the same team or path:
   weakens the check this change must keep.
 - Polling the helper file or its version in the background: costs work in
@@ -189,7 +223,10 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   one last reconnect after the first build that has it is installed.
 - Source and community builds signed ad-hoc never follow; they keep needing a
   reconnect after an update.
-- A file swapped between the final verification and `execve` runs anyway (it
-  is what the harness would start next); it gets no carried request.
+- A process of the same user could still change the private copy between its
+  verification and `execve`; such a process can equally replace the installed
+  helper. The new image then gets no carried request.
+- One private copy (a few MB) stays per running helper that followed a build,
+  until that process ends.
 
 2026-11-25 · branch `fix/helper-follows-new-build`

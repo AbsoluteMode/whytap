@@ -54,12 +54,10 @@ public final class CaseMCPServer {
                 case .replaced:
                     source.close()
                     return
-                case .answeredCarried:
-                    source.restore(Data())
+                case .answered(let rest):
+                    source.restore(rest) // this request already got its explicit answer
                     continue
-                case .answerHere, .waitForCompleteFrame:
-                    // A frame still arriving: answer this request here; the
-                    // next denied request tries again.
+                case .answerHere:
                     source.restore(unread)
                 }
             }

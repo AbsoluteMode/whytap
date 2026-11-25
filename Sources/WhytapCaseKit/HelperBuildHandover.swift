@@ -32,12 +32,19 @@ public struct MCPResumeState: Codable, Equatable {
     /// cdhashes of the replacement the previous image verified; the new image
     /// resumes only if the code it runs is one of them.
     public var expectedCodeHashes: [Data]
+    /// The installed helper this session belongs to; the new image runs from a
+    /// private verified copy and still serves as that helper.
+    public var helperPath: String?
+    /// The private copy's folder, removed by the new image once it runs.
+    public var stagingDirectory: String?
 
-    public init(initialized: Bool, probed: Bool, input: Data, relaunches: [Date], expectedCodeHashes: [Data] = []) {
+    public init(initialized: Bool, probed: Bool, input: Data, relaunches: [Date], expectedCodeHashes: [Data] = [],
+                helperPath: String? = nil, stagingDirectory: String? = nil) {
         self.version = Self.currentVersion
         self.initialized = initialized; self.probed = probed
         self.input = input; self.relaunches = relaunches
         self.expectedCodeHashes = expectedCodeHashes
+        self.helperPath = helperPath; self.stagingDirectory = stagingDirectory
     }
 
     /// nil when the envelope would exceed what a reader accepts.
@@ -86,7 +93,8 @@ public struct MCPResumeState: Codable, Equatable {
         if let runningHash, expectedCodeHashes.contains(runningHash) { return self }
         let carried = MCPCarriedInput.split(input)
         MCPCarriedInput.refusals(for: carried.lines, message: MCPCarriedInput.retryMessage).forEach(write)
-        return MCPResumeState(initialized: initialized, probed: false, input: carried.tail, relaunches: relaunches)
+        return MCPResumeState(initialized: initialized, probed: false, input: carried.tail, relaunches: relaunches,
+                              stagingDirectory: stagingDirectory)
     }
 }
 
@@ -171,11 +179,29 @@ public struct HelperReplacement: Equatable {
     }
 }
 
+/// A private, verified copy of the replacement: the exact bytes that passed
+/// validation are the bytes `execve` runs. It mirrors
+/// `<App>.app/Contents/Helpers/whytap` with the app's `Info.plist`, so a build
+/// that knows nothing of this (a rollback) still finds its app.
+public struct StagedHelper: Equatable {
+    public let executable: String
+    public let directory: String
+    public let replacement: HelperReplacement
+    public init(executable: String, directory: String, replacement: HelperReplacement) {
+        self.executable = executable; self.directory = directory; self.replacement = replacement
+    }
+}
+
 public protocol HelperBuildIdentifying {
     /// The helper file now on disk, when it is a different build that passes
     /// whole-file code-signing validation against this helper's own designated
-    /// requirement; nil otherwise (fail closed).
+    /// requirement; nil otherwise (fail closed). Only decides whether to start.
     func verifiedReplacement() -> HelperReplacement?
+    /// Copies the replacement into a private folder and verifies that copy the
+    /// same way; nil when either step fails (the old image then stays).
+    func stageReplacement() -> StagedHelper?
+    /// Removes a staged copy that was not executed.
+    func discard(_ staged: StagedHelper)
 }
 
 /// Verifies replacements of the helper at `executable` against the identity
@@ -186,10 +212,11 @@ public protocol HelperBuildIdentifying {
 /// accepts another build.
 public final class SystemHelperBuildIdentity: HelperBuildIdentifying, @unchecked Sendable {
     public let executable: URL
+    public let stagingRoot: URL
     private let lock = NSLock()
     private var requirement: SecRequirement?
 
-    public init(executable: URL) { self.executable = executable }
+    public init(executable: URL, stagingRoot: URL) { self.executable = executable; self.stagingRoot = stagingRoot }
 
     /// Off the handshake path: a host drops a server that answers late.
     public func captureBaselineInBackground() {
@@ -209,14 +236,42 @@ public final class SystemHelperBuildIdentity: HelperBuildIdentifying, @unchecked
     }
 
     public func verifiedReplacement() -> HelperReplacement? {
+        verify(executable, contents: nil)
+    }
+
+    private func verify(_ url: URL, contents: Data?) -> HelperReplacement? {
         guard let requirement = lock.withLock({ requirement }),
               let running = Self.runningHash(),
-              let code = Self.staticCode(executable),
+              let code = Self.staticCode(url),
               Self.validateWhole(code, requirement: requirement) else { return nil }
-        let hashes = Self.hashes(of: code, url: executable, requirement: requirement)
-        guard !hashes.isEmpty, !hashes.contains(running) else { return nil }
-        return HelperReplacement(codeHashes: hashes, resumesSession: Self.containsResumeKey(executable))
+        let hashes = Self.hashes(of: code, url: url, requirement: requirement)
+        guard !hashes.isEmpty, !hashes.contains(running),
+              let bytes = contents ?? (try? Data(contentsOf: url, options: .mappedIfSafe)) else { return nil }
+        return HelperReplacement(codeHashes: hashes,
+                                 resumesSession: bytes.range(of: Data(MCPResumeState.environmentKey.utf8)) != nil)
     }
+
+    public func stageReplacement() -> StagedHelper? {
+        let contents = executable.deletingLastPathComponent().deletingLastPathComponent()
+        let app = contents.deletingLastPathComponent()
+        guard let bytes = try? Data(contentsOf: executable),
+              let plist = try? Data(contentsOf: contents.appendingPathComponent("Info.plist")),
+              let directory = HelperStaging.makeDirectory(in: stagingRoot) else { return nil }
+        let helpers = directory.appendingPathComponent(app.lastPathComponent)
+            .appendingPathComponent("Contents/Helpers", isDirectory: true)
+        let copy = helpers.appendingPathComponent(executable.lastPathComponent)
+        guard (try? FileManager.default.createDirectory(at: helpers, withIntermediateDirectories: true,
+                                                         attributes: [.posixPermissions: 0o700])) != nil,
+              HelperStaging.writeNew(plist, to: helpers.deletingLastPathComponent().appendingPathComponent("Info.plist"), mode: 0o400),
+              HelperStaging.writeNew(bytes, to: copy, mode: 0o500),
+              let replacement = verify(copy, contents: bytes) else {
+            HelperStaging.remove(directory.path, root: stagingRoot)
+            return nil
+        }
+        return StagedHelper(executable: copy.path, directory: directory.path, replacement: replacement)
+    }
+
+    public func discard(_ staged: StagedHelper) { HelperStaging.remove(staged.directory, root: stagingRoot) }
 
     /// The kernel's cdhash of the code this process runs. Security's signing
     /// information for `SecCodeCopySelf` is read from the file at the
@@ -267,13 +322,71 @@ public final class SystemHelperBuildIdentity: HelperBuildIdentifying, @unchecked
         return hash
     }
 
-    static func containsResumeKey(_ url: URL) -> Bool {
-        guard let data = try? Data(contentsOf: url, options: .mappedIfSafe) else { return false }
-        return data.range(of: Data(MCPResumeState.environmentKey.utf8)) != nil
+}
+
+/// Private copies of replacement helpers, one 0700 folder per handover under
+/// a 0700 root this user owns, named `<pid>-…`. A process runs from its copy
+/// for the rest of its life: the app identifies a helper through its
+/// executable path (`proc_pidpath`), which fails once the file is gone. So a
+/// copy is removed only after its process ended, or by the same process once
+/// it runs from a newer copy. The root is in the app's Application Support
+/// folder, which macOS does not clean like the temporary folder.
+public enum HelperStaging {
+    public static func root(bundleID: String, home: URL = FileManager.default.homeDirectoryForCurrentUser) -> URL {
+        home.appendingPathComponent("Library/Application Support", isDirectory: true)
+            .appendingPathComponent(bundleID, isDirectory: true)
+            .appendingPathComponent("helper-handover", isDirectory: true)
+    }
+
+    static func makeDirectory(in root: URL) -> URL? {
+        _ = mkdir(root.path, 0o700)
+        var info = stat()
+        guard lstat(root.path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR,
+              info.st_uid == getuid(), info.st_mode & 0o077 == 0 else { return nil }
+        var template = Array(root.appendingPathComponent("\(getpid())-XXXXXX").path.utf8CString)
+        guard template.withUnsafeMutableBufferPointer({ mkdtemp($0.baseAddress!) }) != nil else { return nil }
+        return URL(fileURLWithPath: String(cString: template), isDirectory: true)
+    }
+
+    /// O_EXCL | O_NOFOLLOW: a file only this call created.
+    static func writeNew(_ data: Data, to url: URL, mode: mode_t) -> Bool {
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var written = 0
+        return data.withUnsafeBytes { raw -> Bool in
+            while written < raw.count {
+                let count = write(fd, raw.baseAddress! + written, raw.count - written)
+                if count < 0 && errno == EINTR { continue }
+                guard count > 0 else { return false }
+                written += count
+            }
+            return true
+        }
+    }
+
+    /// Removes a folder only when it is a direct child of `root`.
+    public static func remove(_ path: String?, root: URL) {
+        guard let path else { return }
+        let url = URL(fileURLWithPath: path).standardizedFileURL
+        guard url.deletingLastPathComponent().path == root.standardizedFileURL.path else { return }
+        try? FileManager.default.removeItem(at: url)
+    }
+
+    /// Removes the copies of ended processes and this process's older copies,
+    /// keeping the one it runs from.
+    public static func sweep(root: URL, keeping current: String?) {
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return }
+        let keep = current.map { URL(fileURLWithPath: $0).standardizedFileURL.lastPathComponent }
+        for name in names where name != keep {
+            guard let pid = name.split(separator: "-").first.flatMap({ pid_t($0) }), pid > 0 else { continue }
+            let ended = kill(pid, 0) != 0 && errno == ESRCH
+            if ended || pid == getpid() { remove(root.appendingPathComponent(name).path, root: root) }
+        }
     }
 }
 
-/// Replaces the process image with `path`. With a state, it travels through an
+/// Replaces the process image with `path` (a staged, verified copy). With a state, it travels through an
 /// unlinked temporary file whose descriptor survives `execve`; the file is
 /// unlinked before any request byte is written. Returns only when nothing was
 /// executed, so the caller answers as before.
@@ -328,9 +441,11 @@ public final class MCPBuildHandover: @unchecked Sendable {
 
     public let resumed: MCPResumeState?
     private let identity: HelperBuildIdentifying
-    /// Production: `HelperRelauncher.exec`, which returns only on failure.
-    /// Tests return true to stand for an exec that replaced the image.
-    private let relaunch: (MCPResumeState?) -> Bool
+    /// Production: `HelperRelauncher.exec` of the staged copy, which returns
+    /// only on failure. Tests return true to stand for an exec that replaced the image.
+    private let relaunch: (StagedHelper, MCPResumeState?) -> Bool
+    /// The installed helper path this session serves as.
+    private let helperPath: String?
     private let now: () -> Date
     private let lock = NSLock()
     private var requested = false
@@ -338,10 +453,10 @@ public final class MCPBuildHandover: @unchecked Sendable {
     private var staleOutsideCall = false
     private var relaunches: [Date]
 
-    public init(identity: HelperBuildIdentifying, resumed: MCPResumeState?,
+    public init(identity: HelperBuildIdentifying, resumed: MCPResumeState?, helperPath: String? = nil,
                 now: @escaping () -> Date = Date.init,
-                relaunch: @escaping (MCPResumeState?) -> Bool) {
-        self.identity = identity; self.resumed = resumed
+                relaunch: @escaping (StagedHelper, MCPResumeState?) -> Bool) {
+        self.identity = identity; self.resumed = resumed; self.helperPath = helperPath
         self.now = now; self.relaunch = relaunch
         self.relaunches = resumed?.relaunches ?? []
     }
@@ -407,20 +522,19 @@ public final class MCPBuildHandover: @unchecked Sendable {
         /// Nothing was executed and nothing answered: the caller answers the
         /// held calls and restores the waiting bytes (handover now disabled).
         case answerHere
-        /// The replacement cannot resume and a request frame is incomplete:
-        /// restore everything and try again once more input arrives.
-        case waitForCompleteFrame
-        /// Every carried request was answered with a refusal; exec into a
-        /// build that cannot resume then failed. Nothing is left to restore.
-        case answeredCarried
+        /// Every carried complete request got an explicit answer; the caller
+        /// restores these bytes (an unfinished frame). The handover stays
+        /// requested when only that frame stopped the exec.
+        case answered(restore: Data)
     }
 
-    /// Re-verifies the file right before exec, then replaces the process.
-    /// `held` are calls the app denied; `waiting` lines and `unread` bytes
-    /// arrived after them. Runs with the server's gate held.
+    /// Stages and verifies a private copy right before exec, then replaces the
+    /// process with exactly that copy. `held` are calls the app denied;
+    /// `waiting` lines and `unread` bytes arrived after them. Runs with the
+    /// server's gate held.
     func handOver(initialized: Bool, probed: Bool, held: [String], waiting: [String], unread: Data,
                   write: (String) -> Void) -> Outcome {
-        guard isRequested, budgetLeft(), let replacement = identity.verifiedReplacement() else {
+        guard isRequested, budgetLeft(), let staged = identity.stageReplacement() else {
             abandon(); return .answerHere
         }
         let split = MCPCarriedInput.split(unread)
@@ -429,24 +543,31 @@ public final class MCPBuildHandover: @unchecked Sendable {
             let since = now().addingTimeInterval(-Self.relaunchWindow)
             return relaunches.filter { $0 > since } + [now()]
         }
-        if replacement.resumesSession {
+        if staged.replacement.resumesSession {
             let state = MCPResumeState(initialized: initialized, probed: probed && !probeWasStale,
                                        input: MCPCarriedInput.join(lines) + split.tail, relaunches: history,
-                                       expectedCodeHashes: Array(replacement.codeHashes))
-            guard state.encoded() != nil else { abandon(); return .answerHere }
+                                       expectedCodeHashes: Array(staged.replacement.codeHashes),
+                                       helperPath: helperPath, stagingDirectory: staged.directory)
+            guard state.encoded() != nil else { identity.discard(staged); abandon(); return .answerHere }
             lock.withLock { relaunches = history }
-            if relaunch(state) { return .replaced }
+            if relaunch(staged, state) { return .replaced }
+            identity.discard(staged)
             abandon()
             return .answerHere
         }
         // A build without this protocol (a rollback) starts a fresh session on
-        // the same stdio: answer every carried request now, then exec it.
-        guard split.tail.isEmpty else { return .waitForCompleteFrame }
+        // the same stdio. Every complete request gets its answer now; the exec
+        // waits until no half-written request would be cut in two.
         MCPCarriedInput.refusals(for: lines, message: MCPCarriedInput.retryMessage).forEach(write)
+        guard split.tail.isEmpty else {
+            identity.discard(staged)
+            return .answered(restore: split.tail)
+        }
         lock.withLock { relaunches = history }
-        if relaunch(nil) { return .replaced }
+        if relaunch(staged, nil) { return .replaced }
+        identity.discard(staged)
         abandon()
-        return .answeredCarried
+        return .answered(restore: Data())
     }
 }
 

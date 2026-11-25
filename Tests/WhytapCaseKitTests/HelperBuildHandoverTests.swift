@@ -46,9 +46,17 @@ final class HelperBuildHandoverTests: XCTestCase {
         init(hasNewBuild: Bool, resumes: Bool = true) { _hasNewBuild = hasNewBuild; _resumes = resumes }
         var hasNewBuild: Bool { get { lock.withLock { _hasNewBuild } } set { lock.withLock { _hasNewBuild = newValue } } }
         var resumes: Bool { get { lock.withLock { _resumes } } set { lock.withLock { _resumes = newValue } } }
+        var stagingFails = false
+        private(set) var discarded = 0
         func verifiedReplacement() -> HelperReplacement? {
             hasNewBuild ? HelperReplacement(codeHashes: [Data(repeating: 7, count: 20)], resumesSession: resumes) : nil
         }
+        func stageReplacement() -> StagedHelper? {
+            guard !stagingFails, let replacement = verifiedReplacement() else { return nil }
+            return StagedHelper(executable: "/private/staged/A.app/Contents/Helpers/whytap", directory: "/private/staged",
+                                replacement: replacement)
+        }
+        func discard(_ staged: StagedHelper) { lock.withLock { discarded += 1 } }
     }
 
     /// Everything one helper image's relauncher was asked to hand over.
@@ -56,13 +64,16 @@ final class HelperBuildHandoverTests: XCTestCase {
         private let lock = NSLock()
         private var _states: [MCPResumeState] = []
         private var _fresh = 0
+        private var _executed: [String] = []
         let succeed: Bool
         init(succeed: Bool = true) { self.succeed = succeed }
         var states: [MCPResumeState] { lock.withLock { _states } }
         /// Execs into a build that cannot resume (no state).
         var fresh: Int { lock.withLock { _fresh } }
-        func record(_ state: MCPResumeState?) -> Bool {
-            lock.withLock { if let state { _states.append(state) } else { _fresh += 1 } }
+        /// The paths exec was given: always a staged, verified copy.
+        var executed: [String] { lock.withLock { _executed } }
+        func record(_ staged: StagedHelper, _ state: MCPResumeState?) -> Bool {
+            lock.withLock { _executed.append(staged.executable); if let state { _states.append(state) } else { _fresh += 1 } }
             return succeed
         }
     }
@@ -120,7 +131,8 @@ final class HelperBuildHandoverTests: XCTestCase {
              relaunches: Relaunches = Relaunches(), now: @escaping () -> Date = Date.init, caseMCP: Bool = false,
              beforeProbeSends: @escaping () -> Void = {}) {
             self.app = app; self.stdin = stdin; self.relaunches = relaunches
-            handover = MCPBuildHandover(identity: disk, resumed: resumed, now: now, relaunch: relaunches.record)
+            handover = MCPBuildHandover(identity: disk, resumed: resumed, helperPath: "/Applications/A.app/Contents/Helpers/whytap",
+                                        now: now, relaunch: relaunches.record)
             let client = BuildFollowingBrokerClient(inner: app, handover: handover)
             let source = FileDescriptorLineSource(fd: stdin.read, prefill: resumed?.input ?? Data())
             let output = output, handover = handover
@@ -129,10 +141,11 @@ final class HelperBuildHandoverTests: XCTestCase {
                     CaseMCPServer(client: client, executablePath: "/A.app/Contents/Helpers/whytap")
                         .run(source: source, write: output.write, handover: handover)
                 } else {
-                    AppControlMCPServer(accessProbe: { [self] in
+                    AppControlMCPServer(confirmedAccessProbe: { [self] in
                         probes += 1
                         beforeProbeSends()
-                        _ = try? client.send(.appControl(AppControlRequest("request_access")))
+                        if case .appControl? = try? client.send(.appControl(AppControlRequest("request_access"))) { return true }
+                        return false
                     }, caseServer: CaseMCPServer(client: client, executablePath: "/A.app/Contents/Helpers/whytap"),
                     cancellableCall: { request, cancellation in
                         AppControlCommand(client: client).call(request, cancellation: cancellation)
@@ -182,6 +195,9 @@ final class HelperBuildHandoverTests: XCTestCase {
         XCTAssertTrue(state.initialized, "the handshake is not repeated")
         XCTAssertTrue(state.probed)
         XCTAssertEqual(state.relaunches.count, 1)
+        XCTAssertEqual(old.relaunches.executed, ["/private/staged/A.app/Contents/Helpers/whytap"], "exec runs the verified copy")
+        XCTAssertEqual(state.helperPath, "/Applications/A.app/Contents/Helpers/whytap")
+        XCTAssertEqual(state.stagingDirectory, "/private/staged")
 
         // The new image: same pid and stdin, prefilled with what was unanswered.
         let newApp = App(.trusts)
@@ -405,28 +421,82 @@ final class HelperBuildHandoverTests: XCTestCase {
         XCTAssertTrue(image.output.lines.allSatisfy { $0.contains("Retry the request") })
     }
 
-    func test_a_rollback_waits_for_a_frame_still_arriving_before_exec() {
+    func test_a_rollback_answers_at_once_and_execs_only_after_a_half_written_frame_completes() {
         let session = Stdin()
-        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: Disk(hasNewBuild: true, resumes: false),
+        let disk = Disk(hasNewBuild: true, resumes: false)
+        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: disk,
                           resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
         let next = Self.call(3)
         let split = next.index(next.startIndex, offsetBy: 12)
         session.sendPartial(Self.call(2) + "\n" + String(next[..<split]))
-        Thread.sleep(forTimeInterval: 0.3)
+        waitFor({ image.output.ids() == [2] }, "the triggering call is answered while the next frame is unfinished")
         XCTAssertEqual(image.relaunches.fresh, 0, "no exec while a request is half written")
+        XCTAssertEqual(disk.discarded, 1, "the staged copy of that attempt is removed")
         session.sendPartial(String(next[split...]) + "\n")
         XCTAssertTrue(image.waitUntilStopped())
         XCTAssertEqual(image.relaunches.fresh, 1)
         XCTAssertEqual(image.output.ids().sorted(), [2, 3])
     }
 
-    func test_the_file_is_verified_again_right_before_exec() {
+    func test_an_access_probe_the_app_never_answered_is_not_carried_as_done() throws {
+        let session = Stdin()
+        let app = App(.notRunning)
+        let image = Image(app: app, stdin: session, disk: Disk(hasNewBuild: true))
+        session.send(Self.initialize, Self.initialized)
+        waitFor({ image.probes == 1 }, "the probe ran and got no answer")
+        Thread.sleep(forTimeInterval: 0.05)
+        app.mode = .deniesStaleHelper
+        session.send(Self.call(2))
+        XCTAssertTrue(image.waitUntilStopped())
+        let state = try XCTUnwrap(image.relaunches.states.first)
+        XCTAssertFalse(state.probed, "unavailable is not a confirmed answer")
+    }
+
+    func test_without_a_verified_private_copy_the_old_image_stays_and_answers() {
+        let session = Stdin()
+        let disk = Disk(hasNewBuild: true)
+        disk.stagingFails = true
+        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: disk,
+                          resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
+        session.send(Self.call(2), Self.call(3))
+        finish(image, session, answering: [2, 3])
+        XCTAssertEqual(image.relaunches.executed, [], "nothing unverified is executed")
+    }
+
+    func test_staging_folders_are_removed_only_under_their_root_and_after_their_process() throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("whytap-staging-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: home) }
+        let root = HelperStaging.root(bundleID: "ai.whytap.test", home: home)
+        XCTAssertEqual(root.path, home.path + "/Library/Application Support/ai.whytap.test/helper-handover")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let outside = home.appendingPathComponent("outside")
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        HelperStaging.remove(outside.path, root: root)
+        HelperStaging.remove(root.appendingPathComponent("../../outside").path, root: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: outside.path), "never outside the staging root")
+
+        let current = root.appendingPathComponent("\(getpid())-current")
+        let older = root.appendingPathComponent("\(getpid())-older")
+        let otherLive = root.appendingPathComponent("1-live") // launchd: always running
+        let dead = root.appendingPathComponent("999999-dead")
+        for url in [current, older, otherLive, dead] { try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true) }
+        HelperStaging.sweep(root: root, keeping: current.path)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: current.path), "the copy this process runs from stays")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: older.path), "this process's older copy goes")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: otherLive.path), "another running process keeps its copy")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: dead.path), "an ended process's copy goes")
+
+        // A real staged copy only after a baseline; without one nothing is staged.
+        let identity = SystemHelperBuildIdentity(executable: URL(fileURLWithPath: CommandLine.arguments[0]), stagingRoot: root)
+        XCTAssertNil(identity.stageReplacement())
+    }
+
+    func test_the_copy_is_verified_again_right_before_exec() {
         final class FlipDisk: HelperBuildIdentifying, @unchecked Sendable {
-            private let lock = NSLock()
-            private var calls = 0
-            func verifiedReplacement() -> HelperReplacement? {
-                lock.withLock { calls += 1; return calls == 1 ? HelperReplacement(codeHashes: [Data([1])], resumesSession: true) : nil }
-            }
+            func verifiedReplacement() -> HelperReplacement? { HelperReplacement(codeHashes: [Data([1])], resumesSession: true) }
+            /// The file changed after the trigger: the private copy does not verify.
+            func stageReplacement() -> StagedHelper? { nil }
+            func discard(_ staged: StagedHelper) {}
         }
         let relaunches = Relaunches()
         let handover = MCPBuildHandover(identity: FlipDisk(), resumed: nil, relaunch: relaunches.record)
@@ -506,9 +576,11 @@ final class HelperBuildHandoverTests: XCTestCase {
     }
 
     func test_identity_without_a_baseline_accepts_no_replacement() {
-        let identity = SystemHelperBuildIdentity(executable: URL(fileURLWithPath: CommandLine.arguments[0]))
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("unused-\(UUID().uuidString)")
+        let identity = SystemHelperBuildIdentity(executable: URL(fileURLWithPath: CommandLine.arguments[0]), stagingRoot: root)
         XCTAssertNil(identity.verifiedReplacement(), "fail closed before the signer is known")
-        XCTAssertNil(SystemHelperBuildIdentity(executable: URL(fileURLWithPath: "/nonexistent/whytap")).verifiedReplacement())
+        XCTAssertNil(SystemHelperBuildIdentity(executable: URL(fileURLWithPath: "/nonexistent/whytap"), stagingRoot: root)
+            .verifiedReplacement())
     }
 
     // MARK: Resume state transfer

@@ -31,6 +31,33 @@ def running_cdhash(pid):
     return buffer.raw.hex()
 
 
+LIBPROC = ctypes.CDLL("/usr/lib/libproc.dylib")
+
+
+def executable_path(pid):
+    buffer = ctypes.create_string_buffer(4096)
+    return buffer.value.decode() if LIBPROC.proc_pidpath(pid, buffer, 4096) > 0 else None
+
+
+STAGING = os.path.join(SUPPORT, "helper-handover")
+
+
+def staging_entries(pid):
+    names = sorted(os.listdir(STAGING)) if os.path.isdir(STAGING) else []
+    return [name for name in names if name.startswith(f"{pid}-")]
+
+
+def runs_private_copy(pid):
+    """Runs from its one verified copy (older copies of this pid swept)."""
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        path, entries = executable_path(pid) or "", staging_entries(pid)
+        if len(entries) == 1 and path.startswith(os.path.join(STAGING, entries[0]) + "/"):
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def file_cdhash(path):
     out = subprocess.run(["codesign", "-dvvv", path], capture_output=True, text=True).stderr
     match = re.search(r"CDHash=([0-9a-f]+)", out)
@@ -241,6 +268,8 @@ def main():
             rid = client.call("whytap_get_state")
             check(ok(client.reply(), rid, pid), f"replacement {step}: the same process answers the next call from the new build")
             check(running_cdhash(pid) == file_cdhash(helper), f"replacement {step}: the process runs the new file's code")
+            check(runs_private_copy(pid) and file_cdhash(executable_path(pid)) == file_cdhash(helper),
+                  f"replacement {step}: it runs its verified private copy (path readable for the app), older copies removed")
         install(helper, keychain)
         ids = [client.call("whytap_get_state"), client.call("whytap_list_models")]
         answers = [client.reply(), client.reply()]
@@ -273,14 +302,23 @@ def main():
                   f"{label}: not executed, one denied request, the call is answered")
         install(helper, keychain, resumes=False)
         rid = client.call("whytap_get_state")
-        answer = client.reply()
+        partial = json.dumps({"jsonrpc": "2.0", "id": 900, "method": "tools/call",
+                              "params": {"name": "whytap_get_state", "arguments": {}}})
+        client.proc.stdin.write(partial[:15].encode())
+        client.proc.stdin.flush()
+        answer = client.reply(timeout=5)
         check(answer["id"] == rid and "error" in answer and "Retry" in answer["error"]["message"],
-              "rollback to a build without the protocol: the triggering call gets an explicit answer")
+              "rollback to a build without the protocol: the triggering call is answered at once, next frame unfinished")
+        client.proc.stdin.write((partial[15:] + "\n").encode())
+        client.proc.stdin.flush()
+        answer = client.reply()
+        check(answer["id"] == 900 and "error" in answer, "rollback: the completed frame gets its explicit answer too")
         # The refusal is written before the exec, so give the exec a moment.
         deadline = time.time() + 5
         while running_cdhash(pid) != file_cdhash(helper) and time.time() < deadline:
             time.sleep(0.05)
         check(running_cdhash(pid) == file_cdhash(helper), "rollback: the same process runs the rollback build")
+        check(runs_private_copy(pid), "rollback: it runs from its private copy, kept while it runs")
         rid = client.call("whytap_get_state")
         check(ok(client.reply(), rid, pid), "rollback: later calls are answered by the rollback build")
         client.close()

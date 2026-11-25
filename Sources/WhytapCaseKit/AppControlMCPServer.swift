@@ -18,20 +18,22 @@ public final class AppControlMCPServer {
     /// access prompt for this harness. It must not launch Whytap or delay
     /// `initialize`; hosts drop a server that answers late.
     // WHY: .project-docs/decisions/2026-11-20-harness-access.md
-    private let accessProbe: (() -> Void)?
+    /// Returns whether the app answered it (only then is it carried as done
+    /// across a build handover). `accessProbe:` closures report no answer.
+    private let accessProbe: (() -> Bool)?
     /// Names-only Case tools (`case_*`) of the unified server; nil for `app mcp`.
     private let caseServer: CaseMCPServer?
     public init(screenOnly: Bool = false, todo: ((String, [String: AppControlValue]) -> AppControlResponse)? = nil,
-                accessProbe: (() -> Void)? = nil, caseServer: CaseMCPServer? = nil,
+                accessProbe: (() -> Void)? = nil, confirmedAccessProbe: (() -> Bool)? = nil, caseServer: CaseMCPServer? = nil,
                 call: @escaping (AppControlRequest) -> AppControlResponse) {
-        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = accessProbe
+        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = confirmedAccessProbe ?? accessProbe.map { probe in { probe(); return false } }
         self.caseServer = screenOnly ? nil : caseServer
         self.call = { request, _ in call(request) }
     }
     public init(screenOnly: Bool = false, todo: ((String, [String: AppControlValue]) -> AppControlResponse)? = nil,
-                accessProbe: (() -> Void)? = nil, caseServer: CaseMCPServer? = nil,
+                accessProbe: (() -> Void)? = nil, confirmedAccessProbe: (() -> Bool)? = nil, caseServer: CaseMCPServer? = nil,
                 cancellableCall: @escaping (AppControlRequest, AppControlCancellation?) -> AppControlResponse) {
-        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = accessProbe
+        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = confirmedAccessProbe ?? accessProbe.map { probe in { probe(); return false } }
         self.caseServer = screenOnly ? nil : caseServer
         self.call = cancellableCall
     }
@@ -72,8 +74,9 @@ public final class AppControlMCPServer {
             guard initialized, !probeScheduled, !screenOnly, let accessProbe else { return }
             probeScheduled = true
             DispatchQueue.global(qos: .utility).async {
-                accessProbe()
-                gate.withLock { probeDone = true }
+                // Done only when the app answered it; no answer is carried as not done.
+                let confirmed = accessProbe()
+                gate.withLock { if confirmed { probeDone = true } }
             }
         }
         // Gate held. Answers here: held calls get their own replies, the
@@ -96,11 +99,9 @@ public final class AppControlMCPServer {
                 source.close()
             case .answerHere:
                 answerHere(unread: unread)
-            case .waitForCompleteFrame:
-                source.restore(unread)
-            case .answeredCarried:
+            case .answered(let rest):
                 held = []; waiting = []; waitingBytes = 0
-                source.restore(Data())
+                source.restore(rest)
             }
         }
         // A resumed image probes only if the old one's probe never completed.

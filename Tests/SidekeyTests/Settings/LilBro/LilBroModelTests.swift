@@ -356,6 +356,13 @@ final class LilBroLocalGuideTests: XCTestCase {
              .feature(.drop)),
             ("Can I set up Drop before learning how to enable Microphone access?", .feature(.drop)),
             ("When using Drop where is Accessibility?", .tab(.permissions)),
+            ("Can you help with Drop and show me where to enable Microphone access?", .tab(.permissions)),
+            ("Does Drop automatically turn on my Mac microphone?", .feature(.drop)),
+            ("Can I use Drop with Microphone off? I can't enable Microphone access.", .feature(.drop)),
+            ("How do I give Drop Microphone access?", .tab(.permissions)),
+            ("For Drop, how do I turn the Microphone off?", .tab(.permissions)),
+            ("How do I turn on Microphone?", .tab(.permissions)),
+            ("Where do I disable Screen Recording for Screenshots?", .tab(.permissions)),
         ]
         for (question, expected) in cases {
             XCTAssertEqual(destination(question), expected, question)

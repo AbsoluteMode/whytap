@@ -126,7 +126,8 @@ struct LilBroLocalGuide: LilBroBrain {
     /// "where", "how" ("With Drop can I enable Microphone?", "If I use Agent,
     /// where is Accessibility?").
     private static let mainClause = "\\b(?:(?:can|could|do|does|did|should|shall|will|would|may|must)\\s+(?:i|you|we|it|whytap)"
-        + "|(?:where|how|what|which)\\s+(?:can|could|do|does|did|should|is|are|would|will)|is there|are there)\\b"
+        + "|(?:where|how|what|which)\\s+(?:can|could|do|does|did|should|is|are|would|will)|is there|are there"
+        + "|show me|tell me)\\b"
 
     /// A marker before the setting in the same part of the sentence, with
     /// the main question not yet started between them: "after enabling",
@@ -157,7 +158,7 @@ struct LilBroLocalGuide: LilBroBrain {
     /// settings", "grant Whytap Microphone access", "allow Whytap to use
     /// Screen Recording".
     private static func asksForSetting(_ q: String, at direct: [(String, Int)]) -> Bool {
-        let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
+        let verbs = "allow|grant|permit|enable|disable|revoke|find|open|where is|where's|where are"
         let article = "(?:(?:the|my|a|an|its|your)\\s+)?"
         let recipient = "(?:(?:whytap's|whytap|it|the app|this app)\\s+)?"
         let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
@@ -165,16 +166,20 @@ struct LilBroLocalGuide: LilBroBrain {
         // The person does it: "turn …" and "give …" right after I / to /
         // you / please or at the start, not "Does Drop turn the Microphone on?".
         let person = "(?:^|\\b(?:i|to|you|me|please)\\s+)"
+        // "I can't enable Microphone access" explains, it does not ask.
+        let notNegated = "(?<!can't |cannot |don't |didn't |won't |couldn't |can not |do not )"
         return direct.contains { name, at in
             let setting = "(" + NSRegularExpression.escapedPattern(for: name) + ")"
             let patterns = [
-                "\\b(?:\(verbs))\\s+" + article + recipient + reach + article + place + setting,
-                // "turn Microphone on", "switch the Accessibility permission on"
+                notNegated + "\\b(?:\(verbs))\\s+" + article + recipient + reach + article + place + setting,
+                // "turn on Microphone", "turn Microphone on", "switch the Accessibility permission off"
+                person + "(?:turn|switch)\\s+(?:on|off)\\s+" + article + recipient + place + setting,
                 person + "(?:turn|switch)\\s+" + article + recipient + place + setting
-                    + "\\s+(?:(?:access|permission|setting)\\s+)?on\\b",
-                // "give Drop access to the Microphone"
+                    + "\\s+(?:(?:access|permission|setting)\\s+)?(?:on|off)\\b",
+                // "give Drop access to the Microphone", "give Drop Microphone access"
                 person + "(?:give|grant)\\s+(?:[\\w']+\\s+){1,2}(?:access|permission)\\s+(?:to|for)\\s+"
                     + article + place + setting,
+                person + "(?:give|grant)\\s+(?:[\\w']+\\s+){0,2}" + setting + "\\s+(?:access|permission)\\b",
             ]
             // The verb must take this mention, not the same name elsewhere.
             return patterns.contains { pattern in

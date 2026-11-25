@@ -509,12 +509,32 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  The caption is 146 pt high while connecting or listening. The audio
-  permissions link sits inside it. Stop immediately shows Start and a
-  108 pt caption if there are rows. With no rows the stopped box shows
-  only its controls, and a problem hugs its message. The caption takes the
-  panel's width up to 708 pt and the height the controls leave, so the
-  360 x 190 pt minimum panel fits every state. The live pair
+  The box fills the panel (less a 10 pt transparent margin for its shadow),
+  so its size depends only on the panel, never on what it shows: the
+  controls row above the caption when stopped, the caption alone while
+  running (controls on hover), a hint before the first session. The audio
+  permissions link sits inside the caption. The user drags the box anywhere
+  and resizes it by its edges and corners (margin plus 6 pt inside the edge,
+  18 pt corners; minimum 480 x 150 pt, SubtitleOverlayFrame); the panel's
+  sendEvent runs both (SubtitleOverlayFrameTracker) except on controls
+  (language menus, session button, ×, fix buttons), and a tracking area shows
+  the resize cursor. The frame is saved after each move or resize
+  (sidekey.translation.subtitleFrame: the display's UUID and the frame
+  relative to its visible frame) and restored at the same place on that
+  display, clamped to it; when that display is gone, the saved size returns
+  at the bottom centre of the island's display. The fix buttons (Open Keys &
+  models, Open audio permissions) act on the first click through the panel's
+  sendEvent, like Stop; a Control-click is always the context menu's. A scroll over the box
+  scrolls the caption back (SubtitleCaptionScroll): it then anchors to the
+  pair at its top, new pairs arrive below without moving it, a bottom fade
+  and "Latest" show, and scrolling to the newest pair or Latest follows
+  again, also when the newest pair is already in view. A session keeps 200
+  pairs (SubtitleCaption.historyPairs); following lays out at least 24 and
+  enough to fill the caption's height, so every pair is in view or above it.
+  A scroll reads the rows' placement at the caption's on-screen size, not a
+  measurement pass's; Clear, a new session or mode drop it. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+  The live pair
   settles in place under LiveSubtitleModel.liveID; its original shows only up
   to the audio position its translation has reached (and its first sentence
   end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
@@ -1483,8 +1503,8 @@ CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
-Island tool reorder: in the hover drawer's tool grid, a tile held for
-IslandHoverHitBridge.reorderHoldDelay (0.35 s) without leaving it lifts
+Island tool reorder: in the hover drawer's tool grid, a tile pressed and moved
+IslandHoverHitBridge.dragThreshold (4 pt) lifts at once, with no hold delay
 (liftPressedTool; Settings and coming-soon tools never lift). The bridge
 measures the grid's cells once (IslandHoverReorder.cells); while the button is
 held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
@@ -1496,7 +1516,18 @@ isHoverExpanded), and its release never activates it. A release more than
 the island already has keyboard focus); a layout change the drag did not
 write (Settings Sync) ends it without undoing that change; hide, drawer close
 or the next press end the drag with the order reached. A shorter press stays
-an ordinary click. WHY:
+an ordinary click. Motion: the lifted tool is drawn by IslandHoverFloatingTile
+above the grid (outside the glass container), starting over its cell
+(IslandHoverTileFramesKey frames) and following the pointer through
+IslandHoverReorderMotion, which only it observes; the layer
+(IslandHoverFloatingLayer, fed by IslandHoverReorderStage) is an overlay of the
+whole island in hoverZoneSpace, outside the drawer's glass clip. Its cell stays
+as an empty place sliding with the neighbours; release lands it, cancel flies
+it back from the release point, with damped springs
+(IslandHoverReorderMotionCurve); the drawer is held until it has landed
+(settlingTool / holdsDrawer). Moves are unsaved (placeTool persist: false)
+until release (saveLayout); a cancel restores the screen only; any Settings
+Sync reload (externalReloads) ends the drag. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

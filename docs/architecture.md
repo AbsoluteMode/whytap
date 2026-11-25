@@ -1496,7 +1496,13 @@ isHoverExpanded), and its release never activates it. A release more than
 the island already has keyboard focus); a layout change the drag did not
 write (Settings Sync) ends it without undoing that change; hide, drawer close
 or the next press end the drag with the order reached. A shorter press stays
-an ordinary click. WHY:
+an ordinary click. Motion: the lifted tool is drawn by IslandHoverFloatingTile
+above the grid (outside the glass container), starting over its cell
+(IslandHoverTileFramesKey frames) and following the pointer through
+IslandHoverReorderMotion, which only it observes; its cell stays as an empty
+place sliding with the neighbours; release lands it, cancel flies it back, with
+damped springs (IslandHoverReorderMotionCurve). Moves are unsaved
+(placeTool persist: false) until release (saveLayout). WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

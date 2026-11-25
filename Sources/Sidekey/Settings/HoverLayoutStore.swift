@@ -53,8 +53,10 @@ final class HoverLayoutStore: ObservableObject {
 
     /// Insert a new tool, or move an existing tool to the target position.
     /// Dragging onto the empty editor target uses `lockSlotIndex` to append.
+    /// `persist: false` moves the tool on screen only: an island drag saves
+    /// once, when the tool is let go (`saveLayout()`).
     @discardableResult
-    func placeTool(_ tool: HoverTool, at index: Int) -> Bool {
+    func placeTool(_ tool: HoverTool, at index: Int, persist save: Bool = true) -> Bool {
         guard tool != .settings, index >= 0, index <= lockSlotIndex else { return false }
         var updated = slots
         if let previous = updated.firstIndex(of: tool) {
@@ -63,9 +65,12 @@ final class HoverLayoutStore: ObservableObject {
         updated.insert(tool, at: min(index, updated.count - 1))
         guard updated != slots else { return false }
         slots = updated
-        persist()
+        if save { persist() }
         return true
     }
+
+    /// Saves the order on screen (after an island drag moved it unsaved).
+    func saveLayout() { persist() }
 
     func removeTool(_ tool: HoverTool) {
         guard tool != .settings, slots.contains(tool) else { return }

@@ -42,6 +42,7 @@ All paths below start at `Sources/Sidekey/`.
 | Drag/drop catalog, fixed Add and selected layout | `Settings/ToolboxSettingsView.swift` |
 | Hover screen: ordered list, switches, Move actions | `Settings/Features/HoverFeatureView.swift` |
 | Long-press reorder in the island's tool grid | `DynamicIsland/IslandHoverHitBridge.swift` (`IslandHoverReorder`) |
+| Reorder motion: floating tile, frames, springs | `DynamicIsland/IslandHoverReorderMotion.swift` |
 | Embedded History, Record and translation panels | `Settings/ToolboxMiniApps.swift` |
 | App services and hotkey dispatch | `AppDelegate.swift` (`onToolHotkeyActivated`) |
 | Feature hotkey labels and hints | `Hotkeys/HotkeysSettingsView.swift`, `HelpWindowController.swift` |

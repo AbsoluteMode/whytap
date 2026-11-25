@@ -118,10 +118,31 @@ struct IslandHoverReorder: Equatable {
     }
 }
 
+/// Where the lifted tile is drawn: the pointer's travel since the lift, in
+/// SwiftUI orientation (y down). Kept apart from the bridge so a pointer move
+/// redraws only the floating tile, never the whole island.
+// WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+@MainActor
+final class IslandHoverReorderMotion: ObservableObject {
+    @Published private(set) var translation: CGSize = .zero
+
+    func follow(from lift: CGPoint, to point: CGPoint) {
+        // Window coordinates grow upward; SwiftUI's grow downward.
+        let next = CGSize(width: point.x - lift.x, height: lift.y - point.y)
+        if next != translation { translation = next }
+    }
+
+    func reset() { if translation != .zero { translation = .zero } }
+}
+
 /// The reporters are geometry sources, never mouse catchers. Dispatch remains
 /// at NSWindow.sendEvent, the layer that receives first mouse in this overlay.
 @MainActor
 final class IslandHoverHitBridge: ObservableObject {
+    /// The lifted tile's pointer travel; observed only by the floating tile.
+    let motion = IslandHoverReorderMotion()
+    private var lastPointer: CGPoint?
+    private var liftPoint: CGPoint?
     @Published private(set) var pressedID: IslandHoverHitTargetID?
     /// The tool held up by a long press, while it is being moved.
     @Published private(set) var reorderingTool: HoverTool?
@@ -196,10 +217,13 @@ final class IslandHoverHitBridge: ObservableObject {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
         reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
+        liftPoint = lastPointer
+        motion.reset()
         layoutWatch = store.$slots.dropFirst().sink { [weak self] _ in
             MainActor.assumeIsolated {
                 guard let self, !self.writingLayout else { return }
-                self.finishReorder()
+                // Settings Sync or Settings wrote this layout: keep theirs.
+                self.finishReorder(save: false)
             }
         }
         tracking.cancel()
@@ -211,16 +235,20 @@ final class IslandHoverHitBridge: ObservableObject {
 
     /// The lifted tool takes the place of the cell under the pointer at once.
     func moveLiftedTool(to point: CGPoint) {
-        guard let reorder, let store = layoutStore, let slot = reorder.slot(at: point),
+        guard let reorder else { return }
+        if let liftPoint { motion.follow(from: liftPoint, to: point) }
+        guard let store = layoutStore, let slot = reorder.slot(at: point),
               let current = store.slots.firstIndex(of: reorder.tool), current != slot else { return }
-        writeLayout { _ = store.placeTool(reorder.tool, at: slot) }
+        writeLayout { _ = store.placeTool(reorder.tool, at: slot, persist: false) }
     }
 
-    /// Releasing keeps the order the island shows (it is already saved).
-    func finishReorder() {
+    /// Releasing keeps the order the island shows and saves it once.
+    func finishReorder(save: Bool = true) {
         layoutWatch = nil
-        guard reorder != nil else { return }
-        reorder = nil
+        guard let reorder else { return }
+        if save, let store = layoutStore, store.slots != reorder.original { store.saveLayout() }
+        self.reorder = nil
+        liftPoint = nil
         reorderingTool = nil
     }
 
@@ -231,7 +259,7 @@ final class IslandHoverHitBridge: ObservableObject {
         if let store = layoutStore, let order = reorder.restoredOrder(current: store.slots), store.slots != order {
             writeLayout { store.replaceEditableSlots(with: order) }
         }
-        finishReorder()
+        finishReorder(save: false)
         tracking.discardSequence()
     }
 
@@ -241,9 +269,10 @@ final class IslandHoverHitBridge: ObservableObject {
         withAnimation(Self.reorderAnimation) { change() }
     }
 
-    private static var reorderAnimation: Animation? {
+    /// Neighbours make way with a soft, fully damped-out spring.
+    static var reorderAnimation: Animation? {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-            ? nil : .spring(response: 0.26, dampingFraction: 0.84)
+            ? nil : .spring(response: 0.32, dampingFraction: 0.86)
     }
 
     private func scheduleLift() {
@@ -347,11 +376,13 @@ final class IslandHoverHitBridge: ObservableObject {
         let consumed = tracking.begin(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
         pressWindow = window
+        lastPointer = point
         scheduleLift()
         return consumed
     }
 
     func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        lastPointer = point
         if reorder != nil {
             moveLiftedTool(to: point)
             return

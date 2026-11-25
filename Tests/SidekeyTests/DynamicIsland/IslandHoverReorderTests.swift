@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import XCTest
 @testable import Sidekey
@@ -114,6 +115,7 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertTrue(bridge.liftPressedTool())
         drag(to: point(1))
         XCTAssertEqual(store.slots, [.notes, .inputLang, .monitor, .settings], "It takes the place at once")
+        XCTAssertEqual(restored(), tools, "Nothing is written while the tool is still held")
         drag(to: point(2))
         XCTAssertEqual(store.slots, [.notes, .monitor, .inputLang, .settings])
         // The pointer stays over the same cell while tiles settle: no flip back.
@@ -255,6 +257,100 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertTrue(down(2))
         up(at: point(2))
         XCTAssertEqual(activated, [.monitor])
+    }
+
+    // MARK: - Smooth motion (REV 2)
+
+    func testTheLiftedTileFollowsThePointerInSwiftUIOrientation() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        XCTAssertEqual(bridge.motion.translation, .zero, "It starts exactly over its cell")
+        let start = point(0)
+        drag(to: CGPoint(x: start.x + 17, y: start.y + 5))
+        XCTAssertEqual(bridge.motion.translation, CGSize(width: 17, height: -5),
+                       "Window y grows upward; the floating tile's y grows downward")
+        drag(to: CGPoint(x: start.x + 95, y: start.y - 3))
+        XCTAssertEqual(bridge.motion.translation, CGSize(width: 95, height: 3))
+        up(at: CGPoint(x: start.x + 95, y: start.y - 3))
+        XCTAssertEqual(bridge.motion.translation, CGSize(width: 95, height: 3),
+                       "The landing starts from where the pointer let go")
+        XCTAssertTrue(down(2))
+        XCTAssertTrue(bridge.liftPressedTool())
+        XCTAssertEqual(bridge.motion.translation, .zero, "A new lift starts from its own cell")
+    }
+
+    /// The island observes the bridge; a pointer move that stays in one cell
+    /// must not redraw it. Only the floating tile observes the travel.
+    func testPointerMovesInsideACellRedrawOnlyTheFloatingTile() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        var bridgeChanges = 0, motionChanges = 0
+        let watchBridge = bridge.objectWillChange.sink { bridgeChanges += 1 }
+        let watchMotion = bridge.motion.objectWillChange.sink { motionChanges += 1 }
+        let start = point(0)
+        for step in 1...10 { drag(to: CGPoint(x: start.x + Double(step), y: start.y)) }
+        XCTAssertEqual(bridgeChanges, 0)
+        XCTAssertEqual(motionChanges, 10)
+        XCTAssertEqual(store.slots, tools)
+        watchBridge.cancel(); watchMotion.cancel()
+    }
+
+    func testTheFloatingTileFollowsUntilLetGoThenLandsOnItsCell() {
+        let origin = CGPoint(x: 45, y: 26)
+        XCTAssertEqual(IslandHoverFloatingTile<EmptyView>.position(origin: origin, translation: CGSize(width: 60, height: -4),
+                                                                   settle: nil), CGPoint(x: 105, y: 22))
+        XCTAssertEqual(IslandHoverFloatingTile<EmptyView>.position(origin: origin, translation: CGSize(width: 60, height: -4),
+                                                                   settle: CGPoint(x: 135, y: 26)), CGPoint(x: 135, y: 26))
+    }
+
+    func testTheReorderCurvesDoNotBounce() throws {
+        let source = try String(contentsOfFile: Self.repoFile("Sources/Sidekey/DynamicIsland/IslandHoverReorderMotion.swift"),
+                                encoding: .utf8)
+        XCTAssertTrue(source.contains(".animation(nil, value: motion.translation)"),
+                      "Following the pointer must never lag behind an animation")
+        let island = try String(contentsOfFile: Self.repoFile("Sources/Sidekey/DynamicIsland/IslandView.swift"), encoding: .utf8)
+        XCTAssertTrue(island.contains(".opacity(floatingTool == tool ? 0 : 1)"),
+                      "The lifted tool's cell is an empty place while the floating tile is drawn")
+        XCTAssertTrue(island.contains(".overlay(alignment: .topLeading) { floatingTileLayer }"))
+        XCTAssertFalse(island.contains(".scaleEffect(hoverHitBridge.reorderingTool == tool"),
+                       "The grid tile no longer jumps from cell to cell as the lifted tile")
+    }
+
+    /// The floating tile starts over a tile's frame read through the same
+    /// structure as the drawer: a lazy grid in a scroll view in the glass
+    /// container, measured in the container's space.
+    func testTileFramesReachTheGridSpaceThroughScrollAndGlass() {
+        final class Box { var frames: [HoverTool: CGRect] = [:] }
+        let box = Box(), tools = tools
+        let grid = IslandHoverGlassControlsContainer {
+            ScrollView(.vertical) {
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(60), spacing: 0), count: 3), spacing: 0) {
+                    ForEach(tools, id: \.self) { tool in
+                        Color.clear.frame(width: 60, height: 44)
+                            .background(IslandHoverTileFrameReporter(tool: tool, space: "grid"))
+                    }
+                }
+            }
+            .frame(width: 180, height: 88)
+        }
+        .coordinateSpace(name: "grid")
+        .onPreferenceChange(IslandHoverTileFramesKey.self) { box.frames = $0 }
+        let hosting = NSHostingView(rootView: grid)
+        let offscreen = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 180, height: 88),
+                                 styleMask: .borderless, backing: .buffered, defer: false)
+        offscreen.isReleasedWhenClosed = false
+        offscreen.contentView = hosting
+        defer { offscreen.close() }
+        for _ in 0..<4 { hosting.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
+        XCTAssertEqual(Set(box.frames.keys), Set(tools))
+        XCTAssertEqual(box.frames[.inputLang]?.origin, CGPoint(x: 0, y: 0))
+        XCTAssertEqual(box.frames[.notes]?.origin, CGPoint(x: 60, y: 0))
+        XCTAssertEqual(box.frames[.settings]?.origin, CGPoint(x: 0, y: 44), "Second row, first cell")
+    }
+
+    private static func repoFile(_ path: String) -> String {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(path).path
     }
 
     // MARK: - What cannot move

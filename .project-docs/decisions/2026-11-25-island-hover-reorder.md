@@ -9,6 +9,9 @@ canonical_for: [island-hover-reorder]
 verified_at: 2026-11-25
 sources:
   - type: user-confirmed
+    reference: On 2026-11-25, on build 1757, the maintainer said the reorder works but the animations are too poor, not smooth (translated; ORCH-TASK 103 REV 2).
+    confirmed_at: 2026-11-25
+  - type: user-confirmed
     reference: On 2026-11-24 the maintainer said he would improve the Hover itself so that a tool can be held and swapped with another in the hover, leaving on and off to the toggles (translated). On 2026-11-25, after the Settings list shipped, he said it did not drag for him, asked why Settings, and repeated that the tools should be held and dragged in the hover, since they are now switched on with toggles (translated; ORCH-TASK 103 REV 1).
     confirmed_at: 2026-11-25
   - type: repository
@@ -82,6 +85,22 @@ to live in that same dispatch.
   reorder without a pointer. The screen's text says the order is changed by
   holding a tool in the island.
 
+- **Smooth motion (REV 2).** On 1757 the tile jumped from cell to cell, the
+  whole island redrew on each change and every intermediate order was written
+  to defaults. Now the lifted tool is drawn by a floating layer above the grid
+  (`IslandHoverFloatingTile`, outside the glass container so its glass never
+  melts into the tiles it passes): it starts exactly over its cell (frames
+  reported by `IslandHoverTileFramesKey`), follows the pointer frame by frame
+  with no animation lag, and rises with a soft spring (1.1x, shadow). Its cell
+  stays as an empty place that slides with the neighbours (spring 0.32 s,
+  damping 0.86). On release the tile lands in its cell (spring 0.34 s, damping
+  0.9) from where the pointer let go; on cancel it flies back the same way
+  while the order returns. Only the floating tile observes the pointer's
+  travel (`IslandHoverReorderMotion`), so a pointer move redraws one tile, not
+  the island. Intermediate orders are not saved; the order is written once on
+  release (`placeTool(..., persist: false)`, `saveLayout()`). Reduce Motion
+  drops the springs.
+
 ## Why
 
 - It is what Maxim asked for: the order is a property of the island, so it is
@@ -120,9 +139,15 @@ lift; the cell under the pointer is the target; a lifted tool holds the drawer
 without the pointer. `HoverFeatureTests` keep the list, switches, shortcuts
 and Move actions. The full `swift test` ran.
 
+REV 2 added: the floating tile follows the pointer in SwiftUI orientation and
+lands from where it was let go; pointer moves inside a cell change only the
+motion model, never the bridge the island observes; nothing is written while
+the tool is held; tile frames reach the grid's space through the scroll view
+and the glass container; source contracts for the floating layer and the
+pointer-following without animation.
+
 Not checked in a running app (feature sessions do not launch it): the feel of
-the 0.35 s hold, the lift animation and the drawer staying open while the
-pointer leaves the island during a real drag.
+the 0.35 s hold and of the springs, measured frame rate during a real drag.
 
 ## Rejected
 
@@ -136,9 +161,13 @@ pointer leaves the island during a real drag.
   the person's app (closing its dialog, say); an active tap that swallows it
   would be a second input filter for a rare need. Release outside is the
   pointer's own cancel.
+- Animating the grid tile itself from cell to cell (1757): it can only jump
+  between cells, so it never follows the hand.
+- Saving every intermediate order: defaults observers and Settings Sync see a
+  burst of writes for one gesture.
 - Removing a tool by dragging it out of the island: on and off stay with the
   switches in Settings, as Maxim asked.
 - Auto-scrolling a long grid while dragging: the drawer shows up to its
   scroll height; a tool beyond it is moved with Move actions in Settings.
 
-2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases.
+2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth.

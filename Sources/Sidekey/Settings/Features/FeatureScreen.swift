@@ -145,6 +145,7 @@ struct FeatureVideoStrip: View {
     let clip: FeatureClip
     var shortcuts: [FeatureVideoShortcut] = []
     var bundle: Bundle = FeatureVideo.resourceBundle
+    @Environment(\.isEnabled) private var isEnabled
     @State private var playing = false
     @FocusState private var focused: Bool
 
@@ -166,20 +167,33 @@ struct FeatureVideoStrip: View {
 
     var body: some View {
         let url = clip.video?.url(in: bundle)
+        let card = RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous)
         VStack(alignment: .leading, spacing: 10) {
-            if let url {
-                Button { playing.toggle() } label: { strip(available: true) }
-                    .buttonStyle(MacButtonInteractionStyle(focused: focused))
+            Group {
+                if url != nil {
+                    Button { playing.toggle() } label: {
+                        strip(available: true).opacity(isEnabled ? 1 : 0.42)
+                    }
+                    .buttonStyle(MacButtonInteractionStyle(outline: MacSettingsTheme.text, focused: focused,
+                                                          cornerRadius: MacSettingsTheme.radiusCard))
                     .focused($focused)
                     .accessibilityLabel(playing ? "Close the video" : "Watch how \(clip.name) works")
-                if playing {
-                    FeatureVideoPopover(url: url, shortcuts: shortcuts)
-                        .padding(-12)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    strip(available: false)
+                        .accessibilityElement(children: .combine)
                 }
-            } else {
-                strip(available: false)
-                    .accessibilityElement(children: .combine)
+            }
+            // Keep the card behind the button's interaction outline. An outline
+            // leaves the caption and accent label readable in both appearances.
+            .background {
+                card.fill(MacSettingsTheme.bgCard)
+                    .overlay { card.strokeBorder(MacSettingsTheme.sep, lineWidth: 1) }
+                    .allowsHitTesting(false)
+            }
+            if playing, let url {
+                FeatureVideoPopover(url: url, shortcuts: shortcuts)
+                    .padding(-12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }
@@ -212,24 +226,19 @@ struct FeatureVideoStrip: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
-        .background(MacSettingsTheme.bgCard,
-                    in: RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous)
-                .strokeBorder(MacSettingsTheme.sep, lineWidth: 1)
-        }
         .contentShape(Rectangle())
     }
 }
 
-/// The feature's own shortcuts, changed in place. Each row owns its
-/// recorder; Hotkeys lists the same rows.
+/// The feature's own shortcuts, changed in place. Rows share one recording
+/// session so a second recording ends the first.
 @MainActor
 struct FeatureShortcutsGroup: View {
     let hotkeys: [FeatureHotkey]
     let preferences: HotkeyPreferences
     /// A line beside the title, e.g. where the rest of the feature's keys are.
     var trailing: String?
+    @StateObject private var recording = HotkeyRecordingSession<FeatureHotkey>()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -237,7 +246,7 @@ struct FeatureShortcutsGroup: View {
             MacCard {
                 ForEach(Array(hotkeys.enumerated()), id: \.element) { index, hotkey in
                     if index > 0 { MacRowSeparator() }
-                    OwnedFeatureShortcutRow(hotkey: hotkey, preferences: preferences)
+                    OwnedFeatureShortcutRow(hotkey: hotkey, preferences: preferences, recording: recording)
                 }
             }
         }
@@ -264,14 +273,14 @@ struct FeatureShortcutsGroup: View {
     }
 }
 
-/// A shortcut row that owns its recorder for as long as it is shown.
+/// A shortcut row that owns its editor for as long as it is shown.
 @MainActor
 private struct OwnedFeatureShortcutRow: View {
     @StateObject private var editor: FeatureShortcutEditor
     @ObservedObject private var preferences: HotkeyPreferences
 
-    init(hotkey: FeatureHotkey, preferences: HotkeyPreferences) {
-        _editor = StateObject(wrappedValue: FeatureShortcutEditor(hotkey: hotkey, preferences: preferences))
+    init(hotkey: FeatureHotkey, preferences: HotkeyPreferences, recording: HotkeyRecordingSession<FeatureHotkey>) {
+        _editor = StateObject(wrappedValue: FeatureShortcutEditor(hotkey: hotkey, preferences: preferences, recording: recording))
         self.preferences = preferences
     }
 

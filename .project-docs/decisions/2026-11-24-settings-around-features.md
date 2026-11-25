@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/DropFeatureTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md]
 ---
 
 ## Context
@@ -123,6 +123,18 @@ accepted the second version.
   link (`whytap://settings/agentMode`, the setup prompt) opens the Agent
   screen. The Agent's examples are only things its tools do today (files,
   a command, the screen, web search, To-do, Whytap's own settings).
+- Google search's shortcuts are saved now (`hotkeys.googleSearchTextShortcut`,
+  `…VoiceShortcut`, `…VoiceGesture`, also in backup and settings sync). They
+  never were: a change on its screen or in Hotkeys was dropped at once and the
+  key monitor kept Right Option (builder review of #458). A Google shortcut
+  saved as a key combo now registers like an Agent combo, with Google's own
+  callbacks and hot-key ids 19/20, and the Agent controller rebinds on a
+  Google-only change; the Right Option default stays on the modifier path
+  (builder review 537). The rebind builds the monitor's configuration from
+  the six emitted values: `@Published` emits before it stores, so rereading
+  the preferences left the changed field stale (a Google gesture Hold → Tap
+  stayed Hold; builder review 540). An Agent turned on
+  elsewhere clears the screen's earlier "why it did not turn on".
 - Every catalog feature now has a screen. To-do and Case join the catalog as
   island tools (they need nothing, so they read Ready on a fresh Mac and the
   list's summary counts them). Translate and Subtitles keep one shared screen,

@@ -56,14 +56,14 @@ final class AgentOtherSectionTests: XCTestCase {
         let sources = try ["SettingsOtherView.swift", "Features/DropFeatureView.swift"]
             .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
             .joined()
-        let onScreens = Set(FeatureCatalog.all.compactMap(\.video))
+        let onScreens = Set(FeatureCatalog.all.flatMap(\.clips).compactMap(\.video))
         for video in FeatureVideo.allCases {
             XCTAssertTrue(onScreens.contains(video) || sources.contains("FeatureVideoButton(video: .\(video)"),
                           "\(video) is shown nowhere")
         }
     }
 
-    func test_other_row_clips_name_the_users_own_shortcuts() {
+    func test_feature_clips_name_the_users_own_shortcuts() {
         var configuration = HotkeyConfiguration.defaults
         configuration.dropVoiceShortcut = .combo(.optionPeriod)
         configuration.googleSearchTextShortcut = .modifier(.rightOption)

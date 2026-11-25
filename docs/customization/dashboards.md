@@ -52,6 +52,14 @@ Generate a disconnected starting point:
 python3 scripts/customize.py scaffold-dashboard --id custom-server-status --title 'Custom server status'
 ```
 
+## Copy prompt in Settings
+
+**Settings → Features → Monitor** lists the dashboards with their freshness
+and has a Copy prompt card (Claude Code, Codex, Cursor, Antigravity). The
+prompt carries this Mac's Monitor paths and the contract below
+(`Settings/Features/CodingAgentPrompt.swift`); update it when the contract
+changes. Settings only reads the files and never polls servers.
+
 ## Snapshot contract
 
 | Field | Value |

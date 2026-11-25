@@ -83,15 +83,18 @@ enum NativeAgentEffort {
         }
     }
 
-    /// Whether a failed request may go again with the `refused` fields: the
-    /// provider answered HTTP 400 (OpenRouter also 404) and its error refuses
-    /// a reasoning setting (`ErrorShape.namesReasoning`: the setting named in
-    /// `param`, or named with a refusal in one sentence, or OpenRouter's "no
-    /// endpoints ... requested parameters"). The model did not run, so
-    /// nothing is repeated or paid twice. Any other failure is not repeated.
+    /// Whether a failed request may go again with the `refused` fields. Any
+    /// HTTP 400, as in Drop Smart: the error text is not read, because no
+    /// reading of free provider text told a refused setting from another
+    /// error reliably (four builder reviews). An unrelated 400 therefore goes
+    /// once more and fails the same way: a 400 is not billed and runs no
+    /// tool, and the caller allows it only on the turn's first request, once.
+    /// Also OpenRouter's 404 "no endpoints ... requested parameters". Not a
+    /// refusal of the provider's own web search, which has its own fallback.
     static func refused(_ error: Error, provider: OpenCodeModelProvider) -> Bool {
-        guard case NativeAgentError.service(_, let status, let shape) = error, shape.namesReasoning == true else { return false }
-        return status == 400 || (provider == .openRouter && status == 404)
+        guard case NativeAgentError.service(_, let status, let shape) = error, shape.rejectsWebSearch != true else { return false }
+        if status == 400 { return true }
+        return provider == .openRouter && status == 404 && shape.noEndpointForParameters == true
     }
 
     /// Models whose provider refused the Agent's reasoning fields and then

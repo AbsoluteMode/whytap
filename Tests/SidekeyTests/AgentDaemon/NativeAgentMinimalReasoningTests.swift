@@ -324,26 +324,39 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertNotNil(still.bodies.first?["reasoning"])
     }
 
-    /// A refusal that dropping the fields does not cure: the repeat fails
-    /// too, the turn fails with the provider's error, and the model is not
+    /// Any HTTP 400 on the turn's first request goes once more, as in Drop
+    /// Smart; the error text is not read. An unrelated 400 is repeated
+    /// exactly once and fails with the same error, no loop; the model is not
     /// marked, so the next turn asks for the least reasoning again. An
     /// HTTP-200 body that is not an answer on the repeat does not mark it
-    /// either.
-    func testAModelIsMarkedOnlyWhenTheRepeatIsAnswered() async throws {
-        let bad = json(["type": "error", "error": ["type": "invalid_request_error",
-                                                    "message": "\"thinking.type.disabled\" is not supported for this model."]], status: 400)
-        let failed = try await run("hi", anthropic("claude-haiku-5-5"), [bad, bad])
-        XCTAssertEqual(failed.store.status, .failed)
-        XCTAssertTrue(failed.store.errorMessage?.contains("HTTP 400") == true, failed.store.errorMessage ?? "")
-        XCTAssertEqual(failed.bodies.count, 2, "one repeat, no more")
-        XCTAssertEqual(failed.usage.count, 1)
-
-        let proxyPage = try await run("hi", anthropic("claude-haiku-5-5"), [bad, json(["page": "sign in"])])
+    /// either. The refused request is not counted as usage; the failed
+    /// repeat is.
+    func testAnUnrelated400IsRepeatedExactlyOnceThenFails() async throws {
+        let unrelated: [(Int, [String: String], Data)] = [
+            json(["type": "error", "error": ["type": "invalid_request_error", "message": "prompt is too long: 250000 tokens"]], status: 400),
+            json(["type": "error", "error": ["type": "invalid_request_error", "message": "messages.1: thinking blocks cannot be modified"]], status: 400),
+            json(["type": "error", "error": ["type": "invalid_request_error",
+                                             "message": "'tools': The function schema property 'reasoning.effort' is not supported."]], status: 400),
+            (400, [:], Data("<html>Bad Request</html>".utf8)),
+        ]
+        for response in unrelated {
+            let name = String(decoding: response.2, as: UTF8.self)
+            let failed = try await run("hi", anthropic("claude-haiku-5-5"), [response, response, json(anthropicFinal("never"))])
+            XCTAssertEqual(failed.store.status, .failed, name)
+            XCTAssertTrue(failed.store.errorMessage?.contains("HTTP 400") == true, failed.store.errorMessage ?? name)
+            XCTAssertEqual(failed.bodies.count, 2, "exactly one repeat: \(name)")
+            XCTAssertEqual(failed.bodies.map(thinking), ["disabled", nil], name)
+            XCTAssertEqual(failed.usage.count, 1, name)
+            XCTAssertEqual(failed.diagnostics.map(\.stage), [.request, .failed, .request, .failed], name)
+            XCTAssertEqual(failed.diagnostics.map(\.effortRetry), [nil, nil, true, true], name)
+        }
+        let proxyPage = try await run("hi", anthropic("claude-haiku-5-5"), [unrelated[0], json(["page": "sign in"])])
         XCTAssertEqual(proxyPage.store.status, .failed)
+        XCTAssertEqual(proxyPage.bodies.count, 2)
 
         let next = try await run("hi", anthropic("claude-haiku-5-5"), [json(anthropicFinal("Hello."))])
         XCTAssertEqual(next.store.streamingText, "Hello.")
-        XCTAssertEqual(next.bodies.map(thinking), ["disabled"])
+        XCTAssertEqual(next.bodies.map(thinking), ["disabled"], "not marked")
     }
 
     /// Only the turn's first exchange may repeat: after the model answered
@@ -385,136 +398,31 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
     }
 
     /// Other failures are not repeated: a refused key (401), a busy provider
-    /// (429) and a server error (500) fail after one request, as before; so
-    /// do 400s that mention thinking or reasoning without refusing a setting.
+    /// (429), a server error (500), an OpenRouter 404 for a missing model and
+    /// a refused provider web search (which has its own fallback). A model
+    /// that gets no fields has nothing to repeat without.
     func testOtherFailuresAreNotRepeated() async throws {
         for status in [401, 429, 500] {
             let result = try await run("hi", anthropic("claude-haiku-5-5"),
                                        [json(["type": "error", "error": ["type": "x", "message": "thinking: not supported"]], status: status)])
             XCTAssertEqual(result.store.status, .failed, "\(status)")
             XCTAssertEqual(result.bodies.count, 1, "\(status)")
+            XCTAssertEqual(result.usage.count, 1, "\(status)")
         }
-        let unrelated: [(Int, [String: String], Data)] = [
-            json(["type": "error", "error": ["type": "invalid_request_error", "message": "prompt is too long: 250000 tokens"]], status: 400),
-            json(["type": "error", "error": ["type": "invalid_request_error", "message": "messages.1: thinking blocks cannot be modified"]], status: 400),
-            json(["type": "error", "error": ["type": "invalid_request_error",
-                                             "message": "Item 'rs_1' of type 'reasoning' was provided without its required following item."]], status: 400),
-            json(["type": "error", "error": ["type": "invalid_request_error",
-                                             "message": "Your text 'no thinking is not supported here' was flagged"]], status: 400),
-            (400, [:], Data("<html>Bad Request</html>".utf8)),
-        ]
-        for response in unrelated {
-            let result = try await run("hi", anthropic("claude-haiku-5-5"), [response])
-            XCTAssertEqual(result.store.status, .failed)
-            XCTAssertEqual(result.bodies.count, 1, String(decoding: response.2, as: UTF8.self))
-            XCTAssertEqual(result.usage.count, 1)
-        }
-        // A model that gets no fields has nothing to repeat without.
         let plain = try await run("hi", anthropic("claude-haiku-4-5"),
                                   [json(["type": "error", "error": ["type": "x", "message": "thinking: not supported"]], status: 400)])
         XCTAssertEqual(plain.bodies.count, 1)
-    }
-
-    /// The refusal rule on its own: the setting in `param`, a quoted field
-    /// name with a refusal, OpenAI's search message, OpenRouter's quoted
-    /// upstream text; not a mention without a refusal.
-    func testRefusalRecognition() {
-        typealias Shape = NativeAgentDiagnostics.ErrorShape
-        func names(_ error: [String: Any]) -> Bool? { Shape(object: ["error": error]).namesReasoning }
-        XCTAssertEqual(names(["message": "Unsupported value", "param": "reasoning.effort"]), true)
-        XCTAssertEqual(names(["message": "\"thinking.type.between_tools\" is not supported for this model."]), true)
-        XCTAssertEqual(names(["message": "The following tools cannot be used with reasoning.effort 'minimal': web_search."]), true)
-        XCTAssertEqual(names(["message": "Provider returned error", "metadata": ["raw": "output_config.effort: unknown parameter"]]), true)
-        XCTAssertEqual(names(["message": "thinking blocks in the latest assistant message cannot be modified"]), false)
-        XCTAssertEqual(names(["message": "Model 'vendor/sonar-reasoning' is not available in your region."]), false)
-        XCTAssertEqual(names(["message": "max_tokens: must be greater than thinking.budget_tokens"]), false)
-        // Builder review, queue #543: unrelated 400s that mention a setting.
-        XCTAssertEqual(names(["message": "Extra inputs are not permitted", "param": "messages.1.content.0.thinking"]), false)
-        XCTAssertEqual(names(["message": "messages.1.content.0.thinking: Extra inputs are not permitted"]), false)
-        XCTAssertEqual(names(["message": "tools.0.input_schema.properties.effort: this keyword is not supported"]), false)
-        XCTAssertEqual(names(["message": "max_tokens is too large for reasoning models; this value is not supported"]), false)
-        XCTAssertEqual(names(["message": "messages.3.content.0: thinking blocks are not allowed at this position"]), false)
-        XCTAssertEqual(names(["message": "The tool schema is not supported by reasoning models with thinking enabled."]), false)
-        XCTAssertEqual(names(["message": "output_config.effort 'xhigh' is not supported when thinking is disabled on this model."]), true)
-        XCTAssertEqual(names(["message": "thinking.type: Input tag 'between_tools' is not supported"]), true)
-        // Builder review, queue #548: a request field opening the message
-        // decides it; a setting quoted alone with a refusal is one.
-        XCTAssertEqual(names(["message": "tools: The function schema property 'reasoning.effort' is not supported."]), false)
-        XCTAssertEqual(names(["message": "messages: Thinking block field 'thinking.type' is not supported at this position."]), false)
-        XCTAssertEqual(names(["message": "max_tokens: The requested limit is not supported, see output_config.effort in the examples."]), false)
-        XCTAssertEqual(names(["message": "'thinking' is not supported for this model."]), true)
-        XCTAssertEqual(names(["message": "\"thinking\": Extra inputs are not permitted."]), true)
-        XCTAssertEqual(names(["message": "The model does not support the 'output_config' parameter."]), true)
-        XCTAssertEqual(names(["message": "Error: reasoning.effort 'none' is not supported with this model."]), true)
-        XCTAssertEqual(names(["message": "Item 'rs_1' of type 'reasoning' was provided without its required following item."]), false)
-        // Builder review, queue #584: a quoted request field opening the
-        // message decides it in every quote style, in OpenRouter's upstream
-        // text too; a quoted setting word that is data is not a refusal.
-        for (open, close) in [("'", "'"), ("\"", "\""), ("`", "`"), ("‘", "’"), ("“", "”")] {
-            for root in ["tools", "messages", "max_tokens", "tools[0].input_schema", "input", "model"] {
-                let message = "\(open)\(root)\(close): property 'reasoning.effort' is not supported."
-                XCTAssertEqual(names(["message": message]), false, message)
-                XCTAssertEqual(names(["message": "Provider returned error", "metadata": ["raw": message]]), false, message)
-            }
-            XCTAssertEqual(names(["message": "\(open)thinking\(close) is not supported for this model."]), true, open)
-        }
-        XCTAssertEqual(names(["message": "The message content 'thinking' is not supported."]), false)
-        XCTAssertEqual(names(["message": "The tool named 'reasoning' is not permitted."]), false)
-        XCTAssertEqual(names(["message": "Invalid value 'output_config' for this tool's name."]), false)
-        XCTAssertEqual(names(["message": "Tool 'reasoning' is not supported."]), false)
-        XCTAssertEqual(names(["message": "The model does not support the 'reasoning' tool."]), false)
-        XCTAssertEqual(names(["message": "The model claude-x does not support the thinking parameter."]), true)
-    }
-
-    /// Builder review, queue #584, on the real loop and on all three routes:
-    /// quoted leading fields and quoted data stay one request each.
-    func testQuotedFieldsAndQuotedDataAreNotRepeatedOnAnyRoute() async throws {
-        let messages = ["'tools': The function schema property 'reasoning.effort' is not supported.",
-                        "\"messages\": Thinking block field 'thinking.type' is not supported at this position.",
-                        "'tools[0].input_schema': property 'thinking.type' is not supported.",
-                        "The message content 'thinking' is not supported.",
-                        "The tool named 'reasoning' is not permitted.",
-                        "Invalid value 'output_config' for this tool's name."]
-        let router = AgentRunOptions(model: "vendor/model", allowActions: false,
-                                     openRouterReasoning: .init(mandatory: false, supportedEfforts: ["low"]))
-        for message in messages {
-            let routes: [(AgentRunOptions, (Int, [String: String], Data))] = [
-                (anthropic("claude-haiku-5-5"), json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400)),
-                (openAI("gpt-5.5"), json(["error": ["type": "invalid_request_error", "message": message]], status: 400)),
-                (router, json(["error": ["code": 400, "message": "Provider returned error", "metadata": ["raw": message]]], status: 400)),
-            ]
-            for (options, response) in routes {
-                let result = try await run("hi", options, [response, json(anthropicFinal("Hello."))])
-                XCTAssertEqual(result.store.status, .failed, "\(options.openCodeProvider) \(message)")
-                XCTAssertEqual(result.bodies.count, 1, "\(options.openCodeProvider) \(message)")
-                XCTAssertEqual(result.usage.count, 1, "\(options.openCodeProvider) \(message)")
-            }
-        }
-    }
-
-    /// Builder review, queue #548, on the real loop: the three unrelated
-    /// 400s stay one request each; the three refusals of a setting quoted
-    /// alone are repeated without the fields and deliver the answer.
-    func testQuotedSettingRefusalsRepeatAndUnrelatedRootsDoNot() async throws {
-        for message in ["tools: The function schema property 'reasoning.effort' is not supported.",
-                        "messages: Thinking block field 'thinking.type' is not supported at this position.",
-                        "max_tokens: The requested limit is not supported, see output_config.effort in the examples."] {
-            let result = try await run("hi", anthropic("claude-haiku-5-5"),
-                                       [json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400)])
-            XCTAssertEqual(result.store.status, .failed, message)
-            XCTAssertEqual(result.bodies.count, 1, message)
-            XCTAssertEqual(result.usage.count, 1, message)
-        }
-        for message in ["'thinking' is not supported for this model.", "\"thinking\": Extra inputs are not permitted.",
-                        "The model does not support the 'output_config' parameter."] {
-            refusals = SmartReasoningRefusals()
-            let result = try await run("hi", anthropic("claude-haiku-5-5"), [
-                json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400),
-                json(anthropicFinal("Hello.")),
-            ])
-            XCTAssertEqual(result.store.streamingText, "Hello.", message)
-            XCTAssertEqual(result.bodies.map(thinking), ["disabled", nil], message)
-        }
+        // The provider refuses its own search: the search fallback goes
+        // without the tool, keeping the reasoning fields; no reasoning repeat.
+        let search = try await run("hi", anthropic("claude-haiku-5-5"), [
+            json(["type": "error", "error": ["type": "invalid_request_error", "message": "Web search is disabled for this organization."]], status: 400),
+            json(anthropicFinal("Hello.")),
+        ])
+        XCTAssertEqual(search.store.streamingText, "Hello.")
+        XCTAssertEqual(search.bodies.count, 2)
+        XCTAssertEqual(search.bodies.map { toolTypes($0).contains("web_search_20250305") }, [true, false])
+        XCTAssertEqual(search.bodies.map(thinking), ["disabled", "disabled"])
+        XCTAssertEqual(search.diagnostics.compactMap(\.effortRetry), [])
     }
 
     /// Builder review, queue #543: OpenAI GPT-5 mini beside the provider's

@@ -30,7 +30,11 @@ Claude Sonnet 5, and on Claude Sonnet 5.5 its lowest setting, `between_tools`
 search; on **OpenRouter** reasoning off where the model makes it optional,
 else its lowest level. Models that do not take the setting keep their own
 default. If a provider refuses the setting on a turn's first request, the
-request is sent once more: on OpenAI at `low`, elsewhere without the setting. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
+request is sent once more: on OpenAI at `low`, elsewhere without the setting.
+Whytap does not read the error text, so any HTTP 400 on that first request
+is sent once more, the same way; an error unrelated to the setting then
+fails again with the same message. It is repeated only once, never later in
+the turn, and a 400 is not billed and runs no tool. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
 a longer one says it reached the model's output limit.
 
 ## Answers and actions

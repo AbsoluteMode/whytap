@@ -27,7 +27,10 @@ extension NativeAgentWebSearchTests {
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
             let events = await run(provider, "q", .init(model: model, openCodeProvider: route))
-            XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1, "\(route): no retry for an unrelated error")
+            // An HTTP 400 on the turn's first request goes once more without
+            // the Agent's reasoning fields (the text is not read); OpenRouter
+            // without a catalog entry sends none. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+            XCTAssertEqual(StubURLProtocol.capturedRequests.count, route == .openRouter ? 1 : 2, "\(route): no retry for an unrelated error")
             XCTAssertTrue(events.contains { if case .error = $0 { return true }; return false }, "\(route)")
             XCTAssertNil(finalText(events))
             XCTAssertFalse(events.contains {
@@ -235,7 +238,10 @@ extension NativeAgentWebSearchTests {
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
             _ = await run(provider, "fixture web search", .init(model: modelID, openCodeProvider: route))
-            XCTAssertEqual(modelRequests, 1, "\(route): a search mention in an unrelated 400 is not a refusal")
+            // An HTTP 400 on the turn's first request goes once more without
+            // the Agent's reasoning fields (the text is not read); OpenRouter
+            // without a catalog entry sends none. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+            XCTAssertEqual(modelRequests, route == .openRouter ? 1 : 2, "\(route): a search mention in an unrelated 400 is not a refusal")
             XCTAssertEqual(tavilyRequests, 0, "\(route): an unrelated provider error never sends the query to Tavily")
         }
     }
@@ -325,7 +331,10 @@ extension NativeAgentWebSearchTests {
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
             _ = await run(provider, "fixture", .init(model: modelID, openCodeProvider: route))
-            XCTAssertEqual(modelRequests, 1, "\(route)")
+            // An HTTP 400 on the turn's first request goes once more without
+            // the Agent's reasoning fields (the text is not read); OpenRouter
+            // without a catalog entry sends none. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+            XCTAssertEqual(modelRequests, route == .openRouter ? 1 : 2, "\(route)")
             XCTAssertEqual(tavilyRequests, 0, "\(route)")
         }
     }
@@ -511,7 +520,10 @@ extension NativeAgentWebSearchTests {
             }
             let provider = NativeAgentProvider(keys: keys, http: http, workspace: { directory }, usageSink: { _ in })
             _ = await run(provider, "fixture", .init(model: model, openCodeProvider: route))
-            XCTAssertEqual(providerRequests, 1, "\(route): an invalid tool option does not show that search is unavailable")
+            // An HTTP 400 on the turn's first request goes once more without
+            // the Agent's reasoning fields (the text is not read); OpenRouter
+            // without a catalog entry sends none. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+            XCTAssertEqual(providerRequests, route == .openRouter ? 1 : 2, "\(route): an invalid tool option does not show that search is unavailable")
         }
     }
 

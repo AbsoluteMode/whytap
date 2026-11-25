@@ -2,7 +2,7 @@
 id: agent-minimal-reasoning-2026-11-24
 type: decision
 title: The built-in Agent asks for the least reasoning its model accepts
-summary: The built-in Agent sends the lowest reasoning setting its model takes, from the tables Drop Smart uses - OpenAI none, minimal or low; Anthropic low effort with thinking off on Claude Haiku 5.5 and Claude Sonnet 5 and between_tools on Claude Sonnet 5.5; OpenRouter off or the lowest level of its catalog entry. In a turn with the provider's own web search OpenAI minimal becomes low and Claude Sonnet 5.5 keeps its own thinking. A 400 that refuses a reasoning setting, on the turn's first request, is repeated once at OpenAI low or without the fields.
+summary: The built-in Agent sends the lowest reasoning setting its model takes, from the tables Drop Smart uses - OpenAI none, minimal or low; Anthropic low effort with thinking off on Claude Haiku 5.5 and Claude Sonnet 5 and between_tools on Claude Sonnet 5.5; OpenRouter off or the lowest level of its catalog entry. In a turn with the provider's own web search OpenAI minimal becomes low and Claude Sonnet 5.5 keeps its own thinking. Any HTTP 400 on the turn's first request that carried a reasoning field is repeated once at OpenAI low or without the field, as in Smart; the error text is not read.
 status: confirmed
 tags: [agent, native-agent, anthropic, openai, openrouter, effort, reasoning, latency, diagnostics]
 canonical_for: [agent-reasoning]
@@ -86,40 +86,36 @@ the tables Smart uses; nothing is duplicated.
   default setup GPT-5, GPT-5 mini, GPT-5 nano and Claude Sonnet 5.5 behave as
   they did on 2026-11-23; they get the lower setting when the Agent's search
   is Tavily or the model has none.
-- **A refused request goes once more.** When the provider answers HTTP 400
-  (OpenRouter also 404) and its error refuses a top-level reasoning setting
-  of the request (`ErrorShape.namesReasoning`, `reasoning`,
-  `reasoning_effort`, `thinking` or `output_config`). Only shapes in which
-  the setting is what the provider refused count: a `param` whose first
-  component is a setting decides alone; the message (or the upstream text
-  OpenRouter quotes), after a generic prefix such as `Error:`, opens with
-  the setting as its subject, quoted or not, followed by a colon or a
-  refusal (`thinking.type: ...`, `'thinking' is not supported`,
-  `output_config.effort 'xhigh' is not supported`); "the model does not
-  support the 'output_config' parameter"; OpenAI's "The following tools
-  cannot be used with reasoning.effort ..."; and OpenRouter's "no endpoints
-  ... requested parameters". A message that opens with anything else (another
-  request field, quoted or not, or a sentence about message content, a
-  tool's name or a value) is about that, whatever setting it mentions later:
-  a mention anywhere else is never enough. A bare word is not a
-  setting. The same request is then sent again with what a refusing model
-  gets: on direct OpenAI `low`, which every reasoning model takes (the
-  Agent's level since 2026-11-23), when the level sent was lower; otherwise
-  no reasoning field. A repeat always changes what was sent. This happens
-  only before the turn's first accepted exchange. Only an accepted answer to
+- **A refused request goes once more.** When the turn's first request
+  carried a reasoning field and the provider answers HTTP 400 (on
+  OpenRouter also 404 "no endpoints ... requested parameters"), the same
+  request is sent again once with what a refusing model gets: on direct
+  OpenAI `low`, which every reasoning model takes (the Agent's level since
+  2026-11-23), when the level sent was lower; otherwise no reasoning field.
+  The error text is not read, as in Drop Smart. **Contract change,
+  intended:** an unrelated 400 on the turn's first request (a bad tool
+  schema, a too long prompt) is therefore also sent once more and then
+  fails with the same error; it is never repeated twice and never in a
+  loop. A 400 is not billed and runs no tool, so the cost is one extra
+  round trip on a request that fails anyway. Not repeated: a 400 after the
+  turn's first accepted exchange, a request without a reasoning field (or
+  one already at the fallback), the provider's refusal of its own web
+  search (it has its own fallback), and every other status (401, 404, 429,
+  5xx). A repeat always changes what was sent. Only an accepted answer to
   the repeat marks the model (`NativeAgentEffort.refusals`, in memory until
   relaunch, apart from Smart's list), on OpenRouter for the endpoint the
   route pins or for Auto (`refusalKey`), so another endpoint of the same
-  model still gets the least reasoning; later turns send the fallback. The
-  model did not run on the refused request, so nothing is paid twice, and
-  the refused request is not counted as usage unless it was not repeated
-  after all (cancelled). Any other failure is not repeated. Besides this,
-  only the existing web search fallback repeats a model request.
+  model still gets the least reasoning; later turns send the fallback. An
+  unrelated 400 fails again and marks nothing. The model did not run on the
+  refused request, so nothing is paid twice, and the refused request is not
+  counted as usage unless it was not repeated after all (cancelled).
+  Besides this, only the existing web search fallback repeats a model
+  request.
 - **Diagnostics.** The `native-agent` events carry the level asked for
   (`none`, `minimal`, `low` and higher, or `off` for OpenRouter's
   `enabled: false`), the Anthropic `thinking` setting (`disabled`,
-  `between_tools`), `effortRetry` on the repeat's events and `namesReasoning`
-  on an error. Fixed names and flags only, never provider text.
+  `between_tools`), `effortRetry` on the repeat's events and
+  `noEndpointForParameters` on an OpenRouter error. Fixed names and flags only, never provider text.
 - **Not changed:** the output cap, the wait, plain-text answers and cut-answer
   messages of the 2026-11-23 decision; the local CLI agents; translation and
   meetings; the model and provider are never switched.
@@ -132,9 +128,12 @@ the tables Smart uses; nothing is duplicated.
   family is added.
 - Stepping up beside the provider's search avoids a refused first request on
   every turn (OpenAI) and a failed turn (Claude Sonnet 5.5).
-- The refusal repeat needs positive evidence because the Agent's requests
-  can be large and its tool loop must not repeat a model call for an
-  unrelated error; the web search fallback follows the same rule.
+- The refusal repeat does not read the error text: four builder reviews
+  (queue tickets 543, 548, 584 and 588) each found provider wordings that a
+  text rule repeated wrongly or missed, and an adversarial review of the
+  last rule found about twenty more. A deterministic rule that sometimes
+  repeats an unbilled 400 once is safer than one that misses real
+  refusals and leaves the Agent broken for a model.
 
 ## What was tested
 
@@ -172,8 +171,7 @@ fails again, and an HTTP-200 non-answer on the repeat, not marking the
 model; a refusal after the turn's first answer not repeated; an OpenRouter
 404 for a missing model not repeated; a catalog flag without effort sending
 nothing; OpenRouter `minimal` beside search without a `low` level; 401, 429,
-500, a long prompt, thinking blocks changed, a reasoning item, quoted user
-text and an unreadable 400 not repeated; the refusal rule on its own. After
+500 not repeated. After
 the builder's review of queue ticket 543 (stubbed probes on the real loop):
 a repeat after OpenAI GPT-5 mini's search step-up sends no field instead of
 the same `low`; nested message, tool-schema and incidental mentions of a
@@ -189,7 +187,17 @@ in a sentence with a refusal) was dropped: a quoted request field opening
 the message, in any quote style and in OpenRouter's upstream text, and a
 quoted setting word that is data (message content, a tool's name, an invalid
 value) were repeated under it. The setting must now open the message as its
-subject. `NativeAgentLowEffortTests` updated
+subject. After the builder's review of ticket 588 that rule was replaced
+again: it repeated refusals placed inside the request's data and missed
+direct refusals worded as a parameter ("The 'reasoning.effort' parameter is
+not supported", "Unsupported parameter: ..."). The sentence rule came back
+with an explicit exclusion of data places; an adversarial review then
+found about twenty more misreadings, and the maintainer's orchestrator
+chose to stop reading the text (option A, as in Smart). Tests for it: a real
+refusal is repeated once and answered; an unrelated 400 is repeated exactly
+once and then fails with the same error, without a loop; a 400 after the
+turn's first answer is not repeated; a web search refusal goes to the search
+fallback, not this repeat. `NativeAgentLowEffortTests` updated
 for the new levels. Not tested: the installed app, how much faster answers
 are, OpenRouter live.
 
@@ -201,11 +209,13 @@ are, OpenRouter live.
   matters more to an answer than the last step of reasoning.
 - Thinking off on Claude Opus 5: Anthropic documents tool calls written as
   text and leaked thinking tags.
-- Repeating on any HTTP 400, as Smart does: a large Agent request would be
-  sent twice for an unrelated error, against the no-retry rule.
+- Reading the error text to tell a refused setting from another 400 (four
+  rounds, 2026-11-24 and 2026-11-25): no rule held against the builder's
+  probes; replaced by the repeat on any first-request 400.
 - A request for OpenRouter's catalog before a turn: the saved catalog already
   has the entry.
 - Sharing Smart's refusal list: the two features send different fields
   (Smart never sends a search tool), so one must not switch the other off.
 
-2026-11-24, branch `claude/agent-minimal-reasoning`.
+2026-11-24, revised 2026-11-25, branch `claude/agent-minimal-reasoning`,
+PR https://github.com/AbsoluteMode/whytap/pull/467.

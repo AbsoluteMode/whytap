@@ -29,12 +29,11 @@ enum NativeAgentDiagnostics {
         /// match; no provider text is kept.
         /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
         let rejectsWebSearch: Bool?
-        /// The provider's error names a reasoning setting (`reasoning`,
-        /// `thinking`, `effort`, `output_config`) in its message, its `param`
-        /// or the upstream text OpenRouter quotes. A keyword hint: it allows
-        /// one repeat of the request without those fields and nothing else.
+        /// OpenRouter's "No endpoints found that can handle the requested
+        /// parameters" (HTTP 404): no endpoint of the model takes a field the
+        /// request sent. A fixed phrase; no provider text is kept.
         /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
-        let namesReasoning: Bool?
+        let noEndpointForParameters: Bool?
 
         /// Affirmative, tool-specific evidence only; an ambiguous error stays
         /// on the selected route. Only the provider's own `message` counts
@@ -116,56 +115,6 @@ enum NativeAgentDiagnostics {
 
         /// Removes quoted text (often the user's own words) and keeps a quoted
         /// tool identifier such as 'web_search' as a bare word.
-        /// The error refuses a top-level reasoning setting of the request
-        /// (`reasoning`, `reasoning_effort`, `thinking`, `output_config`). Only
-        /// shapes where the setting is what the provider refused count:
-        /// - a `param` decides alone: its first component must be a setting;
-        /// - the message (or the upstream text OpenRouter quotes), after a
-        ///   generic prefix such as `Error:`, opens with the setting as its
-        ///   subject, quoted or not, followed by a colon or a refusal
-        ///   (`thinking.type: ...`, `'thinking' is not supported`,
-        ///   `output_config.effort 'xhigh' is not supported`);
-        /// - "the model does not support the 'output_config' parameter";
-        /// - OpenAI's "The following tools cannot be used with
-        ///   reasoning.effort ..." and OpenRouter's "no endpoints ...
-        ///   requested parameters".
-        /// A message that opens with anything else (another request field,
-        /// quoted or not, or a sentence about message content, a tool's name
-        /// or a value) is about that, whatever setting it mentions later.
-        /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
-        static func refusesReasoning(error: [String: Any]?, raw: String?) -> Bool {
-            if let param = error?["param"] as? String { return isReasoningSetting(path: String(param.prefix(200)).lowercased()) }
-            for text in [error?["message"] as? String, raw].compactMap({ $0 }) {
-                var lower = String(text.prefix(16_384)).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-                if lower.contains("no endpoints") && lower.contains("requested parameters") { return true }
-                if let prefix = lower.range(of: #"^(?:error|invalid request|invalid_request_error|bad request)\s*:\s*"#,
-                                            options: .regularExpression) {
-                    lower.removeSubrange(prefix)
-                }
-                if refusalShapes.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
-            }
-            return false
-        }
-
-        private static let quote = #"['"`‘’“”]?"#
-        private static let settingPath = #"(?:reasoning_effort|reasoning|thinking|output_config)(?:\.[a-z_]+)*"#
-        private static let settingRefusal = #"(?:is|are)\s+(?:not supported|not allowed|not permitted|unsupported|invalid|not available)"#
-        static let refusalShapes = [
-            // The setting is the subject: `thinking: ...`, `'thinking' is not supported`,
-            // `output_config.effort 'xhigh' is not supported`.
-            "^" + quote + settingPath + quote + #"\s*(?::|(?:['"`‘’“”][^'"`‘’“”]{0,40}['"`‘’“”]\s*)?"# + settingRefusal
-                + #"|cannot be used|not supported)"#,
-            #"^(?:the |this )?model(?: [a-z0-9._/:-]+)? does not support (?:the )?"# + quote + settingPath + quote
-                + #" (?:parameter|field|setting|option|argument)"#,
-            #"^the following tools cannot be used with reasoning\.effort\b"#,
-        ]
-
-        /// The path's first component is a top-level reasoning setting.
-        static func isReasoningSetting(path: String) -> Bool {
-            let first = path.split(whereSeparator: { $0 == "." || $0 == "[" }).first.map(String.init) ?? ""
-            return ["reasoning", "reasoning_effort", "thinking", "output_config"].contains(first)
-        }
-
         static func unquoted(_ text: String) -> String {
             let pattern = #"(?<![\p{L}\p{N}])['"`‘“]([^'"`’”]*)['"`’”](?![\p{L}\p{N}])"#
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
@@ -193,7 +142,7 @@ enum NativeAgentDiagnostics {
             let text = [error?["message"] as? String, metadata?["raw"] as? String]
                 .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
-            namesReasoning = Self.refusesReasoning(error: error, raw: metadata?["raw"] as? String)
+            noEndpointForParameters = text.contains("no endpoints") && text.contains("requested parameters")
             rejectsWebSearch = Self.refusesWebSearch(error: error, category: category, searchToolIndex: searchToolIndex)
             self.truncated = truncated
             parsed = object != nil

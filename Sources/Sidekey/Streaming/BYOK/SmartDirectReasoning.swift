@@ -163,6 +163,11 @@ final class SmartReasoningRefusals: @unchecked Sendable {
         lock.withLock { _ = refused.insert(Self.key(api, model)) }
     }
 
+    /// Forgets every refusal (tests that share the process-wide list).
+    func removeAll() {
+        lock.withLock { refused.removeAll() }
+    }
+
     private static func key(_ api: OpenAICompatibleLLMEndpoint.TextAPI, _ model: String) -> String {
         "\(api):\(model.lowercased())"
     }

@@ -368,10 +368,11 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   search OpenAI minimal becomes low and Claude Sonnet 5.5 gets no thinking
   field. The setting follows the request that starts the turn (after a
   refused provider search, the one without it) and is kept after the first
-  accepted exchange. Before that, an HTTP 400 (or OpenRouter 404) that
-  refuses a top-level reasoning setting (its param, or a message that opens
-  with the setting as subject; a mention later in the message never counts)
-  is repeated once with OpenAI low or without
+  accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no
+  endpoints ... requested parameters") to a request that carried a reasoning
+  field, except a refusal of the provider's own web search, without reading
+  the error text as in Smart (so an unrelated 400 is sent once more and fails
+  the same way: unbilled, no tool runs, never a second time), is repeated once with OpenAI low or without
   the fields, and a model whose repeat is answered keeps that until relaunch
   (on OpenRouter per pinned endpoint or Auto); apart from this and the web
   search fallback below, no model request is retried. WHY:

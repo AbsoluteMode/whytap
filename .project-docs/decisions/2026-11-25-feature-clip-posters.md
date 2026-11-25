@@ -5,6 +5,7 @@ title: A feature screen's clip card shows a frame of the clip with a play mark
 summary: The "Watch how … works" card shows a 16:9 frame read from the bundled clip at a chosen moment where the feature's result is on screen, with a play mark over it, instead of a grey tile. Read once per session on this Mac; a clip not made yet keeps the quiet tile.
 status: confirmed
 tags: [settings, features, video]
+canonical_for: [feature-clip-poster]
 verified_at: 2026-11-25
 sources:
   - type: user-confirmed

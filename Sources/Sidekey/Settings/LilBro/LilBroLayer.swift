@@ -119,11 +119,14 @@ struct LilBroMascot: View {
                     LilBroSprite(pose: pose, elapsed: elapsed, dark: dark, facingRight: controller.facingRight)
                 }
                 .buttonStyle(LilBroPressStyle())
+                // Only while a click catches him (the balloon is closed): with
+                // it open he is not a control, so no press, focus or ring.
+                .disabled(!controller.canCatch)
                 // His own ring follows the sprite; the default one is square and offset.
                 .focusEffectDisabled()
                 .focused($focused)
                 .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MacSettingsTheme.accent, lineWidth: 2)
-                    .padding(-3).opacity(focused ? 1 : 0))
+                    .padding(-3).opacity(focused && controller.canCatch ? 1 : 0))
                 .onHover { controller.hovering = $0 }
                 .help("Lil Bro")
                 .accessibilityLabel("Lil Bro")

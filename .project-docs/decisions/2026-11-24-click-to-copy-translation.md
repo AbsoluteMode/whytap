@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/TranslationClickCopyTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-23-subtitle-pairs-close-speed.md]
+related: [2026-11-23-subtitle-pairs-close-speed.md, 2026-11-24-feature-screen-videos.md]
 ---
 
 # A click on the Translate result copies all of it

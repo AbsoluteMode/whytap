@@ -360,18 +360,37 @@ enum FeatureCatalog {
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",
                 line: "Ask for a quick task by text or voice: it finds, converts, copies and changes settings.",
                 video: .agent, hotkeys: [.agentText, .agentVoice, .agentClose],
-                activation: .userSwitch, place: .tab(.agentMode))
+                activation: .userSwitch, place: .screen,
+                about: "A helper for quick jobs on your Mac. Use its shortcut to type a request, or its voice shortcut to say it. "
+                    + "The answer appears in the island; links and files in it can be opened or pasted.",
+                clipCaption: "The shortcut, “Find my last invoice PDF”, then open it or paste its path.",
+                examples: [
+                    "Find my last invoice PDF in Downloads",
+                    "Convert the PNG on my desktop to JPG",
+                    "What’s on my screen? Sum it up",
+                    "Search the web for today’s euro to dollar rate",
+                    "Add “call the bank” to my To-do",
+                    "Switch Drop to Smart mode",
+                ],
+                examplesTitle: "Things to ask")
         case .meetings:
             return FeatureInfo(
                 feature: feature, name: "Meeting Notes", kind: "Notes from your calls",
                 line: "Takes notes on your calls: transcript, summary, tasks and decisions.",
-                video: .meetings, hotkeys: [.meetingRecord], activation: .userSwitch, place: .tab(.other))
+                video: .meetings, hotkeys: [.meetingRecord], activation: .userSwitch, place: .screen,
+                about: "When a call starts, Whytap offers to take notes. Say yes, or use the shortcut at any time: "
+                    + "it transcribes the call and writes a note with a summary, tasks and decisions. "
+                    + "The note and the transcript stay on this Mac.",
+                clipCaption: "A call starts, Take notes, and the note with its tasks appears.")
         case .googleSearch:
             return FeatureInfo(
                 feature: feature, name: "Google search", kind: "Search from anywhere",
                 line: "Type or say a query from anywhere; it opens in Google.",
                 video: .googleSearch, hotkeys: [.googleText, .googleVoice],
-                activation: .userSwitch, place: .tab(.other))
+                activation: .userSwitch, place: .screen,
+                about: "A search box one shortcut away, in any app. Type the query, or use the voice shortcut and say it. "
+                    + "The results open in Google in your browser.",
+                clipCaption: "The voice shortcut, “weather in Lisbon tomorrow”, and Google opens.")
         case .translateSubtitles:
             return FeatureInfo(
                 feature: feature, name: "Translate & Subtitles", kind: "Island tools",

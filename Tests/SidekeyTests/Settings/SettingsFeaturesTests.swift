@@ -86,13 +86,6 @@ final class SettingsFeaturesTests: XCTestCase {
 
     func testARowWithoutItsOwnScreenOpensItsPresentPlace() {
         let selection = SettingsWindowSelection()
-        selection.open(.agent)
-        XCTAssertEqual(selection.selectedTab, .other)
-        XCTAssertEqual(selection.highlightedTarget, .tab(.agentMode), "The Agent group is marked for a moment")
-
-        selection.open(.meetings)
-        XCTAssertEqual(selection.selectedTab, .other)
-
         selection.open(.translateSubtitles)
         XCTAssertEqual(selection.selectedTab, .toolbox)
         XCTAssertEqual(selection.focusedTool, .translate)

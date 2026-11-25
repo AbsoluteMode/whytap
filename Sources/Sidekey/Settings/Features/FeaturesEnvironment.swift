@@ -22,9 +22,15 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
+    /// The switches of the features that have one. The Agent's connects the
+    /// native Agent and returns why it did not turn on.
+    var setAgent: @MainActor (Bool) async -> String?
+    var setMeetings: (Bool) -> Void
+    var setGoogle: (Bool) -> Void
+    /// "Allow file edits and commands".
+    var agentSettings: AgentSettingsStore
     /// Hover, Notify and Monitor: the island's tool layout, the Notify
-    /// sources and their sounds, Monitor's dashboards (read, never polled
-    /// here), where agents put their files, and the clipboard a prompt is
+    /// sources and their sounds, Monitor's dashboard files (read locally), where agents put their files, and the clipboard a prompt is
     /// copied to. Tests pass temporary ones; nothing touches the user's own.
     // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
     var hoverStore: HoverLayoutStore
@@ -45,6 +51,10 @@ struct FeaturesEnvironment {
          agentOn: @escaping () -> Bool = { false },
          meetingsOn: @escaping () -> Bool = { false },
          googleOn: @escaping () -> Bool = { false },
+         setAgent: @escaping @MainActor (Bool) async -> String? = { _ in nil },
+         setMeetings: @escaping (Bool) -> Void = { _ in },
+         setGoogle: @escaping (Bool) -> Void = { _ in },
+         agentSettings: AgentSettingsStore? = nil,
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil,
@@ -68,6 +78,10 @@ struct FeaturesEnvironment {
         self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
         self.autoStop = autoStop ?? .shared
         self.openHoverPanel = openHoverPanel
+        self.setAgent = setAgent
+        self.setMeetings = setMeetings
+        self.setGoogle = setGoogle
+        self.agentSettings = agentSettings ?? .shared
         self.hoverStore = hoverStore ?? .shared
         self.notifySupervisor = notifySupervisor ?? .shared
         self.meetingNotifications = meetingNotifications ?? .shared

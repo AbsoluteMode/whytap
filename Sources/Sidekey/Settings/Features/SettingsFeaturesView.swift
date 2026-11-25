@@ -85,6 +85,17 @@ struct FeatureScreens: View {
 
     var body: some View {
         switch feature {
+        case .agent:
+            SwitchFeatureScreen(feature: .agent, context: context) {
+                AgentFeatureSettings(settings: context.environment.agentSettings)
+            }
+        case .meetings:
+            SwitchFeatureScreen(feature: .meetings, context: context) {
+                MeetingsFeatureSettings(notifications: context.environment.meetingNotifications,
+                                        openNotes: { context.selection.select(.notes) })
+            }
+        case .googleSearch:
+            SwitchFeatureScreen(feature: .googleSearch, context: context) { EmptyView() }
         case .hover:
             HoverFeatureView(selection: context.selection, environment: context.environment)
         case .notify:

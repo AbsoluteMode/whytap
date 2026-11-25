@@ -107,24 +107,27 @@ struct AgentOtherSection: View {
 
     private func setAgent(_ on: Bool) {
         problem = nil
+        if !on { agentEnabled = false }
+        Task {
+            problem = await Self.turn(on, viewModel: viewModel, settings: settings, store: store,
+                                      onAgentToggle: { agentEnabled = $0; onAgentToggle($0) })
+        }
+    }
+
+    /// Turns the Agent on (connects the native Agent; needs a chosen model)
+    /// or off. Returns why it did not turn on. Shared by Other and the
+    /// Agent's screen in Features.
+    static func turn(_ on: Bool, viewModel: AgentModeViewModel, settings: AgentSettingsStore,
+                     store: AgentProviderStore, onAgentToggle: (Bool) -> Void) async -> Problem? {
         guard on else {
-            agentEnabled = false
             onAgentToggle(false)
             viewModel.disconnect()
-            return
+            return nil
         }
-        guard settings.selectedOpenCodeModel != nil else {
-            problem = .noModel
-            return
-        }
-        Task {
-            if store.activeProvider != .native { await viewModel.connect(.native) }
-            guard store.activeProvider == .native else {
-                problem = .connectFailed
-                return
-            }
-            agentEnabled = true
-            onAgentToggle(true)
-        }
+        guard settings.selectedOpenCodeModel != nil else { return .noModel }
+        if store.activeProvider != .native { await viewModel.connect(.native) }
+        guard store.activeProvider == .native else { return .connectFailed }
+        onAgentToggle(true)
+        return nil
     }
 }

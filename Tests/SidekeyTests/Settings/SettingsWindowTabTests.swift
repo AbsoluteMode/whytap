@@ -38,19 +38,22 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertFalse(SettingsWindowTab.agentMode.isAvailable)
     }
 
-    /// The Agents tab moved into Other; its link and setup prompt still work.
+    /// The Agents tab became the Agent's screen in Features; its link and
+    /// setup prompt open that screen.
     @MainActor
-    func test_agents_tab_opens_other() {
-        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .other)
+    func test_agents_tab_opens_the_agent_screen() {
+        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .features)
         for tab in SettingsWindowTab.availableCases { XCTAssertEqual(tab.resolved, tab) }
         let selection = SettingsWindowSelection(selectedTab: .agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
         selection.select(.hotkeys)
         selection.select(.agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
+        selection.select(.hotkeys)
         selection.setHighlight(.tab(.agentMode))
-        XCTAssertEqual(selection.selectedTab, .other)
-        XCTAssertEqual(selection.highlightedTarget, .tab(.agentMode))
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
     }
 
     func test_no_removed_settings_tabs() {

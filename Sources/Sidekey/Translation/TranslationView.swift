@@ -365,8 +365,12 @@ struct TranslationView: View {
         return hasRows ? .fixed(stoppedCaptionHeight) : .hidden
     }
 
+    /// "Open audio permissions" only when the silence may be macOS
+    /// withholding system audio, never while a granted Mac is just quiet.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
     private var waitingWithoutAudio: Bool {
-        subtitles.phase == .listening && !subtitles.hasAudio && subtitles.lines.isEmpty && subtitles.live.isEmpty
+        subtitles.phase == .listening && subtitles.silenceMayMeanNoAccess
+            && subtitles.lines.isEmpty && subtitles.live.isEmpty
     }
 
     /// Pairs when there are phrases, otherwise one status line. In the

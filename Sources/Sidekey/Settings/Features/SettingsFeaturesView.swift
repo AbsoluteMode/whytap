@@ -65,6 +65,10 @@ struct SettingsFeaturesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyDropModeChanged)) { _ in
             externalChange += 1
         }
+        // The first sound a capture hears turns System audio into Allowed.
+        .onReceive(NotificationCenter.default.publisher(for: SystemAudioAccess.didChange)) { _ in
+            externalChange += 1
+        }
         // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
         .onReceive(environment.snapshotCountChanges) { _ in externalChange += 1 }
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in

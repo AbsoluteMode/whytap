@@ -62,6 +62,16 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   final; slices are only hashed after it passed (a Rosetta process runs the
   x86_64 slice). Without a baseline nothing is a replacement. An ad-hoc helper's
   requirement is its own cdhash, so it never follows another build.
+- **The same build counts when this image lost its file.** A promotion can
+  ship a byte-identical helper (1760 -> 1761, both cdhash `68e6d629…`). The
+  bundle swap moves the running file away and deletes it, so the app's dynamic
+  validity check (audit token, then the code against its file) denies the old
+  process although the cdhash matches. A file with the running cdhash is
+  therefore a replacement exactly when this process's own image is no longer
+  intact: `proc_pidpath` fails or `SecCodeCheckValidity` of itself fails. An
+  intact image with the same cdhash is never re-executed, whatever the app
+  answers, so this adds no loop. The signer requirement and strict whole-file
+  validation stay the same.
 - **Trigger.** A `.denied(.untrustedHelper)` answer requests a handover only
   when such a replacement is on disk and the loop budget allows it (at most
   three relaunches per process within 120 seconds; the history survives exec).
@@ -150,7 +160,7 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
 
 ## What was tested
 
-- `HelperBuildHandoverTests` (26): an open client keeps working after the
+- `HelperBuildHandoverTests` (27): an open client keeps working after the
   replacement, each call answered once by the new build and no second
   handshake or probe; a partial line read before the handover survives it;
   Whytap not running answers `unavailable` without relaunch; a file that does
@@ -172,7 +182,7 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   refuses carried requests; unterminated frames are bounded; the resume file
   is read only from an inherited regular file; without a baseline nothing is a
   replacement.
-- `scripts/check-helper-follows-build.py` (live, real `execve`, 25 checks): a
+- `scripts/check-helper-follows-build.py` (live, real `execve`, 29 checks): a
   throwaway `Selftest.app`, a throwaway keychain (never in the search list)
   with two self-signed code-signing certificates, debug helpers that differ by
   LC_UUID, and a fake broker that trusts a peer only when the kernel's running
@@ -198,6 +208,15 @@ is answered `.denied(.untrustedHelper)` before the app reads a byte of it.
   unfinished next request. Found while fixing: deleting the private copy
   breaks the app's `proc_pidpath` lookup of the helper, so copies live as long
   as their process.
+- Installed 1760 -> 1761 (2026-11-25, builder): helper PID 33799 answered on
+  1760 and got `unavailable` on 1761; both helpers had the same cdhash. The
+  first revision treated an equal cdhash as "no replacement". The builder
+  reproduced it by moving a disposable helper away, copying the identical file
+  back and deleting the moved one. Fixed as above; the live check now models
+  the app's dynamic validity check (the peer's executable file must exist and
+  match its code) and covers that swap (the same process follows from its
+  private copy, an intact image denied anyway is not re-executed). Its folder
+  sweep also keeps the folder of its own executable.
 - Not tested: the installed `/Applications/Whytap.app` (feature sessions do not
   install or launch it) and a Rosetta helper.
 

@@ -53,6 +53,7 @@ enum FeatureVideo: String, CaseIterable {
         case .dropFast: return 8
         case .screenshot: return 10
         case .translate: return 8
+        case .subtitles: return 14
         }
     }
 

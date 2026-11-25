@@ -76,7 +76,7 @@ struct IslandHoverPointerTracking {
     mutating func discardSequence() { captured = nil; consumesSequence = false }
 }
 
-/// A tool lifted by a long press in the island's tool grid. The grid's cells
+/// A tool lifted by pressing and dragging it in the island's tool grid. The grid's cells
 /// stay where they were when the tool was lifted; only which tool sits in
 /// which cell changes. The pointer over a cell puts the lifted tool in that
 /// cell, so a tile sliding under the pointer never sends it back.
@@ -141,23 +141,25 @@ final class IslandHoverReorderMotion: ObservableObject {
 final class IslandHoverHitBridge: ObservableObject {
     /// The lifted tile's pointer travel; observed only by the floating tile.
     let motion = IslandHoverReorderMotion()
-    private var lastPointer: CGPoint?
+    /// Where the button went down; the lifted tile keeps the same offset from
+    /// the pointer it had there.
+    private var pressPoint: CGPoint?
     private var liftPoint: CGPoint?
     @Published private(set) var pressedID: IslandHoverHitTargetID?
-    /// The tool held up by a long press, while it is being moved.
+    /// The tool lifted by a press and drag, while it is being moved.
     @Published private(set) var reorderingTool: HoverTool?
     var isReordering: Bool { reorderingTool != nil }
-    /// The layout the island shows. A long press on a tile moves tools here,
+    /// The layout the island shows. Dragging a tile moves tools here,
     /// the same store Settings -> Features -> Hover shows.
     weak var layoutStore: HoverLayoutStore?
-    /// How long a tile is held before it lifts (a shorter press is a click).
-    var reorderHoldDelay: Duration = .milliseconds(350)
+    /// How far the pointer moves with the button down before a tile lifts.
+    /// Less is a click; this much says the person wants to drag (REV 3).
+    static let dragThreshold: CGFloat = 4
     private var reorder: IslandHoverReorder?
     /// Watches the layout while a tool is lifted: a change the drag did not
     /// make (Settings Sync, Settings, the MCP tool) ends the drag as it is.
     private var layoutWatch: AnyCancellable?
     private var writingLayout = false
-    private var holdTask: Task<Void, Never>?
     private weak var pressWindow: NSWindow?
     private var tracking = IslandHoverPointerTracking()
     private var targets: [UUID: WeakTarget] = [:]
@@ -182,8 +184,6 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func cancelPress() {
-        holdTask?.cancel()
-        holdTask = nil
         tracking.cancel()
         pressedID = nil
     }
@@ -192,22 +192,25 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func discardSequence() {
-        holdTask?.cancel()
-        holdTask = nil
         tracking.discardSequence()
         pressedID = nil
         finishReorder()
     }
 
-    // MARK: - Long-press reorder
+    // MARK: - Press-and-drag reorder
 
-    /// Lifts the tile still held since mouse-down. Called by the hold timer;
-    /// returns false when the press was released, left its tile or is not a
-    /// tool that can move. From here on the press never activates the tool.
+    /// The pressed tile moved far enough to be dragged rather than clicked.
+    private func startsDrag(at point: CGPoint) -> Bool {
+        guard let pressPoint, tracking.captured?.id.surface == .tile else { return false }
+        return hypot(point.x - pressPoint.x, point.y - pressPoint.y) >= Self.dragThreshold
+    }
+
+    /// Lifts the tile pressed since mouse-down, once the pointer moved
+    /// `dragThreshold`; returns false when the press was released, left its
+    /// tile or is not a tool that can move. From here on the press never
+    /// activates the tool.
     @discardableResult
     func liftPressedTool() -> Bool {
-        holdTask?.cancel()
-        holdTask = nil
         guard reorder == nil, let captured = tracking.captured, captured.id.surface == .tile,
               let store = layoutStore, IslandHoverReorder.canLift(captured.id.tool, slots: store.slots),
               let tool = captured.id.tool, let window = pressWindow else { return false }
@@ -217,7 +220,7 @@ final class IslandHoverHitBridge: ObservableObject {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
         reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
-        liftPoint = lastPointer
+        liftPoint = pressPoint
         motion.reset()
         layoutWatch = store.$slots.dropFirst().sink { [weak self] _ in
             MainActor.assumeIsolated {
@@ -273,20 +276,6 @@ final class IslandHoverHitBridge: ObservableObject {
     static var reorderAnimation: Animation? {
         NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
             ? nil : .spring(response: 0.32, dampingFraction: 0.86)
-    }
-
-    private func scheduleLift() {
-        holdTask?.cancel()
-        holdTask = nil
-        guard tracking.captured?.id.surface == .tile,
-              IslandHoverReorder.canLift(tracking.captured?.id.tool, slots: layoutStore?.slots ?? []) else { return }
-        let owner = tracking.captured?.owner
-        let delay = reorderHoldDelay
-        holdTask = Task { @MainActor [weak self] in
-            try? await Task.sleep(for: delay)
-            guard !Task.isCancelled, let self, self.tracking.captured?.owner == owner else { return }
-            self.liftPressedTool()
-        }
     }
 
     func setSurface(_ surface: IslandHoverHitTargetID.Surface) {
@@ -376,13 +365,12 @@ final class IslandHoverHitBridge: ObservableObject {
         let consumed = tracking.begin(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
         pressWindow = window
-        lastPointer = point
-        scheduleLift()
+        pressPoint = point
         return consumed
     }
 
     func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
-        lastPointer = point
+        if reorder == nil, startsDrag(at: point) { liftPressedTool() }
         if reorder != nil {
             moveLiftedTool(to: point)
             return
@@ -390,12 +378,9 @@ final class IslandHoverHitBridge: ObservableObject {
         let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
         tracking.move(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
-        if tracking.captured == nil { holdTask?.cancel(); holdTask = nil }
     }
 
     func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
-        holdTask?.cancel()
-        holdTask = nil
         if let reorder {
             if reorder.cancelsRelease(at: point) {
                 cancelReorder()

@@ -1483,8 +1483,8 @@ CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
-Island tool reorder: in the hover drawer's tool grid, a tile held for
-IslandHoverHitBridge.reorderHoldDelay (0.35 s) without leaving it lifts
+Island tool reorder: in the hover drawer's tool grid, a tile pressed and moved
+IslandHoverHitBridge.dragThreshold (4 pt) lifts at once, with no hold delay
 (liftPressedTool; Settings and coming-soon tools never lift). The bridge
 measures the grid's cells once (IslandHoverReorder.cells); while the button is
 held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,

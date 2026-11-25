@@ -5,11 +5,11 @@ import XCTest
 @testable import Sidekey
 
 /// Reordering the island's tools in the hover drawer, as a person does it:
-/// a click still opens a tool; holding a tile lifts it, moving the pointer
-/// over another tile puts it there at once, letting go keeps the order the
+/// a click still opens a tool; pressing a tile and moving it a few points
+/// lifts it at once, moving the pointer over another tile puts it there, letting go keeps the order the
 /// island shows (and Settings -> Features -> Hover shows the same order);
-/// Letting go far outside the tools puts everything back. Events go through the same window-level
-/// dispatch as in the app, against an offscreen window that is never shown.
+/// letting go far outside the tools puts everything back. Events go through
+/// the same window-level dispatch as in the app, against an offscreen window that is never shown.
 @MainActor
 final class IslandHoverReorderTests: XCTestCase {
     private let tools: [HoverTool] = [.inputLang, .notes, .monitor, .settings]
@@ -78,37 +78,60 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertEqual(store.slots, tools)
     }
 
-    func testAPressReleasedBeforeTheHoldDelayNeverLifts() async throws {
-        bridge.reorderHoldDelay = .milliseconds(40)
-        XCTAssertTrue(down(0))
-        up(at: point(0))
-        try await Task.sleep(for: .milliseconds(120))
-        XCTAssertFalse(bridge.isReordering, "The hold timer ends with the press")
-        XCTAssertEqual(activated, [.inputLang])
-    }
-
-    func testMovingOffTheTileBeforeTheHoldCancelsTheClickAndTheLift() {
-        XCTAssertTrue(down(0))
-        drag(to: point(2))
-        XCTAssertFalse(bridge.liftPressedTool())
-        up(at: point(2))
-        XCTAssertEqual(activated, [])
+    func testASmallJitterIsStillAClick() {
+        XCTAssertTrue(down(1))
+        drag(to: CGPoint(x: point(1).x + 2, y: point(1).y + 1))
+        XCTAssertFalse(bridge.isReordering, "Under the drag threshold the press stays a click")
+        up(at: CGPoint(x: point(1).x + 2, y: point(1).y + 1))
+        XCTAssertEqual(activated, [.notes])
         XCTAssertEqual(store.slots, tools)
     }
 
-    // MARK: - Hold, drag, let go
-
-    func testHoldingATileLiftsItAfterTheDelay() async throws {
-        bridge.reorderHoldDelay = .milliseconds(40)
+    /// REV 3: no waiting. Pressing and moving is the intent to drag.
+    func testMovingPastTheThresholdLiftsAtOnceWithoutWaiting() {
         XCTAssertTrue(down(0))
         XCTAssertEqual(bridge.pressedID?.tool, .inputLang)
-        try await Task.sleep(for: .milliseconds(200))
-        XCTAssertEqual(bridge.reorderingTool, .inputLang)
+        let nudged = CGPoint(x: point(0).x + IslandHoverHitBridge.dragThreshold, y: point(0).y)
+        drag(to: nudged)
+        XCTAssertEqual(bridge.reorderingTool, .inputLang, "Lifted on the first move past the threshold")
         XCTAssertNil(bridge.pressedID, "A lifted tile is no longer a pressed button")
         XCTAssertTrue(bridge.consumesPointerSequence, "The window keeps the drag and the mouse-up")
-        up(at: point(0))
-        XCTAssertEqual(activated, [], "Letting go of a lifted tool never opens it")
+        XCTAssertEqual(bridge.motion.translation, CGSize(width: IslandHoverHitBridge.dragThreshold, height: 0),
+                       "The tile keeps its offset from the pointer where the button went down")
+        up(at: nudged)
+        XCTAssertEqual(activated, [], "Letting go of a dragged tool never opens it")
+        XCTAssertEqual(store.slots, tools, "Dropped back in its own cell")
     }
+
+    func testAFastFlickStraightOntoAnotherTileLiftsAndMovesIt() {
+        XCTAssertTrue(down(0))
+        drag(to: point(2))
+        XCTAssertEqual(bridge.reorderingTool, .inputLang, "Leaving the tile in one move still drags it")
+        XCTAssertEqual(store.slots, [.notes, .monitor, .inputLang, .settings])
+        up(at: point(2))
+        XCTAssertEqual(activated, [])
+        XCTAssertEqual(restored(), [.notes, .monitor, .inputLang, .settings])
+    }
+
+    func testHoldingStillNeverLiftsAndReleasingOpensTheTool() {
+        XCTAssertTrue(down(0))
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        XCTAssertFalse(bridge.isReordering, "There is no timer: only movement starts a drag")
+        up(at: point(0))
+        XCTAssertEqual(activated, [.inputLang])
+    }
+
+    func testSettingsDoesNotDragAndAPressThatLeavesItOpensNothing() {
+        XCTAssertTrue(down(3))
+        drag(to: CGPoint(x: point(3).x + 10, y: point(3).y))
+        XCTAssertFalse(bridge.isReordering)
+        drag(to: point(1))
+        up(at: point(1))
+        XCTAssertEqual(activated, [], "Leaving the pressed tile cancels its click, as before")
+        XCTAssertEqual(store.slots, tools)
+    }
+
+    // MARK: - Drag, let go
 
     func testDraggingALiftedToolMovesItLiveAndLettingGoKeepsTheOrder() {
         XCTAssertTrue(down(0))

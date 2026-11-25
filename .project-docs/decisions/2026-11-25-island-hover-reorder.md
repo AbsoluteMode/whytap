@@ -2,7 +2,7 @@
 id: island-hover-reorder-2026-11-25
 type: decision
 title: Tools are reordered by holding a tile in the island's hover; Settings keeps only switches
-summary: In the island's hover drawer a tool tile held for 0.35 s lifts, the other tiles make way as it is dragged, and letting go keeps the order in HoverLayoutStore, the same layout Settings -> Features -> Hover lists. A short press is still a click; Settings never lifts; the lifted tool holds the drawer open; letting go far outside the tools restores the earlier order, and a layout change from elsewhere (Settings Sync) ends the drag without undoing it. Drag-and-drop is removed from the Settings Hover list, which keeps the switches and Move Up/Down for keyboard and VoiceOver.
+summary: In the island's hover drawer a tool tile pressed and moved 4 points lifts at once (no waiting), the other tiles make way as it is dragged, and letting go keeps the order in HoverLayoutStore, the same layout Settings -> Features -> Hover lists. A short press is still a click; Settings never lifts; the lifted tool holds the drawer open; letting go far outside the tools restores the earlier order, and a layout change from elsewhere (Settings Sync) ends the drag without undoing it. Drag-and-drop is removed from the Settings Hover list, which keeps the switches and Move Up/Down for keyboard and VoiceOver.
 status: confirmed
 tags: [island, hover, toolbox, reorder, settings, features]
 canonical_for: [island-hover-reorder]
@@ -10,6 +10,9 @@ verified_at: 2026-11-25
 sources:
   - type: user-confirmed
     reference: On 2026-11-25, on build 1757, the maintainer said the reorder works but the animations are too poor, not smooth (translated; ORCH-TASK 103 REV 2).
+    confirmed_at: 2026-11-25
+  - type: user-confirmed
+    reference: The same day he added that he would not wait for anything; if the user pressed the button and started to drag, that already says they want to drag (translated; ORCH-TASK 103 REV 3).
     confirmed_at: 2026-11-25
   - type: user-confirmed
     reference: On 2026-11-24 the maintainer said he would improve the Hover itself so that a tool can be held and swapped with another in the hover, leaving on and off to the toggles (translated). On 2026-11-25, after the Settings list shipped, he said it did not drag for him, asked why Settings, and repeated that the tools should be held and dragged in the hover, since they are now switched on with toggles (translated; ORCH-TASK 103 REV 1).
@@ -42,12 +45,13 @@ to live in that same dispatch.
 
 ## Decision
 
-- **Hold to lift.** A mouse-down on a tile starts a 0.35 s timer
-  (`reorderHoldDelay`). If the button is still down and the pointer has not
-  left the tile, the tool lifts (`liftPressedTool`): the press stops being a
-  button, the tile grows (1.14x) with a shadow, the others dim slightly and a
-  light haptic is played on trackpads. A shorter press stays an ordinary click;
-  leaving the tile before the timer cancels both, as before.
+- **Press and move to lift (REV 3).** There is no waiting: the first
+  pointer move of `IslandHoverHitBridge.dragThreshold` (4 points) with the
+  button down on a tile lifts it (`liftPressedTool`), even when that move
+  already leaves the tile. The press stops being a button, the tile rises and a
+  light haptic is played on trackpads. A press that moves less, or holds still
+  for any time, stays an ordinary click. (REV 1 lifted after a 0.35 s hold;
+  Maxim found the wait unnecessary.)
 - **Drag over cells.** At the lift the bridge measures every tile's frame once
   by slot (`IslandHoverReorder.cells`). While the button is held, the pointer
   over a cell calls `HoverLayoutStore.placeTool` for that slot, so the tool
@@ -111,7 +115,9 @@ to live in that same dispatch.
 - The window-level dispatch is the only layer that reliably receives the
   island's mouse events; a SwiftUI `onDrag`/`DragGesture` would miss the first
   mouse in this inactive overlay.
-- A hold delay keeps every existing click unchanged.
+- Pressing and moving already says the person wants to drag (Maxim, REV 3);
+  a 4-point threshold, like macOS's own drag threshold, keeps a click with a
+  little hand jitter a click.
 - Settings' drag in 1753 most likely failed because its drag type was
   declared with `UTType(exportedAs:)` without a matching
   `UTExportedTypeDeclarations` entry in the app's Info.plist, so the drop
@@ -147,7 +153,8 @@ and the glass container; source contracts for the floating layer and the
 pointer-following without animation.
 
 Not checked in a running app (feature sessions do not launch it): the feel of
-the 0.35 s hold and of the springs, measured frame rate during a real drag.
+the 4-point threshold and of the springs, measured frame rate during a real
+drag.
 
 ## Rejected
 
@@ -161,6 +168,8 @@ the 0.35 s hold and of the springs, measured frame rate during a real drag.
   the person's app (closing its dialog, say); an active tap that swallows it
   would be a second input filter for a rare need. Release outside is the
   pointer's own cancel.
+- A hold delay before a drag (REV 1, 0.35 s): an extra wait for an intent the
+  movement already shows.
 - Animating the grid tile itself from cell to cell (1757): it can only jump
   between cells, so it never follows the hand.
 - Saving every intermediate order: defaults observers and Settings Sync see a
@@ -170,4 +179,4 @@ the 0.35 s hold and of the springs, measured frame rate during a real drag.
 - Auto-scrolling a long grid while dragging: the drawer shows up to its
   scroll height; a tool beyond it is moved with Move actions in Settings.
 
-2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth.
+2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth; REV 3 removed the hold delay.

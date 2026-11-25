@@ -60,6 +60,8 @@ click.
   block lightens on hover and further while a click is pressed. The user asked
   for the block on 2026-11-25 after seeing only the line light up. The focus
   ring also outlines the block; Return copies the whole focused result.
+- A long translation's scroller sits inside the block; a click on it scrolls
+  and never copies (`SubtitleOverlayHitTargets.isOnScroller`, queue review 549).
 - Subtitles: no click-to-copy; their context menu is unchanged.
 
 ## Why
@@ -76,7 +78,9 @@ click.
 - `TranslationClickCopyTests`: real mouse events on the real panel off screen,
   copies to a private pasteboard. A click copies all and the badge leaves after
   a second; a click in the block's empty corner, far from a short answer,
-  copies too and the target spans the block; a drag, a double click and a Control-click copy nothing and pass
+  copies too and the target spans the block; a click on a long answer's legacy
+  scroller (knob and track) copies nothing while the block beside it copies; a
+  drag, a double click and a Control-click copy nothing and pass
   the events on; nothing is copyable while translating; the subtitle overlay
   has no copy target and a click on it copies nothing.
 - Offscreen render of the badge and of the pressed block.

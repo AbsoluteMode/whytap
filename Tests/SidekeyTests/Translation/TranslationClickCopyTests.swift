@@ -143,6 +143,51 @@ final class TranslationClickCopyTests: XCTestCase {
         XCTAssertTrue(controller.copier.copied)
     }
 
+    /// A long answer scrolls, and its scroller sits inside the copy block: a
+    /// click on the scroller scrolls and copies nothing, while the block
+    /// beside it still copies (queue review 549).
+    func testTheScrollerOfALongTranslationDoesNotCopy() async throws {
+        let text = TextTranslationModel(makeService: { FixtureTranslator() })
+        let controller = try controller(text: text)
+        defer { controller.dismiss() }
+        showOffScreen(controller, .text, size: NSSize(width: 560, height: 200))
+        let panel = controller.window
+        text.input = Array(repeating: "Слайды пришлю вечером, а завтра обсудим детали.", count: 12)
+            .joined(separator: " ")
+        await text.translate()?.value
+        settle(0.3)
+        func views<T: NSView>(_ type: T.Type, in view: NSView) -> [T] {
+            view.subviews.flatMap { ($0 as? T).map { [$0] } ?? views(type, in: $0) }
+        }
+        let content = try XCTUnwrap(panel.contentView)
+        // The legacy (always shown) scroller, as with "Show scroll bars: Always".
+        for scrollView in views(NSScrollView.self, in: content) {
+            scrollView.scrollerStyle = .legacy
+            scrollView.hasVerticalScroller = true
+        }
+        content.layoutSubtreeIfNeeded()
+        settle(0.3)
+        let block = try XCTUnwrap(controller.hitTargets.frame(of: .copy, in: panel))
+        let scroller = try XCTUnwrap(views(NSScroller.self, in: content).first {
+            $0.isEnabled && !$0.isHiddenOrHasHiddenAncestor && $0.frame.height > $0.frame.width
+                && block.intersects($0.convert($0.bounds, to: nil))
+        }, "the long answer has a vertical scroller inside the block")
+        let knob = scroller.convert(scroller.rect(for: .knob), to: nil)
+        let onKnob = NSPoint(x: knob.midX, y: knob.midY)
+        XCTAssertTrue(block.contains(onKnob))
+        XCTAssertTrue(SubtitleOverlayHitTargets.isOnScroller(onKnob, in: panel))
+
+        try click(panel, at: onKnob)
+        XCTAssertNil(copied, "a click on the scroller scrolls, it does not copy")
+        XCTAssertNil(controller.hitTargets.pressed)
+        let track = scroller.convert(scroller.bounds, to: nil)
+        try click(panel, at: NSPoint(x: track.midX, y: track.minY + 4))
+        XCTAssertNil(copied)
+
+        try click(panel, at: NSPoint(x: block.minX + 40, y: block.midY))
+        XCTAssertEqual(copied, text.result, "the block beside the scroller still copies")
+    }
+
     /// A drag over the answer is a selection: the panel passes every event
     /// on to the text and copies nothing.
     func testDraggingOverTheTranslationSelectsInsteadOfCopying() async throws {

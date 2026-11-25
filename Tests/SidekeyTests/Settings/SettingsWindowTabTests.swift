@@ -38,19 +38,22 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertFalse(SettingsWindowTab.agentMode.isAvailable)
     }
 
-    /// The Agents tab moved into Other; its link and setup prompt still work.
+    /// The Agents tab became the Agent's screen in Features; its link and
+    /// setup prompt open that screen.
     @MainActor
-    func test_agents_tab_opens_other() {
-        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .other)
+    func test_agents_tab_opens_the_agent_screen() {
+        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .features)
         for tab in SettingsWindowTab.availableCases { XCTAssertEqual(tab.resolved, tab) }
         let selection = SettingsWindowSelection(selectedTab: .agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
         selection.select(.hotkeys)
         selection.select(.agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
+        selection.select(.hotkeys)
         selection.setHighlight(.tab(.agentMode))
-        XCTAssertEqual(selection.selectedTab, .other)
-        XCTAssertEqual(selection.highlightedTarget, .tab(.agentMode))
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
     }
 
     func test_no_removed_settings_tabs() {
@@ -61,7 +64,7 @@ final class SettingsWindowTabTests: XCTestCase {
     }
 
     func test_api_and_models_tab_metadata() {
-        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "API & Models")
+        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "Keys & models")
         XCTAssertEqual(SettingsWindowTab.apiAndModels.id, "apiAndModels")
         XCTAssertNil(SettingsWindowTab.apiAndModels.pdfResourceName)
         XCTAssertEqual(SettingsWindowTab.apiAndModels.fallbackSystemImageName, "cpu")
@@ -69,7 +72,7 @@ final class SettingsWindowTabTests: XCTestCase {
 
     func test_no_models_tab_left() {
         let titles = SettingsWindowTab.allCases.map { $0.title }
-        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by API & Models")
+        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by Keys & models")
     }
 
     func test_hotkeys_tab_metadata_uses_hover_icon() {
@@ -112,8 +115,12 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.last, .other)
     }
 
-    func test_other_tab_title_is_Other() {
-        XCTAssertEqual(SettingsWindowTab.other.title, "Other")
+    /// Other is gone as a name: what is left is General. The raw id stays
+    /// `other` so `whytap://settings/other` keeps working.
+    func test_other_tab_is_now_general_with_the_same_id() {
+        XCTAssertEqual(SettingsWindowTab.other.title, "General")
+        XCTAssertEqual(SettingsWindowTab.other.rawValue, "other")
+        XCTAssertFalse(SettingsWindowTab.availableCases.map(\.title).contains("Other"))
     }
 
     func test_other_tab_fallback_image_name() {

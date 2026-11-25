@@ -463,20 +463,40 @@ final class AgentController: ObservableObject {
         state = .idle
     }
 
-    private func bindHotkeyPreferencesIfSupported() {
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    // `@Published` emits before it stores, so the sink must not reread
+    // `preferences.configuration`: it would still hold the old value of the
+    // field that just changed (a Google gesture Hold → Tap stayed Hold in the
+    // monitor). The monitor is built from the six emitted values instead.
+    func bindHotkeyPreferencesIfSupported(_ preferences: HotkeyPreferences = .shared) {
         guard let configurableMonitor = gestureMonitor as? RightCmdGestureMonitor else {
             return
         }
         hotkeyPreferencesCancellable?.cancel()
-        configurableMonitor.setConfiguration(HotkeyPreferences.shared.configuration)
-        hotkeyPreferencesCancellable = Publishers.CombineLatest3(
-            HotkeyPreferences.shared.$agentTextShortcut,
-            HotkeyPreferences.shared.$agentVoiceShortcut,
-            HotkeyPreferences.shared.$agentVoiceGesture
+        configurableMonitor.setConfiguration(preferences.configuration)
+        // Google search's shortcuts register on the same monitor, so a
+        // Google-only change rebinds it too.
+        hotkeyPreferencesCancellable = Publishers.CombineLatest(
+            Publishers.CombineLatest3(
+                preferences.$agentTextShortcut,
+                preferences.$agentVoiceShortcut,
+                preferences.$agentVoiceGesture
+            ),
+            Publishers.CombineLatest3(
+                preferences.$googleSearchTextShortcut,
+                preferences.$googleSearchVoiceShortcut,
+                preferences.$googleSearchVoiceGesture
+            )
         )
             .dropFirst()
-            .sink { [weak configurableMonitor] _, _, _ in
-                configurableMonitor?.setConfiguration(HotkeyPreferences.shared.configuration)
+            .sink { [weak configurableMonitor, weak preferences] agent, google in
+                guard let configurableMonitor, let preferences else { return }
+                var configuration = preferences.configuration
+                (configuration.agentTextShortcut, configuration.agentVoiceShortcut,
+                 configuration.agentVoiceGesture) = agent
+                (configuration.googleSearchTextShortcut, configuration.googleSearchVoiceShortcut,
+                 configuration.googleSearchVoiceGesture) = google
+                configurableMonitor.setConfiguration(configuration)
             }
     }
 
@@ -1042,7 +1062,7 @@ final class AgentController: ObservableObject {
         responseStore.markErrorBlock(StateErrorBlock(
             title: "No agent connected",
             subtitle: "Connect in Settings",
-            message: "Turn on Agent in Settings → Other. Its model is set in API & Models.",
+            message: "Turn on Agent in Settings → Features → Agent. Its model is set there too.",
             code: "not_connected",
             retryable: false
         ))
@@ -1746,7 +1766,7 @@ final class AgentController: ObservableObject {
             return agentError.retryable
         }
         // Retrying cannot help until a provider and its key are set in
-        // Settings -> API & Models.
+        // Settings -> Keys & models.
         if error is BatchTranscriptionUnavailable {
             return false
         }

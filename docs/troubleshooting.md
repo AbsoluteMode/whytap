@@ -11,11 +11,11 @@ The most frequent problems, each with where to fix it:
   ([first launch](install.md#first-launch),
   [shortcut help](install.md#troubleshooting-and-removal)).
 - **Dictation opens Settings instead of recording:** that feature has no speech
-  model yet; pick one in **Settings → API & Models**, or download **On this
+  model yet; pick one in **Settings → Keys & models**, or download **On this
   Mac** ([first launch](install.md#first-launch)).
 - **“<Provider> refused the key” or “out of credit”:** the provider rejected
   the key or the account is empty; fix it with the provider, then save the key
-  again in **API & Models → API keys**
+  again in **Keys & models → API keys**
   ([key help](install.md#troubleshooting-and-removal)).
 - **“Install Whytap before opening it”:** drag Whytap to **Applications** and
   open that copy, not the one on the disk image

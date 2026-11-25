@@ -211,6 +211,24 @@ final class LilBroLocalGuideTests: XCTestCase {
                          "where is Post Event"] {
             XCTAssertEqual(destination(question), .tab(.permissions), question)
         }
+        // Asking to find or allow a setting is Permissions, whatever feature it is for.
+        let settings = ["Input Monitoring", "Accessibility", "Keyboard control", "Screen Recording",
+                        "Microphone", "System audio", "Post Event"]
+        let features = ["Drop", "Meeting Notes", "Screenshots", "the Agent", "Subtitles", "Case"]
+        for setting in settings {
+            for feature in features {
+                let question = "Where do I allow \(setting) for \(feature)?"
+                XCTAssertEqual(destination(question), .tab(.permissions), question)
+            }
+            XCTAssertEqual(destination("How do I grant \(setting) to Drop?"), .tab(.permissions), setting)
+            XCTAssertEqual(destination("where can I find \(setting)"), .tab(.permissions), setting)
+        }
+        XCTAssertEqual(destination("screen recording for screenshots"), .tab(.permissions))
+        XCTAssertEqual(destination("Where is Input Monitoring in case I need it?"), .tab(.permissions))
+        // "in case" is not the Case feature; the Case feature by name still is.
+        XCTAssertEqual(destination("in case dictation stops, what do I do?"), .feature(.drop))
+        XCTAssertEqual(destination("where do I keep keys in Case"), .feature(.caseVault))
+        XCTAssertNil(LilBroLocalGuide.firstFeature(in: "a showcase of tools"))
         // A setting named as context of a feature request is that feature.
         XCTAssertEqual(destination("How do I dictate with my microphone?"), .feature(.drop))
         XCTAssertEqual(destination("How do I translate system audio with Subtitles?"),

@@ -500,7 +500,7 @@ struct OnboardingQuestionList: View {
     /// Real questions the Ask agent answers (its eval pool,
     /// whytap-landing `ask/eval/pool.json`), short enough for one line.
     static let questions = [
-        "Which models should I pick in API & Models to start?",
+        "Which models should I pick in Keys & models first?",
         "Can I tap to start dictation and tap again to stop?",
         "Can Whytap turn Russian speech into English text?",
         "Can I teach Whytap custom words and names?",

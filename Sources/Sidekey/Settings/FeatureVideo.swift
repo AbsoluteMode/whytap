@@ -17,6 +17,7 @@ enum FeatureVideo: String, CaseIterable {
     case dropFast = "drop-fast"
     case screenshot
     case translate
+    case subtitles
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -34,6 +35,25 @@ enum FeatureVideo: String, CaseIterable {
         case .dropFast: return "Drop"
         case .screenshot: return "Shot"
         case .translate: return "Translate"
+        case .subtitles: return "Subtitles"
+        }
+    }
+
+    /// The moment shown as the clip's poster: the feature's result on screen,
+    /// not the dark first frame.
+    // WHY: .project-docs/decisions/2026-11-25-feature-clip-posters.md
+    var posterSeconds: Double {
+        switch self {
+        case .agent: return 10
+        case .meetings: return 10
+        case .googleSearch: return 6
+        case .dropAutoStop: return 6
+        case .screenshotProtection: return 6
+        case .autoHide: return 4
+        case .dropFast: return 8
+        case .screenshot: return 10
+        case .translate: return 8
+        case .subtitles: return 14
         }
     }
 
@@ -140,4 +160,44 @@ struct LoopingVideoView: NSViewRepresentable {
         coordinator.looper = nil
         nsView.player = nil
     }
+}
+
+/// A frame of a bundled clip shown on its card before it plays. Read once
+/// from the clip on this Mac and kept for the session; nothing is fetched.
+// WHY: .project-docs/decisions/2026-11-25-feature-clip-posters.md
+@MainActor
+enum FeatureVideoPoster {
+    private static var cache: [URL: NSImage] = [:]
+    /// A read in progress: a second card asking for the same clip waits for
+    /// it instead of decoding the clip again.
+    private static var loading: [URL: Task<Void, Never>] = [:]
+
+    static func cached(_ url: URL) -> NSImage? { cache[url] }
+
+    /// The frame at `video.posterSeconds`, at most 320 points wide.
+    static func load(_ video: FeatureVideo, url: URL) async -> NSImage? {
+        if let image = cache[url] { return image }
+        let request: Task<Void, Never>
+        if let pending = loading[url] {
+            request = pending
+        } else {
+            request = Task {
+                defer { loading[url] = nil }
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 320, height: 180)
+                let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+                generator.requestedTimeToleranceBefore = tolerance
+                generator.requestedTimeToleranceAfter = tolerance
+                let time = CMTime(seconds: video.posterSeconds, preferredTimescale: 600)
+                guard let (frame, _) = try? await generator.image(at: time) else { return }
+                cache[url] = NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+            }
+            loading[url] = request
+        }
+        await request.value
+        return cache[url]
+    }
+
+    static func clearForTesting() { cache.removeAll(); loading.removeAll() }
 }

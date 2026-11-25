@@ -6,7 +6,7 @@ summary: In the Translate palette (and its Toolbox pane) a click on the result c
 status: confirmed
 tags: [translation, subtitles, clipboard, overlay]
 canonical_for: [click-to-copy-translation]
-verified_at: 2026-11-24
+verified_at: 2026-11-25
 sources:
   - type: user-confirmed
     reference: On 2026-11-24 the user, reviewing the Translate feature clip, asked that a click on the translation copy it (relayed by the orchestrating session, task 106, with "Copied ✓" for about a second and partial mouse selection kept).
@@ -14,6 +14,9 @@ sources:
   - type: user-confirmed
     reference: The same day the user said subtitles must not copy the translation on click (relayed by the orchestrating session).
     confirmed_at: 2026-11-24
+  - type: user-confirmed
+    reference: On 2026-11-25 the user, looking at Whytap 1752 where only the line of text lit up, said the whole result block should light up instead (relayed by the orchestrating session, task 106 REV 1).
+    confirmed_at: 2026-11-25
   - type: repository
     reference: Sources/Sidekey/Translation/SubtitleOverlayHitTargets.swift
     confirmed_at: 2026-11-24
@@ -52,8 +55,13 @@ click.
   (`TranslationView.copiedShownFor`). VoiceOver hears "Copied", and the result
   has a "Copy translation" accessibility action. The context menu's Copy
   translation shows it too.
-- A populated result highlights on hover and while a click is pressed. It
-  has a keyboard focus ring and Return copies the whole focused result.
+- The target is the whole result block (edge to edge, down to the panel's
+  bottom), not the text's lines: a click anywhere in it copies, and the whole
+  block lightens on hover and further while a click is pressed. The user asked
+  for the block on 2026-11-25 after seeing only the line light up. The focus
+  ring also outlines the block; Return copies the whole focused result.
+- A long translation's scroller sits inside the block; a click on it scrolls
+  and never copies (`SubtitleOverlayHitTargets.isOnScroller`, queue review 549).
 - Subtitles: no click-to-copy; their context menu is unchanged.
 
 ## Why
@@ -69,10 +77,13 @@ click.
 
 - `TranslationClickCopyTests`: real mouse events on the real panel off screen,
   copies to a private pasteboard. A click copies all and the badge leaves after
-  a second; a drag, a double click and a Control-click copy nothing and pass
+  a second; a click in the block's empty corner, far from a short answer,
+  copies too and the target spans the block; a click on a long answer's legacy
+  scroller (knob and track) copies nothing while the block beside it copies; a
+  drag, a double click and a Control-click copy nothing and pass
   the events on; nothing is copyable while translating; the subtitle overlay
   has no copy target and a click on it copies nothing.
-- Offscreen render of the badge.
+- Offscreen render of the badge and of the pressed block.
 - Not tested with events: the Toolbox pane's local monitor (XCTest does not run
   the app's event queue).
 

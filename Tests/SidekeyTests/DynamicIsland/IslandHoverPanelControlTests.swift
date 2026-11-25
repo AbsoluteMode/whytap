@@ -190,16 +190,18 @@ final class IslandHoverPanelControlTests: XCTestCase {
                       "controls must iterate hoverStore.slots")
     }
 
-    func test_controls_keep_slot_identity_stable_when_tool_changes() throws {
+    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+    func test_controls_slide_on_reorder_without_a_replacement_tail() throws {
         let source = try Self.source("Sources/Sidekey/DynamicIsland/IslandView.swift")
+        let body = try XCTUnwrap(Self.varBody(named: "controls", in: source))
 
         XCTAssertTrue(
-            source.contains("ForEach(Array(hoverStore.slots.enumerated()), id: \\.offset)"),
-            "Hover row identity must stay tied to the slot index so replacing Case with another tool updates in place instead of animating a removal/insertion."
+            body.contains("ForEach(hoverStore.slots, id: \\.self)"),
+            "Tiles are identified by tool, so holding and dragging one slides the others instead of redrawing each cell."
         )
-        XCTAssertFalse(
-            source.contains("ForEach(hoverStore.slots, id: \\.self)"),
-            "Tool identity makes SwiftUI tear down one tile and insert another on replacement, causing a visible tail at the end of the animation."
+        XCTAssertTrue(
+            body.contains(".transition(.identity)"),
+            "Replacing a tool (Case with another) must not fade the old tile out as a visible tail after the animation."
         )
     }
 
@@ -264,7 +266,7 @@ final class IslandHoverPanelControlTests: XCTestCase {
             "IslandView must keep the controls builder."
         )
         XCTAssertTrue(
-            body.contains(".opacity(hoveredTool == tool ? 1 : 0)"),
+            body.contains(".opacity(hoveredTool == tool && !hoverHitBridge.isReordering ? 1 : 0)"),
             "Hover-slot hints must be visible only for the hovered tile, hidden via opacity so the layout slot stays reserved."
         )
         XCTAssertTrue(

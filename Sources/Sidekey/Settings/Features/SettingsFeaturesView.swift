@@ -65,8 +65,12 @@ struct SettingsFeaturesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyDropModeChanged)) { _ in
             externalChange += 1
         }
-        .onReceive(environment.notifySupervisor.$sources) { _ in externalChange += 1 }
-        .onReceive(environment.monitor.$dashboards) { _ in externalChange += 1 }
+        // The first sound a capture hears turns System audio into Allowed.
+        .onReceive(NotificationCenter.default.publisher(for: SystemAudioAccess.didChange)) { _ in
+            externalChange += 1
+        }
+        // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
+        .onReceive(environment.snapshotCountChanges) { _ in externalChange += 1 }
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in
             // The Agent counts as on only while its native provider is connected.
             DispatchQueue.main.async { externalChange += 1 }
@@ -85,14 +89,85 @@ struct FeatureScreens: View {
 
     var body: some View {
         switch feature {
+        case .agent:
+            SwitchFeatureScreen(feature: .agent, context: context) {
+                AgentFeatureSettings(settings: context.environment.agentSettings)
+            }
+        case .meetings:
+            SwitchFeatureScreen(feature: .meetings, context: context) {
+                MeetingsFeatureSettings(notifications: context.environment.meetingNotifications,
+                                        openNotes: { context.selection.select(.notes) })
+            }
+        case .googleSearch:
+            SwitchFeatureScreen(feature: .googleSearch, context: context) { EmptyView() }
         case .hover:
             HoverFeatureView(selection: context.selection, environment: context.environment)
         case .notify:
             NotifyFeatureView(selection: context.selection, environment: context.environment)
         case .monitor:
             MonitorFeatureView(selection: context.selection, environment: context.environment)
-        default:
-            FeatureScreenView(feature: feature, context: context) { EmptyView() }
+        case .translateSubtitles:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Translate", subtitle: "Type or paste text and translate it, right in Settings.",
+                          button: "Try Translate") { context.selection.focus(.translate) },
+                    .init(title: "Subtitles", subtitle: "Start live subtitles for what your Mac is playing.",
+                          button: "Try Subtitles") { context.selection.focus(.subtitles) },
+                ])
+            }
+        case .screenshots:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Capture an area now", subtitle: "The screen freezes; drag over the area you want.",
+                          button: "Capture") { context.environment.openScreenshot() },
+                ])
+            }
+        case .todo:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Your tasks", subtitle: "Opens To-do in the island.",
+                          button: "Open To-do") { context.environment.openHoverPanel(.tasks) },
+                ])
+            }
+        case .caseVault:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Your keys", subtitle: "Add keys, group them by project and choose whether each command asks you first. Opens in the island.",
+                          button: "Open Case") { context.environment.openHoverPanel(.caseVault) },
+                ])
+            }
+        case .drop:
+            // Drawn by DropFeatureView; never reached.
+            EmptyView()
+        }
+    }
+}
+
+/// An island tool's screen: the buttons that open or start it.
+struct IslandToolActions: View {
+    struct Row: Identifiable {
+        let title: String
+        let subtitle: String
+        let button: String
+        let action: () -> Void
+        var id: String { title }
+    }
+
+    let rows: [Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Use it")
+            MacCard {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { MacRowSeparator() }
+                    MacRow(title: row.title, subtitle: row.subtitle) {
+                        MacButton(title: row.button, action: row.action)
+                            .fixedSize()
+                            .accessibilityLabel(row.button)
+                    }
+                }
+            }
         }
     }
 }
@@ -148,6 +223,8 @@ struct FeatureListRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
+                FeatureIcon(feature: info.feature, size: .row)
+                    .opacity(isQuiet ? 0.78 : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(info.name)
                         .font(.system(size: 13, weight: .medium))
@@ -240,5 +317,23 @@ struct FeatureStatusLabel: View {
                 .fill(MacSettingsTheme.text3)
                 .frame(width: 7, height: 1.4)
         }
+    }
+}
+
+/// A feature's icon: one monochrome symbol, the same weight everywhere, no
+/// coloured plate. The list rows and the feature's own header use it.
+// WHY: .project-docs/decisions/2026-11-25-feature-icons.md
+struct FeatureIcon: View {
+    enum Size { case row, header }
+
+    let feature: AppFeature
+    let size: Size
+
+    var body: some View {
+        Image(systemName: feature.symbol)
+            .font(.system(size: size == .row ? 15 : 19, weight: .regular))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .frame(width: size == .row ? 22 : 26, height: size == .row ? 22 : 26)
+            .accessibilityHidden(true)
     }
 }

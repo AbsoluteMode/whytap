@@ -46,7 +46,7 @@ are verifiable rather than slogans.
   field, after you answer Yes to Whytap's question once. It never gets words
   dictated into other apps, meetings or Case. The words stay on this Mac
   between the two apps; turn it off in Settings -> Integrations -> Coding tools.
-- API keys you enter in Settings → API & Models ("Your key") are stored in the
+- API keys you enter in Settings → Keys & models ("Your key") are stored in the
   macOS Keychain under the app's own service name (`com.rootwise.sidekey`).
   Key values are never shown again after saving and are never written to
   UserDefaults, plaintext files or logs. UserDefaults holds only which provider
@@ -120,17 +120,17 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Route | Where data goes | When |
 |---|---|---|
 | Meeting detector (FluidAudio Silero VAD) | nowhere; a one-time download from Hugging Face fetches the model | the first time the detector checks for speech |
-| On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in API & Models; recognition while a feature set to On this Mac is in use |
-| Your key: speech (Soniox, Deepgram, ElevenLabs, OpenAI, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in API & Models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
+| On this Mac speech (Parakeet, optional) | nowhere: audio is recognized on the Mac. A one-time download from Hugging Face fetches the model | the download when you click Download in Keys & models; recognition while a feature set to On this Mac is in use |
+| Your key: speech (Soniox, Deepgram, ElevenLabs, OpenAI, or a self-hosted endpoint speaking the OpenAI Realtime protocol) and text (OpenRouter, OpenAI, Anthropic or a custom OpenAI-compatible endpoint) | the provider or endpoint chosen for that feature in Keys & models, with your key (a custom endpoint may need none). Each feature's data goes only to its own provider, including its recovery path; nothing moves to another provider | while the feature's route is in use |
 | Agent (native, off by default) | the provider chosen for the Agent row (OpenRouter, OpenAI or Anthropic) and its selected model, using your API key: your request, its recent context, and whatever its tools read for it (file contents, web pages, a screenshot). Tool actions may access destinations needed by your request; with Allow file edits and commands on (the default once the Agent is on) it can also write files and run commands as your user ([Whytap Agent](agent.md)) | when you submit an agent request |
 | Agent model mark | public image files on OpenRouter for the displayed model author; no API key, cookies, audio, prompt or reply. Bundled marks appear immediately; a small local cache is disposable | asynchronously when the voice mark is shown, at most weekly per cached author; failures retain usable artwork |
-| Key checks | the provider of the key: a free request (model list, key or account endpoint) that sends only the key. A restricted ElevenLabs key may need a minimal paid speech request, made only when you save the key or press Check now | when you save a key, press Check now, or open API & Models and the last result is a day old |
-| Model catalogs | the public model lists of OpenRouter and Deepgram (no key), and the model lists of Soniox and Anthropic (your key); a custom server's `/models` list. Only the request itself is sent, no audio or text | when you open API & Models and the cache is a day old, save a key, or press Refresh models |
-| OpenRouter providers | OpenRouter, with your key: the list of providers serving the model selected for an OpenRouter feature, with their latency and throughput. Only the request itself is sent, no audio or text. A pinned provider then receives that feature's requests alone, with no fallback | when an OpenRouter row is shown in API & Models (reused for 5 minutes) |
+| Key checks | the provider of the key: a free request (model list, key or account endpoint) that sends only the key. A restricted ElevenLabs key may need a minimal paid speech request, made only when you save the key or press Check now | when you save a key, press Check now, or open Keys & models and the last result is a day old |
+| Model catalogs | the public model lists of OpenRouter and Deepgram (no key), and the model lists of Soniox and Anthropic (your key); a custom server's `/models` list. Only the request itself is sent, no audio or text | when you open Keys & models and the cache is a day old, save a key, or press Refresh models |
+| OpenRouter providers | OpenRouter, with your key: the list of providers serving the model selected for an OpenRouter feature, with their latency and throughput. Only the request itself is sent, no audio or text. A pinned provider then receives that feature's requests alone, with no fallback | when an OpenRouter row is shown in Keys & models (reused for 5 minutes) |
 | Model probes | the provider of the feature you are choosing a model for: 1 second of digital silence for speech models, the prompt "Reply with OK." (plus one fictitious tool for agent models) for text models. Never your audio, transcripts, prompts or notes. Costs a fraction of a cent | only when you pick a model that is not in the built-in list, or press Check now |
 | Encrypted backup | your private GitHub repository or the folder/sync service you selected; only authenticated ciphertext leaves Whytap | after you explicitly configure and enable Backup |
 | Calendars connected directly by an earlier build (Calendar shows Soon in the published 2.2.26 build; since 2026-11-23 new connections use the calendars of this Mac, which send nothing) | the Google, Microsoft or Zoom account provider of that connection; token refresh and event queries for the displayed date range | while the calendar view is visible or refreshing; local tasks/events are not uploaded |
-| Agent web search (built-in) | nothing extra from Whytap: the Agent's model provider (Anthropic, OpenAI or OpenRouter) runs the search the model asks for, with your key, inside the same request. Through OpenRouter the query goes to Exa (to Anthropic's own search for Claude models) | only when the model decides a request needs current web facts; Tavily is used instead when the model has no search of its own or Tavily is picked in API & Models → Models → Search |
+| Agent web search (built-in) | nothing extra from Whytap: the Agent's model provider (Anthropic, OpenAI or OpenRouter) runs the search the model asks for, with your key, inside the same request. Through OpenRouter the query goes to Exa (to Anthropic's own search for Claude models) | only when the model decides a request needs current web facts; Tavily is used instead when the model has no search of its own or Tavily is picked in Keys & models → Models → Search |
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
@@ -205,9 +205,11 @@ other applications are not silently copied. [Coverage and recovery](backup.md).
 ## Translation and subtitles
 
 Translate sends submitted text to the chosen Translation LLM route. Subtitles
-send system audio to OpenAI (`gpt-realtime-translate`, Audio translate) with
-the OpenAI key from API & Models; OpenAI returns the translation and the
-transcript of what it heard. Without that key Subtitles do not start. This is
+send system audio to Soniox (`stt-rt-v6` live translation) with the Soniox
+key from Keys & models, or, without a Soniox key, to OpenAI
+(`gpt-realtime-translate`) with the OpenAI key; the provider returns the
+translation and the transcript of what it heard. Without either key Subtitles
+do not start. This is
 the next version after 2.2.26; in 2.2.26 Subtitles send system audio to the
 speech route chosen for them (or recognize it On this Mac) and the finished
 phrases to their own language-model route. A session ends by itself after one hour, like Stop. It never opens the microphone or creates a

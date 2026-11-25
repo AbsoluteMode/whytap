@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Translation/SubtitleSpeechPairer.swift
     confirmed_at: 2026-11-23
-related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md]
+related: [2026-11-21-subtitle-phrase-pairs.md, 2026-11-21-compact-subtitle-overlay.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-23-subtitle-pairs-close-speed.md, 2026-11-25-subtitle-overlay-move-resize-scroll.md]
 ---
 
 # A steady subtitle overlay with a clickable Stop and a blurred background
@@ -128,7 +128,9 @@ a box that still changed size. Added:
   keeps a shorter caption if it has rows, and shows only its controls
   otherwise. A problem's message hugs its text so it and its button fit
   the 190 pt panel.
-- **Narrow panels.** The panel can be resized down to 360 pt. The caption takes
+- **Narrow panels.** (Superseded by
+  [move, resize and scroll](2026-11-25-subtitle-overlay-move-resize-scroll.md):
+  the box now fills the panel, minimum 480 x 150 pt.) The panel can be resized down to 360 pt. The caption takes
   the width it is given up to 708 pt (`SteadyPairsLayout.width(proposed:)`);
   the columns still depend only on that width. The view no longer demands
   420 pt. When the controls wrap to two rows, the caption takes the height

@@ -43,7 +43,7 @@ struct DropOutputPolicy {
     static func failureMessage(for error: Error) -> String {
         switch error as? OpenRouterLLMError {
         case .notConfigured, .missingKey, .missingBaseURL, .invalidBaseURL, .missingModel:
-            return "Set up Smart in API & Models"
+            return "Set up Smart in Keys & models"
         case .unexpectedStatus(let status, _):
             return "Smart failed (\(status))"
         case .emptyContent:

@@ -357,6 +357,16 @@ Start a new local chat or restart the host if its existing plugin connection
 does not refresh. Installation into the plugin cache does not prove that tools
 have connected to the updated Whytap app.
 
+A connected `whytap mcp` (also `app mcp` and `case mcp`) keeps working when
+Whytap is updated: on its first call after the update the helper replaces
+itself with the new build's helper, in the same process, and answers that call.
+No `/mcp` reconnect is needed. It runs only a helper file that fully validates
+and is signed by the same signer as itself (ad-hoc source builds therefore
+never switch), and gives up after three switches within two minutes. If the
+update is a rollback to a build without this ability, waiting calls get an
+explicit "retry" error and the following calls work. Helpers started from a
+build without this change need one last reconnect.
+
 The plugin's only runtime dependency is the installed Whytap helper. It uses
 the existing private Unix socket, with bounded requests and audit-token/code
 validation against the helper in the same app. Settings and To-do controls are available to

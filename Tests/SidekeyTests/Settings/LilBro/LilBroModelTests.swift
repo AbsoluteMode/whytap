@@ -331,9 +331,10 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(checked, 504)
     }
 
-    /// The builder's matrix for ticket 590: who turns, switches or gives
-    /// the setting. "we", "please" and an instruction after a comma or a
-    /// sentence ask for it; Drop doing it on its own does not.
+    /// The builder's matrices for tickets 590 and 594: who turns, switches
+    /// or gives the setting. "we", "please" and an instruction after a comma
+    /// or a sentence ask for it; Drop doing it on its own does not, with or
+    /// without commas inside the question.
     func test_the_person_turning_on_or_giving_a_setting_asks_for_it() {
         let settings = ["Input Monitoring", "Accessibility", "Keyboard control",
                         "Screen Recording", "Microphone", "System audio", "Post Event"]
@@ -363,6 +364,17 @@ final class LilBroLocalGuideTests: XCTestCase {
             { f, s, id in ("How can I use \(f) after macOS asks whether I can allow \(s)?", .feature(id)) },
             { f, s, id in ("Does \(f) switch \(s) on by itself?", .feature(id)) },
             { f, s, id in ("Will \(f) give \(s) access to other apps?", .feature(id)) },
+            // Ticket 594: a comma inside a question about the feature's own behaviour.
+            { f, s, _ in ("I use \(f). Switch on \(s).", permissions) },
+            { f, s, id in ("Does \(f) turn on \(s) by default?", .feature(id)) },
+            { f, s, id in ("Does \(f), by default, turn on \(s)?", .feature(id)) },
+            { f, s, id in ("Does \(f), when it closes, switch \(s) off?", .feature(id)) },
+            { f, s, id in ("Does \(f), without asking, give \(s) access to other apps?", .feature(id)) },
+            { f, s, id in ("Does \(f) open at login, turn on \(s), and start automatically?", .feature(id)) },
+            { f, s, id in ("At login, does \(f) turn on \(s) by default?", .feature(id)) },
+            { f, s, id in ("On this Mac, does \(f) switch \(s) off when it closes?", .feature(id)) },
+            { f, s, _ in ("How do I set up \(f), turn on \(s)?", permissions) },
+            { f, s, _ in ("Can we, for \(f), turn on \(s)?", permissions) },
         ]
         var checked = 0
         for template in templates {
@@ -374,7 +386,7 @@ final class LilBroLocalGuideTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(checked, 798)
+        XCTAssertEqual(checked, 1218)
     }
 
     /// An independent review of that fix: other everyday ways to ask for a

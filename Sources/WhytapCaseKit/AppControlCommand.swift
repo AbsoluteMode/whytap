@@ -6,8 +6,12 @@ public final class AppControlCommand {
     private let todo: TodoCommand?
     /// Never launches Whytap: used for the access prompt a connecting harness triggers.
     private let direct: CaseBrokerCalling?
-    public init(client: CaseBrokerCalling?, todo: TodoCommand? = nil, direct: CaseBrokerCalling? = nil) {
-        self.client = client; self.todo = todo; self.direct = direct
+    /// MCP modes of the installed helper: follow a Whytap update in place.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    private let handover: MCPBuildHandover?
+    public init(client: CaseBrokerCalling?, todo: TodoCommand? = nil, direct: CaseBrokerCalling? = nil,
+                handover: MCPBuildHandover? = nil) {
+        self.client = client; self.todo = todo; self.direct = direct; self.handover = handover
     }
 
     public func call(_ request: AppControlRequest) -> AppControlResponse {
@@ -34,7 +38,7 @@ public final class AppControlCommand {
     /// unified `whytap mcp`, which adds the names-only Case tools.
     // WHY: .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md
     public func serveMCP(screenOnly: Bool = false, caseServer: CaseMCPServer?,
-                         readLine: () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
+                         readLine: @escaping () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
         FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
     }) -> Int32 {
         let server = AppControlMCPServer(screenOnly: screenOnly, todo: todo.map { todo in { todo.respond($0, $1) } },
@@ -43,11 +47,15 @@ public final class AppControlCommand {
                                          },
                                          caseServer: caseServer,
                                          cancellableCall: { self.call($0, cancellation: $1) })
-        server.run(readLine: readLine, write: write)
+        // With a handover stdin is read directly (no stdio read-ahead to lose
+        // on exec), starting with what an earlier image left unanswered.
+        let source: MCPLineSource = handover.map { FileDescriptorLineSource(prefill: $0.resumed?.input ?? Data()) }
+            ?? ClosureLineSource(readLine)
+        server.run(source: source, write: write, handover: handover)
         return 0
     }
 
-    public func run(args: [String], readLine: () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
+    public func run(args: [String], readLine: @escaping () -> String? = { Swift.readLine() }, write: @escaping (String) -> Void = {
         FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
     }) -> Int32 {
         if args == ["mcp"] || args == ["screen-mcp"] {

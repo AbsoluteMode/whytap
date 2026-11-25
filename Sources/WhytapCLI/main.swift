@@ -10,6 +10,23 @@ let hostExecutable = Bundle.main.executableURL ?? executable
 var client: CaseBrokerCalling?
 var directClient: CaseBrokerCalling?
 let message = "Whytap is not available: this helper is not inside the Whytap app bundle."
+let resolvedPath = hostExecutable.resolvingSymlinksInPath().path
+let arguments = Array(CommandLine.arguments.dropFirst())
+// A long-lived MCP server started before a Whytap update follows the new
+// helper file in place instead of being denied until the harness reconnects.
+// WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+let resumed = MCPResumeState.takeFromEnvironment()
+var handover: MCPBuildHandover?
+if CaseHostBundle.bundleID(forExecutable: hostExecutable) != nil,
+   [["mcp"], ["app", "mcp"], ["app", "screen-mcp"], ["case", "mcp"]].contains(arguments) {
+    handover = MCPBuildHandover(
+        identity: SystemHelperBuildIdentity(executable: URL(fileURLWithPath: resolvedPath)),
+        resumed: resumed,
+        relaunch: { state in
+            HelperRelauncher.exec(path: resolvedPath, arguments: CommandLine.arguments, state: state)
+            return false // exec returned: it failed
+        })
+}
 if let bundleID = CaseHostBundle.bundleID(forExecutable: hostExecutable) {
     let socket = CaseBrokerPaths.socketURL(bundleID: bundleID)
     directClient = UnixSocketBrokerClient(socketURL: socket, timeout: 15)
@@ -22,8 +39,11 @@ if let bundleID = CaseHostBundle.bundleID(forExecutable: hostExecutable) {
             try? open.run()
             open.waitUntilExit()
         })
+    if let handover, let inner = client, let direct = directClient {
+        client = BuildFollowingBrokerClient(inner: inner, handover: handover)
+        directClient = BuildFollowingBrokerClient(inner: direct, handover: handover)
+    }
 }
-let resolvedPath = hostExecutable.resolvingSymlinksInPath().path
 if CommandLine.arguments.dropFirst().first == "todo" {
     // Never launches Whytap: when it is not running the planner file is edited directly.
     exit(TodoCommand(client: directClient).run(args: Array(CommandLine.arguments.dropFirst(2))))
@@ -36,12 +56,13 @@ if CommandLine.arguments.dropFirst().first == "mcp" {
         FileHandle.standardError.write(Data("usage: whytap mcp\n".utf8))
         exit(CaseCommand.exitUsage)
     }
-    exit(AppControlCommand(client: client, todo: TodoCommand(client: directClient), direct: directClient)
+    exit(AppControlCommand(client: client, todo: TodoCommand(client: directClient), direct: directClient, handover: handover)
         .serveMCP(caseServer: CaseMCPServer(client: client, executablePath: resolvedPath)))
 }
 if CommandLine.arguments.dropFirst().first == "app" {
     // `app mcp` also serves the To-do tools through the same non-launching path.
-    exit(AppControlCommand(client: client, todo: TodoCommand(client: directClient), direct: directClient).run(args: Array(CommandLine.arguments.dropFirst(2))))
+    exit(AppControlCommand(client: client, todo: TodoCommand(client: directClient), direct: directClient, handover: handover)
+        .run(args: Array(CommandLine.arguments.dropFirst(2))))
 }
-exit(CaseCommand(client: client, executablePath: resolvedPath, unavailableMessage: message)
+exit(CaseCommand(client: client, executablePath: resolvedPath, unavailableMessage: message, mcpHandover: handover)
     .run(args: Array(CommandLine.arguments.dropFirst())))

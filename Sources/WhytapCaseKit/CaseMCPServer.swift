@@ -31,10 +31,31 @@ public final class CaseMCPServer {
     }
 
     /// Reads lines until EOF. Never throws on a bad request.
-    public func run(readLine: () -> String?, write: (String) -> Void) {
-        while let line = readLine() {
+    public func run(readLine: @escaping () -> String?, write: (String) -> Void) {
+        run(source: ClosureLineSource(readLine), write: write, handover: nil)
+    }
+
+    /// Sequential, so a request denied as a stale helper is simply carried
+    /// over with the unread input when the helper execs the new build.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    public func run(source: MCPLineSource, write: (String) -> Void, handover: MCPBuildHandover?) {
+        while source.waitForLine() {
+            guard let line = source.takeLine() else { continue }
             if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { continue }
-            if let reply = handle(line: line) { write(reply) }
+            guard let handover else {
+                if let reply = handle(line: line) { write(reply) }
+                continue
+            }
+            let (reply, replayable) = handover.track { handle(line: line) }
+            if replayable {
+                let unread = source.drainForHandover()
+                if handover.handOver(initialized: true, probed: true, input: Data((line + "\n").utf8) + unread) {
+                    source.close()
+                    return
+                }
+                source.restore(unread)
+            }
+            if let reply { write(reply) }
         }
     }
 

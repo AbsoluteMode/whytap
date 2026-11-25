@@ -38,48 +38,117 @@ public final class AppControlMCPServer {
 
     /// Keep stdin readable while a probe is running, so MCP cancellation or
     /// EOF shuts down that request's socket and cancels the app's pending task.
-    public func run(readLine: () -> String?, write: @escaping (String) -> Void) {
+    public func run(readLine: @escaping () -> String?, write: @escaping (String) -> Void) {
+        run(source: ClosureLineSource(readLine), write: write, handover: nil)
+    }
+
+    /// `handover` (MCP modes of the helper) lets a helper started before a
+    /// Whytap update replace itself with the new build: calls the app denied
+    /// as a stale helper are held back, later lines wait, and once no call is
+    /// in flight the process execs the new file with everything unanswered.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    public func run(source: MCPLineSource, write: @escaping (String) -> Void, handover: MCPBuildHandover?) {
         let pending = AppControlPendingCalls()
         let output = NSLock()
         let group = DispatchGroup()
-        var initialized = false
-        var probed = false
+        // Orders taking a line, starting or finishing a call, and the handover,
+        // so every unanswered request is either in flight or carried over.
+        let gate = NSLock()
+        var initialized = handover?.resumed?.initialized ?? false
+        var probed = handover?.resumed?.probed ?? false
+        var inFlight = 0
+        var held: [(key: String, line: String, reply: String?)] = []
+        var deferred: [String] = []
+        var finished = false
         func emit(_ line: String?) {
             guard let line else { return }
             output.withLock { write(line) }
         }
-        while let line = readLine() {
+        func startProbe() {
+            guard initialized, !probed, !screenOnly, let accessProbe else { return }
+            probed = true
+            DispatchQueue.global(qos: .utility).async { accessProbe() }
+        }
+        // Gate held. Execs the new build once nothing is in flight; returns
+        // only when the handover failed (then everything is answered here) or
+        // a test relauncher stood in for exec (then this server stops).
+        func handOverIfReady() {
+            guard let handover, !finished, inFlight == 0, handover.isRequested else { return }
+            var carried = Data()
+            for line in held.map(\.line) + deferred { carried.append(Data((line + "\n").utf8)) }
+            let unread = source.drainForHandover()
+            if handover.handOver(initialized: initialized, probed: probed, input: carried + unread) {
+                finished = true; held = []; deferred = []
+                source.close()
+                return
+            }
+            held.forEach { emit($0.reply) }
+            var restored = Data()
+            for line in deferred { restored.append(Data((line + "\n").utf8)) }
+            held = []; deferred = []
+            source.restore(restored + unread)
+        }
+        // A resumed image probes only if the old one could not.
+        startProbe()
+        while source.waitForLine() {
+            gate.lock()
+            guard !finished, let line = source.takeLine() else { gate.unlock(); continue }
             let bytes = line.utf8.count <= Self.maxLineBytes ? line.data(using: .utf8) : nil
             let request = bytes.flatMap { try? JSONDecoder().decode(AppControlValue.self, from: $0) }?.object
-            if request?["jsonrpc"] == .string("2.0"), request?["method"] == .string("notifications/cancelled"),
-               let id = request?["params"]?.object?["requestId"], let key = Self.requestKey(id) {
-                pending.cancel(key)
+            let cancelledKey = request?["jsonrpc"] == .string("2.0") && request?["method"] == .string("notifications/cancelled")
+                ? request?["params"]?.object?["requestId"].flatMap(Self.requestKey) : nil
+            if handover?.isRequested == true {
+                if let cancelledKey, let index = held.firstIndex(where: { $0.key == cancelledKey }) {
+                    held.remove(at: index) // cancelled before the new image saw it: never replayed
+                } else if let cancelledKey, pending.contains(cancelledKey) {
+                    pending.cancel(cancelledKey) // still in flight in this image
+                } else {
+                    deferred.append(line)
+                }
+                handOverIfReady()
+                gate.unlock()
+                continue
+            }
+            if let cancelledKey {
+                pending.cancel(cancelledKey)
             } else if request?["method"] == .string("tools/call"), let id = request?["id"], let key = Self.requestKey(id) {
                 guard let cancellation = pending.begin(key) else {
                     emit(error(id, -32000, "Duplicate request id or too many pending calls"))
+                    gate.unlock()
                     continue
                 }
+                inFlight += 1
                 group.enter()
                 DispatchQueue.global(qos: .userInitiated).async { [self] in
-                    let reply = handle(line: line, cancellation: cancellation)
+                    let (reply, replayable) = handover.map { $0.track { handle(line: line, cancellation: cancellation) } }
+                        ?? (handle(line: line, cancellation: cancellation), false)
                     pending.end(key)
-                    if !cancellation.isCancelled { emit(reply) }
+                    gate.withLock {
+                        inFlight -= 1
+                        if replayable && !cancellation.isCancelled && !finished {
+                            held.append((key, line, reply))
+                        } else if !cancellation.isCancelled && !finished {
+                            emit(reply)
+                        }
+                        handOverIfReady()
+                    }
                     group.leave()
                 }
             } else {
                 if request?["method"] == .string("initialize") { initialized = true }
                 // Once per connection, after its handshake, and never waited
                 // for: the server exits on EOF whatever the app is doing.
-                if request?["method"] == .string("notifications/initialized"), initialized, !probed,
-                   !screenOnly, let accessProbe {
-                    probed = true
-                    DispatchQueue.global(qos: .utility).async { accessProbe() }
-                }
+                if request?["method"] == .string("notifications/initialized") { startProbe() }
                 emit(handle(line: line))
+                handOverIfReady()
             }
+            gate.unlock()
         }
+        gate.withLock { finished = true }
         pending.cancelAll()
         group.wait()
+        // Input ended while calls waited for a handover: answer them here.
+        gate.withLock { held.forEach { emit($0.reply) }; held = [] }
     }
 
     /// Bounded, but above the largest To-do batch the tools advertise (100 titles
@@ -340,6 +409,7 @@ private final class AppControlPendingCalls: @unchecked Sendable {
         }
     }
     func end(_ key: String) { lock.withLock { _ = calls.removeValue(forKey: key) } }
+    func contains(_ key: String) -> Bool { lock.withLock { calls[key] != nil } }
     func cancel(_ key: String) { lock.withLock { calls[key]?.cancel() } }
     func cancelAll() { lock.withLock { for call in calls.values { call.cancel() } } }
 }

@@ -115,7 +115,7 @@ struct LilBroLocalGuide: LilBroBrain {
         // Screenshots"). Its own words never count as a feature's
         // ("monitoring" is not Monitor).
         // .project-docs/decisions/2026-11-24-lil-bro.md
-        let named = settingNames.compactMap { name in offset(of: name, in: q).map { (name, $0) } }
+        let named = settingNames.flatMap { name in offsets(of: name, in: q).map { (name, $0) } }
         if !named.isEmpty {
             let rest = named.reduce(q) { blank($0, pattern: NSRegularExpression.escapedPattern(for: $1.0)) }
             let found = featureMatch(in: rest)
@@ -128,7 +128,7 @@ struct LilBroLocalGuide: LilBroBrain {
             }
             // Asked for directly ("allow …", "where can I find …"), or named
             // before any feature ("Screen Recording for Screenshots").
-            if asksForSetting(q, named: direct.map(\.0)) { return .answer(toPermissions) }
+            if asksForSetting(q, at: direct) { return .answer(toPermissions) }
             if let found, found.offset < (direct.map(\.1).min() ?? 0) { return .answer(answer(for: found.feature)) }
             return .answer(toPermissions)
         }
@@ -144,27 +144,89 @@ struct LilBroLocalGuide: LilBroBrain {
 
     /// Words that put a setting in a subordinate part of the question.
     private static let contextMarkers: Set<String> = [
-        "after", "once", "when", "whenever", "while", "before", "with", "using", "if", "until", "since",
+        "after", "once", "when", "whenever", "while", "before", "with", "without", "using", "if", "until",
+        "since",
     ]
 
-    /// A marker among the five words before the setting, within the same
-    /// part of the sentence: "after enabling", "once I enable", "when I turn
-    /// on", "with my".
+    /// Where the main question starts after a leading part: "can I", "do I",
+    /// "where", "how" ("With Drop can I enable Microphone?", "If I use Agent,
+    /// where is Accessibility?").
+    private static let mainClause = "\\b(?:(?:can|could|do|does|did|should|shall|will|would|may|must)\\s+(?:i|you|we|it|whytap)"
+        + "|(?:where|how|what|which)\\s+(?:can|could|do|does|did|should|is|are|would|will)|is there|are there"
+        + "|show me|tell me)\\b"
+
+    /// A marker before the setting in the same part of the sentence, with
+    /// the main question not yet started between them: "after enabling",
+    /// "once I allow Whytap to use", "with my", "without having to enable".
+    /// A main question after the marker ("With Drop can I enable
+    /// Microphone?", "When using Screenshots can I allow …") ends that part,
+    /// so the setting is the question again.
     private static func isContext(at offset: Int, in q: String) -> Bool {
-        let before = String(q.prefix(offset))
-        let part = before.split(omittingEmptySubsequences: false) { ",;:.?!".contains($0) }.last.map(String.init) ?? before
-        let words = part.split { !$0.isLetter && $0 != "'" }.suffix(5)
-        return words.contains { contextMarkers.contains(String($0)) }
+        let before = Array(q.prefix(offset))
+        let clauseStart = before.lastIndex { ",;:.?!".contains($0) }.map { $0 + 1 } ?? 0
+        var markerEnd: Int?
+        var index = clauseStart
+        while index < before.count {
+            guard before[index].isLetter || before[index] == "'" else { index += 1; continue }
+            let start = index
+            while index < before.count, before[index].isLetter || before[index] == "'" { index += 1 }
+            if contextMarkers.contains(String(before[start..<index])) { markerEnd = index }
+        }
+        guard let markerEnd else { return false }
+        let between = String(before[markerEnd...])
+        return between.range(of: mainClause, options: .regularExpression) == nil
     }
 
     /// "allow / grant / enable / find / where is <setting>": the verb takes
-    /// the setting itself, with at most an article or "my" between.
-    private static func asksForSetting(_ q: String, named: [String]) -> Bool {
-        let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
-        return named.contains { name in
-            let pattern = "\\b(\(verbs))\\s+(?:(?:the|my|a|an|its)\\s+)?"
-                + NSRegularExpression.escapedPattern(for: name)
-            return q.range(of: pattern, options: .regularExpression) != nil
+    /// the setting itself. Between them only an article or possessive, who
+    /// gets it ("Whytap", "it", "the app", "Whytap to use", "access to") or
+    /// where it lives ("macOS", "System"): "open the macOS Accessibility
+    /// settings", "grant Whytap Microphone access", "allow Whytap to use
+    /// Screen Recording".
+    private static func asksForSetting(_ q: String, at direct: [(String, Int)]) -> Bool {
+        let verbs = "allow|grant|permit|enable|disable|revoke|find|open|where is|where's|where are"
+        let article = "(?:(?:the|my|a|an|its|your)\\s+)?"
+        let recipient = "(?:(?:whytap's|whytap|it|the app|this app)\\s+)?"
+        let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
+        let place = "(?:(?:macos|mac|system|apple)\\s+)?"
+        // The person does it: "turn …" and "give …" right after I / to /
+        // you / please or at the start, not "Does Drop turn the Microphone on?".
+        let person = "(?:^|\\b(?:i|to|you|me|please)\\s+)"
+        // "I can't enable Microphone access" explains, it does not ask.
+        let notNegated = "(?<!can't |cannot |don't |didn't |won't |couldn't |can not |do not )"
+        return direct.contains { name, at in
+            let setting = "(" + NSRegularExpression.escapedPattern(for: name) + ")"
+            let patterns = [
+                notNegated + "\\b(?:\(verbs))\\s+" + article + recipient + reach + article + place + setting,
+                // "turn on Microphone", "turn Microphone on", "switch the Accessibility permission off"
+                person + "(?:turn|switch)\\s+(?:on|off)\\s+" + article + recipient + place + setting,
+                person + "(?:turn|switch)\\s+" + article + recipient + place + setting
+                    + "\\s+(?:(?:access|permission|setting)\\s+)?(?:on|off)\\b",
+                // "give Drop access to the Microphone", "give Drop Microphone access"
+                person + "(?:give|grant)\\s+(?:[\\w']+\\s+){1,2}(?:access|permission)\\s+(?:to|for)\\s+"
+                    + article + place + setting,
+                person + "(?:give|grant)\\s+(?:[\\w']+\\s+){0,2}" + setting + "\\s+(?:access|permission)\\b",
+            ]
+            // The verb must take this mention, not the same name elsewhere.
+            return patterns.contains { pattern in
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+                return regex.matches(in: q, range: NSRange(q.startIndex..., in: q)).contains { match in
+                    guard let range = Range(match.range(at: 1), in: q) else { return false }
+                    return q.distance(from: q.startIndex, to: range.lowerBound) == at
+                }
+            }
+        }
+    }
+
+    /// Every place a setting's name starts: the same setting can be context
+    /// once and asked for later ("… with Microphone disabled. Where do I
+    /// enable Microphone?").
+    private static func offsets(of word: String, in q: String) -> [Int] {
+        guard !word.isEmpty,
+              let regex = try? NSRegularExpression(pattern: "\\b" + NSRegularExpression.escapedPattern(for: word))
+        else { return [] }
+        return regex.matches(in: q, range: NSRange(q.startIndex..., in: q)).compactMap { match in
+            Range(match.range, in: q).map { q.distance(from: q.startIndex, to: $0.lowerBound) }
         }
     }
 

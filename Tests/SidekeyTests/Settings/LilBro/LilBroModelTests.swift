@@ -291,6 +291,84 @@ final class LilBroLocalGuideTests: XCTestCase {
         }
     }
 
+    /// The builder's matrix for ticket 585: a setting qualified by where it
+    /// lives or who gets it is still asked for directly, and a marker that
+    /// introduces the feature ("With Drop …", "When using Screenshots …")
+    /// does not make the setting context. The context cases stay context.
+    func test_qualified_settings_and_feature_introductions_still_ask_for_the_setting() {
+        let settings = ["Input Monitoring", "Accessibility", "Keyboard control",
+                        "Screen Recording", "Microphone", "System audio", "Post Event"]
+        let features: [(String, AppFeature)] = [
+            ("Drop", .drop), ("Agent", .agent), ("Meeting Notes", .meetings),
+            ("Screenshots", .screenshots), ("Subtitles", .translateSubtitles), ("Case", .caseVault),
+        ]
+        let permissions = LilBroDestination.tab(.permissions)
+        typealias Template = (String, String, AppFeature) -> (String, LilBroDestination)
+        let templates: [Template] = [
+            { f, s, _ in ("For \(f), where can I open the macOS \(s) settings?", permissions) },
+            { f, s, _ in ("For \(f), how can I grant Whytap \(s) access?", permissions) },
+            { f, s, _ in ("For \(f), where do I allow Whytap to use \(s)?", permissions) },
+            { f, s, _ in ("With \(f) can I enable \(s)?", permissions) },
+            { f, s, _ in ("When using \(f) can I allow \(s)?", permissions) },
+            { f, s, _ in ("For \(f), where can I open the \(s) settings?", permissions) },
+            { f, s, _ in ("While using \(f), where do I give Whytap access to \(s)?", permissions) },
+            { f, s, _ in ("With \(f), how do I turn on the System \(s) permission?", permissions) },
+            { f, s, id in ("How do I use \(f) after I grant Whytap \(s) access?", .feature(id)) },
+            { f, s, id in ("Can I use \(f) with my \(s) permission?", .feature(id)) },
+            { f, s, id in ("Where is \(f) once I allow Whytap to use \(s)?", .feature(id)) },
+            { f, s, id in ("Can I use \(f) with the macOS \(s) setting?", .feature(id)) },
+        ]
+        var checked = 0
+        for template in templates {
+            for (name, id) in features {
+                for setting in settings {
+                    let (question, expected) = template(name, setting, id)
+                    XCTAssertEqual(destination(question), expected, question)
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertEqual(checked, 504)
+    }
+
+    /// An independent review of that fix: other everyday ways to ask for a
+    /// setting or to mention one in passing.
+    func test_other_ways_to_ask_for_a_setting_or_mention_it_in_passing() {
+        let cases: [(String, LilBroDestination)] = [
+            ("For Drop, how do I turn Microphone on?", .tab(.permissions)),
+            ("How do I give Drop access to the Microphone?", .tab(.permissions)),
+            ("Can I use Drop without having to enable Microphone?", .feature(.drop)),
+            ("I tried using Drop with Microphone disabled. Where do I enable Microphone?", .tab(.permissions)),
+            ("Can I use Drop after I go into System Settings and enable Microphone?", .feature(.drop)),
+            ("For Drop, if prompted can I turn on Microphone?", .tab(.permissions)),
+            ("Can I use Drop if Zoom says to enable Microphone?", .feature(.drop)),
+            ("If I use Agent can I allow Accessibility?", .tab(.permissions)),
+            ("While dictating with Drop can I turn on Microphone?", .tab(.permissions)),
+            ("When I open Drop, where do I allow Microphone?", .tab(.permissions)),
+            ("Does Agent work when Accessibility is off?", .feature(.agent)),
+            ("How do I use Screenshots if Screen Recording is denied?", .feature(.screenshots)),
+            ("After allowing Microphone, how do I use Drop?", .feature(.drop)),
+            ("Can I use Subtitles with System audio?", .feature(.translateSubtitles)),
+            ("Does Drop automatically turn the Microphone on?", .feature(.drop)),
+            ("When using Drop is there a way to turn on Microphone access?", .tab(.permissions)),
+            ("Does Drop give other apps access to my Microphone?", .feature(.drop)),
+            ("Can I use Drop if I don't enable Microphone access? Microphone access is blocked on this Mac.",
+             .feature(.drop)),
+            ("Can I set up Drop before learning how to enable Microphone access?", .feature(.drop)),
+            ("When using Drop where is Accessibility?", .tab(.permissions)),
+            ("Can you help with Drop and show me where to enable Microphone access?", .tab(.permissions)),
+            ("Does Drop automatically turn on my Mac microphone?", .feature(.drop)),
+            ("Can I use Drop with Microphone off? I can't enable Microphone access.", .feature(.drop)),
+            ("How do I give Drop Microphone access?", .tab(.permissions)),
+            ("For Drop, how do I turn the Microphone off?", .tab(.permissions)),
+            ("How do I turn on Microphone?", .tab(.permissions)),
+            ("Where do I disable Screen Recording for Screenshots?", .tab(.permissions)),
+        ]
+        for (question, expected) in cases {
+            XCTAssertEqual(destination(question), expected, question)
+        }
+    }
+
     func test_a_hotkey_is_not_an_api_key() {
         XCTAssertEqual(destination("change a hotkey"), .tab(.hotkeys))
         XCTAssertEqual(destination("where do I paste my OpenAI key"), .apiKeys)

@@ -222,6 +222,138 @@ final class SonioxRealtimeTranslateAdapterTests: XCTestCase {
         XCTAssertEqual(received, [.closed])
         XCTAssertEqual(transport.cancelReason, "client closed")
     }
+
+    // MARK: Builder review #566
+
+    /// Finding 1: Stop or a new session while Soniox has not answered closes
+    /// the socket at once, not at the start deadline, and starts nothing.
+    func testCancellingWhileWaitingForSonioxClosesTheSocketAtOnce() async throws {
+        let transport = StubWebSocketTransport()
+        var adapter = SonioxRealtimeTranslateAdapter(transport: { transport })
+        adapter.startDeadline = .seconds(30)
+        let opening = Task { try await adapter.open(source: "en", target: "ru") }
+        for _ in 0..<400 where transport.sent.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(transport.sent.count, 1, "the config was sent")
+        let cancelledAt = Date()
+        opening.cancel()
+        do { _ = try await opening.value; XCTFail("a cancelled open returns no session") } catch {
+            XCTAssertTrue(error is CancellationError, "\(error)")
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 0.5)
+        XCTAssertTrue(transport.cancelled, "the socket is closed")
+        // A late answer changes nothing.
+        transport.deliverText(Self.ready)
+    }
+
+    func testCancellingWhileTheConfigIsStillSendingClosesTheSocket() async throws {
+        let transport = HangingSendTransport()
+        var adapter = SonioxRealtimeTranslateAdapter(transport: { transport })
+        adapter.startDeadline = .seconds(30)
+        let opening = Task { try await adapter.open(source: nil, target: "ru") }
+        for _ in 0..<400 where !transport.sending { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(transport.sending)
+        let cancelledAt = Date()
+        opening.cancel()
+        do { _ = try await opening.value; XCTFail() } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        XCTAssertLessThan(Date().timeIntervalSince(cancelledAt), 0.5)
+        XCTAssertTrue(transport.cancelled)
+    }
+
+    /// Finding 2: only a transcription response opens the session. A control
+    /// frame does not, so a refused key after it still fails the open; a
+    /// `finished` before any response is a failed open.
+    func testOnlyATranscriptionResponseOpensTheSession() async throws {
+        let refused = StubWebSocketTransport()
+        refused.deliverText(#"{"type":"pong","id":1}"#)
+        refused.deliverText(#"{"type":"reconnect","reconnect_token":"t","reconnect_url":"wss://x"}"#)
+        refused.deliverText(#"{"tokens":[],"error_code":401,"error_type":"unauthenticated","error_message":"Invalid API key."}"#)
+        do { _ = try await open(refused); XCTFail("a refused key after a control frame fails the open") }
+        catch let failure as SpeechTranslationFailure { XCTAssertEqual(failure, .refusedKey) }
+        XCTAssertTrue(refused.cancelled)
+
+        let finished = StubWebSocketTransport()
+        finished.deliverText(#"{"tokens":[],"final_audio_proc_ms":0,"total_audio_proc_ms":0,"finished":true}"#)
+        do { _ = try await open(finished); XCTFail("finished before starting is no session") }
+        catch let failure as SpeechTranslationFailure { XCTAssertEqual(failure, .provider) }
+        XCTAssertTrue(finished.cancelled)
+
+        let ready = StubWebSocketTransport()
+        ready.deliverText(#"{"type":"pong","id":1}"#)
+        ready.deliverText(Self.ready)
+        let session = try await open(ready)
+        await session.close()
+    }
+
+    /// Finding 3: the documented `error_type` decides the message; a 400 is
+    /// a language only when Soniox's request error says so.
+    func testErrorTypesAreNamedByTheirDocumentedCategory() async throws {
+        typealias S = SonioxRealtimeTranslateSession
+        XCTAssertEqual(S.failure(code: 400, type: "model_not_available",
+                                 message: "The requested model is not available.", starting: true), .modelUnavailable)
+        XCTAssertEqual(S.failure(code: 400, type: "invalid_request",
+                                 message: "Invalid language in translation.target_language", starting: true),
+                       .unsupportedLanguage)
+        XCTAssertEqual(S.failure(code: 400, type: "invalid_request", message: "Start request is malformed.", starting: true),
+                       .provider)
+        XCTAssertEqual(S.failure(code: 400, type: "invalid_request", message: "Invalid language hint.", starting: false),
+                       .provider, "mid-session a request error is not the chosen language")
+        XCTAssertEqual(S.failure(code: 401, type: "unauthenticated", starting: true), .refusedKey)
+        XCTAssertEqual(S.failure(code: 403, type: "temp_api_key_session_expired", starting: false), .refusedKey)
+        XCTAssertEqual(S.failure(code: 403, type: "permission_denied", starting: true), .permissionDenied)
+        for type in ["organization_balance_exhausted", "organization_monthly_budget_exhausted",
+                     "project_monthly_budget_exhausted"] {
+            XCTAssertEqual(S.failure(code: 402, type: type, starting: false), .noCredit)
+        }
+        XCTAssertEqual(S.failure(code: 429, type: "max_concurrent_connections_reached", starting: true), .busy)
+        XCTAssertEqual(S.failure(code: 503, type: "service_unavailable", starting: false), .connectionLost)
+        XCTAssertEqual(S.failure(code: 413, type: "max_duration_reached", starting: false), .provider)
+        XCTAssertEqual(S.failure(code: 500, type: "internal_error", starting: false), .provider)
+        // Without a type, the status.
+        XCTAssertEqual(S.failure(code: 400, starting: true), .provider)
+        XCTAssertEqual(S.failure(code: 403, starting: true), .permissionDenied)
+
+        let model = StubWebSocketTransport()
+        model.deliverText(#"{"tokens":[],"error_code":400,"error_type":"model_not_available","error_message":"The requested model is not available."}"#)
+        do { _ = try await open(model); XCTFail() } catch let failure as SpeechTranslationFailure {
+            XCTAssertEqual(failure, .modelUnavailable)
+        }
+        XCTAssertEqual(TranslationIssue.speechTranslation(.modelUnavailable, target: "ru", provider: "Soniox").message,
+                       "Soniox live translation is not available for this key's project or region. Check your Soniox project.")
+        XCTAssertEqual(TranslationIssue.speechTranslation(.permissionDenied, target: "ru", provider: "Soniox").feature,
+                       .subtitlesAudio)
+        XCTAssertEqual(TranslationIssue.speechTranslation(.connectionLost, target: "ru", provider: "Soniox").message,
+                       "The Soniox connection ended. Check your network and start again.")
+    }
+
+    /// Finding 4: Costs records a Soniox session under the reference sent in
+    /// the config, so the usage log's exact charge replaces the estimate.
+    func testCostsCarryTheSessionsSonioxReference() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(Self.ready)
+        let session = try await open(transport)
+        let config = try XCTUnwrap(json(transport.sent[0]))
+        let reference = try XCTUnwrap(config["client_reference_id"] as? String)
+        XCTAssertEqual(session.usageReference, reference)
+        var recorded: [AIUsageEvent] = []
+        let metered = AIUsageMeteredSpeechTranslation(
+            session: session, context: AIUsageContext(feature: .subtitlesAudio, account: .soniox, model: "stt-rt-v6"))
+        metered.record = { recorded.append($0) }
+        await metered.sendAudio(Data(count: 4_800))
+        await metered.close()
+        XCTAssertEqual(recorded.count, 1)
+        XCTAssertEqual(recorded.first?.id, "soniox:\(reference)")
+        XCTAssertEqual(recorded.first?.basis, .estimated, "the estimate stays until the charge is known")
+        XCTAssertEqual(recorded.first.flatMap(SonioxUsagePrices.reference)?.value, reference)
+        // OpenAI sessions have no such reference.
+        let openAI = AIUsageMeteredSpeechTranslation(
+            session: FakeSpeechTranslation(),
+            context: AIUsageContext(feature: .subtitlesAudio, account: .openAI, model: "gpt-realtime-translate"))
+        var other: [AIUsageEvent] = []
+        openAI.record = { other.append($0) }
+        await openAI.sendAudio(Data(count: 4_800))
+        await openAI.close()
+        XCTAssertFalse(other.first?.id.hasPrefix("soniox:") ?? true)
+    }
 }
 
 /// The Subtitles model on a real Soniox session over a stub socket: pairs
@@ -291,7 +423,7 @@ final class SonioxSubtitlesModelTests: XCTestCase {
         try await wait(model.lines.count >= 1)
         transport.deliver(.failure(URLError(.networkConnectionLost)))
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.issue?.message, "The Soniox connection ended. Check your network and start again.")
         XCTAssertGreaterThanOrEqual(model.lines.count, 1, "finished pairs stay on screen")
         XCTAssertEqual(model.lines.first?.translation, "Первое.")
     }
@@ -315,5 +447,51 @@ final class SonioxSubtitlesModelTests: XCTestCase {
         try await wait(model.phase == .failed)
         XCTAssertEqual(model.issue?.message, "Soniox refused the API key. Check it in Keys & models.")
         XCTAssertEqual(audio.started, 0, "system audio is never captured")
+    }
+}
+
+/// A socket whose sends never complete until it is cancelled.
+final class HangingSendTransport: StreamingTransporting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var sendWaiters: [CheckedContinuation<Void, Error>] = []
+    private var receiveWaiters: [CheckedContinuation<Result<StreamingFrame, Error>, Never>] = []
+    private var _sending = false
+    private var _cancelled = false
+    var sending: Bool { lock.withLock { _sending } }
+    var cancelled: Bool { lock.withLock { _cancelled } }
+    var responseStatusCode: Int? { nil }
+    func resume() {}
+
+    func cancel(reason: String?) {
+        let (sends, receives) = lock.withLock { () -> ([CheckedContinuation<Void, Error>], [CheckedContinuation<Result<StreamingFrame, Error>, Never>]) in
+            _cancelled = true
+            defer { sendWaiters = []; receiveWaiters = [] }
+            return (sendWaiters, receiveWaiters)
+        }
+        sends.forEach { $0.resume(throwing: StreamingSessionError.transportCancelled) }
+        receives.forEach { $0.resume(returning: .failure(StreamingSessionError.transportCancelled)) }
+    }
+
+    func send(_ frame: StreamingFrame) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let cancelled = lock.withLock { () -> Bool in
+                _sending = true
+                if _cancelled { return true }
+                sendWaiters.append(continuation)
+                return false
+            }
+            if cancelled { continuation.resume(throwing: StreamingSessionError.transportCancelled) }
+        }
+    }
+
+    func receive() async -> Result<StreamingFrame, Error> {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Result<StreamingFrame, Error>, Never>) in
+            let cancelled = lock.withLock { () -> Bool in
+                if _cancelled { return true }
+                receiveWaiters.append(continuation)
+                return false
+            }
+            if cancelled { continuation.resume(returning: .failure(StreamingSessionError.transportCancelled)) }
+        }
     }
 }

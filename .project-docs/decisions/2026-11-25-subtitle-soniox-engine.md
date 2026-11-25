@@ -45,8 +45,12 @@ OpenAI's API has no latency setting. The user asked to switch.
   `Authorization` header and sends the config: `stt-rt-v6`, 24 kHz PCM16 mono
   (the Subtitles capture, unchanged), endpoint detection, `language_hints`
   with the chosen source (none for Detect), `translation: one_way` to the
-  target. Start waits for Soniox's first answer (it comes without audio), so a
-  refused key or unsupported language fails before capture. Audio goes in
+  target. Start waits for Soniox's first transcription response (a frame
+  with `tokens`; it comes without audio), so a refused key or unsupported
+  language fails before capture. Control frames (`pong`, `reconnect`) do not
+  count, and `finished` before that response is a failed open. Cancelling
+  the start (Stop, a new session) closes the socket at once, also while the
+  config is still being sent. Audio goes in
   100 ms binary frames; Stop sends the rest and an empty text frame, and only
   `finished` is a clean end.
 - **One stream, the same pairs.** Only final tokens are passed on, as the
@@ -55,11 +59,20 @@ OpenAI's API has no latency setting. The user asked to switch.
   no timestamp and takes the end of the last final original token, the audio
   it translates. `SubtitleSpeechPairer` pairs them unchanged. Tokens marked
   `none` (already in the target language) are both original and subtitle.
-- **Errors.** Soniox `error_code`s are HTTP statuses: 401/403 refused key,
-  402 no credit, 429 busy, 400 at start the language, 408 lost connection,
-  others the provider. A socket lost mid-session or after the end of audio is
-  a lost connection; pairs on screen stay. Messages name the engine in use
-  ("Soniox refused the API key…").
+- **Errors.** By the error frame's stable `error_type`
+  (docs.soniox.com/stt/rt/error-handling), else its HTTP status:
+  `unauthenticated` / an expired temporary key -> refused key;
+  `permission_denied` -> the key may not use live translation; the balance and
+  budget types -> no credit; `limit_exceeded` / connection limit -> busy;
+  `model_not_available` -> not available for the key's project or region;
+  `request_timeout` / `service_unavailable` -> lost connection;
+  `invalid_request` at start whose message names a language -> unsupported
+  language; anything else -> the provider stopped. A socket lost mid-session
+  or after the end of audio is a lost connection; pairs on screen stay. Every
+  message names the engine in use ("The Soniox connection ended…").
+- **Costs.** The session is recorded as `soniox:<client_reference_id>`, the
+  reference sent in the config, so `SonioxUsagePrices` replaces the duration
+  estimate with the usage log's charge when it appears.
 - **Settings.** Keys & models -> Models -> Subtitles stays one ordinary row
   with a preselected model: "Soniox · stt-rt-v6" with a Soniox key,
   "OpenAI · gpt-realtime-translate" with only an OpenAI key. No engine menu.
@@ -103,6 +116,16 @@ pairer gave 21 correctly matched pairs (clause by clause, as Soniox finalizes
 at pauses), `finished` at the end, each sentence's translation 0.3-1.1 s
 after the sentence ended. Not checked: the installed app on real system
 audio; the user tests that on the installed build.
+
+## Builder review (queue #566)
+
+The builder's probes found four gaps on the first head, all fixed and tested
+in `SonioxRealtimeTranslateAdapterTests`: a cancelled start kept the socket
+open until the 10 s deadline; any non-error frame (a `pong`) counted as
+ready, so a refused key after it returned a session; every start 400 read as
+the language, including `model_not_available`; Costs recorded a random id, so
+the exact Soniox charge never replaced the estimate. The live probe was run
+again after the fix: 21 pairs, `finished` at the end.
 
 ## Rejected
 

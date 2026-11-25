@@ -85,9 +85,14 @@ extension TranslationIssue {
             let name = target.flatMap { AppLanguage.find(code: $0)?.englishName } ?? "this language"
             return Self(message: "\(provider) live translation does not support \(name). Choose another target language.")
         case .connectionLost:
-            return Self(message: "The translation connection ended. Check your network and start again.")
+            return Self(message: "The \(provider) connection ended. Check your network and start again.")
         case .provider:
             return Self(message: "\(provider) stopped translating. Start again.")
+        case .permissionDenied:
+            return Self(message: "This \(provider) key may not use live translation. Check its permissions or use another key in Keys & models.",
+                        feature: .subtitlesAudio)
+        case .modelUnavailable:
+            return Self(message: "\(provider) live translation is not available for this key's project or region. Check your \(provider) project.")
         }
     }
 }

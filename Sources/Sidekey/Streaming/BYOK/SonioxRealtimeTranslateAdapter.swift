@@ -36,9 +36,11 @@ struct SonioxRealtimeTranslateAdapter {
         self.makeTransport = transport
     }
 
-    /// Opens the session and waits for Soniox's first answer to the config,
-    /// so a refused key or an unsupported language fails here, before any
-    /// system audio is captured. `source` nil detects the spoken language.
+    /// Opens the session and waits for Soniox's first transcription response
+    /// to the config, so a refused key or an unsupported language fails here,
+    /// before any system audio is captured. `source` nil detects the spoken
+    /// language. Cancelling the calling task closes the socket at once and
+    /// throws `CancellationError`.
     func open(source: String?, target: String) async throws -> SpeechTranslationSession {
         let transport = makeTransport()
         transport.resume()
@@ -53,11 +55,14 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     private let continuation: AsyncStream<SpeechTranslationEvent>.Continuation
     let events: AsyncStream<SpeechTranslationEvent>
     var providerName: String { "Soniox" }
+    /// The `client_reference_id` sent in the config: Soniox's usage logs
+    /// carry it, so Costs can replace the estimate with the exact charge.
+    var usageReference: String? { clientReferenceID }
     private let lock = NSLock()
     private var receiveTask: Task<Void, Never>?
     private var ready: CheckedContinuation<Void, Error>?
     private var started = false
-    private var startFailure: SpeechTranslationFailure?
+    private var startFailure: Error?
     /// `endInput` sent the end of audio: only `finished` completes cleanly.
     private var closing = false
     private var clientClosed = false
@@ -95,12 +100,23 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     }
 
     func start(source: String?, target: String, deadline: Duration) async throws {
+        try await withTaskCancellationHandler {
+            try await open(source: source, target: target, deadline: deadline)
+        } onCancel: {
+            // Stop or a new session while opening: the socket closes now,
+            // not at the deadline, and no capture starts.
+            self.resolveStart(.failure(CancellationError()))
+        }
+    }
+
+    private func open(source: String?, target: String, deadline: Duration) async throws {
         startReceiveLoop()
         do {
             try await send(.text(Self.json(Self.config(source: source, target: target, reference: clientReferenceID))))
         } catch {
+            if Task.isCancelled { throw CancellationError() }
             let failure = failure(for: error)
-            close(with: failure)
+            resolveStart(.failure(failure))
             throw failure
         }
         let timer = Task { [weak self] in
@@ -112,7 +128,8 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             let resolved: Result<Void, Error>? = lock.withLock {
                 if started { return .success(()) }
-                if finished { return .failure(startFailure ?? SpeechTranslationFailure.connectionLost) }
+                if let startFailure { return .failure(startFailure) }
+                if finished { return .failure(SpeechTranslationFailure.connectionLost) }
                 ready = continuation
                 return nil
             }
@@ -120,18 +137,27 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         }
     }
 
+    /// Settles the opening once: ready, or failed (the socket closes). A
+    /// cancellation closes quietly.
     private func resolveStart(_ result: Result<Void, Error>) {
-        let waiter: CheckedContinuation<Void, Error>? = lock.withLock {
+        let (waiter, settled): (CheckedContinuation<Void, Error>?, Bool) = lock.withLock {
+            guard !started, startFailure == nil else { return (nil, false) }
             switch result {
             case .success: started = true
-            case .failure(let error):
-                if !started, startFailure == nil { startFailure = error as? SpeechTranslationFailure }
+            case .failure(let error): startFailure = error
             }
             defer { ready = nil }
-            return ready
+            return (ready, true)
         }
+        guard settled else { return }
         waiter?.resume(with: result)
-        if case .failure(let error) = result {
+        guard case .failure(let error) = result else { return }
+        if error is CancellationError {
+            lock.withLock { clientClosed = true }
+            receiveTask?.cancel()
+            finish(.closed)
+            transport.cancel(reason: "client closed")
+        } else {
             close(with: error as? SpeechTranslationFailure ?? .provider)
         }
     }
@@ -167,13 +193,26 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     private func handle(_ object: [String: Any]) -> Bool {
         let isStarted = lock.withLock { started }
         if let code = (object["error_code"] as? NSNumber)?.intValue {
-            let failure = Self.failure(code: code, starting: !isStarted)
-            os_log("soniox translate error session=%{public}@ code=%d", log: Self.log, type: .error,
-                   clientReferenceID, code)
+            let type = object["error_type"] as? String
+            let failure = Self.failure(code: code, type: type, message: object["error_message"] as? String,
+                                       starting: !isStarted)
+            // The stable error type is a documented identifier, never content.
+            os_log("soniox translate error session=%{public}@ code=%d type=%{public}@", log: Self.log, type: .error,
+                   clientReferenceID, code, Self.loggable(type))
             fail(failure)
             return true
         }
-        if !isStarted { resolveStart(.success(())) }
+        // Only a transcription response says the session is configured:
+        // control frames (`pong`, `reconnect`) carry a `type`, no `tokens`.
+        guard object["tokens"] is [Any], object["type"] == nil else { return false }
+        if !isStarted {
+            if (object["finished"] as? Bool) == true {
+                // Finished before it started: the open failed.
+                fail(.provider)
+                return true
+            }
+            resolveStart(.success(()))
+        }
         for token in object["tokens"] as? [[String: Any]] ?? [] {
             guard (token["is_final"] as? Bool) == true, let text = token["text"] as? String, !text.isEmpty,
                   text != "<end>", text != "<fin>" else { continue }
@@ -203,17 +242,39 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         return false
     }
 
-    /// Soniox error codes are HTTP statuses. During start a 400 is the
-    /// configuration, whose only variable part is the languages.
-    static func failure(code: Int, starting: Bool) -> SpeechTranslationFailure {
+    /// An error frame's failure, by its stable `error_type`
+    /// (https://docs.soniox.com/stt/rt/error-handling), else its HTTP status.
+    /// A language is named only when Soniox's request error says so.
+    static func failure(code: Int, type: String? = nil, message: String? = nil,
+                        starting: Bool) -> SpeechTranslationFailure {
+        let aboutLanguage = message.map { $0.range(of: "language", options: .caseInsensitive) != nil } ?? false
+        switch type {
+        case "unauthenticated", "temp_api_key_session_expired": return .refusedKey
+        case "permission_denied": return .permissionDenied
+        case "organization_balance_exhausted", "organization_monthly_budget_exhausted",
+             "project_monthly_budget_exhausted": return .noCredit
+        case "limit_exceeded", "max_concurrent_connections_reached": return .busy
+        case "model_not_available": return .modelUnavailable
+        case "request_timeout", "service_unavailable", "connection_replaced": return .connectionLost
+        case "invalid_request":
+            return starting && aboutLanguage ? .unsupportedLanguage : .provider
+        case .some: return .provider
+        case nil: break
+        }
         switch code {
-        case 401, 403: return .refusedKey
+        case 400 where starting && aboutLanguage: return .unsupportedLanguage
+        case 401: return .refusedKey
+        case 403: return .permissionDenied
         case 402: return .noCredit
         case 429: return .busy
-        case 400 where starting: return .unsupportedLanguage
-        case 408: return .connectionLost
+        case 408, 503: return .connectionLost
         default: return .provider
         }
+    }
+
+    private static func loggable(_ type: String?) -> String {
+        guard let type, type.count <= 64, type.allSatisfy({ $0.isLetter || $0 == "_" }) else { return "-" }
+        return type
     }
 
     /// A refused upgrade has no error message: only its HTTP status.

@@ -100,7 +100,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         session.pair.continuation.yield(.failed(.connectionLost))
         try await wait(model.phase == .failed)
         XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.issue?.message, "The OpenAI connection ended. Check your network and start again.")
         XCTAssertEqual(model.lines.count, 2, "finished pairs stay on screen")
         XCTAssertGreaterThanOrEqual(session.closeCount, 1)
     }
@@ -112,7 +112,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(model.phase == .listening)
         session.pair.continuation.finish()
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.issue?.message, "The OpenAI connection ended. Check your network and start again.")
     }
 
     func testARefusedKeyStopsBeforeAudioWithAKeyMessage() async throws {
@@ -241,7 +241,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(session.endInputCount == 1)
         session.pair.continuation.yield(.failed(.connectionLost))
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.issue?.message, "The OpenAI connection ended. Check your network and start again.")
         XCTAssertEqual(model.lines.map(\.source), ["Thank you all"])
         XCTAssertEqual(model.lines.map(\.translation), ["Спасибо всем и до"], "kept in whole words")
     }
@@ -257,7 +257,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         try await wait(session.endInputCount == 1)
         session.pair.continuation.finish()
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue?.message, "The translation connection ended. Check your network and start again.")
+        XCTAssertEqual(model.issue?.message, "The OpenAI connection ended. Check your network and start again.")
         XCTAssertEqual(model.lines.map(\.translation), ["Привет."])
     }
 

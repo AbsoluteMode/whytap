@@ -162,6 +162,15 @@ accepted the second version.
   The OpenCode install hint now points to Settings → Features → Agent instead
   of the removed Settings → Other.
 
+- The sidebar is the mockup's: Features, Keys & models, Permissions, Hotkeys,
+  General. Meeting notes opens from Meeting Notes ("Open notes") and Toolbox
+  from Hover (its tools' panes), with "‹ Meeting Notes" / "‹ Hover" above
+  them; Notifications, Backup and Integrations are rows of General → More,
+  with "‹ General". Their ids and `whytap://settings/…` links stay, and the
+  row they belong to stays selected. The mockup's "Island tools" row is not
+  added: Hover is that list now. Backup and Integrations stay two screens
+  (the mockup's "Backup & integrations" would merge them; not done here).
+
 ## Why
 
 - A newcomer thinks in features, not in providers, routes and permissions.

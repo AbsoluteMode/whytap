@@ -1412,8 +1412,13 @@ Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
 (.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
-present place. Every feature has its own screen now. The older tabs stay in the
-sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
+present place. Every feature has its own screen now. The sidebar
+(SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,
+Hotkeys and General. Meeting notes and Toolbox open from Meeting Notes and
+Hover; Notifications, Backup and Integrations from General's More group
+(SettingsOtherView.moreRows). Each keeps its identifier and link, its
+sidebarHome row stays selected, and SettingsBackBar above it leads back
+(SettingsWindowSelection.backLink). Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
 HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another

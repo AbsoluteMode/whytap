@@ -372,7 +372,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   endpoints ... requested parameters") to a request that carried a reasoning
   field, except a refusal of the provider's own web search, without reading
   the error text as in Smart (so an unrelated 400 is sent once more and fails
-  the same way: unbilled, no tool runs, never a second time), is repeated once with OpenAI low or without
+  the same way: unbilled, no tool runs, never a second time, and the request the search
+  fallback sends next is not repeated; the 404 wording must be in one
+  sentence of one message), is repeated once with OpenAI low or without
   the fields, and a model whose repeat is answered keeps that until relaunch
   (on OpenRouter per pinned endpoint or Auto); apart from this and the web
   search fallback below, no model request is retried. WHY:

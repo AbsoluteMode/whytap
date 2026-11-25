@@ -139,10 +139,16 @@ enum NativeAgentDiagnostics {
             parameter = Field(rawValue: error?["param"] as? String ?? "")
             // These are keyword-presence hints, not a diagnosis. Providers may
             // quote input; no fragment of their text is retained or echoed.
-            let text = [error?["message"] as? String, metadata?["raw"] as? String]
-                .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }.joined(separator: " ")
+            let texts = [error?["message"] as? String, metadata?["raw"] as? String]
+                .compactMap { $0 }.map { String($0.prefix(16_384)).lowercased() }
+            let text = texts.joined(separator: " ")
             mentions = Field.allCases.filter { text.contains($0.rawValue) }
-            noEndpointForParameters = text.contains("no endpoints") && text.contains("requested parameters")
+            // OpenRouter's "No endpoints found that can handle the requested
+            // parameters": both parts in one sentence of one message, never
+            // pieced together from the message and the upstream text.
+            noEndpointForParameters = texts.contains {
+                $0.range(of: #"no endpoints[^.!?\n]*requested parameters"#, options: .regularExpression) != nil
+            }
             rejectsWebSearch = Self.refusesWebSearch(error: error, category: category, searchToolIndex: searchToolIndex)
             self.truncated = truncated
             parsed = object != nil

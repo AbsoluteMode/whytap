@@ -88,7 +88,8 @@ the tables Smart uses; nothing is duplicated.
   is Tavily or the model has none.
 - **A refused request goes once more.** When the turn's first request
   carried a reasoning field and the provider answers HTTP 400 (on
-  OpenRouter also 404 "no endpoints ... requested parameters"), the same
+  OpenRouter also 404 "no endpoints ... requested parameters", both parts in
+  one sentence of the message or of the upstream text), the same
   request is sent again once with what a refusing model gets: on direct
   OpenAI `low`, which every reasoning model takes (the Agent's level since
   2026-11-23), when the level sent was lower; otherwise no reasoning field.
@@ -96,9 +97,12 @@ the tables Smart uses; nothing is duplicated.
   intended:** an unrelated 400 on the turn's first request (a bad tool
   schema, a too long prompt) is therefore also sent once more and then
   fails with the same error; it is never repeated twice and never in a
-  loop. A 400 is not billed and runs no tool, so the cost is one extra
+  loop. The budget is the turn's very first request, once: the request the
+  provider search fallback sends next (after a search refusal, or after an
+  OpenRouter Exa 403) gets no reasoning repeat, and after a repeat the rest
+  of the turn sends the fallback. A 400 is not billed and runs no tool, so the cost is one extra
   round trip on a request that fails anyway. Not repeated: a 400 after the
-  turn's first accepted exchange, a request without a reasoning field (or
+  turn's first request, a request without a reasoning field (or
   one already at the fallback), the provider's refusal of its own web
   search (it has its own fallback), and every other status (401, 404, 429,
   5xx). A repeat always changes what was sent. Only an accepted answer to
@@ -197,7 +201,16 @@ chose to stop reading the text (option A, as in Smart). Tests for it: a real
 refusal is repeated once and answered; an unrelated 400 is repeated exactly
 once and then fails with the same error, without a loop; a 400 after the
 turn's first answer is not repeated; a web search refusal goes to the search
-fallback, not this repeat. `NativeAgentLowEffortTests` updated
+fallback, not this repeat. After the builder's review of ticket 589 (stubbed
+probes on the real loop): the repeat had been gated on an accepted answer,
+so the search fallback's request could repeat again (search refusal, then
+an unrelated 400: three requests; unrelated 400, search refusal, unrelated
+400: four requests and two repeats, on all three routes; also after
+OpenRouter's Exa 403), and OpenRouter's 404 check joined the message and the
+upstream text, so "No endpoints found for model ..." plus an upstream
+"requested parameters" counted. Now only the turn's very first request may
+repeat, and the 404 wording must be in one sentence of one message; both
+builder fixtures are tests and fail on the previous head. `NativeAgentLowEffortTests` updated
 for the new levels. Not tested: the installed app, how much faster answers
 are, OpenRouter live.
 

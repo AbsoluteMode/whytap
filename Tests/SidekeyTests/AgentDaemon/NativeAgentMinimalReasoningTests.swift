@@ -479,4 +479,76 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(result.bodies.map(thinking), [nil, "between_tools", "between_tools"])
         XCTAssertEqual(result.bodies.map(effort), ["low", "low", "low"])
     }
+
+    /// Builder review, queue #589: the reasoning repeat is spent on the
+    /// turn's very first request, once, also when the provider's search
+    /// fallback sends the turn's next request. Search refusal → unrelated
+    /// 400: two requests, no reasoning repeat. Unrelated 400 → repeat refused
+    /// for search → unrelated 400: three requests, one reasoning repeat, and
+    /// the search-free request keeps the fallback. OpenRouter's Exa 403 →
+    /// 400: two requests.
+    func testTheReasoningRepeatIsSpentOncePerTurnAcrossTheSearchFallback() async throws {
+        let router = AgentRunOptions(model: "vendor/model", allowActions: false,
+                                     openRouterReasoning: .init(mandatory: false, supportedEfforts: ["low"]))
+        let routes: [(AgentRunOptions, (Int, [String: String], Data), (Int, [String: String], Data), (([String: Any]) -> String?))] = [
+            (anthropic("claude-haiku-5-5"),
+             json(["type": "error", "error": ["type": "invalid_request_error", "message": "Web search is disabled for this organization."]], status: 400),
+             json(["type": "error", "error": ["type": "invalid_request_error", "message": "prompt is too long: 250000 tokens"]], status: 400),
+             { self.thinking($0) }),
+            (openAI("gpt-5.5"),
+             json(["error": ["message": "Tool 'web_search' is not supported with this model.", "type": "invalid_request_error"]], status: 400),
+             json(["error": ["message": "Your input exceeds the context window of this model.", "type": "invalid_request_error",
+                             "code": "context_length_exceeded"]], status: 400),
+             { self.reasoning($0) }),
+            (router,
+             json(["error": ["message": "Tool type openrouter:web_search is not supported for this endpoint", "code": 400]], status: 400),
+             json(["error": ["message": "maximum context length exceeded", "code": 400,
+                             "metadata": ["error_type": "context_length_exceeded"]]], status: 400),
+             { (($0["reasoning"] as? [String: Any])?["enabled"] as? Bool).map { "enabled:\($0)" } }),
+        ]
+        for (options, searchRefusal, unrelated, setting) in routes {
+            let name = options.openCodeProvider.rawValue
+            let first = try await run("hi", options, [searchRefusal, unrelated, json(["never": true])])
+            XCTAssertEqual(first.store.status, .failed, name)
+            XCTAssertEqual(first.bodies.count, 2, "search refusal, then the unrelated 400 is not repeated: \(name)")
+            XCTAssertEqual(first.diagnostics.compactMap(\.effortRetry), [], name)
+
+            let second = try await run("hi", options, [unrelated, searchRefusal, unrelated, json(["never": true])])
+            XCTAssertEqual(second.store.status, .failed, name)
+            XCTAssertEqual(second.bodies.count, 3, "one reasoning repeat in the turn: \(name)")
+            XCTAssertEqual(second.diagnostics.filter { $0.effortRetry == true && $0.stage == .request }.count, 1, name)
+            XCTAssertNotNil(setting(second.bodies[0]), name)
+            XCTAssertEqual(second.diagnostics.filter { $0.stage == .request }.map(\.effortRetry), [nil, true, nil], name)
+            XCTAssertEqual(setting(second.bodies[2]), setting(second.bodies[1]), "the search-free request keeps the fallback: \(name)")
+        }
+        let exa = try await run("hi", router, [
+            (403, ["Content-Type": "application/json"], Data(#"{"error":{"message":"Forbidden","code":403}}"#.utf8)),
+            json(["error": ["message": "maximum context length exceeded", "code": 400]], status: 400),
+            json(["never": true]),
+        ])
+        XCTAssertEqual(exa.store.status, .failed)
+        XCTAssertEqual(exa.bodies.count, 2, "Exa 403 fallback, then no reasoning repeat")
+    }
+
+    /// Builder review, queue #589: OpenRouter's 404 counts only when one
+    /// message says no endpoint takes the requested parameters, in the
+    /// message or in the upstream text, never two fragments joined.
+    func testOpenRouter404NeedsTheNoEndpointRefusalInOneMessage() async throws {
+        let options = AgentRunOptions(model: "vendor/probe", allowActions: false,
+                                      openRouterReasoning: .init(mandatory: false, supportedEfforts: ["low"]))
+        let split = json(["error": ["message": "No endpoints found for model vendor/probe.", "code": 404,
+                                    "metadata": ["raw": "The requested parameters are in the request summary."]]], status: 404)
+        let splitParam = json(["error": ["message": "No endpoints found for model vendor/probe.", "code": 404, "param": "model",
+                                         "metadata": ["raw": "The requested parameters are in the request summary."]]], status: 404)
+        for response in [split, splitParam] {
+            let result = try await run("hi", options, [response, json(routerFinal("never"))])
+            XCTAssertEqual(result.store.status, .failed)
+            XCTAssertEqual(result.bodies.count, 1)
+        }
+        let upstream = json(["error": ["message": "Provider returned error", "code": 404,
+                                       "metadata": ["raw": "No endpoints found that can handle the requested parameters."]]], status: 404)
+        let routed = try await run("hi", options, [upstream, json(routerFinal("Hello."))])
+        XCTAssertEqual(routed.store.streamingText, "Hello.")
+        XCTAssertEqual(routed.bodies.count, 2)
+    }
 }

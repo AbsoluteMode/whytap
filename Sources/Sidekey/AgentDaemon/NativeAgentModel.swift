@@ -57,8 +57,10 @@ struct NativeAgentModel {
     /// Whether this turn sends the fields for a model that refused them; set
     /// at the turn's first request and by an accepted refusal repeat.
     private var reasoningRefused: Bool?
-    /// A response of this turn was accepted: later refusals are not repeated.
-    private var acceptedInTurn = false
+    /// A request of this turn was sent: only the turn's very first request
+    /// may repeat on a refusal, once, also when the provider search fallback
+    /// sends the turn's next request.
+    private var requestSentInTurn = false
 
     init(options: AgentRunOptions, key: String, system: String, history: [NativeAgentConversation.Pair], prompt: String,
          http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
@@ -111,12 +113,15 @@ struct NativeAgentModel {
                                       openRouter: options.openRouterReasoning, providerSearch: turnSearch, refused: refused)
         }
         let reasoning = reasoningFields(refused: turnRefused)
-        // Only the turn's first exchange may repeat: a thinking setting must
-        // not change after the model answered within the turn.
+        // Only the turn's very first request may repeat, once: a thinking
+        // setting must not change after the model answered within the turn,
+        // and the search fallback's request (or one after an earlier repeat)
+        // gets no second repeat.
         let fallback = reasoningFields(refused: true)
         // A repeat must change what was sent.
-        let mayRepeat = reasoning != nil && !turnRefused && !acceptedInTurn
+        let mayRepeat = reasoning != nil && !turnRefused && !requestSentInTurn
             && !NSDictionary(dictionary: reasoning?.fields ?? [:]).isEqual(to: fallback?.fields ?? [:])
+        requestSentInTurn = true
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
         // OpenRouter cap per request, so they get what is left of the turn.
@@ -192,7 +197,6 @@ struct NativeAgentModel {
         do {
             let result = try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: reasoning, repeatsOnRefusal: mayRepeat)
-            acceptedInTurn = true
             reasoningSearch = turnSearch
             reasoningRefused = turnRefused
             return result
@@ -201,12 +205,13 @@ struct NativeAgentModel {
             // once more with what a refusing model gets (OpenAI `low`, else
             // no field). Only an accepted answer to that repeat shows the
             // fields were the cause; the model then gets that until relaunch.
+            // The rest of this turn (a search fallback included) sends the
+            // fallback too, without a further repeat.
+            reasoningRefused = true
             let result = try await send(makeRequest(fallback?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: fallback, effortRetry: true)
             reasoningRefusals.record(refusalAPI, model: refusalKey)
-            reasoningRefused = true
             reasoningSearch = turnSearch
-            acceptedInTurn = true
             return result
         } catch {
             // A refused request that was not repeated after all (cancelled

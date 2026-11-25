@@ -1,5 +1,7 @@
 # Whytap Planner
 
+**Settings → Features → To-do** shows its shortcut and opens it in the island.
+
 Open **Search all tools → To-do** for a compact list inside hover.
 **Calendar** opens today inside Hover as an hour grid, with a visible **Connect** button (**Calendars** once connected). The published 2.2.26 build shows Calendar as **Soon**.
 Calendar shows the calendars of this Mac: allow access once, and every account

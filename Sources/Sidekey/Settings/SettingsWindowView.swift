@@ -88,7 +88,8 @@ struct SettingsWindowView: View {
                                              store: .shared, onAgentToggle: onAgentToggle)?.message
             },
             setMeetings: otherOnMeetingsToggle,
-            setGoogle: otherOnGoogleToggle
+            setGoogle: otherOnGoogleToggle,
+            openScreenshot: toolboxDeps.openScreenshot
         )
     }
 

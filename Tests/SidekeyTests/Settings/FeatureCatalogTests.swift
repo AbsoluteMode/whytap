@@ -38,8 +38,8 @@ final class FeatureCatalogTests: XCTestCase {
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word),
                        ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
-                        "Ready", "Not set up", "Not set up"])
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "1 ready · 1 needs setup")
+                        "Ready", "Ready", "Ready", "Not set up", "Not set up"])
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "3 ready · 1 needs setup")
     }
 
     func testShortcutWaitingForKeyboardControlIsNotCountedTwice() {
@@ -460,7 +460,7 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.all.map(\.feature), AppFeature.allCases)
         XCTAssertEqual(FeatureCatalog.all.map(\.name),
                        ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots",
-                        "Hover", "Notify", "Monitor"])
+                        "To-do", "Case", "Hover", "Notify", "Monitor"])
     }
 
     func testClipsAreTheOnesThatExist() {
@@ -473,12 +473,15 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)
     }
 
-    func testFeaturesWithoutAScreenPointAtTheirPresentPlace() {
-        XCTAssertEqual(FeatureCatalog.info(for: .drop).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .agent).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .meetings).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).place, .screen)
-        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).place, .tool(.translate))
-        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).place, .tool(.screenshot))
+    func testEveryFeatureHasItsOwnScreen() {
+        for info in FeatureCatalog.all { XCTAssertEqual(info.place, .screen, "\(info.feature)") }
+    }
+
+    func testToDoAndCaseNeedNothingAndAreReadyFromTheStart() {
+        for feature in [AppFeature.todo, .caseVault] {
+            XCTAssertTrue(FeatureCatalog.requirements(for: feature, snapshot: FeatureSetupSnapshot()).isEmpty)
+            XCTAssertEqual(FeatureCatalog.status(for: feature, snapshot: FeatureSetupSnapshot()), .ready(note: nil))
+        }
+        XCTAssertEqual(AppFeature.caseVault.rawValue, "case")
     }
 }

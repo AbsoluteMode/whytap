@@ -20,10 +20,10 @@ final class SettingsFeaturesTests: XCTestCase {
         let snapshot = try await fixture(.freshInstall).snapshot
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word), ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
-                        "Ready", "Not set up", "Not set up"])
+                        "Ready", "Ready", "Ready", "Not set up", "Not set up"])
         XCTAssertEqual(statuses[0].reason, "No speech-to-text model +2")
         XCTAssertEqual(statuses[0].missing.first?.action, .downloadOnDeviceModel(.dropFast))
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "1 ready · 1 needs setup")
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "3 ready · 1 needs setup")
     }
 
     func testIntelMacWithoutKeysIsAskedForAKey() async throws {
@@ -84,14 +84,17 @@ final class SettingsFeaturesTests: XCTestCase {
         XCTAssertEqual(WhytapLink.destination(for: HoverTool.settings), .settings(.tab(.features)))
     }
 
-    func testARowWithoutItsOwnScreenOpensItsPresentPlace() {
+    func testIslandToolRowsOpenTheirScreensAndTheScreensLeadToTheTools() {
         let selection = SettingsWindowSelection()
-        selection.open(.translateSubtitles)
+        for feature in [AppFeature.translateSubtitles, .screenshots, .todo, .caseVault] {
+            selection.open(feature)
+            XCTAssertEqual(selection.selectedTab, .features)
+            XCTAssertEqual(selection.shownFeature, feature)
+        }
+        // "Try Translate" on its screen opens the tool in Toolbox.
+        selection.focus(.translate)
         XCTAssertEqual(selection.selectedTab, .toolbox)
         XCTAssertEqual(selection.focusedTool, .translate)
-
-        selection.open(.screenshots)
-        XCTAssertEqual(selection.focusedTool, .screenshot)
     }
 
     func testSidebarFeaturesRowReturnsToTheList() {

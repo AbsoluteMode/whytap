@@ -142,12 +142,23 @@ struct FeatureScreenHeader: View {
 /// clip is made, a quiet row saying what it will show. Nothing plays by itself.
 // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
 struct FeatureVideoStrip: View {
-    let info: FeatureInfo
+    let clip: FeatureClip
     var shortcuts: [FeatureVideoShortcut] = []
     var bundle: Bundle = FeatureVideo.resourceBundle
     @Environment(\.isEnabled) private var isEnabled
     @State private var playing = false
     @FocusState private var focused: Bool
+
+    /// The feature's first clip.
+    init(info: FeatureInfo, shortcuts: [FeatureVideoShortcut] = [], bundle: Bundle = FeatureVideo.resourceBundle) {
+        self.init(clip: info.clips[0], shortcuts: shortcuts, bundle: bundle)
+    }
+
+    init(clip: FeatureClip, shortcuts: [FeatureVideoShortcut] = [], bundle: Bundle = FeatureVideo.resourceBundle) {
+        self.clip = clip
+        self.shortcuts = shortcuts
+        self.bundle = bundle
+    }
 
     /// The bundled clip, or nil while it is not made.
     static func url(for info: FeatureInfo, in bundle: Bundle = FeatureVideo.resourceBundle) -> URL? {
@@ -155,7 +166,7 @@ struct FeatureVideoStrip: View {
     }
 
     var body: some View {
-        let url = Self.url(for: info, in: bundle)
+        let url = clip.video?.url(in: bundle)
         let card = RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous)
         VStack(alignment: .leading, spacing: 10) {
             Group {
@@ -166,7 +177,7 @@ struct FeatureVideoStrip: View {
                     .buttonStyle(MacButtonInteractionStyle(outline: MacSettingsTheme.text, focused: focused,
                                                           cornerRadius: MacSettingsTheme.radiusCard))
                     .focused($focused)
-                    .accessibilityLabel(playing ? "Close the video" : "Watch how \(info.name) works")
+                    .accessibilityLabel(playing ? "Close the video" : "Watch how \(clip.name) works")
                 } else {
                     strip(available: false)
                         .accessibilityElement(children: .combine)
@@ -198,10 +209,10 @@ struct FeatureVideoStrip: View {
                     .foregroundStyle(available ? MacSettingsTheme.text : MacSettingsTheme.text3)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text("Watch how \(info.name) works")
+                Text("Watch how \(clip.name) works")
                     .font(.system(size: 13))
                     .foregroundStyle(available ? MacSettingsTheme.text : MacSettingsTheme.text2)
-                Text(info.clipCaption)
+                Text(clip.caption)
                     .font(.system(size: 11.5))
                     .foregroundStyle(MacSettingsTheme.text2)
                     .fixedSize(horizontal: false, vertical: true)
@@ -382,7 +393,9 @@ struct FeatureSwitchCard: View {
     static func subtitle(_ info: FeatureInfo, isOn: Bool) -> String {
         switch info.activation {
         case .alwaysOn: return "There is nothing to switch: it waits for its shortcut."
-        case .islandTools: return "Show or hide them in Toolbox; their shortcuts work either way."
+        case .islandTools(let tools):
+            return tools.count > 1 ? "Show or hide them in Toolbox; their shortcuts work either way."
+                : "Show or hide it in Toolbox; its shortcut works either way."
         case .userSwitch: return isOn ? "Turn it off if you don’t use it." : "Turn it on to use it."
         }
     }
@@ -466,7 +479,10 @@ struct FeatureScreenView<Settings: View>: View {
                                   openIslandTools: { context.selection.select(.toolbox) })
             }
             FeatureNeedsBanner(feature: feature, context: context)
-            FeatureVideoStrip(info: info, shortcuts: videoShortcuts)
+            // One strip per clip: Translate & Subtitles shows both tools.
+            ForEach(Array(info.clips.enumerated()), id: \.offset) { index, clip in
+                FeatureVideoStrip(clip: clip, shortcuts: index == 0 ? videoShortcuts : [])
+            }
             if !info.hotkeys.isEmpty {
                 FeatureShortcutsGroup(hotkeys: info.hotkeys, preferences: context.environment.hotkeys)
             }

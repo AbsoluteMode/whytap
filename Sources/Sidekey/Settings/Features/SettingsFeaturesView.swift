@@ -102,8 +102,68 @@ struct FeatureScreens: View {
             NotifyFeatureView(selection: context.selection, environment: context.environment)
         case .monitor:
             MonitorFeatureView(selection: context.selection, environment: context.environment)
-        default:
-            FeatureScreenView(feature: feature, context: context) { EmptyView() }
+        case .translateSubtitles:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Translate", subtitle: "Type or paste text and translate it, right in Settings.",
+                          button: "Try Translate") { context.selection.focus(.translate) },
+                    .init(title: "Subtitles", subtitle: "Start live subtitles for what your Mac is playing.",
+                          button: "Try Subtitles") { context.selection.focus(.subtitles) },
+                ])
+            }
+        case .screenshots:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Capture an area now", subtitle: "The screen freezes; drag over the area you want.",
+                          button: "Capture") { context.environment.openScreenshot() },
+                ])
+            }
+        case .todo:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Your tasks", subtitle: "Opens To-do in the island.",
+                          button: "Open To-do") { context.environment.openHoverPanel(.tasks) },
+                ])
+            }
+        case .caseVault:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Your keys", subtitle: "Add keys, group them by project and choose whether each command asks you first. Opens in the island.",
+                          button: "Open Case") { context.environment.openHoverPanel(.caseVault) },
+                ])
+            }
+        case .drop:
+            // Drawn by DropFeatureView; never reached.
+            EmptyView()
+        }
+    }
+}
+
+/// An island tool's screen: the buttons that open or start it.
+struct IslandToolActions: View {
+    struct Row: Identifiable {
+        let title: String
+        let subtitle: String
+        let button: String
+        let action: () -> Void
+        var id: String { title }
+    }
+
+    let rows: [Row]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MacGroupTitle(title: "Use it")
+            MacCard {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                    if index > 0 { MacRowSeparator() }
+                    MacRow(title: row.title, subtitle: row.subtitle) {
+                        MacButton(title: row.button, action: row.action)
+                            .fixedSize()
+                            .accessibilityLabel(row.button)
+                    }
+                }
+            }
         }
     }
 }

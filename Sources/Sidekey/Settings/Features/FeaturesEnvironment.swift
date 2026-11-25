@@ -40,6 +40,8 @@ struct FeaturesEnvironment {
     var monitor: MonitorStore
     var notifyRoot: URL
     var copyText: (String) -> Void
+    /// Starts Shot's capture, as its island tool does.
+    var openScreenshot: () -> Void
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
@@ -55,6 +57,7 @@ struct FeaturesEnvironment {
          setMeetings: @escaping (Bool) -> Void = { _ in },
          setGoogle: @escaping (Bool) -> Void = { _ in },
          agentSettings: AgentSettingsStore? = nil,
+         openScreenshot: @escaping () -> Void = {},
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil,
@@ -85,6 +88,7 @@ struct FeaturesEnvironment {
         self.hoverStore = hoverStore ?? .shared
         self.notifySupervisor = notifySupervisor ?? .shared
         self.meetingNotifications = meetingNotifications ?? .shared
+        self.openScreenshot = openScreenshot
         self.notificationSounds = notificationSounds ?? .shared
         self.monitor = monitor ?? FeaturesEnvironment.sharedMonitor
         self.notifyRoot = notifyRoot

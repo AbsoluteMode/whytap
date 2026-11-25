@@ -135,6 +135,15 @@ accepted the second version.
   the preferences left the changed field stale (a Google gesture Hold → Tap
   stayed Hold; builder review 540). An Agent turned on
   elsewhere clears the screen's earlier "why it did not turn on".
+- Every catalog feature now has a screen. To-do and Case join the catalog as
+  island tools (they need nothing, so they read Ready on a fresh Mac and the
+  list's summary counts them). Translate and Subtitles keep one shared screen,
+  as in the mockup: they share requirements, a window and a Toolbox pane.
+  Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
+- A screen can hold more than one clip (`FeatureInfo.moreClips`, one strip
+  each). Translate & Subtitles shows a Translate clip and a Subtitles clip;
+  the Subtitles slot waits for `FeatureVideo.subtitles`
+  (Resources/FeatureVideos/subtitles.mp4) and says "Video coming" until then.
 
 ## Why
 

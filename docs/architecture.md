@@ -1933,7 +1933,8 @@ the app tools. Case -> Connect writes this `whytap` entry and removes its older
 .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md A long-lived
 `whytap mcp` / `app mcp` / `app screen-mcp` / `case mcp` started before an
 update follows the new build in place: when the broker denies it as an
-untrusted helper and the helper file on disk is a different build that strictly
+untrusted helper and the helper file on disk is a different build (or the same
+build while this process lost its own file, as a byte-identical promotion does) that strictly
 validates (all architectures) against the designated requirement the helper
 recorded from itself at start (kernel cdhash vs. the file's), it copies that
 file into a private 0700 folder (Application Support/<bundle id>/helper-handover,

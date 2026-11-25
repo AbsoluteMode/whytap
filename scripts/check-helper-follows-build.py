@@ -113,6 +113,15 @@ def patch_uuid(data):
     raise AssertionError("no LC_UUID")
 
 
+def install_identical(helper):
+    """The same signed bytes again, the way a bundle swap leaves it: the running
+    file is moved away, an identical copy takes its place, the old one is deleted."""
+    parked = helper + ".parked"
+    os.rename(helper, parked)
+    shutil.copy2(parked, helper)
+    os.unlink(parked)
+
+
 def install(helper, keychain, signer="Whytap Selftest Signer", resumes=True, corrupt=False):
     staged = helper + ".new"
     data = bytearray(open(BUILT, "rb").read())
@@ -137,7 +146,7 @@ def install(helper, keychain, signer="Whytap Selftest Signer", resumes=True, cor
 
 class Broker:
     def __init__(self, helper):
-        self.helper, self.log, self.stop = helper, [], False
+        self.helper, self.log, self.stop, self.deny_all = helper, [], False, False
         os.makedirs(SUPPORT, exist_ok=True)
         self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.sock.bind(SOCKET)
@@ -156,7 +165,12 @@ class Broker:
         with conn:
             pid = int.from_bytes(conn.getsockopt(0, LOCAL_PEERPID, 4), "little")
             disk_valid = subprocess.run(["codesign", "-v", "--strict", self.helper], capture_output=True).returncode == 0
-            trusted = disk_valid and running_cdhash(pid) == file_cdhash(self.helper)
+            # Like the app's dynamic validity check: the peer's own executable
+            # file must still exist and match the code it runs.
+            own_path = executable_path(pid)
+            own_valid = own_path is not None and file_cdhash(own_path) == running_cdhash(pid)
+            trusted = (not self.deny_all and disk_valid and own_valid
+                       and running_cdhash(pid) == file_cdhash(self.helper))
             ppid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout or 0)
             if not trusted:
                 self.log.append(("denied", pid, ppid, None))
@@ -337,7 +351,32 @@ def main():
               "ad-hoc helper: never follows another build")
         client.close()
 
-        # 4. case mcp and app mcp follow; no broker means no exec loop.
+        # 4. The same build swapped in again (1760 -> 1761 shipped an identical
+        #    helper): the old process lost its file and must follow it too.
+        install(helper, keychain)
+        client = Client(helper, ["mcp"])
+        pid = client.proc.pid
+        client.handshake()
+        settle(client)
+        same = running_cdhash(pid)
+        install_identical(helper)
+        check(file_cdhash(helper) == same and executable_path(pid) is None,
+              "identical replacement: same cdhash, the process lost its executable file")
+        rid = client.call("whytap_get_state")
+        check(ok(client.reply(), rid, pid) and runs_private_copy(pid) and running_cdhash(pid) == same,
+              "identical replacement: the same process follows and answers from its private copy")
+        broker.deny_all = True
+        denied = broker.denied()
+        rid = client.call("whytap_get_state")
+        answer = client.reply()
+        broker.deny_all = False
+        check(answer["id"] == rid and answer["result"]["isError"] and broker.denied() - denied == 1
+              and runs_private_copy(pid), "intact image, same cdhash, denied anyway: no exec, the call is answered")
+        rid = client.call("whytap_get_state")
+        check(ok(client.reply(), rid, pid), "identical replacement: later calls are answered")
+        client.close()
+
+        # 5. case mcp and app mcp follow; no broker means no exec loop.
         install(helper, keychain)
         case = Client(helper, ["case", "mcp"])
         case.handshake()

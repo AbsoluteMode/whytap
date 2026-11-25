@@ -245,8 +245,15 @@ public final class SystemHelperBuildIdentity: HelperBuildIdentifying, @unchecked
               let code = Self.staticCode(url),
               Self.validateWhole(code, requirement: requirement) else { return nil }
         let hashes = Self.hashes(of: code, url: url, requirement: requirement)
-        guard !hashes.isEmpty, !hashes.contains(running),
-              let bytes = contents ?? (try? Data(contentsOf: url, options: .mappedIfSafe)) else { return nil }
+        guard !hashes.isEmpty else { return nil }
+        // The same build replaces this one only when this image lost its own
+        // file: an update that swaps in byte-identical code unlinks the file
+        // the process was started from, and the app's dynamic validity check
+        // then denies it although the cdhash matches (seen 1760 -> 1761).
+        // An intact image with the same cdhash is never re-executed (no loop).
+        // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+        if hashes.contains(running) && Self.runningCodeIntact() { return nil }
+        guard let bytes = contents ?? (try? Data(contentsOf: url, options: .mappedIfSafe)) else { return nil }
         return HelperReplacement(codeHashes: hashes,
                                  resumesSession: bytes.range(of: Data(MCPResumeState.environmentKey.utf8)) != nil)
     }
@@ -284,6 +291,16 @@ public final class SystemHelperBuildIdentity: HelperBuildIdentifying, @unchecked
         var hash = [UInt8](repeating: 0, count: 20) // CS_CDHASH_LEN
         let status = hash.withUnsafeMutableBytes { csops(getpid(), 5 /* CS_OPS_CDHASH */, $0.baseAddress, $0.count) }
         return status == 0 ? Data(hash) : nil
+    }
+
+    /// This process's executable path still resolves and its running code
+    /// still validates against that file, as the app's broker requires.
+    public static func runningCodeIntact() -> Bool {
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(getpid(), &path, UInt32(path.count)) > 0 else { return false }
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return false }
+        return SecCodeCheckValidity(code, [], nil) == errSecSuccess
     }
 
     private static func staticCode(_ url: URL) -> SecStaticCode? {
@@ -377,8 +394,17 @@ public enum HelperStaging {
     /// keeping the one it runs from.
     public static func sweep(root: URL, keeping current: String?) {
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: root.path) else { return }
-        let keep = current.map { URL(fileURLWithPath: $0).standardizedFileURL.lastPathComponent }
-        for name in names where name != keep {
+        var keep = Set([current].compactMap { $0.map { URL(fileURLWithPath: $0).standardizedFileURL.lastPathComponent } })
+        // Never the folder this process's executable is in, whatever started it.
+        var path = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        if proc_pidpath(getpid(), &path, UInt32(path.count)) > 0 {
+            let components = URL(fileURLWithPath: String(cString: path)).standardizedFileURL.pathComponents
+            let rootComponents = root.standardizedFileURL.pathComponents
+            if components.count > rootComponents.count, Array(components.prefix(rootComponents.count)) == rootComponents {
+                keep.insert(components[rootComponents.count])
+            }
+        }
+        for name in names where !keep.contains(name) {
             guard let pid = name.split(separator: "-").first.flatMap({ pid_t($0) }), pid > 0 else { continue }
             let ended = kill(pid, 0) != 0 && errno == ESRCH
             if ended || pid == getpid() { remove(root.appendingPathComponent(name).path, root: root) }

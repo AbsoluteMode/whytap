@@ -3,30 +3,34 @@ import XCTest
 
 @MainActor
 final class SettingsWindowTabTests: XCTestCase {
-    func test_api_and_models_is_the_first_and_default_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.first, .apiAndModels)
-        XCTAssertEqual(SettingsWindowTab.defaultAvailable, .apiAndModels)
-        XCTAssertEqual(SettingsWindowSelection().selectedTab, .apiAndModels)
+    func test_features_is_the_first_and_default_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.first, .features)
+        XCTAssertEqual(SettingsWindowTab.defaultAvailable, .features)
+        XCTAssertEqual(SettingsWindowSelection().selectedTab, .features)
     }
 
-    func test_hotkeys_is_the_second_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst().first, .hotkeys)
+    func test_api_and_models_follows_features() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst().first, .apiAndModels)
     }
 
-    func test_permissions_is_the_third_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(2).first, .permissions)
+    func test_hotkeys_is_the_third_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(2).first, .hotkeys)
     }
 
-    func test_notes_is_the_fourth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(3).first, .notes)
+    func test_permissions_is_the_fourth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(3).first, .permissions)
     }
 
-    func test_agent_mode_is_the_fifth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(4).first, .agentMode)
+    func test_notes_is_the_fifth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(4).first, .notes)
     }
 
-    func test_toolbox_is_the_sixth_settings_tab() {
-        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(5).first, .toolbox)
+    func test_agent_mode_is_the_sixth_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(5).first, .agentMode)
+    }
+
+    func test_toolbox_is_the_seventh_settings_tab() {
+        XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(6).first, .toolbox)
     }
 
     func test_every_tab_but_agents_is_in_the_sidebar() {
@@ -34,19 +38,22 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertFalse(SettingsWindowTab.agentMode.isAvailable)
     }
 
-    /// The Agents tab moved into Other; its link and setup prompt still work.
+    /// The Agents tab became the Agent's screen in Features; its link and
+    /// setup prompt open that screen.
     @MainActor
-    func test_agents_tab_opens_other() {
-        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .other)
+    func test_agents_tab_opens_the_agent_screen() {
+        XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .features)
         for tab in SettingsWindowTab.availableCases { XCTAssertEqual(tab.resolved, tab) }
         let selection = SettingsWindowSelection(selectedTab: .agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
         selection.select(.hotkeys)
         selection.select(.agentMode)
-        XCTAssertEqual(selection.selectedTab, .other)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
+        selection.select(.hotkeys)
         selection.setHighlight(.tab(.agentMode))
-        XCTAssertEqual(selection.selectedTab, .other)
-        XCTAssertEqual(selection.highlightedTarget, .tab(.agentMode))
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .agent)
     }
 
     func test_no_removed_settings_tabs() {
@@ -108,8 +115,12 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.last, .other)
     }
 
-    func test_other_tab_title_is_Other() {
-        XCTAssertEqual(SettingsWindowTab.other.title, "Other")
+    /// Other is gone as a name: what is left is General. The raw id stays
+    /// `other` so `whytap://settings/other` keeps working.
+    func test_other_tab_is_now_general_with_the_same_id() {
+        XCTAssertEqual(SettingsWindowTab.other.title, "General")
+        XCTAssertEqual(SettingsWindowTab.other.rawValue, "other")
+        XCTAssertFalse(SettingsWindowTab.availableCases.map(\.title).contains("Other"))
     }
 
     func test_other_tab_fallback_image_name() {

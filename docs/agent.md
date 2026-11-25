@@ -11,7 +11,8 @@ on your Mac, and inference runs at the provider you choose, with your key.
 2. Under **Models**, choose an **LLM** (and a **Speech** model for spoken
    requests). To give the Agent its own models, open **Advanced**: the
    **Agent** card holds both, Speech for your voice and Text for the answer.
-3. In **Settings → Other → Agent**, turn on **Agent**.
+3. In **Settings → Features → Agent**, turn on **Agent**. The same screen
+   shows what is still missing, with the button that adds it.
 
 Turning it on connects: it prepares the local workspace and checks that a key and a model are
 present; it does not prove that the provider accepts the key. Requests are
@@ -75,7 +76,7 @@ search is off for this model and that a Tavily key in API keys turns it on.
 
 ## Off by default; what it can do once on
 
-The Agent is off until you turn on **Agent** in **Settings → Other**. Turning
+The Agent is off until you turn it on in **Settings → Features → Agent**. Turning
 it on keeps **Allow file edits and commands** (in the same place) at its
 default, on, so from the first request the model you chose can use these
 tools:

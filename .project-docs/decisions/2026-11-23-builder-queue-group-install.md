@@ -14,7 +14,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-builder-prompt.md
     confirmed_at: 2026-11-23
-related: [2026-11-19-on-demand-build-queue-builder.md, 2026-10-20-meeting-aware-builder-refresh.md, 2026-11-23-builder-queue-cheap-fixes.md, ../processes/shared-app-development.md]
+related: [2026-11-19-on-demand-build-queue-builder.md, 2026-10-20-meeting-aware-builder-refresh.md, 2026-11-23-builder-queue-cheap-fixes.md, ../processes/shared-app-development.md, 2026-11-24-meeting-gate-whytap-activity.md]
 ---
 
 # Group installs, single merges

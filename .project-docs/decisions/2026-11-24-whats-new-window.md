@@ -66,10 +66,10 @@ first outside tester updated and did not learn what changed.
   newer build shows nothing again. The version is remembered when the
   decision is made, not when the window is closed, so the window never
   returns by itself.
-- **How it opens.** After an update the window comes forward without taking
-  the keyboard from the app the person is in (`orderFrontRegardless`, no
-  activation): an update can also apply on quit and the next launch may be a
-  login. From Settings it activates like any window the person asked for.
+- **How it opens.** Right after an update and from Settings alike, the
+  window activates Whytap and takes the keyboard, at the level Settings uses
+  (`configureHoverOverlayPolicy`, the island's overlay level) and on the
+  Space the person is in. Ordered front after Settings, it is above it.
 - **Settings.** The version in the sidebar footer is a button that opens the
   same list with the earlier releases under it. It is plain text when the
   build has no list. Nothing else in Settings changed (its redesign is a
@@ -147,5 +147,23 @@ versions, so an entry could pass and never open, or collide with another.
 Both now use one rule, tested on each side: a version is one to four
 components of one to six ASCII digits ("2.3" still equals "2.3.0"); the app
 ignores a list entry that is not such a version.
+
+## After the first install (REV 1)
+
+The maintainer checked build 1746 and found two problems: the window did not
+appear right after the update, and opened from Settings it lay under
+Settings. The first version opened the automatic window without focus at
+the normal level (so as not to take the keyboard from another app), and
+Settings stays at the overlay level above every normal window. His Mac
+remembered 2.2.27 after that launch, so the launch did open the window; it
+was not noticed in front of nothing and behind other windows. Both paths now
+activate, take the keyboard and use the Settings level. Rejected: keeping
+the quiet automatic window: the person asked to see the list right after the
+update, and a window nobody notices is the problem the tester reported.
+
+The rule stays once per display version. On a Mac where builds change
+inside one version (the maintainer's), the window opens again after
+`defaults write com.rootwise.sidekey sidekey.whatsNew.seenVersion.v1 2.2.26`
+and a relaunch, exactly as after an update from 2.2.26.
 
 2026-11-24 · ORCH-TASK 98

@@ -51,7 +51,8 @@ enum ConfigBackupRegistry {
             "agentCloseCombo", "agentCloseShortcut", "usefulLinksInsertCombo", "usefulLinksInsertShortcut",
             "usefulLinksOpenCombo", "usefulLinksOpenShortcut", "usefulLinksNextCombo", "usefulLinksNextShortcut",
             "usefulLinksPreviousCombo", "usefulLinksPreviousShortcut", "hoverSlot1Shortcut", "hoverSlot2Shortcut",
-            "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut"].map { "hotkeys." + $0 })
+            "hoverSlot3Shortcut", "hoverSlot4Shortcut", "hoverSlot5Shortcut", "meetingRecordShortcut",
+            "googleSearchTextShortcut", "googleSearchVoiceShortcut", "googleSearchVoiceGesture"].map { "hotkeys." + $0 })
         // The shelved Drop learning's Replace rules stay readable so older
         // archives and settings history restore; nothing applies them.
         // WHY: .project-docs/decisions/2026-11-23-drop-learning-shelved.md

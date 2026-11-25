@@ -1,7 +1,7 @@
 import XCTest
 @testable import Sidekey
 
-/// Settings -> Other -> Agent replaced the Agents tab.
+/// The Agent's switch and words, shared by its Features screen and onboarding.
 @MainActor
 final class AgentOtherSectionTests: XCTestCase {
     func test_switch_is_on_only_when_enabled_and_connected() {
@@ -49,18 +49,21 @@ final class AgentOtherSectionTests: XCTestCase {
         XCTAssertFalse(source.contains("http"), "feature videos must never be fetched")
     }
 
-    /// Every bundled clip has its ▶ on a Settings row.
-    func test_every_feature_video_has_a_button() throws {
+    /// Every bundled clip is shown somewhere in Settings: on its feature's
+    /// screen (the catalog's clip) or as a ▶ on a settings row.
+    func test_every_feature_video_has_a_place() throws {
         let root = try projectRoot().appendingPathComponent("Sources/Sidekey/Settings")
-        let sources = try ["SettingsOtherView.swift", "AgentOtherSection.swift"]
+        let sources = try ["SettingsOtherView.swift", "Features/DropFeatureView.swift"]
             .map { try String(contentsOf: root.appendingPathComponent($0), encoding: .utf8) }
             .joined()
+        let onScreens = Set(FeatureCatalog.all.flatMap(\.clips).compactMap(\.video))
         for video in FeatureVideo.allCases {
-            XCTAssertTrue(sources.contains("FeatureVideoButton(video: .\(video)"), "\(video) has no ▶ button")
+            XCTAssertTrue(onScreens.contains(video) || sources.contains("FeatureVideoButton(video: .\(video)"),
+                          "\(video) is shown nowhere")
         }
     }
 
-    func test_other_row_clips_name_the_users_own_shortcuts() {
+    func test_feature_clips_name_the_users_own_shortcuts() {
         var configuration = HotkeyConfiguration.defaults
         configuration.dropVoiceShortcut = .combo(.optionPeriod)
         configuration.googleSearchTextShortcut = .modifier(.rightOption)
@@ -99,11 +102,11 @@ final class AgentOtherSectionTests: XCTestCase {
 
     /// Google search opens a typed or spoken query (AgentController's Google
     /// composer, GoogleSearchController); it never reads the selection.
-    func test_google_row_does_not_promise_a_selection_search() throws {
-        let s = try String(contentsOf: projectRoot().appendingPathComponent("Sources/Sidekey/Settings/SettingsOtherView.swift"),
-                           encoding: .utf8)
-        XCTAssertTrue(s.contains("subtitle: \"Type or say a query; it opens in Google. Shortcut in Hotkeys.\""))
-        XCTAssertFalse(s.contains("selection on Google"))
+    func test_google_screen_does_not_promise_a_selection_search() {
+        let info = FeatureCatalog.info(for: .googleSearch)
+        for text in [info.line, info.about] {
+            XCTAssertFalse(text.lowercased().contains("selection"), text)
+        }
     }
 
     private func projectRoot() throws -> URL {

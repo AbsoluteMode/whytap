@@ -160,7 +160,7 @@ picks another provider for you. If you used **Local** before October 2026,
 choose a speech model again: the old local models were removed.
 
 For the optional Agent, add an OpenRouter, OpenAI or Anthropic key, choose the
-Agent model in **API & Models**, then turn on **Agent** in **Settings → Other**.
+Agent model in **API & Models**, then turn on **Agent** in **Settings → Features → Agent**.
 Read [Whytap Agent](agent.md) first: once on, it can edit files and run
 commands. Meeting recording also asks for **System Audio Recording**.
 

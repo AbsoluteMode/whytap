@@ -646,6 +646,34 @@ final class APIAndModelsViewModel: ObservableObject {
         recompute()
     }
 
+    /// A feature's screen chose the model on this Mac for `feature`: assigned
+    /// as the Assign window's Use does, without a probe and without offering
+    /// it for other features. Nothing changes when the model is not on this
+    /// Mac or the feature cannot run on it.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    @discardableResult
+    func useOnDeviceModel(for feature: AIFeature) -> Bool {
+        guard feature.isActive, onDevice.isReady(),
+              let model = ModelRegistry.recommended(for: feature, kind: .onDevice) else { return false }
+        keyStatuses.set(.valid, for: .thisMac, at: now())
+        routing.setRoute(FeatureRoute(account: .thisMac, model: model), for: feature)
+        checks.clearRefusal(feature: feature, model: model)
+        messages[feature] = nil
+        objectWillChange.send()
+        recompute()
+        return true
+    }
+
+    /// The on-device download a feature's screen started has finished: the
+    /// model is used only if the feature's route is still the one it was
+    /// when the download began. A model chosen meanwhile is kept.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    @discardableResult
+    func useOnDeviceModel(for feature: AIFeature, ifRouteIs startedFrom: FeatureRoute?) -> Bool {
+        guard routing.route(for: feature) == startedFrom else { return false }
+        return useOnDeviceModel(for: feature)
+    }
+
     // MARK: - Models
 
     func sections(for feature: AIFeature) -> [PickerSection] {

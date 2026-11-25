@@ -21,11 +21,21 @@ its own.
 
 ## Speed
 
-On **Anthropic** and **OpenAI** the Agent asks the model for low effort, so a
-simple question is answered without long thinking; tool use stays. Models that
-do not take the setting keep their own default, and OpenRouter models are
-unchanged. An answer can be up to 16,384 tokens; a longer one says it reached
-the model's output limit.
+The Agent asks its model for the least reasoning the model accepts, so a
+simple question is answered without long thinking; tool use stays. On
+**OpenAI** that is `none`, `minimal` or `low` depending on the model; on
+**Anthropic** low effort, with thinking turned off on Claude Haiku 5.5 and
+Claude Sonnet 5, and on Claude Sonnet 5.5 its lowest setting, `between_tools`
+(no thinking before answering), when the turn does not use Anthropic's web
+search; on **OpenRouter** reasoning off where the model makes it optional,
+else its lowest level. Models that do not take the setting keep their own
+default. If a provider refuses the setting on a turn's first request, the
+request is sent once more: on OpenAI at `low`, elsewhere without the setting.
+Whytap does not read the error text, so any HTTP 400 on that first request
+is sent once more, the same way; an error unrelated to the setting then
+fails again with the same message. It is repeated only once, only for the turn's first request
+(not after the search fallback), and a 400 is not billed and runs no tool. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
+a longer one says it reached the model's output limit.
 
 ## Answers and actions
 

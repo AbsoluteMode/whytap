@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentLowEffortTests.swift
     confirmed_at: 2026-11-23
-related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md, 2026-11-24-smart-minimal-reasoning.md]
+related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-24-agent-minimal-reasoning.md]
 ---
 
 # The built-in Agent asks for low effort
@@ -43,6 +43,12 @@ question was not provable: thinking tokens were not logged. The maintainer
 chose low effort for the Agent on Anthropic and OpenAI.
 
 ## Decision
+
+The level sent, "thinking itself is not set" and "OpenRouter is unchanged"
+below are superseded by
+[the least reasoning the model accepts](2026-11-24-agent-minimal-reasoning.md)
+on 2026-11-24. Plain-text answers, the output cap and wait, cut answers and
+the token counts in diagnostics stand.
 
 - **What is sent** (`NativeAgentEffort`), on every request of a turn:
   - direct Anthropic Messages: `output_config: {effort: "low"}`. The Models

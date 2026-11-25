@@ -49,6 +49,18 @@ struct NativeAgentModel {
     var diagnosticsSink: (NativeAgentDiagnostics.Event) -> Void
     private let diagnosticTurn = UUID()
     private var diagnosticRequest = 0
+    /// Models that refused the reasoning fields while this app runs.
+    var reasoningRefusals = NativeAgentEffort.refusals
+    /// Whether the turn's first accepted exchange had the provider's own web
+    /// search; until then each request follows the search it actually sends.
+    private var reasoningSearch: Bool?
+    /// Whether this turn sends the fields for a model that refused them; set
+    /// at the turn's first request and by an accepted refusal repeat.
+    private var reasoningRefused: Bool?
+    /// A request of this turn was sent: only the turn's very first request
+    /// may repeat on a refusal, once, also when the provider search fallback
+    /// sends the turn's next request.
+    private var requestSentInTurn = false
 
     init(options: AgentRunOptions, key: String, system: String, history: [NativeAgentConversation.Pair], prompt: String,
          http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
@@ -86,9 +98,30 @@ struct NativeAgentModel {
         let modelLimit = direct ? options.outputTokenLimit ?? options.openCodeModelSpec?.outputLimit
             : options.openCodeModelSpec?.outputLimit
         let outputLimit = min(outputCap, modelLimit ?? outputCap)
-        let effort = NativeAgentEffort.fields(provider: options.openCodeProvider, model: model,
-                                              catalogFlag: options.lowEffortSupport)
-        var request: URLRequest
+        // The least reasoning the model accepts. The setting follows the
+        // request that can start the turn (a first request whose search tool
+        // was refused goes again without it) and is kept after the turn's
+        // first accepted exchange: a thinking setting must not change inside
+        // a tool loop. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+        let turnSearch = reasoningSearch ?? builtInSearch
+        let refusalAPI = NativeAgentEffort.refusalAPI(options.openCodeProvider)
+        let refusalKey = NativeAgentEffort.refusalKey(model: model, provider: options.openCodeProvider,
+                                                      openRouterPin: options.openRouterProvider)
+        let turnRefused = reasoningRefused ?? reasoningRefusals.contains(refusalAPI, model: refusalKey)
+        func reasoningFields(refused: Bool) -> NativeAgentEffort.Request? {
+            NativeAgentEffort.request(provider: options.openCodeProvider, model: model, catalogFlag: options.lowEffortSupport,
+                                      openRouter: options.openRouterReasoning, providerSearch: turnSearch, refused: refused)
+        }
+        let reasoning = reasoningFields(refused: turnRefused)
+        // Only the turn's very first request may repeat, once: a thinking
+        // setting must not change after the model answered within the turn,
+        // and the search fallback's request (or one after an earlier repeat)
+        // gets no second repeat.
+        let fallback = reasoningFields(refused: true)
+        // A repeat must change what was sent.
+        let mayRepeat = reasoning != nil && !turnRefused && !requestSentInTurn
+            && !NSDictionary(dictionary: reasoning?.fields ?? [:]).isEqual(to: fallback?.fields ?? [:])
+        requestSentInTurn = true
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
         // OpenRouter cap per request, so they get what is left of the turn.
@@ -96,71 +129,111 @@ struct NativeAgentModel {
             - (options.openCodeProvider == .anthropic ? providerTurnBase : searchesUsed)
         let search = builtInSearch && !tools.isEmpty && remaining > 0
         let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining, model: model)
-        switch options.openCodeProvider {
-        case .openAI:
-            var body: [String: Any] = [
-                "model": model, "instructions": system, "input": messages, "store": false,
-                "include": ["reasoning.encrypted_content"] + (search ? ["web_search_call.action.sources"] : []),
-                "max_output_tokens": outputLimit,
-                "tools": tools.map { ["type": "function", "name": $0["name"]!, "description": $0["description"]!,
-                                       "parameters": $0["parameters"]!, "strict": $0["strict"] as? Bool ?? false] }
-                    + (search ? [searchTool] : [])
-            ]
-            // Caps built-in tool calls (searches) per response, not functions.
-            if search { body["max_tool_calls"] = remaining }
-            body.merge(effort ?? [:]) { $1 }
-            request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body,
-                                                  timeout: Self.directTimeout)
-        case .anthropic:
-            var body: [String: Any] = [
-                "model": model, "system": system, "messages": messages, "max_tokens": outputLimit,
-                "tools": tools.map { tool -> [String: Any] in
-                    var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]
-                    if let strict = tool["strict"] as? Bool { result["strict"] = strict }
-                    return result
-                } + (search ? [searchTool] : [])
-            ]
-            body.merge(effort ?? [:]) { $1 }
-            request = try NativeAgentHTTP.request(url: URL(string: "https://api.anthropic.com/v1/messages")!, key: key, body: body,
-                                                  timeout: Self.directTimeout)
-            request.setValue(nil, forHTTPHeaderField: "Authorization")
-            request.setValue(key, forHTTPHeaderField: "x-api-key")
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        case .openRouter:
-            var body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system]] + messages,
-                                      "max_tokens": outputLimit,
-                                      "tools": tools.map { ["type": "function", "function": $0] } + (search ? [searchTool] : [])]
-            if let provider = options.openRouterProvider {
-                body["provider"] = ["only": [provider], "allow_fallbacks": false]
-            }
-            request = try NativeAgentHTTP.request(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, key: key, body: body)
-            request.setValue("Whytap", forHTTPHeaderField: "X-Title")
-        }
-        if (tools.isEmpty || structuredCompletion), let data = request.httpBody,
-           var body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if tools.isEmpty { body.removeValue(forKey: "tools") }
-            if structuredCompletion {
-                // Current Claude models reject forced any/tool choice, even
-                // without explicit thinking. Strict schemas + local terminal
-                // validation also work with auto, directly and via OpenRouter.
-                // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
-                let claude = options.openCodeProvider == .anthropic
-                    || (options.openCodeProvider == .openRouter && model.lowercased().hasPrefix("anthropic/"))
-                body["tool_choice"] = options.openCodeProvider == .anthropic ? ["type": "auto"] as Any
-                    : (claude ? "auto" : "required") as Any
-                if options.openCodeProvider == .openRouter {
-                    var provider = body["provider"] as? [String: Any] ?? [:]
-                    provider["require_parameters"] = true
-                    body["provider"] = provider
+        func makeRequest(_ effort: [String: Any]?) throws -> URLRequest {
+            var request: URLRequest
+            switch options.openCodeProvider {
+            case .openAI:
+                var body: [String: Any] = [
+                    "model": model, "instructions": system, "input": messages, "store": false,
+                    "include": ["reasoning.encrypted_content"] + (search ? ["web_search_call.action.sources"] : []),
+                    "max_output_tokens": outputLimit,
+                    "tools": tools.map { ["type": "function", "name": $0["name"]!, "description": $0["description"]!,
+                                           "parameters": $0["parameters"]!, "strict": $0["strict"] as? Bool ?? false] }
+                        + (search ? [searchTool] : [])
+                ]
+                // Caps built-in tool calls (searches) per response, not functions.
+                if search { body["max_tool_calls"] = remaining }
+                body.merge(effort ?? [:]) { $1 }
+                request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body,
+                                                      timeout: Self.directTimeout)
+            case .anthropic:
+                var body: [String: Any] = [
+                    "model": model, "system": system, "messages": messages, "max_tokens": outputLimit,
+                    "tools": tools.map { tool -> [String: Any] in
+                        var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]
+                        if let strict = tool["strict"] as? Bool { result["strict"] = strict }
+                        return result
+                    } + (search ? [searchTool] : [])
+                ]
+                body.merge(effort ?? [:]) { $1 }
+                request = try NativeAgentHTTP.request(url: URL(string: "https://api.anthropic.com/v1/messages")!, key: key, body: body,
+                                                      timeout: Self.directTimeout)
+                request.setValue(nil, forHTTPHeaderField: "Authorization")
+                request.setValue(key, forHTTPHeaderField: "x-api-key")
+                request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+            case .openRouter:
+                var body: [String: Any] = ["model": model, "messages": [["role": "system", "content": system]] + messages,
+                                          "max_tokens": outputLimit,
+                                          "tools": tools.map { ["type": "function", "function": $0] } + (search ? [searchTool] : [])]
+                if let provider = options.openRouterProvider {
+                    body["provider"] = ["only": [provider], "allow_fallbacks": false]
                 }
+                body.merge(effort ?? [:]) { $1 }
+                request = try NativeAgentHTTP.request(url: URL(string: "https://openrouter.ai/api/v1/chat/completions")!, key: key, body: body)
+                request.setValue("Whytap", forHTTPHeaderField: "X-Title")
             }
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            if (tools.isEmpty || structuredCompletion), let data = request.httpBody,
+               var body = try JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if tools.isEmpty { body.removeValue(forKey: "tools") }
+                if structuredCompletion {
+                    // Current Claude models reject forced any/tool choice, even
+                    // without explicit thinking. Strict schemas + local terminal
+                    // validation also work with auto, directly and via OpenRouter.
+                    // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
+                    let claude = options.openCodeProvider == .anthropic
+                        || (options.openCodeProvider == .openRouter && model.lowercased().hasPrefix("anthropic/"))
+                    body["tool_choice"] = options.openCodeProvider == .anthropic ? ["type": "auto"] as Any
+                        : (claude ? "auto" : "required") as Any
+                    if options.openCodeProvider == .openRouter {
+                        var provider = body["provider"] as? [String: Any] ?? [:]
+                        provider["require_parameters"] = true
+                        body["provider"] = provider
+                    }
+                }
+                request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            }
+            return request
         }
+        do {
+            let result = try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
+                                        reasoning: reasoning, repeatsOnRefusal: mayRepeat)
+            reasoningSearch = turnSearch
+            reasoningRefused = turnRefused
+            return result
+        } catch where mayRepeat && NativeAgentEffort.refused(error, provider: options.openCodeProvider) && !Task.isCancelled {
+            // The provider refused a reasoning setting: the same request goes
+            // once more with what a refusing model gets (OpenAI `low`, else
+            // no field). Only an accepted answer to that repeat shows the
+            // fields were the cause; the model then gets that until relaunch.
+            // The rest of this turn (a search fallback included) sends the
+            // fallback too, without a further repeat.
+            reasoningRefused = true
+            let result = try await send(makeRequest(fallback?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
+                                        reasoning: fallback, effortRetry: true)
+            reasoningRefusals.record(refusalAPI, model: refusalKey)
+            reasoningSearch = turnSearch
+            return result
+        } catch {
+            // A refused request that was not repeated after all (cancelled
+            // in between) still reports its usage.
+            if mayRepeat, NativeAgentEffort.refused(error, provider: options.openCodeProvider) {
+                usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
+                                currency: .usd, amount: nil, basis: .unavailable))
+            }
+            throw error
+        }
+    }
+
+    /// One provider request with its diagnostics and usage.
+    private mutating func send(_ request: URLRequest, model: String, toolsCount: Int, outputLimit: Int,
+                               reasoning: NativeAgentEffort.Request?, repeatsOnRefusal: Bool = false,
+                               effortRetry: Bool = false) async throws -> (String, [NativeAgentToolCall]) {
         diagnosticRequest += 1
         let trace = NativeAgentDiagnostics.Trace(turn: diagnosticTurn, request: diagnosticRequest,
             provider: options.openCodeProvider,
             pinned: options.openCodeProvider == .openRouter && options.openRouterProvider != nil,
-            toolsCount: tools.count, outputLimit: outputLimit, effort: effort == nil ? nil : .low, sink: diagnosticsSink)
+            toolsCount: toolsCount, outputLimit: outputLimit, effort: reasoning?.effort, thinking: reasoning?.thinking,
+            effortRetry: effortRetry ? true : nil, sink: diagnosticsSink)
         let wireMessages = options.openCodeProvider == .openRouter ? [["role": "system", "content": system]] + messages : messages
         trace.emit(.request, bytes: request.httpBody?.count, shape: .init(messages: wireMessages))
         var responseStatus: Int?, responseBytes: Int?
@@ -173,8 +246,12 @@ struct NativeAgentModel {
                 let result = try await http.response(request)
                 response = result.object; responseStatus = result.status; responseBytes = result.bytes
             } catch {
-                usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
-                                            currency: .usd, amount: nil, basis: .unavailable))
+                // A refused request that goes again without its reasoning
+                // fields did not run the model: the repeat reports the usage.
+                if !(repeatsOnRefusal && NativeAgentEffort.refused(error, provider: options.openCodeProvider)) {
+                    usageSink(.init(context: .init(feature: .agent, account: options.openCodeProvider.account, model: model),
+                                    currency: .usd, amount: nil, basis: .unavailable))
+                }
                 throw error
             }
             let usage = response["usage"] as? [String: Any]

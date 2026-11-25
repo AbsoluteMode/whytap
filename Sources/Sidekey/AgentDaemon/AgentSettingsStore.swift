@@ -107,6 +107,8 @@ final class AgentSettingsStore: ObservableObject {
                                    preferTavilySearch: defaults.string(forKey: Keys.webSearchChoice) == AgentWebSearchChoice.tavily.rawValue,
                                    webSearchSupport: selectedWebSearchSupport,
                                    lowEffortSupport: selectedCatalogEntry?.supportsLowEffort,
+                                   openRouterReasoning: selectedOpenCodeProvider == .openRouter
+                                       ? selectedCatalogEntry?.reasoning : nil,
                                    outputTokenLimit: selectedCatalogEntry?.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil })
         case .opencode:
             return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,

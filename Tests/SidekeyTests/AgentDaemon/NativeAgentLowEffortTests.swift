@@ -7,6 +7,8 @@ import XCTest
 @MainActor
 final class NativeAgentLowEffortTests: XCTestCase {
     private func fixture() throws -> (URL, ProviderKeyStore, NativeAgentHTTP) {
+        // The Agent's in-memory refusal list is process-wide: start clean.
+        NativeAgentEffort.refusals.removeAll()
         StubURLProtocol.reset()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -98,7 +100,7 @@ final class NativeAgentLowEffortTests: XCTestCase {
         XCTAssertEqual(result.bodies.count, 1, "no repair request")
         let body = result.bodies[0]
         XCTAssertEqual(effort(body), "low")
-        XCTAssertNil(body["thinking"], "only effort is set; thinking stays the model's own")
+        XCTAssertNil(body["thinking"], "the turn has the provider's search: Sonnet 5.5 keeps its own thinking")
         XCTAssertEqual(body["max_tokens"] as? Int, 16_384)
         XCTAssertEqual(result.requests.first?.timeoutInterval, 180)
         XCTAssertNotNil(result.sessionID, "the answer is kept for a follow-up")
@@ -194,10 +196,11 @@ final class NativeAgentLowEffortTests: XCTestCase {
         XCTAssertEqual(toolResult?["tool_use_id"] as? String, "t1")
     }
 
-    /// OpenAI Responses: reasoning models get `reasoning.effort: low` with
-    /// the required finish_answer; chat and pre-reasoning models get nothing.
-    func testOpenAIReasoningModelsGetLowReasoningEffortOthersGetNone() async throws {
-        for (model, expected) in [("gpt-6.2-astra", "low"), ("gpt-5.5-2026-04-23", "low"), ("o4-mini", "low"),
+    /// OpenAI Responses: reasoning models get the lowest `reasoning.effort`
+    /// they take with the required finish_answer; chat and pre-reasoning
+    /// models get nothing.
+    func testOpenAIReasoningModelsGetTheirLowestReasoningEffortOthersGetNone() async throws {
+        for (model, expected) in [("gpt-6.2-astra", "low"), ("gpt-5.5-2026-04-23", "none"), ("o4-mini", "low"),
                                   ("gpt-4.1", nil), ("gpt-5-chat-latest", nil), ("gpt-5-pro", nil)] {
             let result = try await run("160 × 120", AgentRunOptions(model: model, allowActions: false, openCodeProvider: .openAI),
                                        [openAIFinal("19,200")])
@@ -214,7 +217,7 @@ final class NativeAgentLowEffortTests: XCTestCase {
     // MARK: Models without the parameter
 
     /// Anthropic: the Models API flag wins; without it, only families the
-    /// effort page lists get it. OpenRouter is unchanged.
+    /// effort page lists get it. OpenRouter without a catalog entry gets nothing.
     func testEffortIsSentOnlyToModelsThatTakeIt() async throws {
         let cases: [(AgentRunOptions, String?)] = [
             (anthropic("claude-haiku-5-5"), "low"),
@@ -350,10 +353,11 @@ final class NativeAgentLowEffortTests: XCTestCase {
         let options = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
                                          catalogs: ModelCatalogStore(fileURL: file)).options(for: .native)
         XCTAssertEqual(options.lowEffortSupport, false)
-        XCTAssertNil(NativeAgentEffort.fields(provider: .anthropic, model: "claude-sonnet-5-5", catalogFlag: options.lowEffortSupport))
+        XCTAssertNil(NativeAgentEffort.request(provider: .anthropic, model: "claude-sonnet-5-5", catalogFlag: options.lowEffortSupport,
+                                               providerSearch: true))
         let old = try JSONDecoder().decode(CatalogModel.self, from: Data(#"{"id":"claude-sonnet-5-5"}"#.utf8))
         XCTAssertNil(old.supportsLowEffort)
-        XCTAssertNotNil(NativeAgentEffort.fields(provider: .anthropic, model: old.id, catalogFlag: old.supportsLowEffort))
+        XCTAssertNotNil(NativeAgentEffort.request(provider: .anthropic, model: old.id, catalogFlag: old.supportsLowEffort))
     }
 
     func testUsageReadsEachProvidersTokenFields() {

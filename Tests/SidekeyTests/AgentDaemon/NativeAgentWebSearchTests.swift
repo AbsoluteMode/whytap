@@ -7,6 +7,8 @@ import XCTest
 @MainActor
 final class NativeAgentWebSearchTests: XCTestCase {
     func fixture() throws -> (URL, ProviderKeyStore, NativeAgentHTTP) {
+        // The Agent's in-memory refusal list is process-wide: start clean.
+        NativeAgentEffort.refusals.removeAll()
         StubURLProtocol.reset()
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

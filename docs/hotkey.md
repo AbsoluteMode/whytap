@@ -10,6 +10,11 @@ default). Remap any of them, or give any tool its own shortcut, in
 changed on **Settings → Features → Drop**, where a recorded key is saved at
 once (a key another action uses is refused and recording stays open).
 
+Use **Settings → Features** to change the Agent, Meeting Notes or Google search
+shortcuts on their own screens. Google text and voice keep the Right Option
+tap/hold split until remapped. A remapped voice shortcut uses its saved Hold or
+Toggle setting. The Help window shows the saved shortcuts and gestures.
+
 | Action | Default |
 |---|---|
 | Dictate into the focused field | hold <kbd>Space</kbd> |

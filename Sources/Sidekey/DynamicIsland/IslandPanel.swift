@@ -1020,6 +1020,7 @@ final class IslandPanel: NSPanel {
             refreshMouseEventRouting()
             return
         case .keyDown where event.keyCode == 53:
+            hoverHitBridge.cancelReorder()
             hoverHitBridge.cancelPress()
         default:
             break

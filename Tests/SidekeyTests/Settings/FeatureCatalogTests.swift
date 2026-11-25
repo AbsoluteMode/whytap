@@ -133,13 +133,31 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.status(for: .drop, snapshot: snapshot).reason, "Shortcut isn't heard")
     }
 
-    func testSystemAudioIsNeverShownAsAllowedOrMissing() {
+    func testSystemAudioIsAskedLaterUntilACaptureHearsSoundAndNeverMissing() {
         var snapshot = readyDrop()
         snapshot.meetingsOn = true
         snapshot.models[.meetings] = .ok
         snapshot.models[.meetingNotes] = .ok
         let audio = FeatureCatalog.checks(for: .meetings, snapshot: snapshot).last
         XCTAssertEqual(audio?.state, .askedLater(note: "macOS asks at the first recording"))
+        XCTAssertEqual(FeatureCatalog.status(for: .meetings, snapshot: snapshot), .ready(note: nil))
+    }
+
+    /// Subtitles or a meeting heard the Mac's sound: the grant exists, and
+    /// the row reads Allowed like every other permission, on both screens
+    /// that list it (task 110).
+    func testSystemAudioReadsAllowedOnceACaptureHeardSound() {
+        var snapshot = readyDrop()
+        snapshot.systemAudioHeard = true
+        snapshot.meetingsOn = true
+        snapshot.models[.meetings] = .ok
+        snapshot.models[.meetingNotes] = .ok
+        for feature in [AppFeature.meetings, .translateSubtitles] {
+            let audio = FeatureCatalog.checks(for: feature, snapshot: snapshot)
+                .first { $0.requirement.kind == .permission(.systemAudio) }
+            XCTAssertEqual(audio?.state, .met, "\(feature)")
+            XCTAssertEqual(audio?.reason, nil)
+        }
         XCTAssertEqual(FeatureCatalog.status(for: .meetings, snapshot: snapshot), .ready(note: nil))
     }
 
@@ -467,6 +485,7 @@ final class FeatureCatalogTests: XCTestCase {
         // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
         XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
         XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
+        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).clips.map(\.video), [.translate, .subtitles])
         XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)

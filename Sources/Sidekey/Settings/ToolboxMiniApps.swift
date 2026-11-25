@@ -54,7 +54,7 @@ struct ToolboxRecordingPane: View {
                 Text(Duration.seconds(state.meetingRecordingDuration).formatted(.time(pattern: .minuteSecond)))
                     .font(.system(.title2, design: .monospaced))
             }
-            Text("Record your microphone and system audio. Processing uses your Meeting routes in API & Models.")
+            Text("Record your microphone and system audio. Processing uses your Meeting routes in Keys & models.")
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button(state.meetingRecordingActive ? "Stop recording" : "Start recording", action: toggle)

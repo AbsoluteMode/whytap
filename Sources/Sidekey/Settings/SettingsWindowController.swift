@@ -194,9 +194,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .codex:
             return "Install Codex, run `codex login`, then press Connect again. See developers.openai.com/codex."
         case .native:
-            return "Whytap Agent is included in the app. Choose a model in API & Models."
+            return "Whytap Agent is included in the app. Choose a model in Keys & models."
         case .opencode:
-            return "Install OpenCode, then turn on Agent in Settings → Other."
+            return "Install OpenCode, then turn on Agent in Settings → Features → Agent."
         }
     }
 
@@ -207,9 +207,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         case .codex:
             return "Open a terminal, run `codex login`, sign in, then press Connect again."
         case .native:
-            return "Add the selected provider’s key in Settings → API & Models, then connect."
+            return "Add the selected provider’s key in Settings → Keys & models, then connect."
         case .opencode:
-            return "Add your OpenRouter key in Settings → API & Models, then press Connect."
+            return "Add your OpenRouter key in Settings → Keys & models, then press Connect."
         }
     }
 

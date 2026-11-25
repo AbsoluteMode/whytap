@@ -22,7 +22,7 @@ struct FeatureScreenContext {
         switch action {
         case .downloadOnDeviceModel(let feature):
             // The download takes minutes; a model picked meanwhile (here or
-            // in API & Models) is the newer choice and stays.
+            // in Keys & models) is the newer choice and stays.
             let startedFrom = models.currentRoute(for: feature)
             let models = models
             let onDevice = environment.onDevice
@@ -121,14 +121,17 @@ struct FeatureScreenHeader: View {
             .focused($backFocused)
             .padding(.leading, -6)
             .accessibilityLabel("Back to Features")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(info.name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text(info.kind)
-                    .font(.system(size: 13))
-                    .foregroundStyle(MacSettingsTheme.text2)
+            HStack(alignment: .center, spacing: 8) {
+                FeatureIcon(feature: info.feature, size: .header)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(info.name)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(MacSettingsTheme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(info.kind)
+                        .font(.system(size: 13))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                }
             }
             Text(about)
                 .font(.system(size: 13))
@@ -147,6 +150,7 @@ struct FeatureVideoStrip: View {
     var bundle: Bundle = FeatureVideo.resourceBundle
     @Environment(\.isEnabled) private var isEnabled
     @State private var playing = false
+    @State private var poster: NSImage?
     @FocusState private var focused: Bool
 
     /// The feature's first clip.
@@ -196,18 +200,57 @@ struct FeatureVideoStrip: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .task(id: url) {
+            guard let url, let video = clip.video else { poster = nil; return }
+            poster = FeatureVideoPoster.cached(url)
+            if poster == nil {
+                let image = await FeatureVideoPoster.load(video, url: url)
+                if !Task.isCancelled { poster = image }
+            }
+        }
     }
 
-    private func strip(available: Bool) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+    /// The clip's frame with a play mark, or a quiet tile until it is read
+    /// (and for a clip not made yet).
+    // WHY: .project-docs/decisions/2026-11-25-feature-clip-posters.md
+    private func thumbnail(available: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let image = available ? (poster ?? clip.video?.url(in: bundle).flatMap(FeatureVideoPoster.cached)) : nil
+        return ZStack {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: Self.posterSize.width, height: Self.posterSize.height)
+                    .clipShape(shape)
+                    .overlay { shape.strokeBorder(MacSettingsTheme.sep, lineWidth: 1) }
+                Circle()
+                    .fill(.black.opacity(0.55))
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Image(systemName: playing ? "stop.fill" : "play.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: playing ? 0 : 1)
+                    }
+            } else {
+                shape
                     .fill(MacSettingsTheme.hover)
-                    .frame(width: 54, height: 34)
+                    .frame(width: Self.posterSize.width, height: Self.posterSize.height)
                 Image(systemName: available ? "play.fill" : "film")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(available ? MacSettingsTheme.text : MacSettingsTheme.text3)
             }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// 16:9, like the clips.
+    static let posterSize = CGSize(width: 96, height: 54)
+
+    private func strip(available: Bool) -> some View {
+        HStack(spacing: 12) {
+            thumbnail(available: available)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Watch how \(clip.name) works")
                     .font(.system(size: 13))
@@ -292,7 +335,7 @@ private struct OwnedFeatureShortcutRow: View {
 }
 
 /// "What it needs": every requirement with its state or its action, and the
-/// model dropdown of API & Models in place.
+/// model dropdown of Keys & models in place.
 @MainActor
 struct FeatureNeedsGroup: View {
     let feature: AppFeature
@@ -330,7 +373,7 @@ struct FeatureNeedsGroup: View {
         }
     }
 
-    /// Picking a model here is the same choice as picking it in API & Models.
+    /// Picking a model here is the same choice as picking it in Keys & models.
     @ViewBuilder
     private func modelMenu(for check: FeatureCheck) -> some View {
         if case .model(let aiFeature) = check.requirement.kind,

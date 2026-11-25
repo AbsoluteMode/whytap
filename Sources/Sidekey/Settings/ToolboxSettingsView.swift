@@ -415,7 +415,7 @@ struct ToolboxSettingsView: View {
             case .quit:
                 actionPane(tool, title: "Quit Whytap", action: deps.quitApplication)
             case .settings:
-                actionPane(tool, title: "Open API & Models") { selection.select(.apiAndModels) }
+                actionPane(tool, title: "Open Keys & models") { selection.select(.apiAndModels) }
             }
         }
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.16), value: tool)

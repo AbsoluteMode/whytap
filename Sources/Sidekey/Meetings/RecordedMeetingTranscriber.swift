@@ -278,11 +278,11 @@ struct RecordedMeetingTranscriber: MeetingRecordedTranscribing {
         let reason: String
         switch (refusal, status) {
         case (.missingPermissions?, _):
-            reason = "This \(provider) key has no Speech to Text access. Check it in Settings > API & Models."
+            reason = "This \(provider) key has no Speech to Text access. Check it in Settings > Keys & models."
         case (.quotaExceeded?, _), (_, 402):
             reason = "\(provider) is out of credit."
         case (.invalidKey?, _), (_, 401), (_, 403):
-            reason = "\(provider) refused the key. Check it in Settings > API & Models."
+            reason = "\(provider) refused the key. Check it in Settings > Keys & models."
         case (_, 429):
             reason = "\(provider) is busy or its limit was reached."
         case (_, let code) where code >= 500:

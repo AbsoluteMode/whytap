@@ -1,7 +1,7 @@
 import Foundation
 
 /// How a feature uses a model. Shown as a small caption next to the feature in
-/// API & Models, and narrows the model list to what fits.
+/// Keys & models, and narrows the model list to what fits.
 enum AIFeatureMode: String, Codable, Sendable {
     case realtime
     case recorded
@@ -23,7 +23,7 @@ enum AIFeatureMode: String, Codable, Sendable {
 /// Every place the app calls an AI model. Each feature has its own route
 /// (provider account + model) in `AIRoutingStore`, stored under the raw value,
 /// so raw values must not change. Declaration order is the row order in
-/// API & Models.
+/// Keys & models.
 enum AIFeature: String, CaseIterable, Codable, Sendable {
     case dropFast
     case dropSmart

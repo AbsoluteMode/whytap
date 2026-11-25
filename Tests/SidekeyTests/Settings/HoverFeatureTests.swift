@@ -4,10 +4,11 @@ import UniformTypeIdentifiers
 import XCTest
 @testable import Sidekey
 
-/// Settings -> Features -> Hover, as a person uses it: open the list, hold a
-/// tool and drag it to another place, switch off a tool they don't need and
-/// back on, and keep its shortcut. Every change lands in the one layout the
-/// island observes, and survives a restart.
+/// Settings -> Features -> Hover, as a person uses it: open the list in the
+/// island's order, switch off a tool they don't need and back on, move one
+/// without a mouse, and keep its shortcut. Every change lands in the one
+/// layout the island observes, and survives a restart. Dragging tools happens
+/// in the island itself (`IslandHoverReorderTests`).
 @MainActor
 final class HoverFeatureTests: XCTestCase {
     private func fixture(_ state: FeaturesFixture.State = .usual) async throws -> FeaturesFixture {
@@ -22,13 +23,6 @@ final class HoverFeatureTests: XCTestCase {
     }
 
     // MARK: - Opening
-
-    func testOnlyAnInternalToolProviderOffersTheReorderType() {
-        let type = HoverToolDropDelegate.contentType.identifier
-        XCTAssertTrue(HoverToolDropDelegate.provider(for: .monitor).hasItemConformingToTypeIdentifier(type))
-        XCTAssertFalse(NSItemProvider(object: "external text" as NSString).hasItemConformingToTypeIdentifier(type))
-        XCTAssertFalse(HoverToolDropDelegate.contentType.conforms(to: .text))
-    }
 
     func testHoverRowOpensItsOwnScreenAndIsReadyOnAFreshMac() async throws {
         let fixture = try await fixture(.freshInstall)
@@ -87,105 +81,6 @@ final class HoverFeatureTests: XCTestCase {
         HoverToolLayout(slots: fixture.hoverStore.slots).set(.notes, on: false, in: fixture.hoverStore)
         XCTAssertEqual(fixture.hotkeys.toolShortcuts[.notes], shortcut,
                        "Search and the shortcut still reach a tool that is not in the island")
-    }
-
-    // MARK: - Drag
-
-    func testHoldingAToolAndDraggingItUpMovesItLiveAndTheDropKeepsIt() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.monitor)
-        drag.enter(.tool(.notes))
-        XCTAssertEqual(fixture.hoverStore.slots, [.inputLang, .monitor, .notes, .meetingRecord, .hotkeys, .settings],
-                       "The tool takes the row's place while it is still held")
-        drag.enter(.tool(.inputLang))
-        XCTAssertEqual(fixture.hoverStore.slots.first, .monitor)
-        XCTAssertTrue(drag.drop(on: .tool(.inputLang)))
-        XCTAssertNil(drag.dragging)
-        XCTAssertEqual(fixture.hoverStore.slots, [.monitor, .inputLang, .notes, .meetingRecord, .hotkeys, .settings])
-        XCTAssertEqual(restored(fixture), fixture.hoverStore.slots)
-    }
-
-    func testDraggingDownTakesThePlaceOfTheRowItIsOver() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.inputLang)
-        drag.enter(.tool(.meetingRecord))
-        XCTAssertTrue(drag.drop(on: .tool(.meetingRecord)))
-        XCTAssertEqual(fixture.hoverStore.slots, [.notes, .meetingRecord, .inputLang, .hotkeys, .monitor, .settings])
-    }
-
-    /// After a live move the row the tool passed slides under the pointer.
-    /// Entering it again must not swap the two back and forth.
-    func testARowSlidingUnderThePointerDoesNotFlipTheToolBack() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.notes)
-        drag.enter(.tool(.inputLang))
-        let moved = fixture.hoverStore.slots
-        XCTAssertEqual(moved.first, .notes)
-        drag.enter(.tool(.inputLang))
-        drag.enter(.tool(.notes))
-        XCTAssertEqual(fixture.hoverStore.slots, moved)
-        XCTAssertTrue(drag.drop(on: .tool(.inputLang)))
-        XCTAssertEqual(fixture.hoverStore.slots, moved, "The drop keeps what the person saw")
-    }
-
-    func testDraggingAToolThatIsOffIntoTheIslandPutsItWhereItIsDropped() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.vocab)
-        drag.enter(.tool(.inputLang))
-        XCTAssertFalse(fixture.hoverStore.slots.contains(.vocab), "Passing over rows does not switch it on yet")
-        XCTAssertTrue(drag.drop(on: .tool(.notes)))
-        XCTAssertEqual(fixture.hoverStore.slots, [.inputLang, .vocab, .notes, .meetingRecord, .hotkeys, .monitor, .settings])
-    }
-
-    func testDroppingOnSettingsPutsTheToolLastBeforeSettings() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.caseVault)
-        XCTAssertTrue(drag.drop(on: .end))
-        XCTAssertEqual(fixture.hoverStore.slots.suffix(2), [.caseVault, .settings])
-
-        drag.begin(.inputLang)
-        drag.enter(.end)
-        XCTAssertTrue(drag.drop(on: .end))
-        XCTAssertEqual(fixture.hoverStore.slots.suffix(2), [.inputLang, .settings])
-    }
-
-    func testDroppingAToolOnMoreToolsTakesItOutOfTheIsland() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.hotkeys)
-        XCTAssertTrue(drag.drop(on: .off))
-        XCTAssertFalse(fixture.hoverStore.slots.contains(.hotkeys))
-
-        drag.begin(.vocab)
-        XCTAssertFalse(drag.drop(on: .off), "A tool that is already off has nowhere to go")
-    }
-
-    func testSettingsCannotBeDraggedAndADropWithoutADragDoesNothing() async throws {
-        let fixture = try await fixture()
-        let before = fixture.hoverStore.slots
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.settings)
-        XCTAssertNil(drag.dragging)
-        drag.enter(.tool(.inputLang))
-        XCTAssertFalse(drag.drop(on: .tool(.inputLang)))
-        XCTAssertFalse(drag.drop(on: .off))
-        XCTAssertEqual(fixture.hoverStore.slots, before)
-    }
-
-    func testLeavingTheScreenMidDragForgetsTheDrag() async throws {
-        let fixture = try await fixture()
-        let drag = HoverToolDragModel(store: fixture.hoverStore)
-        drag.begin(.notes)
-        drag.end()
-        let before = fixture.hoverStore.slots
-        drag.enter(.tool(.inputLang))
-        XCTAssertFalse(drag.drop(on: .off))
-        XCTAssertEqual(fixture.hoverStore.slots, before)
     }
 
     // MARK: - Keyboard and VoiceOver

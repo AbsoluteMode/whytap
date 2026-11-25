@@ -1,7 +1,7 @@
 import XCTest
 @testable import Sidekey
 
-/// The feature registry and the account identity types behind API & Models.
+/// The feature registry and the account identity types behind Keys & models.
 /// Feature raw values and account storage IDs are persisted (route keys and
 /// values in `AIRoutingStore`), so these tests pin the exact strings.
 final class AIFeatureTests: XCTestCase {

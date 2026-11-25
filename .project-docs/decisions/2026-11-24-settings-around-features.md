@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/DropFeatureTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md, 2026-11-25-settings-features-refresh.md]
 ---
 
 ## Context
@@ -141,9 +141,35 @@ accepted the second version.
   as in the mockup: they share requirements, a window and a Toolbox pane.
   Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
 - A screen can hold more than one clip (`FeatureInfo.moreClips`, one strip
-  each). Translate & Subtitles shows a Translate clip and a Subtitles clip;
-  the Subtitles slot waits for `FeatureVideo.subtitles`
-  (Resources/FeatureVideos/subtitles.mp4) and says "Video coming" until then.
+  each). Translate & Subtitles shows a Translate clip and a Subtitles clip
+  (`FeatureVideo.subtitles`, Resources/FeatureVideos/subtitles.mp4, bundled
+  2026-11-25).
+- Other is taken apart. Its Drop, Meeting Notes, Google search and Agent rows
+  live on their feature screens; what belongs to no feature (auto-hide, which
+  display, screenshot protection) stays under the same raw id `other`, now
+  titled **General**, so `whytap://settings/other` and the landing's catalog
+  parser keep working (the parser reads ids, not titles; the title change
+  needs a catalog refresh there).
+- API & Models keeps its name for now. The mockup calls it "Keys & models",
+  but about fifty messages and eleven documents say "API & Models", some in
+  files other sessions own (the window controller, the main menu); a rename
+  is its own change, decided by Maxim.
+
+- API & Models is called "Keys & models" (approved mockup): in the sidebar,
+  in every message that sends the reader there and in the current documents.
+  The raw tab id `apiAndModels`, `whytap://settings/apiAndModels`, type and
+  file names stay. Dated decisions and old plans keep the name they had.
+  The OpenCode install hint now points to Settings → Features → Agent instead
+  of the removed Settings → Other.
+
+- The sidebar is the mockup's: Features, Keys & models, Permissions, Hotkeys,
+  General. Meeting notes opens from Meeting Notes ("Open notes") and Toolbox
+  from Hover (its tools' panes), with "‹ Meeting Notes" / "‹ Hover" above
+  them; Notifications, Backup and Integrations are rows of General → More,
+  with "‹ General". Their ids and `whytap://settings/…` links stay, and the
+  row they belong to stays selected. The mockup's "Island tools" row is not
+  added: Hover is that list now. Backup and Integrations stay two screens
+  (the mockup's "Backup & integrations" would merge them; not done here).
 
 ## Why
 

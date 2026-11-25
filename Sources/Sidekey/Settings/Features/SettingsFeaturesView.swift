@@ -65,8 +65,12 @@ struct SettingsFeaturesView: View {
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyDropModeChanged)) { _ in
             externalChange += 1
         }
-        .onReceive(environment.notifySupervisor.$sources) { _ in externalChange += 1 }
-        .onReceive(environment.monitor.$dashboards) { _ in externalChange += 1 }
+        // The first sound a capture hears turns System audio into Allowed.
+        .onReceive(NotificationCenter.default.publisher(for: SystemAudioAccess.didChange)) { _ in
+            externalChange += 1
+        }
+        // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
+        .onReceive(environment.snapshotCountChanges) { _ in externalChange += 1 }
         .onReceive(AgentProviderStore.shared.objectWillChange) { _ in
             // The Agent counts as on only while its native provider is connected.
             DispatchQueue.main.async { externalChange += 1 }
@@ -219,6 +223,8 @@ struct FeatureListRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 12) {
+                FeatureIcon(feature: info.feature, size: .row)
+                    .opacity(isQuiet ? 0.78 : 1)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(info.name)
                         .font(.system(size: 13, weight: .medium))
@@ -310,5 +316,23 @@ struct FeatureStatusLabel: View {
                 .fill(MacSettingsTheme.text3)
                 .frame(width: 7, height: 1.4)
         }
+    }
+}
+
+/// A feature's icon: one monochrome symbol, the same weight everywhere, no
+/// coloured plate. The list rows and the feature's own header use it.
+// WHY: .project-docs/decisions/2026-11-25-feature-icons.md
+struct FeatureIcon: View {
+    enum Size { case row, header }
+
+    let feature: AppFeature
+    let size: Size
+
+    var body: some View {
+        Image(systemName: feature.symbol)
+            .font(.system(size: size == .row ? 15 : 19, weight: .regular))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .frame(width: size == .row ? 22 : 26, height: size == .row ? 22 : 26)
+            .accessibilityHidden(true)
     }
 }

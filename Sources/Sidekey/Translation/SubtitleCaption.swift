@@ -10,6 +10,10 @@ enum SubtitleCaption {
     /// a line at a time as new text pushes it up, never as a whole pair.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     static let maxPairs = 12
+    /// Pairs a session keeps to scroll back through (about a quarter of an
+    /// hour of speech); older ones leave the history.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+    static let historyPairs = 200
 
     struct Row: Identifiable, Equatable {
         enum Translation: Equatable {
@@ -38,7 +42,7 @@ enum SubtitleCaption {
     /// `liveID` is the identity the next committed pair will take, so the live
     /// row settles in place.
     static func rows(lines: [SubtitleLine], live: String, liveTranslation: String = "",
-                     liveID: UUID = SubtitleCaption.liveID) -> [Row] {
+                     liveID: UUID = SubtitleCaption.liveID, limit: Int = SubtitleCaption.maxPairs) -> [Row] {
         var rows = lines.compactMap { line -> Row? in
             let source = line.source.trimmingCharacters(in: .whitespacesAndNewlines)
             let hasTranslation = !(line.translation ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -62,7 +66,7 @@ enum SubtitleCaption {
             rows.append(Row(id: liveID, source: heard, translation: spoken.isEmpty ? .pending : .live(spoken),
                             isLive: true, ordinal: (lines.last?.ordinal ?? -1) + 1))
         }
-        return Array(rows.suffix(maxPairs))
+        return Array(rows.suffix(limit))
     }
 
     /// The one line shown instead of pairs: an error, or the session's state

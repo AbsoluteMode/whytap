@@ -93,12 +93,23 @@ final class LiveSubtitleModel: ObservableObject {
     @Published private(set) var liveID = UUID()
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
+    /// Listening has heard only silence for `accessHintDelay`, and no capture
+    /// has ever heard this Mac's sound: macOS may be withholding system
+    /// audio. Only then does the overlay offer the privacy pane.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+    @Published private(set) var silenceMayMeanNoAccess = false
     var onActivityChange: (() -> Void)?
 
     private let connectionTimeout: Duration
     private var connectionWatchdog: Task<Void, Never>?
     private let flushInterval: Duration
     private let makeAudio: () -> TerminalSystemAudioSourceStreaming
+    private let systemAudioHeard: () -> Bool
+    private let accessHintDelay: Duration
+    private var accessHint: Task<Void, Never>?
+    /// Another capture (a meeting, the detector) can prove the grant while
+    /// the hint is already shown: it goes away then too.
+    nonisolated(unsafe) private var accessObserver: NSObjectProtocol?
     /// Opens Subtitles' one engine, OpenAI live speech translation, or says
     /// why it cannot (no OpenAI key).
     private let openTranslator: (_ source: String?, _ target: String) async throws -> SpeechTranslationSession
@@ -137,6 +148,8 @@ final class LiveSubtitleModel: ObservableObject {
         flushInterval: Duration = .milliseconds(80),
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
+        accessHintDelay: Duration = .seconds(5),
+        systemAudioHeard: @escaping () -> Bool = { SystemAudioAccess.heard() },
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
             CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
         },
@@ -157,6 +170,24 @@ final class LiveSubtitleModel: ObservableObject {
         self.connectionTimeout = connectionTimeout
         self.flushInterval = flushInterval
         self.makeAudio = makeAudio
+        self.accessHintDelay = accessHintDelay
+        self.systemAudioHeard = systemAudioHeard
+        accessObserver = NotificationCenter.default.addObserver(
+            forName: SystemAudioAccess.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.accessMayBeProven() }
+        }
+    }
+
+    deinit {
+        if let accessObserver { NotificationCenter.default.removeObserver(accessObserver) }
+    }
+
+    /// The grant was proven elsewhere: no hint, now or later this session.
+    private func accessMayBeProven() {
+        guard systemAudioHeard() else { return }
+        accessHint?.cancel(); accessHint = nil
+        silenceMayMeanNoAccess = false
     }
 
     @discardableResult func start() -> Task<Void, Never>? {
@@ -184,6 +215,8 @@ final class LiveSubtitleModel: ObservableObject {
         pairer = SubtitleSpeechPairer(); nextOrdinal = 0; liveID = UUID()
         receivedEvents = 0; publishedEvents = 0
         hasAudio = false
+        accessHint?.cancel(); accessHint = nil
+        silenceMayMeanNoAccess = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
             try? await Task.sleep(for: self?.connectionTimeout ?? .seconds(15))
@@ -263,6 +296,7 @@ final class LiveSubtitleModel: ObservableObject {
         timer?.cancel(); timer = nil
         stopWatchdog?.cancel(); stopWatchdog = nil
         connectionWatchdog?.cancel(); connectionWatchdog = nil
+        accessHint?.cancel(); accessHint = nil
         live = ""; liveTranslation = ""
         setPhase(.finishing)
         let task = Task { [weak self] in
@@ -288,6 +322,15 @@ final class LiveSubtitleModel: ObservableObject {
         }
         self.issue = issue
         cancel()
+    }
+
+    /// The first sound of a session: the caption can start, and no
+    /// permission hint is due.
+    private func markHeard() {
+        guard !hasAudio else { return }
+        hasAudio = true
+        silenceMayMeanNoAccess = false
+        accessHint?.cancel(); accessHint = nil
     }
 
     private func setPhase(_ value: SubtitlePhase) { phase = value; onActivityChange?() }
@@ -326,6 +369,17 @@ final class LiveSubtitleModel: ObservableObject {
             guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening else { return }
             self.stop()
         }
+        // A quiet Mac is not a refusal: the hint waits, and never appears
+        // once any capture has heard sound on this Mac.
+        if !systemAudioHeard() {
+            let delay = accessHintDelay
+            accessHint = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening,
+                      !self.hasAudio, !self.systemAudioHeard() else { return }
+                self.silenceMayMeanNoAccess = true
+            }
+        }
         // Audio goes out off the main actor: a busy caption never holds it
         // back (the relay's 128 buffers would fill and stop the session).
         // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
@@ -337,7 +391,7 @@ final class LiveSubtitleModel: ObservableObject {
                     guard !Task.isCancelled else { return }
                     if !heard, pcm.contains(where: { $0 != 0 }) {
                         heard = true
-                        await MainActor.run { if self?.hasAudio == false { self?.hasAudio = true } }
+                        await self?.markHeard()
                     }
                     await session.sendAudio(pcm)
                 }
@@ -399,9 +453,12 @@ final class LiveSubtitleModel: ObservableObject {
     }
 
     /// Deltas often arrive several at once: the caption is published at once
-    /// when the last publish is `publishInterval` old, otherwise by the flush
-    /// timer, so a burst redraws (and restarts its motion) once.
+    /// when the last change it showed is `publishInterval` old, otherwise by
+    /// the flush timer, so a burst redraws (and restarts its motion) once.
+    /// Only a flush that changed the caption counts: the timer's empty ticks
+    /// used to make almost every delta wait for the next tick (about 80 ms).
     // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
     static let publishInterval: TimeInterval = 0.08
     private var lastPublish: TimeInterval = 0
 
@@ -411,20 +468,23 @@ final class LiveSubtitleModel: ObservableObject {
 
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
-        lastPublish = ProcessInfo.processInfo.systemUptime
+        let now = ProcessInfo.processInfo.systemUptime
         publishedEvents = receivedEvents
+        var changed = false
         let carry = pairer.takeCarry()
-        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
-        for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
+        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry; changed = true }
+        for pair in pairer.take(now: now, force: force) {
             let translated = !pair.translation.isEmpty
             lines.append(SubtitleLine(id: liveID, source: pair.source, translation: translated ? pair.translation : nil,
                                       failed: !translated, ordinal: nextOrdinal))
             nextOrdinal += 1
             liveID = UUID()
-            if lines.count > 40 { lines.removeFirst() }
+            if lines.count > SubtitleCaption.historyPairs { lines.removeFirst() }
+            changed = true
         }
-        let row = pairer.showLive(now: ProcessInfo.processInfo.systemUptime)
-        if live != row.source { live = row.source }
-        if liveTranslation != row.translation { liveTranslation = row.translation }
+        let row = pairer.showLive(now: now)
+        if live != row.source { live = row.source; changed = true }
+        if liveTranslation != row.translation { liveTranslation = row.translation; changed = true }
+        if changed { lastPublish = now }
     }
 }

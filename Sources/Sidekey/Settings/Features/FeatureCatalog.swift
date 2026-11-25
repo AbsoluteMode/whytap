@@ -22,6 +22,36 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case monitor
 
     var id: String { rawValue }
+
+    /// The island tool whose icon the feature shows, so the list and the
+    /// island read as one thing.
+    var islandTool: HoverTool? {
+        switch self {
+        case .translateSubtitles: return .translate
+        case .screenshots: return .screenshot
+        case .todo: return .tasks
+        case .caseVault: return .caseVault
+        case .notify: return .notifs
+        case .monitor: return .monitor
+        case .drop, .agent, .meetings, .googleSearch, .hover: return nil
+        }
+    }
+
+    /// The feature's icon: its island tool's, or the one its shortcuts carry
+    /// in Hotkeys (Drop's mic, the Agent's sparkles, Record, Google's
+    /// magnifying glass); Hover, the tools' grid.
+    // WHY: .project-docs/decisions/2026-11-25-feature-icons.md
+    var symbol: String {
+        if let islandTool { return HoverToolRegistry.info(for: islandTool).sfSymbol }
+        switch self {
+        case .drop: return "mic"
+        case .agent: return "sparkles"
+        case .meetings: return "record.circle"
+        case .googleSearch: return "magnifyingglass"
+        case .hover: return "square.grid.2x2"
+        case .translateSubtitles, .screenshots, .todo, .caseVault, .notify, .monitor: return "questionmark"
+        }
+    }
 }
 
 /// How a feature is turned on. A switch is listed only where the app really
@@ -169,7 +199,7 @@ enum FeatureSetupAction: Equatable {
     /// No provider that can serve the feature has a key yet.
     case addKey(AIFeature)
     /// The route's key is refused and no other model would work: the key
-    /// has to be fixed or replaced in API & Models.
+    /// has to be fixed or replaced in Keys & models.
     case fixKey(AIFeature)
     case addOpenAIKey
     case allow(FeaturePermission)
@@ -303,6 +333,9 @@ struct FeatureSetupSnapshot: Equatable {
     var microphoneGranted = false
     var screenRecordingGranted = false
     var screenNeedsRestart = false
+    /// A capture has heard the Mac's sound: System audio is allowed. macOS
+    /// has no status check for it, so this is the only proof.
+    var systemAudioHeard = false
     var dropShortcut: DropHotkeyStatus = .ready
     var agentOn = false
     var meetingsOn = false
@@ -419,12 +452,11 @@ enum FeatureCatalog {
                 activation: .islandTools([.translate, .subtitles]), place: .screen,
                 about: "Two tools in the island. Translate turns text you type or paste into another language "
                     + "with your text model. Subtitles listens to your Mac’s sound and shows a live translation on screen.",
-                clipCaption: "Paste a phrase, get the translation, copy it.",
+                clipCaption: "Type a reply, get the translation, click it to copy.",
                 clipName: "Translate",
-                // The Subtitles clip is made in ORCH-104: its key is
-                // `FeatureVideo.subtitles`, its file Resources/FeatureVideos/subtitles.mp4.
-                moreClips: [FeatureClip(name: "Subtitles", video: nil,
-                                        caption: "A video plays, and translated lines appear on screen.")])
+                // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+                moreClips: [FeatureClip(name: "Subtitles", video: .subtitles,
+                                        caption: "A lecture plays, and each line appears with its translation.")])
         case .screenshots:
             return FeatureInfo(
                 feature: feature, name: "Screenshots", kind: "Island tool Shot",
@@ -433,7 +465,7 @@ enum FeatureCatalog {
                 activation: .islandTools([.screenshot]), place: .screen,
                 about: "Pick an area of the screen, draw arrows and text on it, blur anything private, "
                     + "then copy or save it. In the island it is called Shot.",
-                clipCaption: "Shot, drag over an area, add an arrow, blur a number, copy.")
+                clipCaption: "Shot, drag over an area, blur the private details, add an arrow, copy.")
         case .todo:
             return FeatureInfo(
                 feature: feature, name: "To-do", kind: "Island tool",
@@ -607,7 +639,7 @@ enum FeatureCatalog {
         let isSpeech = feature.mode == .realtime || feature.mode == .recorded
         switch snapshot.modelStatus(feature) {
         // A model not probed yet, an alias or one that expires later still
-        // runs; API & Models says the rest on its own row.
+        // runs; Keys & models says the rest on its own row.
         case .ok, .notVerified, .deprecatedAlias, .expiring:
             return .met
         case .notSet:
@@ -662,7 +694,10 @@ enum FeatureCatalog {
             return snapshot.screenRecordingGranted ? .met
                 : .unmet(reason: "Allow \(permission.title)", action: .allow(.screenRecording))
         case .systemAudio:
-            return .askedLater(note: "macOS asks at the first recording")
+            // Allowed once a capture has heard sound; until then macOS has
+            // not been asked, or the Mac was quiet, and nothing can tell.
+            // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+            return snapshot.systemAudioHeard ? .met : .askedLater(note: "macOS asks at the first recording")
         }
     }
 

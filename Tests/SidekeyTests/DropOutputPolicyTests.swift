@@ -230,6 +230,6 @@ final class DropOutputPolicyTests: XCTestCase {
 
     func testFailureCopyExcludesProviderBodiesAndEndpointValues() {
         XCTAssertEqual(DropOutputPolicy.failureMessage(for: OpenRouterLLMError.unexpectedStatus(401, "private response")), "Smart failed (401)")
-        XCTAssertEqual(DropOutputPolicy.failureMessage(for: OpenRouterLLMError.invalidBaseURL("private endpoint")), "Set up Smart in API & Models")
+        XCTAssertEqual(DropOutputPolicy.failureMessage(for: OpenRouterLLMError.invalidBaseURL("private endpoint")), "Set up Smart in Keys & models")
     }
 }

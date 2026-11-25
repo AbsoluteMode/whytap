@@ -409,7 +409,7 @@ acceptance after the designated builder promotes the reviewed source.
 
 Tiles, form actions and picker rows show full-target hover and pressed feedback,
 with distinct keyboard focus. Disabled controls are dimmed and ignore hover.
-Feedback is local to API & Models; shared MacButton behavior stays unchanged.
+Feedback is local to Keys & models; shared MacButton behavior stays unchanged.
 Dark pressed overlays are capped at 8% to preserve small blue/white text contrast.
 
 The person comes to connect a provider. First they see every available provider,
@@ -573,7 +573,7 @@ spinner tests cover its reduced-motion glyph and render-server animation.
 Physical first mouse, Tab/Return, VoiceOver and the real Sparkle download remain
 installed-app acceptance; no real update is started by the tests.
 
-## API & Models costs — 2026-10-20
+## Keys & models costs — 2026-10-20
 
 The user chose four tabs in one surface: API keys, Models, Costs, API hints.
 Costs first shows the nearby period, then the total, then used features with
@@ -822,7 +822,7 @@ and its current value, then changes that value without losing context.
 ### Direction and layout
 
 - Use iOS inset groups within the existing macOS sidebar window. Groups describe
-  related settings. In API & Models, independently configured functions have
+  related settings. In Keys & models, independently configured functions have
   separate contours and a 10 pt gap, so their setup states do not run together.
 - Keep the current tabs and navigation. Sidebar rows use text alone, following
   the user's 2026-10-20 request to remove the colored icon tiles.
@@ -871,10 +871,10 @@ feature's state as a sign, a word and a reason, never as colour or glow.
 
 Why: the first outside tester saw orange outlines on models of features he
 did not use, could not tell what they meant and closed Settings. The outline
-below remains on the older API & Models rows until those rows move to the
+below remains on the older Keys & models rows until those rows move to the
 feature screens; new screens do not use it.
 
-An unconfigured model function in API & Models uses a static orange outline and a soft 5 pt
+An unconfigured model function in Keys & models uses a static orange outline and a soft 5 pt
 outer glow (12% light, 18% dark). The outline has at least 3:1 contrast on both
 the row and page surface; the glow is decoration, never the only boundary.
 The normal `Choose a model` action stays visible. `Not set` and warning triangles
@@ -1712,7 +1712,7 @@ supersedes the former window presentation. See
 - Keep the existing macOS Settings card/row typography and spacing. The selected
   model, workspace and connection stay together; no runtime
   installation card remains. Reason: the agent is now built in.
-- Tavily belongs in API & Models → API keys, alongside every other API key.
+- Tavily belongs in Keys & models → API keys, alongside every other API key.
   The user corrected its original Agents placement on October 22. Its search tile
   uses the existing provider grid and minimal secure Save/Remove form; the shared
   accepted/rejected notice is announced without adding a model route. Its saved
@@ -1757,7 +1757,7 @@ supersedes the former window presentation. See
   and no Add API key button under the offers.
 - Show verification dates on each card: existing offers retain October 19, Tavily
   uses October 22. Reason: adding one verified offer does not reverify the rest.
-- Point all key setup, including Tavily, to API & Models → API keys.
+- Point all key setup, including Tavily, to Keys & models → API keys.
   Use MacButton interaction surfaces for full link/button hover, pressed,
   focus and disabled feedback without layout shifts or added animation.
 - Check light/dark native offscreen layouts, narrow/wide, embedded/standalone and

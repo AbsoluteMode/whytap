@@ -43,7 +43,7 @@ final class DeepgramLanguagePolicyTests: XCTestCase {
         XCTAssertTrue(DeepgramLanguagePolicy.automaticLanguageDescription(for: "nova-2").contains("2 languages"))
     }
 
-    /// The texts show on a feature's row in API & Models, which has no
+    /// The texts show on a feature's row in Keys & models, which has no
     /// language menu and no Save button.
     func testErrorTextsPointAtTheModelOrTheInputLanguage() {
         XCTAssertEqual(

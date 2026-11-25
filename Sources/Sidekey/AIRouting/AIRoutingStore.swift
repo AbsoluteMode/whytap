@@ -152,7 +152,7 @@ final class AIRoutingStore: ObservableObject {
         return server
     }
 
-    /// The Keychain account of a server added in API & Models.
+    /// The Keychain account of a server added in Keys & models.
     static func serverKeyAccount(for id: UUID) -> String {
         "byok.server.\(id.uuidString.lowercased()).api_key"
     }

@@ -30,8 +30,8 @@ final class FakeSpeechTranslation: SpeechTranslationSession, @unchecked Sendable
     }
     func acceptedAudioSeconds() -> Double { Double(sentBytes) / 32_000 }
 
-    func yieldRecorded(until millis: Int = .max) {
-        for event in OpenAITranslateRecordedSession.events where event.at <= millis {
+    func yieldRecorded(from first: Int = .min, until millis: Int = .max) {
+        for event in OpenAITranslateRecordedSession.events where event.at > first && event.at <= millis {
             switch event.stream {
             case .source: pair.continuation.yield(.source(event.text, elapsedMs: event.elapsed))
             case .translation: pair.continuation.yield(.translation(event.text, elapsedMs: event.elapsed))
@@ -120,7 +120,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         let model = makeModel(translator: { throw SpeechTranslationFailure.refusedKey }, audio: audio)
         model.start()
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue, TranslationIssue(message: "OpenAI refused the API key. Check it in API & Models.",
+        XCTAssertEqual(model.issue, TranslationIssue(message: "OpenAI refused the API key. Check it in Keys & models.",
                                                      feature: .subtitlesAudio))
         XCTAssertEqual(audio.started, 0, "system audio is never captured")
     }
@@ -165,8 +165,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         model.stop()
         // Same run loop turn: no longer running, the stopped box and Start.
         XCTAssertFalse(model.phase.isRunning)
-        XCTAssertEqual(TranslationView.overlayCaption(phase: model.phase, hasRows: true, hasIssue: false),
-                       .fixed(TranslationView.stoppedCaptionHeight))
+        XCTAssertEqual(model.sessionAction, .start, "Start shows in place of Stop at once")
         XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: model.phase, issue: nil))
 
         // The tail arrives after Stop and settles in place.

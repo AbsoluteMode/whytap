@@ -108,8 +108,13 @@ struct SettingsWindowView: View {
                 .fill(MacSettingsTheme.sep)
                 .frame(width: 1)
 
-            detailPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                if let back = selection.backLink {
+                    SettingsBackBar(title: back.title, action: { selection.goBack() })
+                }
+                detailPane
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -119,7 +124,7 @@ struct SettingsWindowView: View {
             // Scrollable tab list
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: SettingsSidebarStyle.rowSpacing) {
-                    ForEach(SettingsWindowTab.availableCases) { tab in
+                    ForEach(SettingsWindowTab.sidebarCases) { tab in
                         sidebarTabButton(tab)
                     }
                 }
@@ -151,9 +156,10 @@ struct SettingsWindowView: View {
     @ViewBuilder
     private func sidebarTabButton(_ tab: SettingsWindowTab) -> some View {
         let isHighlighted: Bool = {
-            if case .tab(let t) = selection.highlightedTarget, t == tab { return true }
+            if case .tab(let t) = selection.highlightedTarget, t.sidebarHome == tab { return true }
             return false
         }()
+        let isSelected = selection.selectedTab.sidebarHome == tab
 
         Button {
             selection.select(tab)
@@ -166,7 +172,7 @@ struct SettingsWindowView: View {
                     .layoutPriority(1)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(selection.selectedTab == tab && !isHighlighted ? Color.white : MacSettingsTheme.text)
+            .foregroundStyle(isSelected && !isHighlighted ? Color.white : MacSettingsTheme.text)
             .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding)
             .frame(height: SettingsSidebarStyle.rowHeight)
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -174,16 +180,16 @@ struct SettingsWindowView: View {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isHighlighted
                           ? MacSettingsTheme.selection
-                          : (selection.selectedTab == tab
+                          : (isSelected
                              ? MacSettingsTheme.accentFill
                              : Color.clear))
             )
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isHighlighted)
         }
-        .buttonStyle(SettingsSidebarButtonStyle(isSelected: selection.selectedTab == tab && !isHighlighted,
+        .buttonStyle(SettingsSidebarButtonStyle(isSelected: isSelected && !isHighlighted,
                                                 focused: focusedSidebarControl == tab.id))
         .focused($focusedSidebarControl, equals: tab.id)
-        .accessibilityAddTraits(selection.selectedTab == tab ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(tab.title)
     }
 
@@ -218,24 +224,6 @@ struct SettingsWindowView: View {
         .accessibilityLabel(AppBuildIdentity.current.quitActionTitle)
     }
 
-    /// The Agent group in Other; a `whytap://settings/agentMode` link or the
-    /// Agent setup prompt highlights it for a second.
-    private var agentSection: AgentOtherSection {
-        let highlighted: Bool = {
-            if case .tab(.agentMode) = selection.highlightedTarget { return true }
-            return false
-        }()
-        return AgentOtherSection(
-            viewModel: agentModeViewModel,
-            settings: AgentSettingsStore.shared,
-            store: AgentProviderStore.shared,
-            agentEnabled: agentEnabled,
-            onAgentToggle: onAgentToggle,
-            openAPIAndModels: { selection.focus($0) },
-            highlighted: highlighted
-        )
-    }
-
     @ViewBuilder
     private var detailPane: some View {
         switch selection.selectedTab {
@@ -265,17 +253,12 @@ struct SettingsWindowView: View {
         case .other:
             SettingsOtherView(
                 displayPicker: displayPickerViewModel,
-                volumeDuckConfig: otherVolumeDuckConfig,
-                meetingsEnabled: otherMeetingsEnabled,
-                googleEnabled: otherGoogleEnabled,
-                onMeetingsToggle: otherOnMeetingsToggle,
-                onGoogleToggle: otherOnGoogleToggle,
                 privacyPreferences: privacyPreferences,
                 screenshotProtectionChanged: screenshotProtectionChanged,
-                agentSection: agentSection
+                open: { selection.select($0) }
             )
         case .agentMode:
-            // Never selected: `select` resolves it to Other.
+            // Never selected: `select` opens the Agent screen in Features.
             EmptyView()
         case .toolbox:
             ToolboxSettingsView(
@@ -373,14 +356,14 @@ private struct SettingsNotesUnavailableView: View {
 final class SettingsWindowSelection: ObservableObject {
     @Published var selectedTab: SettingsWindowTab
     @Published var notesController: MeetingsContentController?
-    /// The feature row API & Models scrolls to and highlights; the tab clears it once shown.
+    /// The feature row Keys & models scrolls to and highlights; the tab clears it once shown.
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
     @Published var shownFeature: AppFeature?
-    /// The part of API & Models to open on next (API keys from a feature's
-    /// screen); API & Models takes it once and clears it.
+    /// The part of Keys & models to open on next (API keys from a feature's
+    /// screen); Keys & models takes it once and clears it.
     @Published var requestedAPISection: APIAndModelsSection?
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
@@ -401,7 +384,7 @@ final class SettingsWindowSelection: ObservableObject {
         let resolvedTab = tab.resolved
         let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         if availableTab == .notes {
-            // Sidebar Notes button = "Notes home": always land on the meeting
+            // The Notes entry always lands on the meeting
             // list, even if the controller was left mid-editor.
             ensureNotesController()?.showListScreen()
         } else {
@@ -428,13 +411,30 @@ final class SettingsWindowSelection: ObservableObject {
         }
     }
 
-    /// Opens API & Models on one feature's row.
+    /// Where a tab outside the sidebar leads back to: the screen it was
+    /// opened from (Meeting Notes for the notes, Hover for Toolbox) or General.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    var backLink: (title: String, tab: SettingsWindowTab, feature: AppFeature?)? {
+        switch selectedTab {
+        case .notes: return ("Meeting Notes", .features, .meetings)
+        case .toolbox: return ("Hover", .features, .hover)
+        case .notifications, .integrations, .backup: return ("General", .other, nil)
+        case .features, .apiAndModels, .hotkeys, .permissions, .other, .agentMode: return nil
+        }
+    }
+
+    func goBack() {
+        guard let back = backLink else { return }
+        if let feature = back.feature { open(feature) } else { select(back.tab) }
+    }
+
+    /// Opens Keys & models on one feature's row.
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
         focusedFeature = feature
     }
 
-    /// Opens API & Models on API keys, where a key is added or replaced:
+    /// Opens Keys & models on API keys, where a key is added or replaced:
     /// "Add a key" and "Fix the key" on a feature's screen.
     // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
     func showAPIKeys() {
@@ -491,5 +491,35 @@ enum SettingsSidebarStyle {
         width
             - horizontalPadding * 2
             - buttonHorizontalPadding * 2
+    }
+}
+
+/// The "‹ General" line above a tab that is not in the sidebar, drawn like
+/// the "‹ Features" link of a feature screen.
+struct SettingsBackBar: View {
+    let title: String
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Text(title).font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(MacSettingsTheme.accent)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.accent, focused: focused))
+            .focused($focused)
+            .accessibilityLabel("Back to \(title)")
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
     }
 }

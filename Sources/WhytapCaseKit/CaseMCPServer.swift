@@ -25,7 +25,7 @@ public final class CaseMCPServer {
         To use a known key, run in your terminal: \(Self.quoted(executablePath)) case run --only KEY_NAME '<command using $KEY_NAME>'
         Use single quotes so your shell does not expand $KEY_NAME; Case injects values and hides them in output.
         If several projects have that key, Case lists them: rerun with -p <project>, choosing by description or asking the user.
-        Case keys are for commands you run. Whytap's own dictation, model and meeting provider keys are separate, in Whytap Settings → API & Models.
+        Case keys are for commands you run. Whytap's own dictation, model and meeting provider keys are separate, in Whytap Settings → Keys & models.
         Nothing here shows, copies, edits or deletes a key value.
         """
     }

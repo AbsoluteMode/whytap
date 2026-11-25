@@ -64,7 +64,7 @@ final class SettingsWindowTabTests: XCTestCase {
     }
 
     func test_api_and_models_tab_metadata() {
-        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "API & Models")
+        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "Keys & models")
         XCTAssertEqual(SettingsWindowTab.apiAndModels.id, "apiAndModels")
         XCTAssertNil(SettingsWindowTab.apiAndModels.pdfResourceName)
         XCTAssertEqual(SettingsWindowTab.apiAndModels.fallbackSystemImageName, "cpu")
@@ -72,7 +72,7 @@ final class SettingsWindowTabTests: XCTestCase {
 
     func test_no_models_tab_left() {
         let titles = SettingsWindowTab.allCases.map { $0.title }
-        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by API & Models")
+        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by Keys & models")
     }
 
     func test_hotkeys_tab_metadata_uses_hover_icon() {
@@ -115,8 +115,12 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.last, .other)
     }
 
-    func test_other_tab_title_is_Other() {
-        XCTAssertEqual(SettingsWindowTab.other.title, "Other")
+    /// Other is gone as a name: what is left is General. The raw id stays
+    /// `other` so `whytap://settings/other` keeps working.
+    func test_other_tab_is_now_general_with_the_same_id() {
+        XCTAssertEqual(SettingsWindowTab.other.title, "General")
+        XCTAssertEqual(SettingsWindowTab.other.rawValue, "other")
+        XCTAssertFalse(SettingsWindowTab.availableCases.map(\.title).contains("Other"))
     }
 
     func test_other_tab_fallback_image_name() {

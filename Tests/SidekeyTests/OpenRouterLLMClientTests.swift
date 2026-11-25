@@ -231,6 +231,6 @@ final class OpenRouterLLMClientTests: XCTestCase {
     }
 
     func testNotConfiguredPointsToAPIAndModels() {
-        XCTAssertEqual(OpenRouterLLMError.notConfigured.description, "No LLM is chosen in Settings > API & Models.")
+        XCTAssertEqual(OpenRouterLLMError.notConfigured.description, "No LLM is chosen in Settings > Keys & models.")
     }
 }

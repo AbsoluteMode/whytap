@@ -549,6 +549,108 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertFalse(panel.isVisible, "Offscreen: never shown over the person's work")
     }
 
+    /// The real island mounted offscreen (never shown), with the press point
+    /// of its Input language tile.
+    private struct MountedIsland {
+        let bridge: IslandHoverHitBridge
+        let window: NSWindow
+        let hosting: NSView
+        let press: CGPoint
+        var moved: CGPoint { CGPoint(x: press.x, y: press.y - IslandHoverHitBridge.dragThreshold) }
+
+        func layOut() {
+            for _ in 0..<4 {
+                hosting.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.025))
+            }
+        }
+
+        func wait(_ seconds: TimeInterval) { RunLoop.main.run(until: Date().addingTimeInterval(seconds)) }
+    }
+
+    private func mountIsland() throws -> MountedIsland {
+        let state = AppState()
+        state.programmaticHoverExpansion = true
+        let liveBridge = IslandHoverHitBridge()
+        let hosting = NSHostingView(rootView: IslandView(appState: state, hoverHitBridge: liveBridge,
+                                                         displayPreferences: DisplayPreferences(defaults: defaults),
+                                                         hoverLayout: store)
+            .frame(width: 700, height: 430, alignment: .top))
+        let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 430),
+                             styleMask: .borderless, backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = hosting
+        addTeardownBlock { await MainActor.run { panel.close() } }
+        var found: CGPoint?
+        let probe = MountedIsland(bridge: liveBridge, window: panel, hosting: hosting, press: .zero)
+        probe.layOut()
+        liveBridge.setEnabled(true)
+        search: for y in stride(from: 4, to: 426, by: 8) {
+            for x in stride(from: 4, to: 696, by: 8) {
+                let candidate = CGPoint(x: x, y: y)
+                if liveBridge.mouseDown(at: candidate, in: panel, allowed: true),
+                   liveBridge.pressedID?.tool == .inputLang {
+                    found = candidate
+                    break search
+                }
+            }
+        }
+        let press = try XCTUnwrap(found, "The island offers the Input language tile")
+        liveBridge.discardSequence()
+        return MountedIsland(bridge: liveBridge, window: panel, hosting: hosting, press: press)
+    }
+
+    /// Two quick drags of the same tile, the second lift and release both
+    /// before the island redraws: the latest lift gets the picture and lands;
+    /// the first lift's enlarged picture does not linger.
+    func testTwoQuickDragsOfTheSameTileWithoutARedrawLandTheLatest() throws {
+        let island = try mountIsland()
+        let bridge = island.bridge
+        XCTAssertTrue(bridge.mouseDown(at: island.press, in: island.window, allowed: true))
+        bridge.mouseDragged(at: island.moved, in: island.window, allowed: true)
+        island.layOut()
+        let first = bridge.reorderGeneration
+        XCTAssertEqual(bridge.stage.generation, first)
+
+        bridge.mouseUp(at: island.moved, in: island.window, allowed: true)
+        XCTAssertTrue(bridge.mouseDown(at: island.press, in: island.window, allowed: true))
+        bridge.mouseDragged(at: island.moved, in: island.window, allowed: true)
+        bridge.mouseUp(at: island.moved, in: island.window, allowed: true)
+        let second = bridge.reorderGeneration
+        XCTAssertGreaterThan(second, first)
+        XCTAssertEqual(bridge.settlingTool, .inputLang)
+        island.layOut()
+        XCTAssertEqual(bridge.stage.generation, second, "The latest lift has the picture, the first one is gone")
+        XCTAssertEqual(bridge.stage.tool, .inputLang)
+        XCTAssertNotNil(bridge.stage.settle, "The latest release lands")
+        XCTAssertTrue(bridge.holdsDrawer, "The drawer stays for that landing")
+        island.wait(1.2)
+        XCTAssertNil(bridge.stage.content, "Nothing stays enlarged over the grid")
+        XCTAssertFalse(bridge.holdsDrawer)
+    }
+
+    func testTwoQuickDragsOfTheSameTileWithARedrawBeforeTheSecondReleaseLandTheLatest() throws {
+        let island = try mountIsland()
+        let bridge = island.bridge
+        XCTAssertTrue(bridge.mouseDown(at: island.press, in: island.window, allowed: true))
+        bridge.mouseDragged(at: island.moved, in: island.window, allowed: true)
+        island.layOut()
+        bridge.mouseUp(at: island.moved, in: island.window, allowed: true)
+        XCTAssertTrue(bridge.mouseDown(at: island.press, in: island.window, allowed: true))
+        bridge.mouseDragged(at: island.moved, in: island.window, allowed: true)
+        island.layOut()
+        let second = bridge.reorderGeneration
+        XCTAssertEqual(bridge.stage.generation, second)
+        XCTAssertTrue(bridge.stage.lifted)
+        bridge.mouseUp(at: island.moved, in: island.window, allowed: true)
+        island.layOut()
+        XCTAssertEqual(bridge.stage.generation, second)
+        XCTAssertNotNil(bridge.stage.settle)
+        island.wait(1.2)
+        XCTAssertNil(bridge.stage.content)
+        XCTAssertFalse(bridge.holdsDrawer)
+    }
+
     /// The production layering: the floating layer is an overlay outside the
     /// drawer's glass surface, which clips its content on the macOS 14/15
     /// backdrop. The tile must stay visible below the drawer on both paths.

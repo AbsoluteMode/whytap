@@ -3096,21 +3096,37 @@ private struct IslandDropModeHoverPanel: View {
     private func reorderPhaseChanged(_ phase: IslandHoverHitBridge.ReorderPhase) {
         let stage = hoverHitBridge.stage
         let generation = phase.generation
+        /// This lift's picture over its cell (replacing any older lift's).
+        func stagePicture(_ tool: HoverTool) -> Bool {
+            guard let frame = tileFrames[tool] else { return false }
+            let picture = tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
+                .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
+            stage.begin(tool, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
+                        generation: generation)
+            return true
+        }
         switch phase.state {
         case .idle:
             return
         case .lifted:
             guard let tool = phase.tool, stage.generation != generation || stage.tool == nil,
-                  let frame = tileFrames[tool] else { return }
-            let picture = tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
-                .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
-            stage.begin(tool, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
-                        generation: generation)
+                  stagePicture(tool) else { return }
             withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.lift) { stage.lifted = true }
         case .settling:
-            guard let tool = phase.tool, stage.tool == tool, stage.generation == generation else {
+            guard let tool = phase.tool else {
                 hoverHitBridge.didSettle(generation: generation)
                 return
+            }
+            if stage.tool != tool || stage.generation != generation {
+                // This lift and its release reached the view in one display
+                // pass: give this lift its picture (it replaces an older
+                // one) and land it like any other.
+                guard stagePicture(tool) else {
+                    stage.clear(generation: stage.generation)
+                    hoverHitBridge.didSettle(generation: generation)
+                    return
+                }
+                stage.lifted = true
             }
             // A cancel restores the order in the same pass; land on the final cell.
             DispatchQueue.main.async {

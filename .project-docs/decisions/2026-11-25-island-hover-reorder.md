@@ -86,7 +86,9 @@ to live in that same dispatch.
   lift has a generation, and the island observes the phase with it
   (`ReorderPhase`: idle, lifted, settling + generation), so a release and a
   new lift of the same tile in one display pass still start a new picture and
-  an older landing never ends a newer lift.
+  an older landing never ends a newer lift. When a lift and its release both
+  reach the island in one pass (it only sees "settling"), the island gives
+  that lift its picture then and lands it, replacing any older picture.
 - **Drag intent and permission.** The tile pressed at mouse-down stays the
   drag candidate when a move under the threshold crosses its edge (that still
   cancels the click). Before lifting, the bridge re-checks that the window
@@ -177,7 +179,10 @@ floating tile below the drawer on both the native and the macOS 14/15
 backdrop. Queue #564 added: grabbing the same tile again before a redraw, on
 the real `IslandView` mounted offscreen, gets its own picture that the older
 landing cannot erase; a release after hover dispatch stopped keeps the last
-allowed order.
+allowed order. Queue #567 added: two quick drags of the same tile on the
+mounted island, with and without a redraw before the second release, land
+the latest lift and leave nothing enlarged (the first fails on the previous
+head).
 
 Not checked in a running app (feature sessions do not launch it): the feel of
 the 4-point threshold and of the springs, measured frame rate during a real

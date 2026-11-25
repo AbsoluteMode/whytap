@@ -26,15 +26,15 @@ struct TranslationIssue: Equatable {
             if case .invalidLanguageConfiguration(_, let reason) = routeError {
                 return Self(message: reason.localizedDescription, feature: routeError.feature)
             }
-            return Self(message: "Choose a provider and model for \(routeError.feature.title) in API & Models.", feature: routeError.feature)
+            return Self(message: "Choose a provider and model for \(routeError.feature.title) in Keys & models.", feature: routeError.feature)
         }
         if let llm = error as? OpenRouterLLMError {
             switch llm {
             case .notConfigured, .missingKey, .missingBaseURL, .invalidBaseURL, .missingModel:
-                return Self(message: "Choose a provider and model for \(feature.title) in API & Models.", feature: feature)
+                return Self(message: "Choose a provider and model for \(feature.title) in Keys & models.", feature: feature)
             case .unexpectedStatus(let status, _):
                 if status == 401 || status == 403 {
-                    return Self(message: "The translation provider refused the API key. Check it in API & Models.", feature: feature)
+                    return Self(message: "The translation provider refused the API key. Check it in Keys & models.", feature: feature)
                 }
                 if status == 429 { return Self(message: "The translation provider is busy or its limit was reached. Try again shortly.") }
             default: break
@@ -44,14 +44,14 @@ struct TranslationIssue: Equatable {
             return speechTranslation(failure, target: nil)
         }
         // Subtitles' one engine needs the OpenAI key: say so instead of
-        // refusing quietly, and open API & Models on Subtitles.
+        // refusing quietly, and open Keys & models on Subtitles.
         // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
         if let unavailable = error as? SubtitleAudioTranslate.Unavailable {
             switch unavailable {
             case .missingKey:
-                return Self(message: "Subtitles need an OpenAI key. Add it in API & Models.", feature: .subtitlesAudio)
+                return Self(message: "Subtitles need an OpenAI key. Add it in Keys & models.", feature: .subtitlesAudio)
             case .unreadableKey:
-                return Self(message: "Whytap couldn't read the OpenAI key from the Keychain. Check it in API & Models.",
+                return Self(message: "Whytap couldn't read the OpenAI key from the Keychain. Check it in Keys & models.",
                             feature: .subtitlesAudio)
             }
         }
@@ -67,12 +67,12 @@ struct TranslationIssue: Equatable {
 
 extension TranslationIssue {
     /// Live speech translation (OpenAI) failures, from status codes and error
-    /// codes only. Setup problems open API & Models on Subtitles audio.
+    /// codes only. Setup problems open Keys & models on Subtitles audio.
     // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
     static func speechTranslation(_ failure: SpeechTranslationFailure, target: String?) -> Self {
         switch failure {
         case .refusedKey:
-            return Self(message: "OpenAI refused the API key. Check it in API & Models.", feature: .subtitlesAudio)
+            return Self(message: "OpenAI refused the API key. Check it in Keys & models.", feature: .subtitlesAudio)
         case .noCredit:
             return Self(message: "Your OpenAI account is out of credit. Add credit to use Subtitles.",
                         feature: .subtitlesAudio)

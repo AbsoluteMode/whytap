@@ -495,7 +495,7 @@ enum OnboardingKeyTarget: Hashable {
 }
 
 /// One tile of the key card: every provider Whytap takes a key for, with its
-/// offer from Settings -> API & Models -> API hints (the one source for
+/// offer from Settings -> Keys & models -> API hints (the one source for
 /// offers; a provider without one gets none).
 struct OnboardingKeyOffer: Equatable {
     enum Category: String { case speech = "SPEECH", ai = "AI", search = "SEARCH" }
@@ -717,7 +717,7 @@ struct OnboardingKeyCard: View {
     }
 
     private func savedText(_ target: OnboardingKeyTarget) -> String {
-        guard let kind = target.speechKind else { return "Saved. Pick its models in Settings → API & Models." }
+        guard let kind = target.speechKind else { return "Saved. Pick its models in Settings → Keys & models." }
         if let refusal = model.keyRefusal(kind) { return refusal }
         return "Your \(target.name) key is saved."
     }

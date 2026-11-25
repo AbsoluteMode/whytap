@@ -5,7 +5,7 @@ import Foundation
 /// & Models -> Models -> Subtitles has this one Audio translate slot with the
 /// model filled in; there is no Speech or LLM choice and no switch. It runs
 /// exactly when the OpenAI key from API keys can be read. Without it Start
-/// says what is missing and opens API & Models.
+/// says what is missing and opens Keys & models.
 // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
 enum SubtitleAudioTranslate {
     static let account = ProviderAccount.openAI

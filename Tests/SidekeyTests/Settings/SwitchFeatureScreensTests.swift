@@ -53,7 +53,7 @@ final class SwitchFeatureScreensTests: XCTestCase {
         await agent.turn(true)?.value
         XCTAssertFalse(agent.isOn)
         XCTAssertFalse(agent.busy)
-        XCTAssertEqual(agent.problem, "Choose an Agent model in API & Models.")
+        XCTAssertEqual(agent.problem, "Choose an Agent model in Keys & models.")
 
         environment.setAgent = { _ in nil }
         let connected = FeatureSwitchModel(feature: .agent, isOn: false, environment: environment)

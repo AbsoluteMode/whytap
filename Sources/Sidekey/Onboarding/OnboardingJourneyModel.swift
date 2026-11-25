@@ -191,7 +191,7 @@ struct OnboardingAcceptance: Equatable {
 /// short dwell the person can hold; Back keeps everything done.
 ///
 /// Speech and the language model are set through the shared Speech and LLM
-/// rows of Settings -> API & Models (`APIAndModelsViewModel.selectShared`):
+/// rows of Settings -> Keys & models (`APIAndModelsViewModel.selectShared`):
 /// one pick covers every feature of its kind that it can serve, the rest say
 /// why in one line, and nothing switches without that pick.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md

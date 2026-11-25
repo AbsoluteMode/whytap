@@ -1766,7 +1766,7 @@ final class AgentController: ObservableObject {
             return agentError.retryable
         }
         // Retrying cannot help until a provider and its key are set in
-        // Settings -> API & Models.
+        // Settings -> Keys & models.
         if error is BatchTranscriptionUnavailable {
             return false
         }

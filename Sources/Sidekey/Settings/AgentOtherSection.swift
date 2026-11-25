@@ -3,7 +3,7 @@ import SwiftUI
 /// The Agent's switch and its words, shared by the Agent's screen in
 /// Features and onboarding. It was a group in Settings -> Other until every
 /// feature got its own screen; the name is kept for the callers.
-/// The model is chosen on the Agent screen (or in API & Models); the
+/// The model is chosen on the Agent screen (or in Keys & models); the
 /// workspace path is in the Whytap plugin's `whytap_get_state`.
 // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
 @MainActor
@@ -14,8 +14,8 @@ enum AgentOtherSection {
 
         var message: String {
             switch self {
-            case .noModel: return "Choose an Agent model in API & Models."
-            case .connectFailed: return "Couldn’t connect the Agent. Check its model and key in API & Models."
+            case .noModel: return "Choose an Agent model in Keys & models."
+            case .connectFailed: return "Couldn’t connect the Agent. Check its model and key in Keys & models."
             }
         }
     }

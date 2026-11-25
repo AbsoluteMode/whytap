@@ -6,7 +6,7 @@ import XCTest
 
 /// `SettingsWindowController` integration with the new settings shell.
 /// Asserts the controller wires the Aurora window chrome correctly and
-/// opens on the API & Models tab by default.
+/// opens on the Keys & models tab by default.
 @MainActor
 final class SettingsWindowControllerTests: XCTestCase {
 

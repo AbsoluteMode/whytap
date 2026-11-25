@@ -169,7 +169,7 @@ enum FeatureSetupAction: Equatable {
     /// No provider that can serve the feature has a key yet.
     case addKey(AIFeature)
     /// The route's key is refused and no other model would work: the key
-    /// has to be fixed or replaced in API & Models.
+    /// has to be fixed or replaced in Keys & models.
     case fixKey(AIFeature)
     case addOpenAIKey
     case allow(FeaturePermission)
@@ -606,7 +606,7 @@ enum FeatureCatalog {
         let isSpeech = feature.mode == .realtime || feature.mode == .recorded
         switch snapshot.modelStatus(feature) {
         // A model not probed yet, an alias or one that expires later still
-        // runs; API & Models says the rest on its own row.
+        // runs; Keys & models says the rest on its own row.
         case .ok, .notVerified, .deprecatedAlias, .expiring:
             return .met
         case .notSet:

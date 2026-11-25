@@ -41,7 +41,7 @@ final class DropFeatureTests: XCTestCase {
         XCTAssertEqual(selection.requestedAPISection, .keys)
         try FeaturesFixture.render(fixture.shell(selection: selection), size: NSSize(width: 960, height: 560), dark: false,
                                    to: FeaturesFixture.renderDirectory?.appendingPathComponent("drop-add-key-opens-api-keys.png"))
-        XCTAssertNil(selection.requestedAPISection, "API & Models takes the request once")
+        XCTAssertNil(selection.requestedAPISection, "Keys & models takes the request once")
 
         selection.select(.hotkeys)
         selection.select(.apiAndModels)
@@ -154,7 +154,7 @@ final class DropFeatureTests: XCTestCase {
         let fixture = try await fixture(.usual)
         fixture.routing.setRoute(nil, for: .dropFast)
         fixture.models.useOnDeviceModel(for: .dropFast)
-        XCTAssertNil(fixture.models.proposal, "No Assign window appears later in API & Models")
+        XCTAssertNil(fixture.models.proposal, "No Assign window appears later in Keys & models")
         XCTAssertNil(fixture.routing.route(for: .meetings), "Other features are left as they were")
     }
 

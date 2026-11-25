@@ -5,7 +5,7 @@ enum APIAndModelsSection: String, CaseIterable {
     case keys = "API keys", models = "Models", costs = "Costs", hints = "API hints"
 }
 
-/// Four sections in one API & Models surface. One model menu
+/// Four sections in one Keys & models surface. One model menu
 /// per feature row: a provider is never picked on its own, only through the
 /// model it serves.
 @MainActor

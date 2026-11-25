@@ -26,14 +26,15 @@ In **Settings → Keys & models**, choose:
 
 - **Translation**: a language model from OpenRouter, OpenAI, Anthropic or your
   own OpenAI-compatible server, for typed text.
-- **Subtitles** is an ordinary row with its model already chosen: **OpenAI ·
-  gpt-realtime-translate**. It hears and translates in one step (about $3.06
-  per hour of audio: $0.034 a minute for the translation and $0.017 for the
-  transcript of the original). There is nothing to choose: it works when your
-  OpenAI key is saved in **API keys**. Without the key the row looks like any
-  other row that cannot run yet, its menu offers **Add an OpenAI key…**, and
-  **Start** says "Subtitles need an OpenAI key" with a button to **API &
-  Models**. Subtitles models chosen in earlier versions (Speech and LLM) are no
+- **Subtitles** is an ordinary row with its model already chosen by your
+  keys: **Soniox · stt-rt-v6** when your Soniox key (the one Drop uses) is
+  saved in **API keys**, otherwise **OpenAI · gpt-realtime-translate** with
+  your OpenAI key. Both hear and translate in one step. Soniox gives each
+  phrase's translation about a second after it ends, for about $0.12 per hour
+  of audio; OpenAI runs 3–4 seconds behind, for about $3.06 per hour. There is
+  nothing to choose. Without either key the row looks like any other row that
+  cannot run yet, its menu offers **Add a Soniox key…**, and **Start** says
+  "Subtitles need a Soniox or OpenAI key" with a button to **API & Models**. Subtitles models chosen in earlier versions (Speech and LLM) are no
   longer used.
 
   This Subtitles setup comes with the next version after 2.2.26. In 2.2.26
@@ -42,7 +43,7 @@ In **Settings → Keys & models**, choose:
   phrases.
 - A Subtitles session ends by itself after one hour, exactly as if you had
   pressed **Stop**: nothing is shown and **Start** begins a new hour. This
-  keeps a forgotten session from spending your OpenAI credit.
+  keeps a forgotten session from spending your provider credit.
 
 Keys stay in Whytap's existing Keychain store. New routes start **Not set**.
 The app never borrows another feature's model or chooses a replacement
@@ -104,12 +105,12 @@ Audio Recording** permission. If the Mac is playing audio but no signal arrives,
 check that permission in **System Settings → Privacy & Security**. Silence and
 a denied grant cannot be reliably distinguished by the capture API.
 
-There is no separate speech model or LLM request: one OpenAI session receives the system audio and
+There is no separate speech model or LLM request: one Soniox (or OpenAI) session receives the system audio and
 returns the translation together with the transcript of what it heard. Each
 translated sentence becomes a pair with the sentence of the original it
 translates, also when the model translates two short sentences as one; the sentence still being heard shows its original and the
-translation so far, dimmed. A refused key, an empty OpenAI balance, a busy
-service, a target language OpenAI does not offer (Punjabi, for example) or a
+translation so far, dimmed. A refused key, an empty provider balance, a busy
+service, a target language the provider does not offer or a
 lost connection stops subtitles with a message saying which; finished pairs
 stay. It uses only the key saved in Whytap, not the standalone app's files.
 

@@ -38,7 +38,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SubtitleAudioTranslateTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-10-19-api-and-models.md, 2026-10-20-translation-tools.md, 2026-11-21-free-api-report.md, 2026-11-23-subtitle-steady-overlay.md]
+related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-10-19-api-and-models.md, 2026-10-20-translation-tools.md, 2026-11-21-free-api-report.md, 2026-11-23-subtitle-steady-overlay.md, 2026-11-25-subtitle-soniox-engine.md]
 ---
 
 # Subtitles run only on OpenAI Audio translate
@@ -137,3 +137,6 @@ hears and translates, and it is the engine they use.
   in shared adapters used by Drop and Meetings; left for a separate cleanup.
 
 2026-11-22 · branch claude/subtitles-audio-translate-slot
+
+Update 2026-11-25: the engine is Soniox stt-rt-v6 with the Soniox key, OpenAI
+only without it. See 2026-11-25-subtitle-soniox-engine.md.

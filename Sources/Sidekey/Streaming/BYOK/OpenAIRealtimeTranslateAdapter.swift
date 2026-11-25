@@ -36,6 +36,12 @@ protocol SpeechTranslationSession: AnyObject {
     func close() async
     /// Seconds of audio the provider accepted, for Costs.
     func acceptedAudioSeconds() -> Double
+    /// The provider a message about this session names.
+    var providerName: String { get }
+}
+
+extension SpeechTranslationSession {
+    var providerName: String { "OpenAI" }
 }
 
 /// OpenAI's live speech translation: audio goes in, the model returns the
@@ -358,6 +364,7 @@ final class AIUsageMeteredSpeechTranslation: SpeechTranslationSession {
     }
 
     var events: AsyncStream<SpeechTranslationEvent> { session.events }
+    var providerName: String { session.providerName }
     func sendAudio(_ pcm: Data) async { await session.sendAudio(pcm) }
     func endInput() async { await session.endInput() }
     func acceptedAudioSeconds() -> Double { session.acceptedAudioSeconds() }

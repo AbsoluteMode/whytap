@@ -110,8 +110,8 @@ final class LiveSubtitleModel: ObservableObject {
     /// Another capture (a meeting, the detector) can prove the grant while
     /// the hint is already shown: it goes away then too.
     nonisolated(unsafe) private var accessObserver: NSObjectProtocol?
-    /// Opens Subtitles' one engine, OpenAI live speech translation, or says
-    /// why it cannot (no OpenAI key).
+    /// Opens Subtitles' engine (Soniox live translation, or OpenAI's without
+    /// a Soniox key), or says why it cannot (no key).
     private let openTranslator: (_ source: String?, _ target: String) async throws -> SpeechTranslationSession
     private var translator: SpeechTranslationSession?
     private var pairer = SubtitleSpeechPairer()
@@ -122,7 +122,8 @@ final class LiveSubtitleModel: ObservableObject {
     private var audioTask: Task<Void, Never>?
     private var timer: Task<Void, Never>?
     private var stopWatchdog: Task<Void, Never>?
-    /// Subtitles cost about $3 per hour of audio on the user's own key: a
+    /// Subtitles cost up to about $3 per hour of audio on the user's own key
+    /// (OpenAI; Soniox about $0.12): a
     /// session stops by itself after an hour of listening, quietly, exactly
     /// as if Stop had been pressed. Start begins a new hour. No timer or
     /// message is shown, at the user's request.
@@ -153,16 +154,12 @@ final class LiveSubtitleModel: ObservableObject {
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
             CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
         },
-        // Subtitles run only on Audio translate (OpenAI gpt-realtime-translate)
-        // with the OpenAI key from API keys; without it Start names the fix.
-        // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
-        openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession = { _, target in
-            let key = try SubtitleAudioTranslate.key()
-            let session = try await OpenAIRealtimeTranslateAdapter(apiKey: key, model: SubtitleAudioTranslate.model)
-                .open(target: target)
-            let context = AIUsageContext(feature: .subtitlesAudio, account: SubtitleAudioTranslate.account,
-                                         model: SubtitleAudioTranslate.model)
-            return AIUsageMeteredSpeechTranslation(session: session, context: context)
+        // Subtitles run on Soniox live translation with the Soniox key, or on
+        // OpenAI gpt-realtime-translate with the OpenAI key; without either
+        // Start names the fix.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+        openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession = { source, target in
+            try await SubtitleAudioTranslate.open(source: source, target: target)
         }
     ) {
         self.openTranslator = openTranslator
@@ -232,6 +229,10 @@ final class LiveSubtitleModel: ObservableObject {
                 let translator = try await self.openTranslator(language, self.targetCode)
                 guard self.generation == token, !Task.isCancelled else { await translator.close(); return }
                 try await self.runSpeechTranslation(translator, token: token)
+            } catch let failure as SubtitleAudioTranslate.EngineFailure {
+                guard self.generation == token, !Task.isCancelled else { return }
+                self.fail(.speechTranslation(failure.failure, target: self.targetCode, provider: failure.provider),
+                          token: token)
             } catch let failure as SpeechTranslationFailure {
                 guard self.generation == token, !Task.isCancelled else { return }
                 self.fail(.speechTranslation(failure, target: self.targetCode), token: token)
@@ -428,7 +429,7 @@ final class LiveSubtitleModel: ObservableObject {
             case .closed:
                 closedCleanly = true
             case .failed(let failure):
-                fail(.speechTranslation(failure, target: targetCode), token: token)
+                fail(.speechTranslation(failure, target: targetCode, provider: translator.providerName), token: token)
                 return
             }
             if pairer.liveSource.count > 4_000 {
@@ -440,7 +441,7 @@ final class LiveSubtitleModel: ObservableObject {
         // Only session.closed after Stop is a complete ending; anything else
         // may have lost the last translation.
         guard phase == .finishing, closedCleanly else {
-            fail(.speechTranslation(.connectionLost, target: targetCode), token: token)
+            fail(.speechTranslation(.connectionLost, target: targetCode, provider: translator.providerName), token: token)
             return
         }
         stopWatchdog?.cancel(); stopWatchdog = nil

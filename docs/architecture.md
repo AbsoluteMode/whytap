@@ -2384,7 +2384,13 @@ is separate from the removed app-managed speech/LLM models. Guide:
   tap used for the other side of a meeting. Requires
   `NSAudioCaptureUsageDescription` (contract: `PackagingRebrandTests`);
   without the grant the tap silently yields zeros, so `SystemAudioVADProbe`
-  rebuilds it at every recording start.
+  rebuilds it at every recording start. macOS has no status check for it:
+  the first non-zero sample any capture hears (`CoreAudioSystemAudioSource`)
+  is remembered by `SystemAudioAccess`, after which Settings shows System audio
+  as Allowed ("?" and "macOS asks at the first recording" only before that).
+  The Subtitles overlay offers "Open audio permissions" only after 5 s of
+  silence while no capture has ever heard sound. A grant withdrawn later is
+  not noticed. WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
 - **Microphone** for Drop, agent voice and meetings.
 
 Drop reconciles failed installations and permission changes on activation,

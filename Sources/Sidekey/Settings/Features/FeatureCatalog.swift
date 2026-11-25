@@ -303,6 +303,9 @@ struct FeatureSetupSnapshot: Equatable {
     var microphoneGranted = false
     var screenRecordingGranted = false
     var screenNeedsRestart = false
+    /// A capture has heard the Mac's sound: System audio is allowed. macOS
+    /// has no status check for it, so this is the only proof.
+    var systemAudioHeard = false
     var dropShortcut: DropHotkeyStatus = .ready
     var agentOn = false
     var meetingsOn = false
@@ -661,7 +664,10 @@ enum FeatureCatalog {
             return snapshot.screenRecordingGranted ? .met
                 : .unmet(reason: "Allow \(permission.title)", action: .allow(.screenRecording))
         case .systemAudio:
-            return .askedLater(note: "macOS asks at the first recording")
+            // Allowed once a capture has heard sound; until then macOS has
+            // not been asked, or the Mac was quiet, and nothing can tell.
+            // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+            return snapshot.systemAudioHeard ? .met : .askedLater(note: "macOS asks at the first recording")
         }
     }
 

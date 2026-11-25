@@ -42,6 +42,12 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
     private var resamplerGeneration: UUID?
     private var callbackRateMonitor = SystemAudioCallbackRateMonitor()
     private var callbackRateMismatchWindows = 0
+    /// Called once, from `ioQueue`, with the first buffer that is not pure
+    /// silence: proof that System Audio Recording is allowed.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+    private let onFirstSignal: @Sendable () -> Void
+    /// Touched only from `handleInput` on the serial `ioQueue`.
+    private var heardSignal = false
     private var defaultOutputListenerInstalled = false
     private var defaultOutputListenerBlock: AudioObjectPropertyListenerBlock?
     private var outputPropertyListenerDeviceID = AudioObjectID(0)
@@ -68,8 +74,10 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
         ioQueue: DispatchQueue = DispatchQueue(label: "com.sidekey.meetings.coreaudio.tap", qos: .userInitiated),
         buffers: SystemAudioBufferBroadcast = SystemAudioBufferBroadcast(),
         targetSampleRate: Double = 16_000,
-        antiAlias: Bool = false
+        antiAlias: Bool = false,
+        onFirstSignal: @escaping @Sendable () -> Void = { SystemAudioAccess.recordHeard() }
     ) {
+        self.onFirstSignal = onFirstSignal
         self.ioQueue = ioQueue
         self.buffers = buffers
         resampler = SystemAudioStreamingResampler(targetSampleRate: targetSampleRate)
@@ -505,6 +513,10 @@ final class CoreAudioSystemAudioSource: TerminalSystemAudioSourceStreaming, @unc
 
         let inputSamples = Self.monoFloatSamples(from: inputData, format: decodeFormat)
         guard !inputSamples.isEmpty else { return }
+        if !heardSignal, SystemAudioAccess.containsSignal(inputSamples) {
+            heardSignal = true
+            onFirstSignal()
+        }
 
         let observedRate: Double?
         let sourceSampleRate: Double

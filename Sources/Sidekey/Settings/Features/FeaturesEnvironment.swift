@@ -146,6 +146,7 @@ extension FeatureSetupSnapshot {
             microphoneGranted: permissions.snapshot.microphoneGranted,
             screenRecordingGranted: permissions.screenRecordingGranted,
             screenNeedsRestart: permissions.screenNeedsRestart,
+            systemAudioHeard: SystemAudioAccess.heard(),
             dropShortcut: permissions.dropHotkeyStatus,
             agentOn: environment.agentOn(),
             meetingsOn: environment.meetingsOn(),

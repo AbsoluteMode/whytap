@@ -22,6 +22,36 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case monitor
 
     var id: String { rawValue }
+
+    /// The island tool whose icon the feature shows, so the list and the
+    /// island read as one thing.
+    var islandTool: HoverTool? {
+        switch self {
+        case .translateSubtitles: return .translate
+        case .screenshots: return .screenshot
+        case .todo: return .tasks
+        case .caseVault: return .caseVault
+        case .notify: return .notifs
+        case .monitor: return .monitor
+        case .drop, .agent, .meetings, .googleSearch, .hover: return nil
+        }
+    }
+
+    /// The feature's icon: its island tool's, or the one its shortcuts carry
+    /// in Hotkeys (Drop's mic, the Agent's sparkles, Record, Google's
+    /// magnifying glass); Hover, the tools' grid.
+    // WHY: .project-docs/decisions/2026-11-25-feature-icons.md
+    var symbol: String {
+        if let islandTool { return HoverToolRegistry.info(for: islandTool).sfSymbol }
+        switch self {
+        case .drop: return "mic"
+        case .agent: return "sparkles"
+        case .meetings: return "record.circle"
+        case .googleSearch: return "magnifyingglass"
+        case .hover: return "square.grid.2x2"
+        case .translateSubtitles, .screenshots, .todo, .caseVault, .notify, .monitor: return "questionmark"
+        }
+    }
 }
 
 /// How a feature is turned on. A switch is listed only where the app really

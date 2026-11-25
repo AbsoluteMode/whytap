@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/Features/FeatureCatalog.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-24-settings-around-features.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-24-settings-around-features.md, 2026-11-24-click-to-copy-translation.md]
 ---
 
 # Feature screens get their clips (Drop, Shot, Translate)
@@ -58,6 +58,14 @@ their screens showed no clip.
   Subtitles every word and its arrival time from a recorded OpenAI live session.
 - Defaults are what a new user gets: hold Space for Drop, Auto · RU ↔ EN for
   Translate, Auto-detect → Russian for Subtitles.
+
+## Translate re-shot for click-to-copy
+
+The user accepted Drop, Shot and Subtitles and asked that Translate show the
+new click on the translation. The clip now copies with one click on the
+result: the text tints under the pointer (8 %, 14 % pressed) and "Copied ✓"
+shows for a second, instead of right-click and Copy translation. Same answer,
+same scene otherwise; kit commit `c7e97b15`.
 
 ## What we tested
 

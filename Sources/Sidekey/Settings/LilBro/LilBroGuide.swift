@@ -106,13 +106,19 @@ struct LilBroLocalGuide: LilBroBrain {
 
     static func match(_ question: String) -> LilBroReply {
         let q = question.lowercased()
-        if settingNames.contains(where: { q.contains($0) }) {
+        // A macOS setting's name is the question only when no feature is
+        // asked about besides it: "Where is Input Monitoring?" is Permissions,
+        // "How do I dictate with my microphone?" is Drop. Its own words never
+        // count as a feature's ("monitoring" is not Monitor).
+        let named = settingNames.filter { q.contains($0) }
+        let rest = named.reduce(q) { $0.replacingOccurrences(of: $1, with: " ") }
+        // The feature words win over generic ones ("dictation shortcut" is Drop).
+        if let feature = firstFeature(in: rest) {
+            return .answer(answer(for: feature))
+        }
+        if !named.isEmpty {
             let destination = LilBroDestination.tab(.permissions)
             return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))
-        }
-        // The feature words win over generic ones ("dictation shortcut" is Drop).
-        if let feature = firstFeature(in: q) {
-            return .answer(answer(for: feature))
         }
         if let (_, destination) = tabWords.first(where: { q.contains($0.0) }) {
             return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))

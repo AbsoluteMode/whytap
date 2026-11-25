@@ -207,8 +207,17 @@ final class LilBroLocalGuideTests: XCTestCase {
     func test_exact_names_win_over_broader_words() {
         // macOS settings are Permissions, though "monitor" is a feature word.
         for question in ["Where is Input Monitoring?", "allow accessibility", "Keyboard control is off",
-                         "screen recording for screenshots", "microphone access"] {
+                         "allow screen recording", "microphone access", "Is system audio allowed?",
+                         "where is Post Event"] {
             XCTAssertEqual(destination(question), .tab(.permissions), question)
+        }
+        // A setting named as context of a feature request is that feature.
+        XCTAssertEqual(destination("How do I dictate with my microphone?"), .feature(.drop))
+        XCTAssertEqual(destination("How do I translate system audio with Subtitles?"),
+                       .feature(.translateSubtitles))
+        for setting in ["Input Monitoring", "Accessibility", "Keyboard control", "Screen Recording",
+                        "Microphone", "System audio", "Post Event"] {
+            XCTAssertEqual(destination("How do I use Drop after enabling \(setting)?"), .feature(.drop), setting)
         }
         // The most specific feature word wins over an earlier feature's alias.
         XCTAssertEqual(destination("How do I use Google voice search?"), .feature(.googleSearch))

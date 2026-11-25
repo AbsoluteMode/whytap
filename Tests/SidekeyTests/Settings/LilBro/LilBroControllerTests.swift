@@ -416,4 +416,24 @@ final class LilBroControllerTests: XCTestCase {
         controller.stroll(to: CGPoint(x: 60, y: 471))
         await until { controller.feet.x == 60 }
     }
+
+    func test_he_is_a_control_only_while_a_click_catches_him() async {
+        let gate = Gate { $0 >= 0.6 }
+        let controller = make(sleep: { await gate.sleep($0) })
+        XCTAssertTrue(controller.canCatch, "at home")
+        controller.stroll(to: CGPoint(x: 60, y: 471))
+        await until { controller.segment != nil }
+        XCTAssertTrue(controller.canCatch, "while strolling")
+        gate.release()
+        controller.toggleFromSidebar()
+        XCTAssertFalse(controller.canCatch, "balloon open")
+        controller.ask("Set up dictation")
+        XCTAssertFalse(controller.canCatch, "thinking")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertFalse(controller.canCatch, "answer shown")
+        controller.close()
+        XCTAssertTrue(controller.canCatch, "walking home after closing")
+        controller.catchHim()
+        await until { controller.bubble == .full }
+    }
 }

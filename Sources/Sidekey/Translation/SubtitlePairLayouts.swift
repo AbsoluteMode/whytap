@@ -185,7 +185,7 @@ struct SteadyPairsLayout: Layout {
                 placed.append(.init(id: id, top: y - bounds.minY, bottom: y - bounds.minY + row.height))
             }
         }
-        geometry?.placed = .init(rows: placed, height: bounds.height)
+        geometry?.record(.init(rows: placed, height: bounds.height, width: bounds.width))
     }
 }
 

@@ -519,14 +519,20 @@ Translation tools:
   sendEvent runs both (SubtitleOverlayFrameTracker) except on controls
   (language menus, session button, ×, fix buttons), and a tracking area shows
   the resize cursor. The frame is saved after each move or resize
-  (sidekey.translation.subtitleFrame) and restored on the display it was
-  left on, clamped to it; when that display is gone, the saved size returns
-  at the bottom centre of the island's display. A scroll over the box
+  (sidekey.translation.subtitleFrame: the display's UUID and the frame
+  relative to its visible frame) and restored at the same place on that
+  display, clamped to it; when that display is gone, the saved size returns
+  at the bottom centre of the island's display. The fix buttons (Open Keys &
+  models, Open audio permissions) act on the first click through the panel's
+  sendEvent, like Stop; a Control-click is always the context menu's. A scroll over the box
   scrolls the caption back (SubtitleCaptionScroll): it then anchors to the
   pair at its top, new pairs arrive below without moving it, a bottom fade
   and "Latest" show, and scrolling to the newest pair or Latest follows
-  again. A session keeps 200 pairs (SubtitleCaption.historyPairs); 24 are
-  laid out while following. WHY:
+  again, also when the newest pair is already in view. A session keeps 200
+  pairs (SubtitleCaption.historyPairs); following lays out at least 24 and
+  enough to fill the caption's height, so every pair is in view or above it.
+  A scroll reads the rows' placement at the caption's on-screen size, not a
+  measurement pass's; Clear, a new session or mode drop it. WHY:
   .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
   The live pair
   settles in place under LiveSubtitleModel.liveID; its original shows only up

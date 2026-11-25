@@ -19,6 +19,7 @@ struct TranslationView: View {
     /// panel can hand it scroll events.
     @ObservedObject var scroll = SubtitleCaptionScroll()
     @State private var closeHovered = false
+    @State private var latestHovered = false
     @FocusState private var inputFocused: Bool
     @FocusState private var resultFocused: Bool
     @State private var inputHovered = false
@@ -245,7 +246,10 @@ struct TranslationView: View {
         let rows = SubtitleCaption.rows(lines: subtitles.lines, live: subtitles.live,
                                         liveTranslation: subtitles.liveTranslation, liveID: subtitles.liveID,
                                         limit: embedded ? SubtitleCaption.maxPairs
-                                            : scroll.isFollowing ? Self.followedPairs : SubtitleCaption.historyPairs)
+                                            : scroll.isFollowing
+                                                ? SubtitleCaptionScroll.followedLimit(height: scroll.viewportHeight,
+                                                                                      minimum: Self.followedPairs)
+                                                : SubtitleCaption.historyPairs)
         if embedded {
             VStack(alignment: .leading, spacing: 8) {
                 subtitleControls
@@ -272,9 +276,12 @@ struct TranslationView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
                     .layoutPriority(-1)
                 if let feature = subtitles.issue?.feature {
+                    // The panel is never key: the window dispatches the
+                    // first click (`SubtitleOverlayHitTargets`), as for Stop.
                     Button("Open Keys & models") { openSettings(feature) }.controlSize(.small)
-                        .background(SubtitleOverlayHitReporter(control: .fix, targets: hitTargets, action: "fix",
-                                                               activate: {}))
+                        .background(SubtitleOverlayHitReporter(control: .fix, targets: hitTargets,
+                                                               action: "fix-\(feature.rawValue)",
+                                                               activate: { openSettings(feature) }))
                 }
             }
             .padding(.horizontal, 16)
@@ -310,8 +317,8 @@ struct TranslationView: View {
             // The margin around the box is the edge a press resizes; fully
             // clear pixels would let that press through to the app below.
             .background(Color.black.opacity(Self.marginOpacity))
-            .onChange(of: subtitles.phase) { _, phase in if phase == .connecting { scroll.follow() } }
-            .onChange(of: subtitles.lines.isEmpty) { _, empty in if empty { scroll.follow() } }
+            .onChange(of: subtitles.phase) { _, phase in if phase == .connecting { scroll.reset() } }
+            .onChange(of: subtitles.lines.isEmpty) { _, empty in if empty { scroll.reset() } }
         }
     }
 
@@ -330,24 +337,29 @@ struct TranslationView: View {
                 .overlay(alignment: .bottomTrailing) {
                     if waitingWithoutAudio {
                         audioPermissionsButton
-                            .background(SubtitleOverlayHitReporter(control: .fix, targets: hitTargets, action: "audio",
-                                                                   activate: {}))
+                            .background(SubtitleOverlayHitReporter(control: .audio, targets: hitTargets, action: "audio",
+                                                                   activate: { Self.openAudioPermissions() }))
                     }
                 }
                 .clipped()
         } else if rows.isEmpty {
             Text(Self.idleHint)
-                .font(.system(size: 13, weight: .regular, design: .rounded))
-                .foregroundStyle(.white.opacity(0.45))
+                .font(.system(size: 13, weight: .medium, design: .rounded))
+                .foregroundStyle(.white.opacity(Self.idleHintOpacity))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
         } else {
             caption(rows)
                 .overlay(alignment: .bottomTrailing) { if !scroll.isFollowing { latestButton } }
+                // The size a scroll works with is the caption's on screen,
+                // not a measurement pass's (`SubtitleCaptionGeometry`).
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { [scroll] size in scroll.setViewport(size) }
         }
     }
 
     /// Before the first session the box explains its one action.
     static let idleHint = "Start translates what this Mac plays."
+    /// Dim, but at least 4.5:1 against the box over a bright picture.
+    static let idleHintOpacity = 0.68
 
     /// Back to the newest pairs after scrolling back.
     private var latestButton: some View {
@@ -359,8 +371,9 @@ struct TranslationView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background(Capsule().fill(Color.black.opacity(hitTargets.pressed == .latest ? 0.55 : 0.78)))
-        .overlay(Capsule().strokeBorder(.white.opacity(0.18)))
+        .background(Capsule().fill(latestFill))
+        .overlay(Capsule().strokeBorder(.white.opacity(latestHovered ? 0.45 : 0.18)))
+        .onHover { latestHovered = $0 }
         .background(SubtitleOverlayHitReporter(control: .latest, targets: hitTargets, action: "latest",
                                                activate: { [scroll] in scroll.follow() }))
         .padding(4)
@@ -625,12 +638,24 @@ struct TranslationView: View {
         .accessibilityLabel("Close subtitles")
     }
 
-    private var audioPermissionsButton: some View {
-        Button("Open audio permissions") {
-            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
-                NSWorkspace.shared.open(url)
-            }
+    /// Latest lightens under the pointer and darkens while pressed.
+    private var latestFill: Color {
+        if hitTargets.pressed == .latest { return Color.black.opacity(0.55) }
+        return latestHovered ? Color(white: 0.24).opacity(0.92) : Color.black.opacity(0.78)
+    }
+
+    /// System Settings → Privacy & Security → Screen & System Audio Recording.
+    static func openAudioPermissions() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AudioCapture") {
+            openURL(url)
         }
+    }
+
+    /// Opens a System Settings pane (tests record instead).
+    nonisolated(unsafe) static var openURL: (URL) -> Void = { NSWorkspace.shared.open($0) }
+
+    private var audioPermissionsButton: some View {
+        Button("Open audio permissions") { Self.openAudioPermissions() }
         .buttonStyle(.link)
         .font(.caption)
     }

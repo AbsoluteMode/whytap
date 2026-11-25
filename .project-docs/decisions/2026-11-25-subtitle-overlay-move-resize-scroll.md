@@ -62,10 +62,13 @@ background, but none of that reached the user:
   pointer. A tracking area active while Whytap is inactive shows the resize
   cursor. The text palette keeps AppKit's own behaviour.
 - **Remembered.** The frame is saved after each move or resize
-  (`sidekey.translation.subtitleFrame`), never by the system moving the window.
-  It is restored on the display that holds its centre (or overlaps it most),
-  clamped to it. When no display does, the saved size returns at the bottom
-  centre of the island's display. Nothing saved: 760 x 190 pt there, as before.
+  (`sidekey.translation.subtitleFrame`), never by the system moving the window:
+  the display's identity (`NSScreen.sidekeyDisplayUUID`) and the frame relative
+  to that display's visible frame. It is restored at the same place on the
+  same display, clamped to it. When that display is gone, the saved size
+  returns at the bottom centre of the island's display. Nothing saved:
+  760 x 190 pt there, as before. A display without an identity goes by
+  coordinates (the display holding the frame's centre or overlapping it most).
 - **Scrolling back.** A scroll event over the box goes to
   `SubtitleCaptionScroll`. Following (the usual state), the newest pair stays
   at the bottom. Scrolling toward older pairs anchors the caption to the pair
@@ -74,7 +77,20 @@ background, but none of that reached the user:
   or scrolling down to the newest pair, follows again; a new session or Clear
   follows too. The caption never scrolls past the oldest pair, and one that
   fits does not scroll. A session keeps 200 pairs (about a quarter of an hour
-  of speech); following lays out 24, scrolled back all of them.
+  of speech); following lays out at least 24 and enough to fill the caption
+  with its shortest rows (`SubtitleCaptionScroll.followedLimit`), scrolled
+  back all of them, so every pair is in view or reachable at any size. A
+  gesture toward newer pairs with the newest in view follows again. A scroll
+  reads the placement at the caption's on-screen size
+  (`SubtitleCaptionGeometry.current`), since SwiftUI also places the rows for
+  a measurement at the ideal size; Clear, a new session and a mode change
+  drop the geometry.
+- **Buttons on the first click.** Open Keys & models and Open audio
+  permissions act through the panel's `sendEvent`, like Stop and Latest
+  (`SubtitleOverlayHitTargets.buttons`). A Control-click never acts on a
+  button: it is the context menu's. Latest lightens under the pointer; the
+  idle hint is 68 % white, medium weight (about 7:1 measured on the
+  minimum-size render).
 
 ## Why
 
@@ -156,6 +172,24 @@ Offscreen renders: the default, minimum (480 x 150, live, stopped, missing
 key) and a 1000 x 420 box, idle with the hint, and the caption scrolled back
 with Latest. Not checked: the installed app with a real pointer, the
 resize cursor, and a trackpad's momentum over a playing video.
+
+## Builder review (queue #563)
+
+The builder's offscreen probes found five groups on the first head, all fixed
+and covered by tests in `SubtitleOverlayMoveResizeScrollTests`:
+
+1. The right and top grips' inner boundaries returned a resize handle that
+   resized nothing (`NSRect.contains` excludes those edges): now they resize;
+   every point of three panel sizes is checked.
+2. A display was known by coordinates only: after unplugging an external
+   display the laptop can take its origin. Now by identity and relative place.
+3. Scroll geometry: kept after Clear; a gesture toward newer pairs at the
+   bottom of a grown window left Latest up; a tall caption could not reach
+   pairs past the 24 laid out; a measurement pass could replace the on-screen
+   placement. See Decision, scrolling back.
+4. Open Keys & models and Open audio permissions did nothing on the first
+   click of the inactive panel; Latest took a Control-click.
+5. Latest had no hover response; the idle hint measured about 3.9:1.
 
 ## Rejected
 

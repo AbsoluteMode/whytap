@@ -79,6 +79,74 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
                                                      screens: [laptop], fallback: laptop), first)
     }
 
+    /// Where the remembered frame opens on the test display.
+    private func remembered(_ defaults: UserDefaults) -> NSRect? {
+        guard let saved = SubtitleOverlayFrame.load(from: defaults) else { return nil }
+        XCTAssertEqual(saved.display, "test-display", "the display is remembered by identity")
+        return SubtitleOverlayFrame.restored(saved: saved, displays: [.init(id: "test-display", frame: display)],
+                                             fallback: display)
+    }
+
+    /// Queue #563, finding 1: the right and top edges were a grip that resized
+    /// nothing. Every point of the panel either moves the box or resizes it
+    /// along at least one axis, also on the grip's exact boundaries.
+    func testEveryGripPointResizesSomething() {
+        for size in [NSSize(width: 760, height: 190), NSSize(width: 480, height: 150), NSSize(width: 1_001, height: 421)] {
+            XCTAssertEqual(SubtitleOverlayFrame.handle(at: NSPoint(x: size.width - 16, y: size.height / 2), in: size),
+                           .init(horizontal: 1, vertical: 0), "the right grip's inner boundary")
+            XCTAssertEqual(SubtitleOverlayFrame.handle(at: NSPoint(x: size.width / 2, y: size.height - 16), in: size),
+                           .init(horizontal: 0, vertical: 1), "the top grip's inner boundary")
+            var x: CGFloat = 0
+            while x < size.width {
+                var y: CGFloat = 0
+                while y < size.height {
+                    if let handle = SubtitleOverlayFrame.handle(at: NSPoint(x: x, y: y), in: size) {
+                        XCTAssertNotEqual(handle, .init(horizontal: 0, vertical: 0), "(\(x), \(y)) in \(size)")
+                    }
+                    y += y < 30 || y > size.height - 30 ? 1 : 7
+                }
+                x += x < 30 || x > size.width - 30 ? 1 : 7
+            }
+        }
+        XCTAssertEqual(SubtitleOverlayFrame.handle(at: NSPoint(x: 744, y: 95), in: NSSize(width: 760, height: 190)),
+                       .init(horizontal: 1, vertical: 0))
+        XCTAssertEqual(SubtitleOverlayFrame.handle(at: NSPoint(x: 380, y: 174), in: NSSize(width: 760, height: 190)),
+                       .init(horizontal: 0, vertical: 1))
+    }
+
+    /// Queue #563, finding 2: a display is known by its identity, not by
+    /// where it was. Unplugging the external display can give the laptop its
+    /// origin; the overlay then opens at the usual place on the laptop.
+    func testTheOverlayFollowsItsDisplayByIdentityNotByCoordinates() {
+        let external = SubtitleOverlayFrame.Display(id: "external", frame: NSRect(x: 0, y: 0, width: 2_560, height: 1_415))
+        let laptopRight = SubtitleOverlayFrame.Display(id: "laptop", frame: NSRect(x: 2_560, y: 0, width: 1_512, height: 945))
+        let frame = NSRect(x: 40, y: 500, width: 800, height: 300)
+        let saved = SubtitleOverlayFrame.saved(frame, among: [external, laptopRight])
+        XCTAssertEqual(saved, .init(display: "external", frame: frame))
+        // Unplugged: the laptop takes the external display's origin.
+        let laptopAlone = SubtitleOverlayFrame.Display(id: "laptop", frame: NSRect(x: 0, y: 0, width: 1_512, height: 945))
+        let reopened = SubtitleOverlayFrame.restored(saved: saved, displays: [laptopAlone], fallback: laptopAlone.frame)
+        XCTAssertEqual(reopened, NSRect(x: 356, y: 72, width: 800, height: 300), "the usual place, the saved size")
+        // The arrangement changed: the same place on the same display.
+        let externalMoved = SubtitleOverlayFrame.Display(id: "external", frame: NSRect(x: 1_512, y: -200, width: 2_560, height: 1_415))
+        XCTAssertEqual(SubtitleOverlayFrame.restored(saved: saved, displays: [laptopAlone, externalMoved],
+                                                     fallback: laptopAlone.frame),
+                       NSRect(x: 1_552, y: 300, width: 800, height: 300))
+        // Saved and read back through the defaults.
+        let suite = "subtitle-frame-identity-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        SubtitleOverlayFrame.save(frame, among: [external, laptopRight], to: defaults)
+        XCTAssertEqual(SubtitleOverlayFrame.load(from: defaults), saved)
+        // A display without an identity: by coordinates, as before.
+        let anonymous = SubtitleOverlayFrame.Display(id: nil, frame: external.frame)
+        let global = SubtitleOverlayFrame.saved(frame, among: [anonymous])
+        XCTAssertNil(global.display)
+        XCTAssertEqual(SubtitleOverlayFrame.restored(saved: global, displays: [anonymous], fallback: anonymous.frame), frame)
+        defaults.set("{{1, 2}, {3, 4}}", forKey: SubtitleOverlayFrame.defaultsKey)
+        XCTAssertNil(SubtitleOverlayFrame.load(from: defaults), "an unreadable value is the default place")
+    }
+
     // MARK: The panel with real events
 
     private func overlay(defaults suite: String = "subtitle-frame-\(UUID())", pairs: Int = 3)
@@ -94,7 +162,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }), subtitleModel: model,
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         let display = display
-        controller.screens = { [display] }
+        controller.displays = { [.init(id: "test-display", frame: display)] }
         controller.islandScreen = { display }
         if pairs > 0 {
             model.start()
@@ -148,7 +216,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         XCTAssertFalse(controller.hitTargets.isControl(at: NSPoint(x: 300, y: 50), in: panel))
         drag(panel, from: caption, by: CGVector(dx: 140, dy: 260))
         XCTAssertEqual(panel.frame, start.offsetBy(dx: 140, dy: 260))
-        XCTAssertEqual(SubtitleOverlayFrame.load(from: defaults), panel.frame, "the new place is remembered")
+        XCTAssertEqual(remembered(defaults), panel.frame, "the new place is remembered")
 
         // The right edge makes it wider; the left edge stays.
         let moved = panel.frame
@@ -164,7 +232,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         XCTAssertEqual(panel.frame.size, SubtitleOverlayFrame.minimumSize)
         XCTAssertEqual(panel.frame.minX, tall.minX)
         XCTAssertEqual(panel.frame.maxY, tall.maxY)
-        XCTAssertEqual(SubtitleOverlayFrame.load(from: defaults), panel.frame)
+        XCTAssertEqual(remembered(defaults), panel.frame)
         XCTAssertTrue(panel.isVisible)
         XCTAssertFalse(panel.isKeyWindow, "moving and resizing never takes focus from the video")
     }
@@ -213,7 +281,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
                 subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
                                                  openTranslator: { _, _ in FixtureSubtitleUpstream() }),
                 defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
-            next.screens = { screens }
+            next.displays = { screens.map { .init(id: $0 == self.display ? "test-display" : "other", frame: $0) } }
             next.islandScreen = { island }
             next.resize(for: .subtitles)
             return next
@@ -247,7 +315,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
             defaults: defaults, openSettings: { _ in }, activityChanged: { _ in })
         self.controller = controller
         let display = display
-        controller.screens = { [display] }
+        controller.displays = { [.init(id: "test-display", frame: display)] }
         controller.presentation.mode = .subtitles
         controller.resize(for: .subtitles)
         controller.window.setFrame(start, display: false)
@@ -284,9 +352,16 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         XCTAssertEqual(scroll.anchor?.id, anchor.id)
         XCTAssertEqual(try XCTUnwrap(anchoredTop()), before, accuracy: 0.5, "new lines never pull the reader down")
 
-        // Latest returns to the newest pair.
+        // Queue #563, finding 4: a Control-click on Latest is the context
+        // menu's, not Latest's.
         let latest = try XCTUnwrap(controller.hitTargets.frame(of: .latest, in: controller.window))
         let point = NSPoint(x: start.minX + latest.midX, y: start.minY + latest.midY)
+        let menuClick = mouse(.leftMouseDown, controller.window, screen: point, flags: .control)
+        XCTAssertFalse(controller.hitTargets.handle(menuClick, in: controller.window))
+        XCTAssertFalse(controller.frameTracker.handle(menuClick, in: controller.window))
+        XCTAssertEqual(scroll.anchor?.id, anchor.id, "still reading the older pairs")
+
+        // Latest returns to the newest pair.
         controller.window.sendEvent(mouse(.leftMouseDown, controller.window, screen: point))
         controller.window.sendEvent(mouse(.leftMouseUp, controller.window, screen: point))
         settle(0.4)
@@ -315,7 +390,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         scroll.scroll(by: 120)
         XCTAssertTrue(scroll.isFollowing, "nothing laid out yet")
         let id = UUID()
-        scroll.geometry.placed = .init(rows: [.init(id: id, top: 80, bottom: 140)], height: 146)
+        scroll.geometry.record(.init(rows: [.init(id: id, top: 80, bottom: 140)], height: 146))
         scroll.scroll(by: 120)
         scroll.scroll(by: -120)
         XCTAssertTrue(scroll.isFollowing, "everything fits: nothing to scroll")
@@ -342,4 +417,118 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         XCTAssertEqual(SteadyPairsLayout.contentTop(rowTops: Array(tops.prefix(2)), total: 112, bounds: bounds,
                                                     anchor: anchor), 38)
     }
+
+    /// Queue #563, finding 3: the geometry a scroll uses is the caption's on
+    /// screen, a gesture toward the newest pair with it in view follows, and
+    /// pairs that are gone leave nothing to scroll.
+    func testScrollGeometryIsTheCaptionOnScreenAndGoesWithThePairs() {
+        let scroll = SubtitleCaptionScroll()
+        let ids = (0..<10).map { _ in UUID() }
+        func placed(height: CGFloat) -> SubtitleCaptionGeometry.Placed {
+            let top = height - CGFloat(ids.count) * 50
+            return .init(rows: ids.enumerated().map { index, id in
+                .init(id: id, top: top + CGFloat(index) * 50, bottom: top + CGFloat(index + 1) * 50)
+            }, height: height, width: 700)
+        }
+        scroll.setViewport(CGSize(width: 700, height: 300))
+        scroll.geometry.record(placed(height: 300))
+        // A measurement pass at the ideal height lands after the real one.
+        scroll.geometry.record(placed(height: 146))
+        XCTAssertEqual(scroll.geometry.current?.height, 300, "the caption on screen, not the measurement")
+        scroll.scroll(by: 40)
+        XCTAssertFalse(scroll.isFollowing)
+        // The window grew until the newest pair is in view: a gesture toward
+        // newer pairs follows again instead of leaving Latest up.
+        scroll.setViewport(CGSize(width: 700, height: 900))
+        scroll.geometry.record(placed(height: 900))
+        scroll.scroll(by: -3)
+        XCTAssertTrue(scroll.isFollowing)
+        // Clear: no rows, nothing to anchor.
+        scroll.setViewport(CGSize(width: 700, height: 300))
+        scroll.geometry.record(placed(height: 300))
+        scroll.scroll(by: 40)
+        XCTAssertFalse(scroll.isFollowing)
+        scroll.reset()
+        XCTAssertTrue(scroll.isFollowing)
+        XCTAssertNil(scroll.geometry.current)
+        scroll.scroll(by: 40)
+        XCTAssertTrue(scroll.isFollowing, "a wheel over the emptied caption anchors nothing")
+    }
+
+    /// Queue #563, finding 3: following lays out enough pairs to fill any
+    /// caption with the shortest rows, so a tall window shows every retained
+    /// pair or has the rest above it to scroll to.
+    func testFollowingLaysOutEnoughPairsForATallCaption() {
+        XCTAssertEqual(SubtitleCaptionScroll.followedLimit(height: 0, minimum: 24), 24)
+        XCTAssertEqual(SubtitleCaptionScroll.followedLimit(height: 146, minimum: 24), 24)
+        for height: CGFloat in [1_520, 2_160] {
+            let limit = SubtitleCaptionScroll.followedLimit(height: height, minimum: 24)
+            XCTAssertGreaterThan(CGFloat(limit) * SubtitleCaptionScroll.shortestRow, height)
+        }
+        XCTAssertGreaterThanOrEqual(SubtitleCaptionScroll.followedLimit(height: 1_520, minimum: 24), 36)
+    }
+
+    /// Queue #563, finding 4: the inactive overlay's repair buttons act on the
+    /// first click, through the window, without moving it.
+    func testOpenKeysAndModelsActsOnTheFirstClick() async throws {
+        let suite = "subtitle-fix-\(UUID())"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
+        let model = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
+                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
+        var opened: [AIFeature] = []
+        let controller = TranslationWindowController(
+            textModel: TextTranslationModel(makeService: { FixtureTranslator() }), subtitleModel: model,
+            defaults: defaults, openSettings: { opened.append($0) }, activityChanged: { _ in })
+        self.controller = controller
+        let display = display
+        controller.displays = { [.init(id: "test-display", frame: display)] }
+        controller.islandScreen = { display }
+        model.start()
+        for _ in 0..<200 where model.issue == nil { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertEqual(model.issue?.feature, .subtitlesAudio)
+        controller.presentation.mode = .subtitles
+        controller.resize(for: .subtitles)
+        controller.window.setFrame(start, display: false)
+        controller.window.orderFrontRegardless()
+        addTeardownBlock { controller.window.orderOut(nil) }
+        settle(0.4)
+        let panel = controller.window
+        XCTAssertFalse(panel.isKeyWindow)
+        let fix = try XCTUnwrap(controller.hitTargets.frame(of: .fix, in: panel))
+        let point = NSPoint(x: start.minX + fix.midX, y: start.minY + fix.midY)
+        let menu = mouse(.leftMouseDown, panel, screen: point, flags: .control)
+        XCTAssertFalse(controller.hitTargets.handle(menu, in: panel), "a Control-click is the menu's")
+        panel.sendEvent(mouse(.leftMouseDown, panel, screen: point))
+        panel.sendEvent(mouse(.leftMouseUp, panel, screen: point))
+        XCTAssertEqual(opened, [.subtitlesAudio])
+        XCTAssertEqual(panel.frame, start, "the click did not move the overlay")
+    }
+
+    func testOpenAudioPermissionsActsOnTheFirstClick() {
+        let targets = SubtitleOverlayHitTargets()
+        var opened: [URL] = []
+        let open = TranslationView.openURL
+        TranslationView.openURL = { opened.append($0) }
+        defer { TranslationView.openURL = open }
+        let panel = NSPanel(contentRect: NSRect(x: -20_000, y: -20_000, width: 320, height: 80),
+                            styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        panel.contentView = NSHostingView(rootView:
+            Button("Open audio permissions") { TranslationView.openAudioPermissions() }
+                .background(SubtitleOverlayHitReporter(control: .audio, targets: targets, action: "audio",
+                                                       activate: { TranslationView.openAudioPermissions() }))
+                .frame(width: 320, height: 80))
+        panel.orderFrontRegardless()
+        defer { panel.orderOut(nil) }
+        panel.contentView?.layoutSubtreeIfNeeded()
+        RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        guard let button = targets.frame(of: .audio, in: panel) else { return XCTFail("the button reports its frame") }
+        let point = NSPoint(x: panel.frame.minX + button.midX, y: panel.frame.minY + button.midY)
+        XCTAssertTrue(targets.isControl(at: NSPoint(x: button.midX, y: button.midY), in: panel), "a press there never moves the overlay")
+        XCTAssertTrue(targets.handle(mouse(.leftMouseDown, panel, screen: point), in: panel))
+        XCTAssertTrue(targets.handle(mouse(.leftMouseUp, panel, screen: point), in: panel))
+        XCTAssertEqual(opened.count, 1)
+        XCTAssertTrue(opened.first?.absoluteString.contains("Privacy_AudioCapture") == true)
+    }
+
 }

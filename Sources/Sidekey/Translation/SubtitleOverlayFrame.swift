@@ -24,6 +24,31 @@ enum SubtitleOverlayFrame {
     /// The overlay starts this far above the bottom of the visible frame.
     static let bottomInset: CGFloat = 72
 
+    /// A display: its stable identity (`NSScreen.sidekeyDisplayUUID`) and
+    /// visible frame.
+    struct Display: Equatable {
+        var id: String?
+        var frame: NSRect
+
+        init(id: String?, frame: NSRect) {
+            self.id = id
+            self.frame = frame
+        }
+
+        @MainActor init(_ screen: NSScreen) {
+            self.init(id: screen.sidekeyDisplayUUID, frame: screen.visibleFrame)
+        }
+    }
+
+    /// What is remembered: the frame relative to the visible frame of the
+    /// display it was left on, with that display's identity. Coordinates
+    /// alone are ambiguous: after unplugging a display another one can take
+    /// its origin. Without an identity the frame is global (`display` nil).
+    struct Saved: Equatable {
+        var display: String?
+        var frame: NSRect
+    }
+
     /// Which edges a press moves: -1 the left or bottom edge, 1 the right or
     /// top edge, 0 neither.
     struct Handle: Equatable {
@@ -57,10 +82,27 @@ enum SubtitleOverlayFrame {
         return overlaps.max { $0.1.width * $0.1.height < $1.1.width * $1.1.height }?.0
     }
 
-    /// Where the overlay opens: the saved frame on its display, kept inside
-    /// it; the saved size at the usual place on `fallback` when that display
-    /// is gone (or no longer overlaps it); the default frame when nothing was
-    /// saved.
+    /// Where the overlay opens: the saved frame at the same place on the
+    /// same display, kept inside it; the saved size at the usual place on
+    /// `fallback` when that display is gone; the default frame when nothing
+    /// was saved. A frame saved without a display identity goes by its
+    /// coordinates (the display holding or overlapping it).
+    static func restored(saved: Saved?, displays: [Display], fallback: NSRect) -> NSRect {
+        guard let saved, saved.frame.width > 0, saved.frame.height > 0,
+              saved.frame.width.isFinite, saved.frame.height.isFinite else {
+            return defaultFrame(on: fallback)
+        }
+        if let id = saved.display {
+            guard let display = displays.first(where: { $0.id == id }) else {
+                return defaultFrame(size: saved.frame.size, on: fallback)
+            }
+            let frame = saved.frame.offsetBy(dx: display.frame.minX, dy: display.frame.minY)
+            return clamped(frame, to: display.frame)
+        }
+        return restored(saved: saved.frame, screens: displays.map(\.frame), fallback: fallback)
+    }
+
+    /// `restored` by coordinates only.
     static func restored(saved: NSRect?, screens: [NSRect], fallback: NSRect) -> NSRect {
         guard let saved, saved.width > 0, saved.height > 0, saved.width.isFinite, saved.height.isFinite else {
             return defaultFrame(on: fallback)
@@ -71,14 +113,28 @@ enum SubtitleOverlayFrame {
         return clamped(saved, to: screen)
     }
 
-    static func load(from defaults: UserDefaults) -> NSRect? {
-        guard let value = defaults.string(forKey: defaultsKey) else { return nil }
-        let frame = NSRectFromString(value)
-        return frame.width > 0 && frame.height > 0 ? frame : nil
+    /// What to remember for `frame`: its display (the one holding its centre
+    /// or overlapping it most) and its place relative to that display.
+    static func saved(_ frame: NSRect, among displays: [Display]) -> Saved {
+        guard let screen = screen(for: frame, among: displays.map(\.frame)),
+              let display = displays.first(where: { $0.frame == screen }), let id = display.id else {
+            return Saved(display: nil, frame: frame.integral)
+        }
+        return Saved(display: id, frame: frame.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY).integral)
     }
 
-    static func save(_ frame: NSRect, to defaults: UserDefaults) {
-        defaults.set(NSStringFromRect(frame.integral), forKey: defaultsKey)
+    static func load(from defaults: UserDefaults) -> Saved? {
+        guard let value = defaults.dictionary(forKey: defaultsKey), let rect = value["frame"] as? String else { return nil }
+        let frame = NSRectFromString(rect)
+        guard frame.width > 0, frame.height > 0 else { return nil }
+        return Saved(display: value["display"] as? String, frame: frame)
+    }
+
+    static func save(_ frame: NSRect, among displays: [Display], to defaults: UserDefaults) {
+        let saved = saved(frame, among: displays)
+        var value: [String: Any] = ["frame": NSStringFromRect(saved.frame)]
+        if let display = saved.display { value["display"] = display }
+        defaults.set(value, forKey: defaultsKey)
     }
 
     /// The handle under `point` (window coordinates, origin bottom-left) of a
@@ -88,8 +144,9 @@ enum SubtitleOverlayFrame {
         let box = NSRect(origin: .zero, size: size).insetBy(dx: margin, dy: margin)
         let reach = box.insetBy(dx: grip, dy: grip)
         guard NSRect(origin: .zero, size: size).contains(point), !reach.contains(point) else { return nil }
-        var horizontal = point.x < reach.minX ? -1 : point.x > reach.maxX ? 1 : 0
-        var vertical = point.y < reach.minY ? -1 : point.y > reach.maxY ? 1 : 0
+        // `contains` excludes the right and top edges, so they resize too.
+        var horizontal = point.x < reach.minX ? -1 : point.x >= reach.maxX ? 1 : 0
+        var vertical = point.y < reach.minY ? -1 : point.y >= reach.maxY ? 1 : 0
         // Near a corner along one edge: both ways, as a window's corner.
         if horizontal != 0, vertical == 0 {
             if point.y < box.minY + cornerGrip { vertical = -1 } else if point.y > box.maxY - cornerGrip { vertical = 1 }

@@ -38,9 +38,10 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     let scroll = SubtitleCaptionScroll()
     /// Moves and resizes the subtitle overlay from the panel's own events.
     let frameTracker = SubtitleOverlayFrameTracker()
-    /// The displays' visible frames and the island's, for placing the overlay
-    /// (tests substitute them).
-    var screens: () -> [NSRect] = { NSScreen.screens.map(\.visibleFrame) }
+    /// The displays (identity and visible frame) and the island's visible
+    /// frame, for placing the overlay (tests substitute them).
+    var displays: () -> [SubtitleOverlayFrame.Display] = { NSScreen.screens.map(SubtitleOverlayFrame.Display.init) }
+    var screens: [NSRect] { displays().map(\.frame) }
     var islandScreen: () -> NSRect = { IslandScreenResolver.currentVisibleFrame() }
     private var embeddingID: UUID?
     var isEmbedded: Bool { embeddingID != nil }
@@ -115,7 +116,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         panel.frameTracker = frameTracker
         panel.scroll = scroll
         frameTracker.hitTargets = hitTargets
-        frameTracker.screens = { [weak self] in self?.screens() ?? [] }
+        frameTracker.screens = { [weak self] in self?.screens ?? [] }
         frameTracker.didFinish = { [weak self] frame in self?.rememberSubtitleFrame(frame) }
         if let content = panel.contentView { frameTracker.install(on: content) }
         adoptTextWidth(restoredFrame: panel.frame)
@@ -163,14 +164,14 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     /// The subtitle overlay's frame for this launch and these displays.
     func subtitleFrame() -> NSRect {
-        SubtitleOverlayFrame.restored(saved: SubtitleOverlayFrame.load(from: defaults), screens: screens(),
+        SubtitleOverlayFrame.restored(saved: SubtitleOverlayFrame.load(from: defaults), displays: displays(),
                                       fallback: islandScreen())
     }
 
     /// A move or resize by the user is the overlay's place from now on.
     private func rememberSubtitleFrame(_ frame: NSRect) {
         guard laidOutMode == .subtitles else { return }
-        SubtitleOverlayFrame.save(frame, to: defaults)
+        SubtitleOverlayFrame.save(frame, among: displays(), to: defaults)
     }
 
     /// A tool hotkey's second press closes the same visible mode; the other
@@ -220,6 +221,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             frame = subtitleFrame()
         }
         frameTracker.isEnabled = !isText
+        if laidOutMode != mode { scroll.reset() }
         laidOutMode = mode
         applyingLayout = true
         panel.setFrame(frame, display: panel.isVisible)

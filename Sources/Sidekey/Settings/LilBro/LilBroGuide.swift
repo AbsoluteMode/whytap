@@ -198,11 +198,13 @@ struct LilBroLocalGuide: LilBroBrain {
 
     /// An instruction after a comma inside a question about what something
     /// else does is that thing's action: "Does Drop, by default, turn on
-    /// Microphone?", "Doesn't Drop, by default, turn on Microphone?", "Can't
-    /// Drop start now, switch Microphone off, and stop cleanly?". The
-    /// question has to start that sentence; a statement before the comma
-    /// ("Drop is installed, turn on Microphone.") or a sentence that has
-    /// ended ("Does Drop work? Turn on Microphone.") leaves an instruction.
+    /// Microphone?", "On this Mac, does Drop, by default, turn on …?",
+    /// "Doesn't Drop …", "I wonder whether Drop can start, give another app
+    /// access to …". Any part of the sentence before it may hold that
+    /// question; its subject is the feature, it or Whytap. "Don't open Drop,
+    /// turn on Microphone." (a verb after "don't"), a statement before the
+    /// comma ("Drop is installed, turn on …") or an ended sentence ("Does
+    /// Drop work? Turn on …") leaves an instruction.
     private static func isSomeoneElsesAction(_ match: NSTextCheckingResult, in q: String) -> Bool {
         let actorRange = match.range(withName: "actor")
         guard actorRange.location != NSNotFound, let actor = Range(actorRange, in: q) else { return false }
@@ -212,15 +214,36 @@ struct LilBroLocalGuide: LilBroBrain {
         guard mark.count == 1, ",;:".contains(mark) else { return false }
         let before = q[..<actor.lowerBound]
         let sentence = before.lastIndex { ".?!".contains($0) }.map { before[before.index(after: $0)...] } ?? before
-        return String(sentence).range(of: someoneElsesQuestion, options: .regularExpression) != nil
+        let asks = "^(?:(?:and|or|but|so)\\s+)?(?:(?:how|why|when|where|what)\\s+)?(?:" + auxiliaries + ")\\s+"
+        let wonders = "\\b(?:whether|if)\\s+"
+        return sentence.split { ",;:".contains($0) }.contains { part in
+            let part = part.trimmingCharacters(in: .whitespacesAndNewlines)
+            if let opening = part.range(of: asks, options: .regularExpression),
+               startsWithAppSubject(part[opening.upperBound...]) { return true }
+            guard let opening = part.range(of: wonders, options: .regularExpression) else { return false }
+            let rest = part[opening.upperBound...]
+            return startsWithAppSubject(rest)
+                && rest.range(of: "\\b(?:" + auxiliaries + ")\\b", options: .regularExpression) != nil
+        }
     }
 
-    /// A sentence that opens by asking what something other than the person
-    /// does: "Does Drop", "Doesn't Drop", "Why does Agent", "Won't it".
-    private static let someoneElsesQuestion = "^\\s*(?:(?:how|why|when|where|what)\\s+)?"
-        + "(?:does|do|did|will|would|can|could|is|are|should|may|might|"
-        + "doesn't|don't|didn't|won't|wouldn't|can't|couldn't|isn't|aren't|shouldn't)"
-        + "\\s+(?!(?:i|we|you|us)\\b)[\\w']"
+    /// The question is about the app: it opens with a feature (by name or
+    /// alias, "Subtitles"), it, or Whytap, not a verb ("Don't open Drop").
+    private static func startsWithAppSubject(_ text: Substring) -> Bool {
+        // Its first three words, so a feature later in the part does not count.
+        let text = text.split(separator: " ", maxSplits: 3, omittingEmptySubsequences: true).prefix(3)
+            .joined(separator: " ")
+        if text.range(of: "^(?:it|this|that|whytap|the app|lil bro|he)\\b", options: .regularExpression) != nil {
+            return true
+        }
+        guard let found = featureMatch(in: text) else { return false }
+        let lead = text.prefix(found.offset)
+        return lead.trimmingCharacters(in: .whitespaces).isEmpty || lead.range(of: "^(?:the|my)\\s+$", options: .regularExpression) != nil
+    }
+
+    private static let auxiliaries = "does|do|did|will|would|can|could|is|are|should|may|might|"
+        + "doesn't|don't|didn't|won't|wouldn't|can't|couldn't|isn't|aren't|shouldn't"
+
 
     /// Every place a setting's name starts: the same setting can be context
     /// once and asked for later ("… with Microphone disabled. Where do I
@@ -257,10 +280,12 @@ struct LilBroLocalGuide: LilBroBrain {
         featureMatch(in: withoutInCase(question))?.feature
     }
 
-    /// Lowercased, with the phrase "in case" blanked: "in case I need it" is
+    /// Lowercased, typographic apostrophes made plain ("Can’t" is "can't"),
+    /// with the phrase "in case" blanked: "in case I need it" is
     /// not the Case feature, while "keys in Case" (capital C, its name) is.
     private static func withoutInCase(_ question: String) -> String {
-        blank(question, pattern: "\\b(?:[Jj]ust )?[Ii]n case\\b").lowercased()
+        blank(question.replacingOccurrences(of: "\u{2019}", with: "'"), pattern: "\\b(?:[Jj]ust )?[Ii]n case\\b")
+            .lowercased()
     }
 
     /// The feature a question names, and where: a feature's exact name first

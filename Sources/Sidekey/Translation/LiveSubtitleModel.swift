@@ -454,9 +454,12 @@ final class LiveSubtitleModel: ObservableObject {
     }
 
     /// Deltas often arrive several at once: the caption is published at once
-    /// when the last publish is `publishInterval` old, otherwise by the flush
-    /// timer, so a burst redraws (and restarts its motion) once.
+    /// when the last change it showed is `publishInterval` old, otherwise by
+    /// the flush timer, so a burst redraws (and restarts its motion) once.
+    /// Only a flush that changed the caption counts: the timer's empty ticks
+    /// used to make almost every delta wait for the next tick (about 80 ms).
     // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
     static let publishInterval: TimeInterval = 0.08
     private var lastPublish: TimeInterval = 0
 
@@ -466,20 +469,23 @@ final class LiveSubtitleModel: ObservableObject {
 
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
-        lastPublish = ProcessInfo.processInfo.systemUptime
+        let now = ProcessInfo.processInfo.systemUptime
         publishedEvents = receivedEvents
+        var changed = false
         let carry = pairer.takeCarry()
-        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
-        for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
+        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry; changed = true }
+        for pair in pairer.take(now: now, force: force) {
             let translated = !pair.translation.isEmpty
             lines.append(SubtitleLine(id: liveID, source: pair.source, translation: translated ? pair.translation : nil,
                                       failed: !translated, ordinal: nextOrdinal))
             nextOrdinal += 1
             liveID = UUID()
-            if lines.count > 40 { lines.removeFirst() }
+            if lines.count > SubtitleCaption.historyPairs { lines.removeFirst() }
+            changed = true
         }
-        let row = pairer.showLive(now: ProcessInfo.processInfo.systemUptime)
-        if live != row.source { live = row.source }
-        if liveTranslation != row.translation { liveTranslation = row.translation }
+        let row = pairer.showLive(now: now)
+        if live != row.source { live = row.source; changed = true }
+        if liveTranslation != row.translation { liveTranslation = row.translation; changed = true }
+        if changed { lastPublish = now }
     }
 }

@@ -34,6 +34,15 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     let hitTargets = SubtitleOverlayHitTargets()
     /// Click-to-copy of a translation and its "Copied ✓", shared with the Toolbox pane.
     let copier: PromptCopier
+    /// The overlay caption's scroll position, fed by the panel's scroll events.
+    let scroll = SubtitleCaptionScroll()
+    /// Moves and resizes the subtitle overlay from the panel's own events.
+    let frameTracker = SubtitleOverlayFrameTracker()
+    /// The displays (identity and visible frame) and the island's visible
+    /// frame, for placing the overlay (tests substitute them).
+    var displays: () -> [SubtitleOverlayFrame.Display] = { NSScreen.screens.map(SubtitleOverlayFrame.Display.init) }
+    var screens: [NSRect] { displays().map(\.frame) }
+    var islandScreen: () -> NSRect = { IslandScreenResolver.currentVisibleFrame() }
     private var embeddingID: UUID?
     var isEmbedded: Bool { embeddingID != nil }
     private let panel: TranslationPanel
@@ -100,9 +109,16 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
             },
             close: { [weak self] in self?.dismiss() },
             hitTargets: hitTargets,
-            copier: copier
+            copier: copier,
+            scroll: scroll
         ))
         panel.hitTargets = hitTargets
+        panel.frameTracker = frameTracker
+        panel.scroll = scroll
+        frameTracker.hitTargets = hitTargets
+        frameTracker.screens = { [weak self] in self?.screens ?? [] }
+        frameTracker.didFinish = { [weak self] frame in self?.rememberSubtitleFrame(frame) }
+        if let content = panel.contentView { frameTracker.install(on: content) }
         adoptTextWidth(restoredFrame: panel.frame)
         configureChrome(for: .text)
         let publish = { [weak self] in
@@ -119,7 +135,13 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     func show(_ mode: Mode) {
         if presentation.mode == mode { resize(for: mode) }
         else { presentation.mode = mode }
-        if !panel.isVisible {
+        if !panel.isVisible, mode == .subtitles {
+            // Where the user left it, on the display it was left on.
+            // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+            applyingLayout = true
+            panel.setFrame(subtitleFrame(), display: false)
+            applyingLayout = false
+        } else if !panel.isVisible {
             let frame = IslandScreenResolver.currentVisibleFrame()
             let width = min(panel.frame.width, frame.width - 32)
             let height = min(panel.frame.height, frame.height - 48)
@@ -135,8 +157,21 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
         }
         presentation.isTextPresented = mode == .text
         if mode == .text { presentation.requestInputFocus() }
+        frameTracker.isEnabled = mode == .subtitles
         updateOutsideClickMonitors(for: mode)
         text.onActivityChange?()
+    }
+
+    /// The subtitle overlay's frame for this launch and these displays.
+    func subtitleFrame() -> NSRect {
+        SubtitleOverlayFrame.restored(saved: SubtitleOverlayFrame.load(from: defaults), displays: displays(),
+                                      fallback: islandScreen())
+    }
+
+    /// A move or resize by the user is the overlay's place from now on.
+    private func rememberSubtitleFrame(_ frame: NSRect) {
+        guard laidOutMode == .subtitles else { return }
+        SubtitleOverlayFrame.save(frame, among: displays(), to: defaults)
     }
 
     /// A tool hotkey's second press closes the same visible mode; the other
@@ -155,19 +190,19 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     }
 
     // WHY: .project-docs/decisions/2026-11-21-compact-subtitle-overlay.md
-    static let subtitleSize = NSSize(width: 760, height: 190)
+    static let subtitleSize = SubtitleOverlayFrame.defaultSize
     static let minimumWidth: CGFloat = 360
 
     /// Internal so tests can check the layout without putting the panel on screen.
     func resize(for mode: Mode) {
         hitTargets.cancelPress()
+        frameTracker.cancel()
         let isText = mode == .text
         configureChrome(for: mode)
-        // Subtitles: never shorter than the overlay's own height, so the
-        // controls, a problem with its fix and the caption all fit at the
-        // narrowest width (the caption shrinks to what the controls leave).
-        // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
-        panel.minSize = NSSize(width: Self.minimumWidth, height: isText ? 120 : Self.subtitleSize.height)
+        // Subtitles: the smallest box that still holds the controls, a
+        // problem with its fix and the caption.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+        panel.minSize = isText ? NSSize(width: Self.minimumWidth, height: 120) : SubtitleOverlayFrame.minimumSize
         let screen = IslandScreenResolver.currentVisibleFrame()
         var frame = panel.frame
         if laidOutMode == .text { rememberTextWidth(frame.width) }
@@ -180,12 +215,13 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
                 frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.midY - frame.height / 2)
             }
         } else if laidOutMode != .subtitles || !panel.isVisible {
-            // Entering subtitles places the overlay at the bottom of the screen;
-            // a repeated show of the visible overlay keeps where it was dragged.
-            frame.size = NSSize(width: min(Self.subtitleSize.width, screen.width - 32),
-                                height: min(Self.subtitleSize.height, screen.height - 48))
-            frame.origin = NSPoint(x: screen.midX - frame.width / 2, y: screen.minY + 72)
+            // Entering subtitles places the overlay where the user left it
+            // (at first the bottom of the screen); a repeated show of the
+            // visible overlay keeps where it is.
+            frame = subtitleFrame()
         }
+        frameTracker.isEnabled = !isText
+        if laidOutMode != mode { scroll.reset() }
         laidOutMode = mode
         applyingLayout = true
         panel.setFrame(frame, display: panel.isVisible)
@@ -251,6 +287,7 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     func dismiss() {
         hitTargets.cancelPress()
+        frameTracker.cancel()
         presentation.isTextPresented = false
         removeOutsideClickMonitors()
         panel.orderOut(nil)
@@ -284,6 +321,12 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         guard !applyingLayout, laidOutMode == .text else { return }
         rememberTextWidth(panel.frame.width)
+    }
+
+    /// AppKit's own resize of the overlay (outside the tracker) is kept too.
+    func windowDidEndLiveResize(_ notification: Notification) {
+        guard !applyingLayout, laidOutMode == .subtitles, !frameTracker.isTracking else { return }
+        rememberSubtitleFrame(panel.frame)
     }
 
     /// Once per Mac: until this version stores the palette width, the shared
@@ -321,13 +364,24 @@ final class FirstClickHostingView<Content: View>: NSHostingView<Content> {
 
 private final class TranslationPanel: NSPanel {
     var hitTargets: SubtitleOverlayHitTargets?
+    var frameTracker: SubtitleOverlayFrameTracker?
+    var scroll: SubtitleCaptionScroll?
     override var canBecomeKey: Bool { true }
 
     // The overlay's buttons take their click here, where it always arrives,
-    // not through the first-mouse bridge that can drop it.
+    // not through the first-mouse bridge that can drop it. The rest of the
+    // subtitle box moves the overlay, its edges resize it, and a scroll
+    // scrolls its caption.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
     override func sendEvent(_ event: NSEvent) {
+        if frameTracker?.isTracking == true, frameTracker?.handle(event, in: self) == true { return }
         if let hitTargets, hitTargets.handle(event, in: self) { return }
+        if let frameTracker, frameTracker.handle(event, in: self) { return }
+        if event.type == .scrollWheel, frameTracker?.isEnabled == true, let scroll {
+            scroll.scroll(with: event)
+            return
+        }
         super.sendEvent(event)
     }
     override func cancelOperation(_ sender: Any?) { close() }

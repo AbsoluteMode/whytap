@@ -35,16 +35,25 @@ enum NativeAgentEffort {
     ///
     /// `refused`: the provider refused these fields for this model before.
     /// Direct OpenAI then gets `low`, which every reasoning model takes (the
-    /// Agent's level before 2026-11-24), when the table asked for less;
-    /// otherwise nothing is sent.
+    /// Agent's level before 2026-11-24), when the level that would be sent is
+    /// lower; otherwise nothing is sent.
     static func request(provider: OpenCodeModelProvider, model: String, catalogFlag: Bool?,
                         openRouter: OpenRouterReasoningCapabilities? = nil, providerSearch: Bool = false,
                         refused: Bool = false) -> Request? {
-        typealias Effort = NativeAgentDiagnostics.Effort
-        if refused {
-            guard provider == .openAI, let effort = SmartDirectReasoning.openAIEffort(model: model), effort != "low" else { return nil }
-            return Request(fields: ["reasoning": ["effort": "low"]], effort: .low, thinking: nil)
+        guard refused else {
+            return least(provider: provider, model: model, catalogFlag: catalogFlag, openRouter: openRouter,
+                         providerSearch: providerSearch)
         }
+        let sent = least(provider: provider, model: model, catalogFlag: catalogFlag, openRouter: openRouter,
+                         providerSearch: providerSearch)
+        guard provider == .openAI, sent?.effort == .noReasoning || sent?.effort == .minimal else { return nil }
+        return Request(fields: ["reasoning": ["effort": "low"]], effort: .low, thinking: nil)
+    }
+
+    /// The least reasoning the tables give this model.
+    private static func least(provider: OpenCodeModelProvider, model: String, catalogFlag: Bool?,
+                              openRouter: OpenRouterReasoningCapabilities?, providerSearch: Bool) -> Request? {
+        typealias Effort = NativeAgentDiagnostics.Effort
         switch provider {
         case .anthropic:
             // The Models API saying the model takes no effort setting: nothing
@@ -88,6 +97,13 @@ enum NativeAgentEffort {
     /// Models whose provider refused the Agent's reasoning fields and then
     /// answered the same request without them, while this app runs.
     static let refusals = SmartReasoningRefusals()
+
+    /// The name a refusal is remembered under: the model, and on OpenRouter
+    /// also the endpoint it is pinned to (or Auto), because another endpoint
+    /// of the same model may take the setting.
+    static func refusalKey(model: String, provider: OpenCodeModelProvider, openRouterPin: String?) -> String {
+        provider == .openRouter ? model + "@" + (openRouterPin ?? "auto") : model
+    }
 
     static func refusalAPI(_ provider: OpenCodeModelProvider) -> OpenAICompatibleLLMEndpoint.TextAPI {
         switch provider {

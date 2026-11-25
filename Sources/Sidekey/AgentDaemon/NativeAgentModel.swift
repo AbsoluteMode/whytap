@@ -51,7 +51,8 @@ struct NativeAgentModel {
     private var diagnosticRequest = 0
     /// Models that refused the reasoning fields while this app runs.
     var reasoningRefusals = NativeAgentEffort.refusals
-    /// Whether this turn's first request had the provider's own web search.
+    /// Whether the turn's first accepted exchange had the provider's own web
+    /// search; until then each request follows the search it actually sends.
     private var reasoningSearch: Bool?
     /// Whether this turn sends the fields for a model that refused them; set
     /// at the turn's first request and by an accepted refusal repeat.
@@ -95,14 +96,16 @@ struct NativeAgentModel {
         let modelLimit = direct ? options.outputTokenLimit ?? options.openCodeModelSpec?.outputLimit
             : options.openCodeModelSpec?.outputLimit
         let outputLimit = min(outputCap, modelLimit ?? outputCap)
-        // The least reasoning the model accepts. A turn keeps the choice its
-        // first request made (a thinking setting must not change inside a
-        // tool loop). WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
+        // The least reasoning the model accepts. The setting follows the
+        // request that can start the turn (a first request whose search tool
+        // was refused goes again without it) and is kept after the turn's
+        // first accepted exchange: a thinking setting must not change inside
+        // a tool loop. WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
         let turnSearch = reasoningSearch ?? builtInSearch
-        reasoningSearch = turnSearch
         let refusalAPI = NativeAgentEffort.refusalAPI(options.openCodeProvider)
-        let turnRefused = reasoningRefused ?? reasoningRefusals.contains(refusalAPI, model: model)
-        reasoningRefused = turnRefused
+        let refusalKey = NativeAgentEffort.refusalKey(model: model, provider: options.openCodeProvider,
+                                                      openRouterPin: options.openRouterProvider)
+        let turnRefused = reasoningRefused ?? reasoningRefusals.contains(refusalAPI, model: refusalKey)
         func reasoningFields(refused: Bool) -> NativeAgentEffort.Request? {
             NativeAgentEffort.request(provider: options.openCodeProvider, model: model, catalogFlag: options.lowEffortSupport,
                                       openRouter: options.openRouterReasoning, providerSearch: turnSearch, refused: refused)
@@ -110,7 +113,10 @@ struct NativeAgentModel {
         let reasoning = reasoningFields(refused: turnRefused)
         // Only the turn's first exchange may repeat: a thinking setting must
         // not change after the model answered within the turn.
+        let fallback = reasoningFields(refused: true)
+        // A repeat must change what was sent.
         let mayRepeat = reasoning != nil && !turnRefused && !acceptedInTurn
+            && !NSDictionary(dictionary: reasoning?.fields ?? [:]).isEqual(to: fallback?.fields ?? [:])
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
         // OpenRouter cap per request, so they get what is left of the turn.
@@ -187,17 +193,19 @@ struct NativeAgentModel {
             let result = try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: reasoning, repeatsOnRefusal: mayRepeat)
             acceptedInTurn = true
+            reasoningSearch = turnSearch
+            reasoningRefused = turnRefused
             return result
         } catch where mayRepeat && NativeAgentEffort.refused(error, provider: options.openCodeProvider) && !Task.isCancelled {
             // The provider refused a reasoning setting: the same request goes
             // once more with what a refusing model gets (OpenAI `low`, else
             // no field). Only an accepted answer to that repeat shows the
             // fields were the cause; the model then gets that until relaunch.
-            let fallback = reasoningFields(refused: true)
             let result = try await send(makeRequest(fallback?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: fallback, effortRetry: true)
-            reasoningRefusals.record(refusalAPI, model: model)
+            reasoningRefusals.record(refusalAPI, model: refusalKey)
             reasoningRefused = true
+            reasoningSearch = turnSearch
             acceptedInTurn = true
             return result
         } catch {

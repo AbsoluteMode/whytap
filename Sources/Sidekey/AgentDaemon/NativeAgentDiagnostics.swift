@@ -116,35 +116,53 @@ enum NativeAgentDiagnostics {
 
         /// Removes quoted text (often the user's own words) and keeps a quoted
         /// tool identifier such as 'web_search' as a bare word.
-        /// The error refuses a reasoning setting: its `param` names one
-        /// (`reasoning.effort`, `thinking.type`); or one sentence of the
-        /// message (or of the upstream text OpenRouter quotes), with quoted
-        /// text removed except field names, names a setting and refuses it
-        /// ("is not supported", "cannot be used with"); or it is OpenRouter's
-        /// "no endpoints ... requested parameters". A message that only
-        /// mentions thinking blocks or a reasoning item is not a refusal.
+        /// The error refuses a top-level reasoning setting of the request
+        /// (`reasoning`, `reasoning_effort`, `thinking`, `output_config`):
+        /// - a `param` is decisive: its first component must be a setting
+        ///   (`reasoning.effort`, not `messages.1.content.0.thinking`);
+        /// - a message (or the upstream text OpenRouter quotes) that opens
+        ///   with a path (`thinking.type: ...`) is decided by that path;
+        /// - otherwise one sentence must name a setting by its request path
+        ///   (`reasoning.effort`, `"thinking.type.between_tools"`,
+        ///   `output_config.effort`; quoted text removed except field names)
+        ///   together with a refusal ("is not supported", "cannot be used").
+        /// A bare word ("reasoning models", "thinking blocks", a tool schema's
+        /// `effort` property) is not a setting, and OpenRouter's "no endpoints
+        /// ... requested parameters" counts as a refusal.
         /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
         static func refusesReasoning(error: [String: Any]?, raw: String?) -> Bool {
-            let settings = ["reasoning", "thinking", "effort", "output_config"]
-            if let param = (error?["param"] as? String)?.prefix(200).lowercased(), settings.contains(where: param.contains) { return true }
+            if let param = error?["param"] as? String { return isReasoningSetting(path: String(param.prefix(200)).lowercased()) }
             let refusals = ["not supported", "unsupported", "does not support", "doesn't support", "not allowed",
                             "not permitted", "cannot be used", "can't be used", "unrecognized", "unknown parameter",
                             "invalid value", "not available", "not enabled", "only supported"]
+            let setting = #"(?<![a-z0-9_.\]\[/-])(?:reasoning_effort|(?:reasoning|thinking|output_config)(?:\.[a-z_]+)+)(?![a-z0-9_])"#
             for text in [error?["message"] as? String, raw].compactMap({ $0 }) {
-                let plain = fieldNamesKept(String(text.prefix(16_384)).lowercased())
-                if plain.contains("no endpoints") && plain.contains("requested parameters") { return true }
+                let lower = String(text.prefix(16_384)).lowercased()
+                if lower.contains("no endpoints") && lower.contains("requested parameters") { return true }
+                if let range = lower.range(of: #"^\s*[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+|\[\d+\])*\s*:"#, options: .regularExpression) {
+                    let path = lower[range].trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ":")))
+                    if isReasoningSetting(path: path) { return true }
+                    // A request path that is not a setting decides the error.
+                    if path.contains(".") || path.contains("[") { continue }
+                }
+                let plain = fieldNamesKept(lower)
                 let sentences = plain.replacingOccurrences(of: ". ", with: "\n").split(whereSeparator: { $0 == "\n" || $0 == ";" })
                 for sentence in sentences {
                     let words = String(sentence)
-                    if settings.contains(where: words.contains) && refusals.contains(where: words.contains) { return true }
+                    if words.range(of: setting, options: .regularExpression) != nil, refusals.contains(where: words.contains) { return true }
                 }
             }
             return false
         }
 
+        /// The path's first component is a top-level reasoning setting.
+        static func isReasoningSetting(path: String) -> Bool {
+            let first = path.split(whereSeparator: { $0 == "." || $0 == "[" }).first.map(String.init) ?? ""
+            return ["reasoning", "reasoning_effort", "thinking", "output_config"].contains(first)
+        }
+
         /// Quoted text removed, except a quoted field name
-        /// (`"thinking.type.between_tools"`), whose dots are kept apart from
-        /// sentence ends.
+        /// (`"thinking.type.between_tools"`), which stays as a bare word.
         static func fieldNamesKept(_ text: String) -> String {
             let pattern = #"(?<![\p{L}\p{N}])['"`‘“]([^'"`’”]*)['"`’”](?![\p{L}\p{N}])"#
             guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
@@ -153,7 +171,7 @@ enum NativeAgentDiagnostics {
                 guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
                 let content = String(text[inner])
                 let field = content.range(of: #"^[a-z_]+(\.[a-z_]+)*$"#, options: .regularExpression) != nil
-                result.replaceSubrange(whole, with: field ? content.replacingOccurrences(of: ".", with: "_") : " ")
+                result.replaceSubrange(whole, with: field ? " " + content + " " : " ")
             }
             return result
         }

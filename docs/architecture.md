@@ -366,10 +366,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   between_tools on Claude Sonnet 5.5; OpenRouter reasoning off or the lowest
   level of its saved catalog entry). In a turn with the provider's own web
   search OpenAI minimal becomes low and Claude Sonnet 5.5 gets no thinking
-  field. A model outside the tables gets no field. On the turn's first
-  exchange, an HTTP 400 (or OpenRouter 404) that refuses a reasoning setting
-  is repeated once with OpenAI low or without the fields, and a model whose
-  repeat is answered keeps that until relaunch; apart from this and the web
+  field. The setting follows the request that starts the turn (after a
+  refused provider search, the one without it) and is kept after the first
+  accepted exchange. Before that, an HTTP 400 (or OpenRouter 404) that
+  refuses a top-level reasoning setting (by param, leading path, or a named
+  setting path with a refusal) is repeated once with OpenAI low or without
+  the fields, and a model whose repeat is answered keeps that until relaunch
+  (on OpenRouter per pinned endpoint or Auto); apart from this and the web
   search fallback below, no model request is retried. WHY:
   .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md Direct
   Anthropic and OpenAI requests allow 16,384 output tokens (or

@@ -428,5 +428,69 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(names(["message": "thinking blocks in the latest assistant message cannot be modified"]), false)
         XCTAssertEqual(names(["message": "Model 'vendor/sonar-reasoning' is not available in your region."]), false)
         XCTAssertEqual(names(["message": "max_tokens: must be greater than thinking.budget_tokens"]), false)
+        // Builder review, queue #543: unrelated 400s that mention a setting.
+        XCTAssertEqual(names(["message": "Extra inputs are not permitted", "param": "messages.1.content.0.thinking"]), false)
+        XCTAssertEqual(names(["message": "messages.1.content.0.thinking: Extra inputs are not permitted"]), false)
+        XCTAssertEqual(names(["message": "tools.0.input_schema.properties.effort: this keyword is not supported"]), false)
+        XCTAssertEqual(names(["message": "max_tokens is too large for reasoning models; this value is not supported"]), false)
+        XCTAssertEqual(names(["message": "messages.3.content.0: thinking blocks are not allowed at this position"]), false)
+        XCTAssertEqual(names(["message": "The tool schema is not supported by reasoning models with thinking enabled."]), false)
+        XCTAssertEqual(names(["message": "output_config.effort 'xhigh' is not supported when thinking is disabled on this model."]), true)
+        XCTAssertEqual(names(["message": "thinking.type: Input tag 'between_tools' is not supported"]), true)
+    }
+
+    /// Builder review, queue #543: OpenAI GPT-5 mini beside the provider's
+    /// search already sends `low`; a refusal of it goes once more without the
+    /// field, never with the same `low` again.
+    func testARepeatAlwaysChangesWhatWasSent() async throws {
+        let refusal = json(["error": ["message": "Unsupported value", "type": "invalid_request_error", "param": "reasoning.effort"]], status: 400)
+        let result = try await run("hi", openAI("gpt-5-mini"), [refusal, json(openAIFinal("Hello."))])
+        XCTAssertEqual(result.store.streamingText, "Hello.")
+        XCTAssertEqual(result.bodies.map(reasoning), ["low", nil])
+        // A refused OpenRouter setting goes without the field.
+        let router = AgentRunOptions(model: "vendor/model", allowActions: false,
+                                     openRouterReasoning: .init(mandatory: true, supportedEfforts: ["low"]))
+        let routed = try await run("hi", router, [json(["error": ["message": "x", "metadata": ["raw": "reasoning.effort: not supported"]]], status: 400),
+                                                  json(routerFinal("Hello."))])
+        XCTAssertEqual(routed.bodies.count, 2)
+        XCTAssertNotNil(routed.bodies[0]["reasoning"]); XCTAssertNil(routed.bodies[1]["reasoning"])
+    }
+
+    /// Builder review, queue #543: an OpenRouter refusal is remembered for the
+    /// endpoint the route pins (or Auto); another endpoint of the same model
+    /// still gets the least reasoning.
+    func testOpenRouterRefusalIsKeptPerPinnedEndpoint() async throws {
+        let capabilities = OpenRouterReasoningCapabilities(mandatory: false, supportedEfforts: ["low", "none"])
+        func pinned(_ pin: String?) -> AgentRunOptions {
+            AgentRunOptions(model: "openai/gpt-5.5", allowActions: false, openRouterProvider: pin, openRouterReasoning: capabilities)
+        }
+        let noEndpoint = json(["error": ["message": "No endpoints found that can handle the requested parameters.", "code": 404]], status: 404)
+        let a = try await run("hi", pinned("endpoint/a"), [noEndpoint, json(routerFinal("Hello."))])
+        XCTAssertEqual(a.bodies.count, 2)
+        let aAgain = try await run("hi", pinned("endpoint/a"), [json(routerFinal("Hi."))])
+        XCTAssertNil(aAgain.bodies.first?["reasoning"])
+        let b = try await run("hi", pinned("endpoint/b"), [json(routerFinal("Hi."))])
+        XCTAssertEqual(b.bodies.first?["reasoning"] as? [String: Bool], ["enabled": false])
+        let auto = try await run("hi", pinned(nil), [json(routerFinal("Hi."))])
+        XCTAssertEqual(auto.bodies.first?["reasoning"] as? [String: Bool], ["enabled": false])
+        XCTAssertEqual((b.bodies.first?["provider"] as? [String: Any])?["only"] as? [String], ["endpoint/b"], "the saved route stays")
+    }
+
+    /// Builder review, queue #543: when the provider refuses its own search on
+    /// the first request, the request that starts the turn has no search, so
+    /// Claude Sonnet 5.5 gets `between_tools` there and keeps it for the turn.
+    func testAfterARefusedSearchTheTurnUsesTheSettingOfTheRequestThatRuns() async throws {
+        let refused = json(["type": "error", "error": ["type": "invalid_request_error", "message": "Web search is disabled for this organization."]],
+                           status: 400)
+        let result = try await run("what is in my workspace?", anthropic("claude-sonnet-5-5"), [
+            refused,
+            json(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "t1", "name": "list_directory", "input": ["path": NSNull()]]]]),
+            json(anthropicFinal("Empty.")),
+        ])
+        XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
+        XCTAssertEqual(result.bodies.count, 3)
+        XCTAssertEqual(result.bodies.map { toolTypes($0).contains("web_search_20250305") }, [true, false, false])
+        XCTAssertEqual(result.bodies.map(thinking), [nil, "between_tools", "between_tools"])
+        XCTAssertEqual(result.bodies.map(effort), ["low", "low", "low"])
     }
 }

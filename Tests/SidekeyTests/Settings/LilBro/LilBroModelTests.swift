@@ -331,6 +331,52 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(checked, 504)
     }
 
+    /// The builder's matrix for ticket 590: who turns, switches or gives
+    /// the setting. "we", "please" and an instruction after a comma or a
+    /// sentence ask for it; Drop doing it on its own does not.
+    func test_the_person_turning_on_or_giving_a_setting_asks_for_it() {
+        let settings = ["Input Monitoring", "Accessibility", "Keyboard control",
+                        "Screen Recording", "Microphone", "System audio", "Post Event"]
+        let features: [(String, AppFeature)] = [
+            ("Drop", .drop), ("Agent", .agent), ("Meeting Notes", .meetings),
+            ("Screenshots", .screenshots), ("Subtitles", .translateSubtitles), ("Case", .caseVault),
+        ]
+        let permissions = LilBroDestination.tab(.permissions)
+        typealias Template = (String, String, AppFeature) -> (String, LilBroDestination)
+        let templates: [Template] = [
+            { f, s, _ in ("For \(f), can I turn on the \(s) permission?", permissions) },
+            { f, s, _ in ("For \(f), can we turn on the \(s) permission?", permissions) },
+            { f, s, _ in ("For \(f), how do we switch on \(s)?", permissions) },
+            { f, s, _ in ("For \(f), please turn on \(s).", permissions) },
+            { f, s, _ in ("For \(f), turn on \(s).", permissions) },
+            { f, s, _ in ("For \(f), give \(s) access.", permissions) },
+            { f, s, _ in ("For \(f), can we give \(s) access?", permissions) },
+            { f, s, _ in ("I am using \(f). Switch on \(s).", permissions) },
+            { f, s, _ in ("For \(f), please give \(s) access.", permissions) },
+            { f, s, _ in ("For \(f), can I give \(s) access?", permissions) },
+            { f, s, _ in ("For \(f), grant \(s) access.", permissions) },
+            { f, s, _ in ("For \(f), can I switch \(s) off?", permissions) },
+            { f, s, id in ("Does \(f) turn on \(s) automatically?", .feature(id)) },
+            { f, s, _ in ("When using \(f) on this Mac, can I enable \(s)?", permissions) },
+            { f, s, _ in ("To get started with \(f) on this Mac, enable \(s).", permissions) },
+            { f, s, id in ("How do I use \(f) with the macOS \(s) setting?", .feature(id)) },
+            { f, s, id in ("How can I use \(f) after macOS asks whether I can allow \(s)?", .feature(id)) },
+            { f, s, id in ("Does \(f) switch \(s) on by itself?", .feature(id)) },
+            { f, s, id in ("Will \(f) give \(s) access to other apps?", .feature(id)) },
+        ]
+        var checked = 0
+        for template in templates {
+            for (name, id) in features {
+                for setting in settings {
+                    let (question, expected) = template(name, setting, id)
+                    XCTAssertEqual(destination(question), expected, question)
+                    checked += 1
+                }
+            }
+        }
+        XCTAssertEqual(checked, 798)
+    }
+
     /// An independent review of that fix: other everyday ways to ask for a
     /// setting or to mention one in passing.
     func test_other_ways_to_ask_for_a_setting_or_mention_it_in_passing() {

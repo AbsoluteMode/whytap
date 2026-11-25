@@ -163,9 +163,11 @@ struct LilBroLocalGuide: LilBroBrain {
         let recipient = "(?:(?:whytap's|whytap|it|the app|this app)\\s+)?"
         let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
         let place = "(?:(?:macos|mac|system|apple)\\s+)?"
-        // The person does it: "turn …" and "give …" right after I / to /
-        // you / please or at the start, not "Does Drop turn the Microphone on?".
-        let person = "(?:^|\\b(?:i|to|you|me|please)\\s+)"
+        // The person does it: "turn …" and "give …" right after I / we / to /
+        // you / please, or as an instruction at the start of the question or
+        // of a part of it ("For Drop, turn on Microphone."), not "Does Drop
+        // turn on Microphone automatically?".
+        let person = "(?:^\\s*|[,;:.?!]\\s*|\\b(?:i|we|to|you|me|please|let's|lets|us)\\s+)"
         // "I can't enable Microphone access" explains, it does not ask.
         let notNegated = "(?<!can't |cannot |don't |didn't |won't |couldn't |can not |do not )"
         return direct.contains { name, at in

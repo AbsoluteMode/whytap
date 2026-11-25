@@ -63,8 +63,8 @@ palette closes before the text arrives, Drop saves it in **History → Drop**
 and shows a notice.
 
 **Auto · RU ↔ EN** translates Cyrillic input to English and other input to
-Russian. Click the translation to copy all of it: **Copied ✓** shows for a
-second at the corner of the result. Dragging over it still selects a part to
+Russian. Click anywhere in the translation block to copy all of it: the block
+lightens under the pointer, and **Copied ✓** shows for a second at its corner. Dragging over it still selects a part to
 copy with ⌘C, and a double click selects a word. With keyboard navigation
 enabled, Tab can focus the result and Return copies it. Right-click the palette for
 **Translate to**, **Copy translation**,

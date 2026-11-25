@@ -267,6 +267,10 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
 
     func testTheOverlayReturnsWhereItWasAfterARelaunchAndAtTheUsualPlaceWhenItsDisplayIsGone() async throws {
         let suite = "subtitle-frame-relaunch-\(UUID())"
+        let testDefaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        // Keep the text width independent of AppKit's shared frame autosave.
+        testDefaults.set(Double(TranslationWindowController.defaultTextWidth),
+                         forKey: TranslationWindowController.textWidthKey)
         let (controller, _, defaults) = try await overlay(defaults: suite, pairs: 0)
         self.controller = controller
         let panel = controller.window

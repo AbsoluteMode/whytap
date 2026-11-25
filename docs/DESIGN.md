@@ -1796,9 +1796,10 @@ the horizontal division without an extra border or inset field container; the
 native caret indicates input focus.
 Use a borderless rounded text panel to remove the empty title bar and native rim.
 Secondary text on the dark fixture remains 5.45:1.
-A click on the result copies the whole translation and shows a "Copied ✓"
-capsule (12pt semibold, 72% black) at its bottom-right corner for 1 s.
-The clickable result has hover and pressed fills and an accent focus outline.
+A click anywhere in the result block copies the whole translation and shows a
+"Copied ✓" capsule (12pt semibold, 72% black) at its bottom-right corner for
+1 s. The whole block, not the text's lines, takes the hover (8%) and pressed
+(14%) fills and the accent focus outline (2026-11-25, user request).
 Return copies the whole result when it has keyboard focus. A drag still
 selects part of it (2026-11-24, user request). Subtitles do not copy on click.
 Loading, empty, over-limit and failure messages replace the second row rather

@@ -129,6 +129,20 @@ final class SubtitleOverlayHitTargets: ObservableObject {
 
     private var localMonitor: Any?
 
+    /// A long translation scrolls: its scroller sits inside the copy block,
+    /// and a click there scrolls instead of copying.
+    // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+    static func isOnScroller(_ point: CGPoint, in window: NSWindow) -> Bool {
+        func scrollers(in view: NSView) -> [NSScroller] {
+            view.subviews.flatMap { ($0 as? NSScroller).map { [$0] } ?? scrollers(in: $0) }
+        }
+        guard let content = window.contentView else { return false }
+        return scrollers(in: content).contains { scroller in
+            !scroller.isHiddenOrHasHiddenAncestor && scroller.isEnabled && scroller.alphaValue > 0
+                && scroller.convert(scroller.bounds, to: nil).contains(point)
+        }
+    }
+
     private func handle(_ event: NSEvent, in window: NSWindow, buttons handlesButtons: Bool) -> Bool {
         let point = event.locationInWindow
         switch event.type {
@@ -147,7 +161,8 @@ final class SubtitleOverlayHitTargets: ObservableObject {
             // Control-click is the context menu's; a double click selects a
             // word. The text keeps the press either way.
             if !event.modifierFlags.contains(.control), event.clickCount <= 1,
-               frame(of: .copy, in: window)?.contains(point) == true, let view = shownView(.copy, in: window) {
+               frame(of: .copy, in: window)?.contains(point) == true, !Self.isOnScroller(point, in: window),
+               let view = shownView(.copy, in: window) {
                 copyPress = (view, point)
                 pressed = .copy
             }

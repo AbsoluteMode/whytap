@@ -115,36 +115,19 @@ struct TranslationView: View {
                         .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
                         .focused($settingsFocused)
                     } else if canCopyTranslation {
-                        // A click copies the whole translation; a drag still
-                        // selects part of it (the click is only watched).
+                        // A click anywhere in the result block copies the whole
+                        // translation; a drag still selects part of it (the
+                        // click is only watched). Tint and target: the block below.
                         // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
                         Text(textOutput)
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .contentShape(Rectangle())
-                            .background {
-                                let opacity = hitTargets.pressed == .copy ? 0.14 : (resultHovered ? 0.08 : 0)
-                                RoundedRectangle(cornerRadius: 4).fill(.primary.opacity(opacity))
-                            }
-                            .background {
-                                SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
-                                                           activate: copyTranslation)
-                            }
-                            .onHover { resultHovered = $0 }
-                            .onDisappear { resultHovered = false }
                             .focusable(interactions: .activate)
                             .focused($resultFocused)
                             .onKeyPress(.return) {
                                 copyTranslation()
                                 return .handled
                             }
-                            .overlay {
-                                if resultFocused {
-                                    RoundedRectangle(cornerRadius: 4).strokeBorder(Color.accentColor, lineWidth: 2)
-                                        .allowsHitTesting(false)
-                                }
-                            }
-                            .help("Click the translation or focus it and press Return to copy")
                             .accessibilityAction(named: "Copy translation", copyTranslation)
                     } else {
                         Text(textOutput)
@@ -160,7 +143,29 @@ struct TranslationView: View {
                 .padding(.vertical, embedded ? 12 : 14)
             }
             .frame(maxWidth: .infinity, minHeight: 32, maxHeight: .infinity, alignment: .topLeading)
+            // The whole result block is the copy target and lights up, not
+            // just the text's lines (Maxim, 2026-11-25).
+            // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+            .contentShape(Rectangle())
+            .background {
+                let opacity = !canCopyTranslation ? 0 : (hitTargets.pressed == .copy ? 0.14 : (resultHovered ? 0.08 : 0))
+                Rectangle().fill(.primary.opacity(opacity))
+            }
             .background(Color.black.opacity(0.08))
+            .background {
+                if canCopyTranslation {
+                    SubtitleOverlayHitReporter(control: .copy, targets: hitTargets, action: "copy",
+                                               activate: copyTranslation)
+                }
+            }
+            .onHover { resultHovered = $0 }
+            .onDisappear { resultHovered = false }
+            .overlay {
+                if resultFocused && canCopyTranslation {
+                    Rectangle().strokeBorder(Color.accentColor, lineWidth: 2).allowsHitTesting(false)
+                }
+            }
+            .help(canCopyTranslation ? "Click the translation or focus it and press Return to copy" : "")
             .overlay(alignment: .bottomTrailing) { if copier.copied { copiedBadge.padding(8) } }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.15), value: copier.copied)
             .accessibilityLabel("Translation")

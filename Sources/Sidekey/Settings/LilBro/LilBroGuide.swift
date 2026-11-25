@@ -167,11 +167,11 @@ struct LilBroLocalGuide: LilBroBrain {
         // you / please, or as an instruction at the start of the question or
         // of a part of it ("For Drop, turn on Microphone."), not "Does Drop
         // turn on Microphone automatically?".
-        let person = "(?:^\\s*|[,;:.?!]\\s*|\\b(?:i|we|to|you|me|please|let's|lets|us)\\s+)"
+        let person = "(?<actor>^\\s*|[,;:.?!]\\s*|\\b(?:i|we|to|you|me|please|let's|lets|us)\\s+)"
         // "I can't enable Microphone access" explains, it does not ask.
         let notNegated = "(?<!can't |cannot |don't |didn't |won't |couldn't |can not |do not )"
         return direct.contains { name, at in
-            let setting = "(" + NSRegularExpression.escapedPattern(for: name) + ")"
+            let setting = "(?<setting>" + NSRegularExpression.escapedPattern(for: name) + ")"
             let patterns = [
                 notNegated + "\\b(?:\(verbs))\\s+" + article + recipient + reach + article + place + setting,
                 // "turn on Microphone", "turn Microphone on", "switch the Accessibility permission off"
@@ -187,11 +187,29 @@ struct LilBroLocalGuide: LilBroBrain {
             return patterns.contains { pattern in
                 guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
                 return regex.matches(in: q, range: NSRange(q.startIndex..., in: q)).contains { match in
-                    guard let range = Range(match.range(at: 1), in: q) else { return false }
-                    return q.distance(from: q.startIndex, to: range.lowerBound) == at
+                    guard let range = Range(match.range(withName: "setting"), in: q),
+                          q.distance(from: q.startIndex, to: range.lowerBound) == at
+                    else { return false }
+                    return !isSomeoneElsesAction(match, in: q)
                 }
             }
         }
+    }
+
+    /// An instruction after a comma inside a question about what something
+    /// else does is that thing's action: "Does Drop, by default, turn on
+    /// Microphone?", "Does Drop open at login, turn on Microphone, and start
+    /// automatically?". "For Drop, turn on Microphone." and "How do I set
+    /// it up, turn on Microphone?" still ask.
+    private static func isSomeoneElsesAction(_ match: NSTextCheckingResult, in q: String) -> Bool {
+        let actorRange = match.range(withName: "actor")
+        guard actorRange.location != NSNotFound, let actor = Range(actorRange, in: q) else { return false }
+        let word = q[actor].trimmingCharacters(in: .whitespaces)
+        guard word.isEmpty || word.count == 1 && ",;:.?!".contains(word) else { return false }
+        let before = q[..<actor.lowerBound]
+        let sentence = before.lastIndex { ".?!".contains($0) }.map { before[before.index(after: $0)...] } ?? before
+        let otherSubject = "\\b(?:does|do|did|will|would|can|could|is|are|should|may|might)\\s+(?!(?:i|we|you|us)\\b)[\\w']"
+        return String(sentence).range(of: otherSubject, options: .regularExpression) != nil
     }
 
     /// Every place a setting's name starts: the same setting can be context

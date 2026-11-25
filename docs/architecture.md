@@ -1538,7 +1538,9 @@ never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
 same balloon. Answers come from LilBroLocalGuide: the feature catalog and tab
-names, on this Mac, no network. The sprite sheet is Resources/LilBro, embedded
+names, on this Mac, no network. It is a keyword guide, not an English parser;
+its contract is LilBroLocalGuideTests (a new phrasing answered wrongly is added
+there as its own task, see the decision's "Contract"). The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md
 

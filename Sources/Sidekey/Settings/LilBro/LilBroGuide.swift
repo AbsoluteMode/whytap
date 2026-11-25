@@ -102,7 +102,7 @@ struct LilBroLocalGuide: LilBroBrain {
             }
             // Asked for directly ("allow …", "where can I find …"), or named
             // before any feature ("Screen Recording for Screenshots").
-            if asksForSetting(q, named: direct.map(\.0)) { return .answer(toPermissions) }
+            if asksForSetting(q, at: direct) { return .answer(toPermissions) }
             if let found, found.offset < (direct.map(\.1).min() ?? 0) { return .answer(answer(for: found.feature)) }
             return .answer(toPermissions)
         }
@@ -125,7 +125,8 @@ struct LilBroLocalGuide: LilBroBrain {
     /// Where the main question starts after a leading part: "can I", "do I",
     /// "where", "how" ("With Drop can I enable Microphone?", "If I use Agent,
     /// where is Accessibility?").
-    private static let mainClause = "\\b(?:(?:can|could|do|does|did|should|shall|will|would|may|must)\\s+(?:i|you|we|it|whytap)|where|how|what|which)\\b"
+    private static let mainClause = "\\b(?:(?:can|could|do|does|did|should|shall|will|would|may|must)\\s+(?:i|you|we|it|whytap)"
+        + "|(?:where|how|what|which)\\s+(?:can|could|do|does|did|should|is|are|would|will)|is there|are there)\\b"
 
     /// A marker before the setting in the same part of the sentence, with
     /// the main question not yet started between them: "after enabling",
@@ -155,24 +156,34 @@ struct LilBroLocalGuide: LilBroBrain {
     /// where it lives ("macOS", "System"): "open the macOS Accessibility
     /// settings", "grant Whytap Microphone access", "allow Whytap to use
     /// Screen Recording".
-    private static func asksForSetting(_ q: String, named: [String]) -> Bool {
+    private static func asksForSetting(_ q: String, at direct: [(String, Int)]) -> Bool {
         let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
         let article = "(?:(?:the|my|a|an|its|your)\\s+)?"
         let recipient = "(?:(?:whytap's|whytap|it|the app|this app)\\s+)?"
         let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
         let place = "(?:(?:macos|mac|system|apple)\\s+)?"
-        return named.contains { name in
-            let setting = NSRegularExpression.escapedPattern(for: name)
+        // The person does it: "turn …" and "give …" right after I / to /
+        // you / please or at the start, not "Does Drop turn the Microphone on?".
+        let person = "(?:^|\\b(?:i|to|you|me|please)\\s+)"
+        return direct.contains { name, at in
+            let setting = "(" + NSRegularExpression.escapedPattern(for: name) + ")"
             let patterns = [
-                "\\b(\(verbs))\\s+" + article + recipient + reach + article + place + setting,
+                "\\b(?:\(verbs))\\s+" + article + recipient + reach + article + place + setting,
                 // "turn Microphone on", "switch the Accessibility permission on"
-                "\\b(?:turn|switch)\\s+" + article + recipient + place + setting
+                person + "(?:turn|switch)\\s+" + article + recipient + place + setting
                     + "\\s+(?:(?:access|permission|setting)\\s+)?on\\b",
                 // "give Drop access to the Microphone"
-                "\\b(?:give|grant)\\s+(?:[\\w']+\\s+){1,2}(?:access|permission)\\s+(?:to|for)\\s+"
+                person + "(?:give|grant)\\s+(?:[\\w']+\\s+){1,2}(?:access|permission)\\s+(?:to|for)\\s+"
                     + article + place + setting,
             ]
-            return patterns.contains { q.range(of: $0, options: .regularExpression) != nil }
+            // The verb must take this mention, not the same name elsewhere.
+            return patterns.contains { pattern in
+                guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+                return regex.matches(in: q, range: NSRange(q.startIndex..., in: q)).contains { match in
+                    guard let range = Range(match.range(at: 1), in: q) else { return false }
+                    return q.distance(from: q.startIndex, to: range.lowerBound) == at
+                }
+            }
         }
     }
 

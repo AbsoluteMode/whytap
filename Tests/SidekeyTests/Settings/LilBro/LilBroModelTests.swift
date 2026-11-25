@@ -349,6 +349,13 @@ final class LilBroLocalGuideTests: XCTestCase {
             ("How do I use Screenshots if Screen Recording is denied?", .feature(.screenshots)),
             ("After allowing Microphone, how do I use Drop?", .feature(.drop)),
             ("Can I use Subtitles with System audio?", .feature(.translateSubtitles)),
+            ("Does Drop automatically turn the Microphone on?", .feature(.drop)),
+            ("When using Drop is there a way to turn on Microphone access?", .tab(.permissions)),
+            ("Does Drop give other apps access to my Microphone?", .feature(.drop)),
+            ("Can I use Drop if I don't enable Microphone access? Microphone access is blocked on this Mac.",
+             .feature(.drop)),
+            ("Can I set up Drop before learning how to enable Microphone access?", .feature(.drop)),
+            ("When using Drop where is Accessibility?", .tab(.permissions)),
         ]
         for (question, expected) in cases {
             XCTAssertEqual(destination(question), expected, question)

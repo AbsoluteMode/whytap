@@ -168,24 +168,36 @@ struct LoopingVideoView: NSViewRepresentable {
 @MainActor
 enum FeatureVideoPoster {
     private static var cache: [URL: NSImage] = [:]
+    /// A read in progress: a second card asking for the same clip waits for
+    /// it instead of decoding the clip again.
+    private static var loading: [URL: Task<Void, Never>] = [:]
 
     static func cached(_ url: URL) -> NSImage? { cache[url] }
 
     /// The frame at `video.posterSeconds`, at most 320 points wide.
     static func load(_ video: FeatureVideo, url: URL) async -> NSImage? {
         if let image = cache[url] { return image }
-        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
-        generator.appliesPreferredTrackTransform = true
-        generator.maximumSize = CGSize(width: 320, height: 180)
-        let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
-        generator.requestedTimeToleranceBefore = tolerance
-        generator.requestedTimeToleranceAfter = tolerance
-        guard let (frame, _) = try? await generator.image(at: CMTime(seconds: video.posterSeconds,
-                                                                     preferredTimescale: 600)) else { return nil }
-        let image = NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
-        cache[url] = image
-        return image
+        let request: Task<Void, Never>
+        if let pending = loading[url] {
+            request = pending
+        } else {
+            request = Task {
+                defer { loading[url] = nil }
+                let generator = AVAssetImageGenerator(asset: AVURLAsset(url: url))
+                generator.appliesPreferredTrackTransform = true
+                generator.maximumSize = CGSize(width: 320, height: 180)
+                let tolerance = CMTime(seconds: 0.5, preferredTimescale: 600)
+                generator.requestedTimeToleranceBefore = tolerance
+                generator.requestedTimeToleranceAfter = tolerance
+                let time = CMTime(seconds: video.posterSeconds, preferredTimescale: 600)
+                guard let (frame, _) = try? await generator.image(at: time) else { return }
+                cache[url] = NSImage(cgImage: frame, size: NSSize(width: frame.width, height: frame.height))
+            }
+            loading[url] = request
+        }
+        await request.value
+        return cache[url]
     }
 
-    static func clearForTesting() { cache.removeAll() }
+    static func clearForTesting() { cache.removeAll(); loading.removeAll() }
 }

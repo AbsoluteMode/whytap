@@ -54,8 +54,19 @@ final class FeatureClipPosterTests: XCTestCase {
         }
     }
 
+    func testConcurrentRequestsReuseTheSamePoster() async throws {
+        let url = try XCTUnwrap(FeatureVideo.subtitles.url(in: resources))
+        let first = Task { await FeatureVideoPoster.load(.subtitles, url: url) }
+        let second = Task { await FeatureVideoPoster.load(.subtitles, url: url) }
+        let firstImage = await first.value
+        let secondImage = await second.value
+        let poster = try XCTUnwrap(firstImage)
+        XCTAssertIdentical(secondImage, poster)
+        XCTAssertIdentical(FeatureVideoPoster.cached(url), poster)
+    }
+
     func testAClipNotMadeYetHasNoPoster() async throws {
-        let clip = FeatureClip(name: "Subtitles", video: nil, caption: "Soon")
+        let clip = FeatureClip(name: "Upcoming clip", video: nil, caption: "Soon")
         XCTAssertNil(clip.video?.url(in: resources))
         let missing = URL(fileURLWithPath: "/nonexistent/clip.mp4")
         let image = await FeatureVideoPoster.load(.translate, url: missing)

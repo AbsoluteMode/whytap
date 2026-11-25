@@ -35,7 +35,8 @@ tile with ▶. It did not show what the clip is about until it was played.
   file, Google's results, Drop's dictated text, the call with live captions,
   Shot's arrow, the finished translation, two translated subtitle lines), never the dark first frame.
 - `FeatureVideoPoster` reads the frame with `AVAssetImageGenerator` from the
-  bundled file (at most 320×180), once per session, and keeps it in memory.
+  bundled file (at most 320×180), once per session, and keeps it in memory;
+  cards asking at the same time share one read (found by the builder).
   Nothing is fetched and nothing is written to disk.
 
 ## Why
@@ -51,7 +52,7 @@ tile with ▶. It did not show what the clip is about until it was played.
 `FeatureClipPosterTests`: every bundled clip's moment is after the first
 second and inside the clip; every clip a feature screen shows gives a 16:9
 frame that is neither black nor blank (mean and spread of its luminance) and
-is read once; a missing file gives no poster and nothing cached; offscreen
+is read once, also for two requests at the same time; a missing file gives no poster and nothing cached; offscreen
 pictures of every feature's cards in both appearances, including
 Translate & Subtitles with both posters.
 

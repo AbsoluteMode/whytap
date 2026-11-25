@@ -200,7 +200,10 @@ struct FeatureVideoStrip: View {
         .task(id: url) {
             guard let url, let video = clip.video else { poster = nil; return }
             poster = FeatureVideoPoster.cached(url)
-            if poster == nil { poster = await FeatureVideoPoster.load(video, url: url) }
+            if poster == nil {
+                let image = await FeatureVideoPoster.load(video, url: url)
+                if !Task.isCancelled { poster = image }
+            }
         }
     }
 

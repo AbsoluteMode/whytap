@@ -64,7 +64,9 @@ The user accepted Drop, Shot and Subtitles and asked that Translate show the
 new click on the translation. The clip now copies with one click on the
 result: the text tints under the pointer (8 %, 14 % pressed) and "Copied ✓"
 shows for a second, instead of right-click and Copy translation. Same answer,
-same scene otherwise; kit commit `c7e97b15`.
+same scene otherwise; kit commit `c7e97b15`. After the user asked for the
+whole result block to light up (#469), the clip tints the whole block on hover
+and press instead of the text's lines; kit commit `4696e72c` (2026-11-25).
 
 ## Subtitles joins, captions follow the clips
 

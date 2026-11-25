@@ -248,6 +248,49 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(destination("Turn on meeting notes"), .feature(.meetings))
     }
 
+    /// The builder's probe for ticket 581, both intent classes, one to one.
+    func test_asking_for_a_setting_opens_permissions_and_a_setting_as_context_keeps_the_feature() {
+        let settings = ["Input Monitoring", "Accessibility", "Keyboard control",
+                        "Screen Recording", "Microphone", "System audio", "Post Event"]
+        let features: [(String, AppFeature)] = [
+            ("Drop", .drop), ("Agent", .agent), ("Meeting Notes", .meetings),
+            ("Screenshots", .screenshots), ("Subtitles", .translateSubtitles), ("Case", .caseVault),
+        ]
+        var direct: [(String, LilBroDestination)] = []
+        for setting in settings {
+            for (name, _) in features {
+                direct.append(("Where do I allow \(setting) for \(name)?", .tab(.permissions)))
+                direct.append(("For \(name), where can I find \(setting)?", .tab(.permissions)))
+            }
+        }
+        direct += [
+            ("Screen Recording for Screenshots", .tab(.permissions)),
+            ("Where is Input Monitoring in case I need it?", .tab(.permissions)),
+        ]
+        var context: [(String, LilBroDestination)] = []
+        for setting in settings {
+            context += [
+                ("How do I use Drop after enabling \(setting)?", .feature(.drop)),
+                ("Where is Drop after enabling \(setting)?", .feature(.drop)),
+                ("How do I use Drop once I enable \(setting)?", .feature(.drop)),
+                ("How do I use Drop when I turn on \(setting)?", .feature(.drop)),
+                ("Can I open Screenshots after allowing \(setting)?", .feature(.screenshots)),
+            ]
+        }
+        context += [
+            ("How do I dictate with my microphone?", .feature(.drop)),
+            ("How do I translate system audio with Subtitles?", .feature(.translateSubtitles)),
+            ("Can I enable Drop with my Microphone?", .feature(.drop)),
+            ("Where can I find Drop after allowing Microphone?", .feature(.drop)),
+            ("Where do I keep keys in Case?", .feature(.caseVault)),
+        ]
+        XCTAssertEqual(direct.count, 86)
+        XCTAssertEqual(context.count, 40)
+        for (question, expected) in direct + context {
+            XCTAssertEqual(destination(question), expected, question)
+        }
+    }
+
     func test_a_hotkey_is_not_an_api_key() {
         XCTAssertEqual(destination("change a hotkey"), .tab(.hotkeys))
         XCTAssertEqual(destination("where do I paste my OpenAI key"), .apiKeys)

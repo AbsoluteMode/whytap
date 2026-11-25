@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AppControl/HarnessAccessTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-21-app-control-plugin.md, 2026-11-03-todo-helper.md, 2026-10-20-whytap-links.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-23-agent-drop-lists.md]
+related: [2026-10-21-app-control-plugin.md, 2026-11-03-todo-helper.md, 2026-10-20-whytap-links.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-23-agent-drop-lists.md, 2026-11-24-drop-live-for-dictation-clients.md]
 ---
 
 ## Context

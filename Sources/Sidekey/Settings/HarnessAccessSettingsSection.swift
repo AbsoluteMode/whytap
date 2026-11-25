@@ -10,7 +10,15 @@ struct HarnessAccessSettingsSection: View {
 
     static let title = "Coding tools"
 
-    static func subtitle(_ decision: HarnessDecision) -> String {
+    static func subtitle(_ decision: HarnessDecision, identity: HarnessIdentity? = nil) -> String {
+        // An app on the live dictation list can do one thing, and its row says
+        // exactly that. WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+        if let identity, let name = DropLiveFeed.allowedName(for: identity) {
+            switch decision {
+            case .allow: return "Shows your words in its own field while you dictate into \(name). Nothing you dictate into other apps, no meetings, settings or Case keys."
+            case .deny: return "Does not get your dictation; Whytap's island shows it as usual."
+            }
+        }
         switch decision {
         case .allow: return "Reads your meetings, adds Vocab and Filler words and changes settings through the Whytap plugin."
         case .deny: return "Not allowed to use Whytap."
@@ -41,7 +49,7 @@ struct HarnessAccessSettingsSection: View {
                     MacCard {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, grant in
                             if index > 0 { MacRowSeparator() }
-                            MacRow(title: grant.name, subtitle: Self.subtitle(grant.decision)) {
+                            MacRow(title: grant.name, subtitle: Self.subtitle(grant.decision, identity: grant.identity)) {
                                 MacSwitch(isOn: Binding(
                                     get: { grant.decision == .allow },
                                     set: { allowed in

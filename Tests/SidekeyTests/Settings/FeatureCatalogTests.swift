@@ -37,8 +37,9 @@ final class FeatureCatalogTests: XCTestCase {
         let snapshot = freshInstall()
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word),
-                       ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up", "Ready", "Ready"])
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "2 ready · 1 needs setup")
+                       ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
+                        "Ready", "Ready", "Ready", "Not set up", "Not set up"])
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "3 ready · 1 needs setup")
     }
 
     func testShortcutWaitingForKeyboardControlIsNotCountedTwice() {
@@ -459,11 +460,14 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.all.map(\.feature), AppFeature.allCases)
         XCTAssertEqual(FeatureCatalog.all.map(\.name),
                        ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots",
-                        "To-do", "Case"])
+                        "To-do", "Case", "Hover", "Notify", "Monitor"])
     }
 
     func testClipsAreTheOnesThatExist() {
-        XCTAssertNil(FeatureCatalog.info(for: .drop).video, "No Drop clip yet: the screen keeps its place")
+        // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+        XCTAssertEqual(FeatureCatalog.info(for: .drop).video, .dropFast)
+        XCTAssertEqual(FeatureCatalog.info(for: .translateSubtitles).video, .translate)
+        XCTAssertEqual(FeatureCatalog.info(for: .screenshots).video, .screenshot)
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)

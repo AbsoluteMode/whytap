@@ -39,7 +39,7 @@ struct SwitchFeatureScreen<Settings: View>: View {
         case .googleSearch: return SettingsOtherView.googleSearchVideoShortcuts(configuration)
         case .meetings:
             return [FeatureVideoShortcut(label: "Record", contents: configuration.meetingRecordShortcut.contents)]
-        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault: return []
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor: return []
         }
     }
 }
@@ -61,8 +61,12 @@ final class FeatureSwitchModel: ObservableObject {
         self.environment = environment
     }
 
+    /// The flag changed elsewhere (the island, onboarding, a nudge). Once
+    /// the feature is on, an earlier "why it did not turn on" is stale.
     func follow(_ now: Bool) {
-        if !busy { isOn = now }
+        guard !busy else { return }
+        isOn = now
+        if now { problem = nil }
     }
 
     @discardableResult
@@ -84,7 +88,7 @@ final class FeatureSwitchModel: ObservableObject {
         case .googleSearch:
             isOn = on
             environment.setGoogle(on)
-        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault:
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor:
             break
         }
         return nil

@@ -61,10 +61,11 @@ struct MacButtonInteractionStyle: ButtonStyle {
     var highlight: Color = MacSettingsTheme.text
     var outline: Color? = nil
     var focused = false
+    var cornerRadius: CGFloat = 6
 
     func makeBody(configuration: Configuration) -> some View {
         Content(configuration: configuration, background: background, highlight: highlight,
-                outline: outline, focused: focused)
+                outline: outline, focused: focused, cornerRadius: cornerRadius)
     }
 
     private struct Content: View {
@@ -73,17 +74,18 @@ struct MacButtonInteractionStyle: ButtonStyle {
         let highlight: Color
         let outline: Color?
         let focused: Bool
+        let cornerRadius: CGFloat
         @Environment(\.isEnabled) private var isEnabled
         @State private var isHovered = false
 
         var body: some View {
             configuration.label
-                .contentShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                .contentShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .background {
                     MacButtonInteractionSurface(background: background, highlight: highlight,
                                                 outline: outline,
                                                 hovered: isHovered, pressed: configuration.isPressed,
-                                                focused: focused, enabled: isEnabled)
+                                                focused: focused, enabled: isEnabled, cornerRadius: cornerRadius)
                         .allowsHitTesting(false)
                 }
                 .onHover { isHovered = $0 }
@@ -99,24 +101,22 @@ struct MacButtonInteractionSurface: View {
     var pressed: Bool
     var focused: Bool
     var enabled: Bool
+    var cornerRadius: CGFloat = 6
 
     var body: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(background)
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        shape.fill(background)
             .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .fill(highlight.opacity(!enabled || outline != nil ? 0 : pressed ? 0.18 : hovered ? 0.10 : 0))
+                shape.fill(highlight.opacity(!enabled || outline != nil ? 0 : pressed ? 0.18 : hovered ? 0.10 : 0))
             }
             .overlay {
                 // Colored labels retain their existing contrast. Brightening
                 // their dark background would make blue/red text harder to read.
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke((outline ?? .clear).opacity(!enabled ? 0 : pressed ? 0.85 : hovered ? 0.5 : 0),
-                            lineWidth: pressed ? 2 : 1)
+                shape.stroke((outline ?? .clear).opacity(!enabled ? 0 : pressed ? 0.85 : hovered ? 0.5 : 0),
+                             lineWidth: pressed ? 2 : 1)
             }
             .overlay {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                    .stroke(enabled && focused ? MacSettingsTheme.accent : .clear, lineWidth: 2)
+                shape.stroke(enabled && focused ? MacSettingsTheme.accent : .clear, lineWidth: 2)
                     .padding(-3)
             }
     }

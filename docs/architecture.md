@@ -570,8 +570,13 @@ Translation tools:
   .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
   Pressing the same Translate or Subtitles tool hotkey again closes its visible
   mode through the ordinary dismissal path. The other hotkey switches modes.
-  Saved targets and secondary actions stay in the
-  context menu; long output scrolls. TextTranslationModel cancels
+  Saved targets and secondary actions stay in the context menu. Long output
+  scrolls. The panel watches clicks on the visible result and hands mouse
+  events to the selectable text. The Toolbox pane watches the same target
+  through a window-scoped local event monitor. Clicking or focusing the result
+  and pressing Return copies it and shows Copied for one second.
+  WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+  TextTranslationModel cancels
   edited/replaced requests and rejects late results; automatic text direction
   is RU to EN for Cyrillic input and EN to RU otherwise. Explicit targets use
   AppLanguage. LiveSubtitleModel captures only CoreAudio system audio, never
@@ -1418,10 +1423,11 @@ feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
 (snapshot, view models, environment, the setup actions and the per-check
 notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
 setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
-one a "Video coming" row says what it will show), FeatureShortcutsGroup (one
-recorder per shortcut), FeatureNeedsGroup, the feature's own settings and
-FeatureExamplesGroup. FeatureScreens maps each feature with place .screen to
-its screen; Drop keeps DropFeatureView around the same parts. The Agent,
+one a "Video coming" row says what it will show), FeatureShortcutsGroup
+(one recording session shared by the shortcut rows), FeatureNeedsGroup, the
+feature's own settings and FeatureExamplesGroup. FeatureScreens maps each
+feature with place .screen to its screen. Drop keeps DropFeatureView around
+the same parts. The Agent,
 Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
 the switch (FeatureSwitchModel) writes the same flag as Other and the island
 through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
@@ -1438,6 +1444,27 @@ Translate and Subtitles in their Toolbox panes, Shot's capture
 (FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
 Case need nothing and read Ready. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
+
+Hover, Notify and Monitor are features with their own screens too. Hover
+(HoverFeatureView) lists the island's tools in HoverLayoutStore order with
+Settings pinned last, then the tools that are off. A row is held and dragged
+(HoverToolDragModel: over another row the tool takes its place live; a row
+sliding under the pointer is not a new target; an off tool dropped on a row
+joins there; dropped on More tools it leaves). Only the internal tool drag
+type can update the list. A tool's switch removes it or puts
+it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
+actions. The island observes the same store, so it changes at once. The
+chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
+tool that is off keeps its shortcut and stays in island search. Notify and
+Monitor are Not set up until an agent connected a source or a dashboard.
+Their screens show the shortcut, an Open button for the island panel, the
+sources (NotificationSourcesGroups, shared with the Notifications tab) or the
+dashboards with freshness (a MonitorStore that is only read, never started,
+so Settings never polls servers), and CodingAgentPromptCard: the marks of
+Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
+CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
+enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
+.project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
@@ -1879,6 +1906,28 @@ except deleting data. Settings and To-do tools keep the earlier boundary. The
 gate never loads the Case vault and a Case registration gives no access to
 meetings. whytap://meeting/<id without dashes> shows one note. WHY:
 .project-docs/decisions/2026-11-20-harness-access.md
+
+Live dictation clients: whytap_drop_live (DropLiveFeed) is a separate
+allowlist, DropLiveFeed.allowedClients (Whycode, UVBKCN5PPV /
+com.rootwise.whycode), resolved like a harness (direct parent, Apple-vouched)
+but with HarnessScope.liveDictation: it reaches liveDictationOperations only
+and gets unsupported_client for every gated tool, and a coding harness gets
+unsupported_client for drop_live. Same one Yes and store; the card asks "Let
+Whycode show your dictation?" and its VoiceOver detail and Settings row name
+that scope only. The gate answers it itself with the client's pid: phase,
+takeId, level, energy (VoiceOrbView.voiceEnergy, the orb before
+AudioEnergyFollower, recording only) and the take's words only while the
+phase can still deliver and the take's target pid (captured at
+startDropTurnTelemetry) is the caller. Partials carry the take id of their
+session; endTake() runs from endDropTurn (before the trace guard) and on
+every idle/deliveryFailed phase (endTakes(on:)). On-device partials report
+through onTranscriptWindow whether their ~14 s window has shifted; only
+shifted windows are stitched onto the words already sent (DropLiveFeed.stitch,
+words or characters). showsLiveText keeps an opt-in for
+1.5 s; while it holds for the take's target, onTranscriptUpdate skips the
+wing. Not listed in tools/list, unknown to AppControlController (the built-in
+Agent cannot reach it), never logged. WHY:
+.project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
 
 Agent answers: native Whytap Agent keeps intermediate text hidden and completes
 with a sole finish_answer call containing status, answer, insert_text, sources

@@ -56,6 +56,11 @@ actor ParakeetSpeechDecoder: OnDeviceSpeechDecoding {
 @MainActor
 final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     var onTranscriptUpdate: ((String) -> Void)?
+    /// The same partials, plus whether the decoded window no longer starts at
+    /// the beginning of the take (audio past `partialWindowSamples`). For
+    /// `drop_live`, which keeps the start of a long take in a client's field.
+    // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
+    var onTranscriptWindow: ((String, Bool) -> Void)?
 
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "on-device-speech")
 
@@ -161,7 +166,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
             for await chunk in audioEngine.chunks {
                 guard let self else { return }
                 guard let window = self.ingest(chunk) else { continue }
-                await self.emitPartial(samples: window)
+                await self.emitPartial(samples: window.samples, shifted: window.shifted)
             }
         }
 
@@ -229,7 +234,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// Keeps `chunk` and, once about 0.8 s of new audio has arrived, returns
     /// the trailing window to decode. `nil` between ticks, after `stop()` and
     /// while the take is shorter than Parakeet accepts.
-    private func ingest(_ chunk: Data) -> [Float]? {
+    private func ingest(_ chunk: Data) -> (samples: [Float], shifted: Bool)? {
         streamed.append(chunk)
         bytesSinceLastDecode += chunk.count
         guard bytesSinceLastDecode >= Self.partialByteStride else { return nil }
@@ -237,7 +242,8 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
         guard !stopping else { return nil }
         let audio = takeAudio()
         guard audio.count / 2 >= Self.minPartialSampleCount else { return nil }
-        return Self.floatSamples(fromPCM16LittleEndian: audio.suffix(Self.partialWindowSamples * 2))
+        return (Self.floatSamples(fromPCM16LittleEndian: audio.suffix(Self.partialWindowSamples * 2)),
+                audio.count > Self.partialWindowSamples * 2)
     }
 
 
@@ -249,7 +255,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// so the ticker must keep updating even when newer text is shorter. The
     /// decode runs on the decoder's actor (off the main actor); only the cheap
     /// guard + callback run here.
-    private func emitPartial(samples: [Float]) async {
+    private func emitPartial(samples: [Float], shifted: Bool) async {
         do {
             let text = try await decoder.decode(
                 samples: samples,
@@ -268,6 +274,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
             else { return }
             lastEmittedPartial = trimmed
             onTranscriptUpdate?(trimmed)
+            onTranscriptWindow?(trimmed, shifted)
         } catch {
             // Partials are best-effort; the final decode on stop is the
             // authority. Never surface a partial failure to the user.

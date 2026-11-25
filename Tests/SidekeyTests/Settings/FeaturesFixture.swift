@@ -46,6 +46,14 @@ struct FeaturesFixture {
     let agent: AgentModeViewModel
     let hotkeys: HotkeyPreferences
     let environment: FeaturesEnvironment
+    /// Hover, Notify and Monitor read only these: a layout in the test's own
+    /// defaults, Notify and Monitor folders in a temporary directory, and a
+    /// clipboard that is a box, never the user's pasteboard.
+    let hoverStore: HoverLayoutStore
+    let notifySupervisor: NotifyScriptSupervisor
+    let monitor: MonitorStore
+    let files: URL
+    let clipboard = CopiedText()
     private let suite: String
     private let previousShortcut: DropHotkeyStatus
     private let catalogURL: URL
@@ -103,6 +111,15 @@ struct FeaturesFixture {
         hotkeys = HotkeyPreferences(defaults: defaults)
         let controller = OnDeviceSpeechModelController(store: FixedStore(modelStatus))
         await controller.refresh()
+        files = FileManager.default.temporaryDirectory.appendingPathComponent(suite, isDirectory: true)
+        let notifyRoot = files.appendingPathComponent("notifications", isDirectory: true)
+        let hub = LocalNotificationHub(directory: notifyRoot)
+        hub.setSuspended(true)
+        hoverStore = HoverLayoutStore(defaults: defaults)
+        notifySupervisor = NotifyScriptSupervisor(directory: notifyRoot, hub: hub)
+        monitor = MonitorStore(root: files.appendingPathComponent("Monitor", isDirectory: true),
+                               collector: { _ in throw CancellationError() })
+        let clipboard = clipboard
         environment = FeaturesEnvironment(
             dropMode: { dropMode },
             volumeDuck: VolumeDuckConfig(defaults: defaults),
@@ -110,17 +127,31 @@ struct FeaturesFixture {
             agentOn: { usual }, meetingsOn: { false }, googleOn: { usual },
             supportsOnDevice: state != .freshIntel,
             onDevice: controller,
-            hotkeys: hotkeys)
+            hotkeys: hotkeys,
+            hoverStore: hoverStore,
+            notifySupervisor: notifySupervisor,
+            meetingNotifications: MeetingReadyNotifications(defaults: defaults, hub: hub),
+            notificationSounds: NotificationSoundSettings(defaults: defaults),
+            monitor: monitor,
+            notifyRoot: notifyRoot,
+            copyText: { clipboard.texts.append($0) })
     }
 
     func cleanUp() {
         AppState.shared.dropHotkeyStatus = previousShortcut
         defaults.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: catalogURL)
+        notifySupervisor.stop()
+        try? FileManager.default.removeItem(at: files)
     }
 
     var snapshot: FeatureSetupSnapshot {
         .live(models: models, permissions: permissions, environment: environment)
+    }
+
+    /// What Copy prompt put on the clipboard, in order.
+    final class CopiedText {
+        var texts: [String] = []
     }
 
     /// The whole Settings shell on `tab`.

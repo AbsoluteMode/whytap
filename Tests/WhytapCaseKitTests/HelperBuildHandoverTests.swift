@@ -609,4 +609,10 @@ final class HelperBuildHandoverTests: XCTestCase {
     func test_running_code_hash_comes_from_the_kernel() {
         XCTAssertEqual(SystemHelperBuildIdentity.runningHash()?.count, 20)
     }
+
+    func test_a_process_whose_file_is_in_place_counts_as_intact() {
+        // The test runner's executable exists and validates; an image that lost
+        // its file (an identical build swapped in) is covered by the live check.
+        XCTAssertTrue(SystemHelperBuildIdentity.runningCodeIntact())
+    }
 }

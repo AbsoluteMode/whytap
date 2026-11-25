@@ -104,6 +104,10 @@ struct LilBroLocalGuide: LilBroBrain {
         return [.tab(.features), .apiKeys]
     }
 
+    /// A keyword guide, not a parser of English: its contract is
+    /// LilBroLocalGuideTests. A new phrasing answered wrongly goes into those
+    /// tests as its own task.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md ("Contract for the local guide")
     static func match(_ question: String) -> LilBroReply {
         let q = withoutInCase(question)
         // WHY: a macOS setting's name is context in a subordinate part of the

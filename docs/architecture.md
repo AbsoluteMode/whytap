@@ -1538,7 +1538,9 @@ never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
 same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
-names, on this Mac, no network) until the person presses "Turn on answers" in
+names, on this Mac, no network; a keyword guide, not an English parser, whose
+contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
+there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
 the balloon (LilBroOffer; `lilBro.answersFromWhytap`, off by default). Then
 LilBroRemoteBrain posts the question, the screen (`tab` or `tab/feature` raw
 ids) and up to three earlier answered exchanges to

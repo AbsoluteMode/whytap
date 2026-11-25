@@ -18,7 +18,7 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Sidebar tabs. `agentMode` stays a case so `whytap://settings/agentMode`
+    /// Selectable tabs. `agentMode` stays a case so `whytap://settings/agentMode`
     /// keeps working; it opens the Agent's screen in Features (`resolved`,
     /// `SettingsWindowSelection.select`).
     // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
@@ -30,6 +30,25 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
     var resolved: SettingsWindowTab {
         self == .agentMode ? .features : self
     }
+
+    /// The sidebar, as in the approved mockup: Features, Keys & models,
+    /// Permissions, Hotkeys, General. The other tabs keep their ids and links
+    /// and open from where they belong (`sidebarHome`).
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    static let sidebarCases: [SettingsWindowTab] = [.features, .apiAndModels, .permissions, .hotkeys, .other]
+
+    /// The sidebar row that stays selected while this tab is shown: Meeting
+    /// notes and Toolbox belong to Features (Meeting Notes, Hover);
+    /// Notifications, Integrations and Backup to General.
+    var sidebarHome: SettingsWindowTab {
+        switch self {
+        case .notes, .toolbox, .agentMode: return .features
+        case .notifications, .integrations, .backup: return .other
+        case .features, .apiAndModels, .hotkeys, .permissions, .other: return self
+        }
+    }
+
+    var isInSidebar: Bool { Self.sidebarCases.contains(self) }
 
     static var defaultAvailable: SettingsWindowTab {
         availableCases.first ?? .features
@@ -43,8 +62,11 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
         switch self {
         case .features:
             return "Features"
+        // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+        // Keep the case and return adjacent for the landing catalog parser.
+        // The raw id `apiAndModels` stays: links and saved selections use it.
         case .apiAndModels:
-            return "API & Models"
+            return "Keys & models"
         case .hotkeys:
             return "Hotkeys"
         case .permissions:

@@ -85,6 +85,6 @@ enum ProviderFailure: Equatable, Sendable {
         }
     }
 
-    /// Only the user can fix it, in API & Models: Retry alone cannot help.
+    /// Only the user can fix it, in Keys & models: Retry alone cannot help.
     var needsSettings: Bool { keyStatus != nil }
 }

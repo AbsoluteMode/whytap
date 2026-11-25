@@ -86,7 +86,7 @@ enum ProviderAccount: Hashable, Codable, Sendable {
 /// A user's own OpenAI-compatible server (vLLM, LiteLLM, Ollama's shim, a
 /// company gateway). Its API key is optional and lives in the Keychain under
 /// `keyAccount`: `byok.server.<uuid, lower case>.api_key` for servers added in
-/// API & Models, but the old Models-tab accounts (`byok.selfHosted.api_key`,
+/// Keys & models, but the old Models-tab accounts (`byok.selfHosted.api_key`,
 /// `byok.custom_llm.api_key`) for servers the migration carries over, so no
 /// stored key has to move.
 struct ServerEndpoint: Codable, Equatable, Identifiable, Sendable {

@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Settings -> Features -> Drop: what dictation does, its shortcut and Hold
 /// or Toggle, a field to try it, what it needs with the action in place, and
-/// its options. Everything Drop-related that was spread over API & Models,
+/// its options. Everything Drop-related that was spread over Keys & models,
 /// Hotkeys, Permissions, Other and the island is reachable from this screen.
 // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
 @MainActor

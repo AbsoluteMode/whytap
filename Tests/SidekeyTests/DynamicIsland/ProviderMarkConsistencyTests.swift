@@ -4,7 +4,7 @@ import XCTest
 @testable import Sidekey
 
 /// A route on Anthropic's own API shows the bundled Anthropic mark everywhere
-/// (island ticker, API & Models), the same asset the Agent uses for Anthropic
+/// (island ticker, Keys & models), the same asset the Agent uses for Anthropic
 /// models, never a generic SF Symbol.
 @MainActor
 final class ProviderMarkConsistencyTests: XCTestCase {
@@ -49,7 +49,7 @@ final class ProviderMarkConsistencyTests: XCTestCase {
         XCTAssertEqual(account.assetName, agent.assetName)
         XCTAssertNil(account.systemName)
 
-        // Settings → API & Models tiles, chips and model rows.
+        // Settings → Keys & models tiles, chips and model rows.
         XCTAssertEqual(ProviderKindIcon.assetName(for: .anthropic), agent.assetName)
 
         // An unset feature still shows nothing rather than a guessed mark.
@@ -57,7 +57,7 @@ final class ProviderMarkConsistencyTests: XCTestCase {
         XCTAssertNil(TranscriptionProviderBrand.currentDropCleanup(routing: routing))
     }
 
-    /// One provider, one mark: the Agent ticker, Drop, API & Models and the
+    /// One provider, one mark: the Agent ticker, Drop, Keys & models and the
     /// first-run key step all name the same bundled asset.
     func testOpenAIAndAnthropicShowOneMarkInEveryPlace() throws {
         let routing = routing()

@@ -120,7 +120,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(page.models.map(\.supportsReasoning), [true, nil, false], "Reading the new flag keeps thinking")
     }
 
-    // MARK: - The Search row in API & Models → Models
+    // MARK: - The Search row in Keys & models → Models
 
     func testSearchRowShowsWhatTheAgentSearchesWithAndOffersTheRest() {
         func row(_ provider: OpenCodeModelProvider?, _ model: String? = "m", flag: Bool? = nil, tavily: Bool,
@@ -476,7 +476,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         let instructions = try XCTUnwrap(first["instructions"] as? String)
         XCTAssertTrue(instructions.contains("Web search is off"))
         XCTAssertTrue(instructions.contains("answer in one line"))
-        XCTAssertTrue(instructions.contains("adding a Tavily key in Settings → API & Models → API keys"))
+        XCTAssertTrue(instructions.contains("adding a Tavily key in Settings → Keys & models → API keys"))
         XCTAssertNil(first["max_tool_calls"])
         XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
         XCTAssertTrue(finalText(events)?.hasPrefix("Couldn’t verify") == true)

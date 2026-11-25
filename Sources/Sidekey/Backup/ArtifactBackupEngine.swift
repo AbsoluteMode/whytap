@@ -147,7 +147,7 @@ final class ArtifactBackupEngine {
         if let data = verification.inline[.settings],
            let payload = try? JSONDecoder.artifactBackup.decode(ArtifactSettingsPayload.self, from: data),
            payload.schema < 3, payload.values[ConfigBackupRegistry.aiRoutingKey] == nil {
-            warnings.append("This backup predates API & Models. Routes already configured on this Mac are kept; a fresh Mac can migrate the saved legacy provider choices.")
+            warnings.append("This backup predates Keys & models. Routes already configured on this Mac are kept; a fresh Mac can migrate the saved legacy provider choices.")
         }
         if verification.manifest.flavor != BuildConfig.flavor.rawValue {
             warnings.append("This backup was made by the \(verification.manifest.flavor) build of Whytap.")

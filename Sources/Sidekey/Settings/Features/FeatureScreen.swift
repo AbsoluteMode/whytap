@@ -22,7 +22,7 @@ struct FeatureScreenContext {
         switch action {
         case .downloadOnDeviceModel(let feature):
             // The download takes minutes; a model picked meanwhile (here or
-            // in API & Models) is the newer choice and stays.
+            // in Keys & models) is the newer choice and stays.
             let startedFrom = models.currentRoute(for: feature)
             let models = models
             let onDevice = environment.onDevice
@@ -292,7 +292,7 @@ private struct OwnedFeatureShortcutRow: View {
 }
 
 /// "What it needs": every requirement with its state or its action, and the
-/// model dropdown of API & Models in place.
+/// model dropdown of Keys & models in place.
 @MainActor
 struct FeatureNeedsGroup: View {
     let feature: AppFeature
@@ -330,7 +330,7 @@ struct FeatureNeedsGroup: View {
         }
     }
 
-    /// Picking a model here is the same choice as picking it in API & Models.
+    /// Picking a model here is the same choice as picking it in Keys & models.
     @ViewBuilder
     private func modelMenu(for check: FeatureCheck) -> some View {
         if case .model(let aiFeature) = check.requirement.kind,

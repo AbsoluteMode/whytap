@@ -127,7 +127,7 @@ after recovery; external event caches are not backed up. Older archives preserve
 calendar connections already on this Mac. A visible Planner or retained task
 draft blocks restore, while ordinary backups can continue.
 
-- API & Models routes for every feature, registered server addresses, languages,
+- Keys & models routes for every feature, registered server addresses, languages,
   meeting preferences, hotkeys, vocabulary, Toolbox layout,
   display and feature settings, and agent preferences.
 - Whytap's saved speech and text provider keys (including Anthropic and each

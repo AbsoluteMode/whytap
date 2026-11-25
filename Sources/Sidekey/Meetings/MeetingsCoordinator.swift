@@ -109,7 +109,7 @@ final class MeetingsCoordinator {
     /// chosen to process it. The staged audio is kept for retries for up to
     /// `failedRecordingRetention`.
     static let processorNotConfiguredMessage =
-        "Choose models for Meetings and Meeting notes in Settings > API & Models to process this meeting."
+        "Choose models for Meetings and Meeting notes in Settings > Keys & models to process this meeting."
 
     /// Shown on a meeting whose note still failed when its audio expired.
     static let recordingExpiredMessage =
@@ -1275,7 +1275,7 @@ final class MeetingsCoordinator {
 
         // No provider is configured: the recording stays staged (manifest +
         // chunks) and is retried on the next launch once the user has set up
-        // BYOK keys in Settings -> API & Models, for at most
+        // BYOK keys in Settings -> Keys & models, for at most
         // `failedRecordingRetention`.
         os_log(
             "handleFinalizedEvent no processor configured (meetingId: %{public}@) — recording kept for later",

@@ -124,7 +124,7 @@ struct AssignProposal: Equatable {
     let items: [AssignItem]
 }
 
-/// State and actions of the API & Models tab. Routes change only through an
+/// State and actions of the Keys & models tab. Routes change only through an
 /// explicit pick, a Switch action or the assign window: adding a key proposes,
 /// removing one un-sets, and neither moves a feature to another provider.
 /// Keys go from the Keychain straight to the checker, catalog and probe; none
@@ -250,7 +250,7 @@ final class APIAndModelsViewModel: ObservableObject {
             .store(in: &observers)
     }
 
-    /// API & Models → Models → Search: the Agent model's search (`.auto`) or Tavily.
+    /// Keys & models → Models → Search: the Agent model's search (`.auto`) or Tavily.
     func selectSearch(_ choice: AgentWebSearchChoice) {
         agentSettings.webSearchChoice = choice
         recompute()

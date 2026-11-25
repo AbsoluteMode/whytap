@@ -70,7 +70,7 @@ final class OpenCodeProvider: CLIProvider {
         }
     }
 
-    /// Anthropic's free models list, through the API & Models key checker.
+    /// Anthropic's free models list, through the Keys & models key checker.
     static func validateAnthropicKey(_ key: String) async -> ConnectOutcome {
         switch await ProviderKeyChecker().check(.anthropic, apiKey: key, server: nil, allowPaidProbe: false) {
         case .valid, .limited: return .connected(sessionID: nil)
@@ -152,14 +152,14 @@ final class OpenCodeProvider: CLIProvider {
             guard let binary = locate() else { return fail("not_installed", "Install OpenCode.") }
             let provider = options.openCodeProvider
             guard let key = try? readKey(provider), !key.isEmpty else {
-                return fail("missing_key", "Add your \(provider.displayName) key in Settings → API & Models.")
+                return fail("missing_key", "Add your \(provider.displayName) key in Settings → Keys & models.")
             }
             guard let rawModel = options.model else {
-                return fail("missing_model", "Choose a model in API & Models.")
+                return fail("missing_model", "Choose a model in Keys & models.")
             }
             let model = OpenCodeEnvironment.normalizeModel(rawModel)
             guard !model.isEmpty, !model.contains(where: \.isWhitespace) else {
-                return fail("missing_model", "Choose a model in API & Models.")
+                return fail("missing_model", "Choose a model in Keys & models.")
             }
             let workingDir: URL
             let env: [String: String]

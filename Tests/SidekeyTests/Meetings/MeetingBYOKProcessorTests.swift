@@ -551,7 +551,7 @@ final class MeetingBYOKProcessorTests: XCTestCase {
     func test_not_configured_message_points_to_api_and_models() {
         XCTAssertEqual(
             MeetingsCoordinator.processorNotConfiguredMessage,
-            "Choose models for Meetings and Meeting notes in Settings > API & Models to process this meeting."
+            "Choose models for Meetings and Meeting notes in Settings > Keys & models to process this meeting."
         )
     }
 

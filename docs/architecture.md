@@ -46,7 +46,7 @@ Voice flow (Drop / dictation):
             dropSmart) when the take starts; Retry and recovery read the
             latch, never the current preference
        -> realtime STT via TranscriptionSessionFactory
-            (route of the take's feature, Settings -> API & Models):
+            (route of the take's feature, Settings -> Keys & models):
             FeatureRouteResolver turns the feature's route (provider account +
             model, AIRoutingStore) into a ResolvedRoute with the account's
             Keychain key; RealtimeAdapterFactory builds the adapter. Your key
@@ -79,7 +79,7 @@ Voice flow (Drop / dictation):
             A feature without a route (Not set: never chosen on Apple Silicon,
             the retired Local route, or its key removed), or whose key is
             missing or unreadable, throws .notConfigured / .missingKey and
-            opens Settings -> API & Models on that feature's row; nothing
+            opens Settings -> Keys & models on that feature's row; nothing
             moves to another provider on its own. Deepgram's language policy
             is checked before the key (invalidLanguageConfiguration). WHY:
             .project-docs/decisions/2026-10-18-remove-local-models.md,
@@ -142,7 +142,7 @@ Voice flow (Drop / dictation):
             Decision-only catalog entries stay excluded from text/agent pickers.
             WHY: .project-docs/decisions/2026-10-22-smart-editor-pass.md
             Smart failures retain the transcript in memory and show Retry with
-            the original mode and target; configuration errors open API & Models on
+            the original mode and target; configuration errors open Keys & models on
             the Drop Smart cleanup row.
             Full, batch-recovered and partial transcripts use the same rule.
             In both modes DropPunctuationSpacing then removes an ordinary
@@ -230,7 +230,7 @@ Voice flow (Drop / dictation):
             Retry, the recorder fallback and agent batch voice: the whole
             take goes to the provider of the feature that led it (Drop Fast
             or Drop Smart; agent batch voice: Agent voice) in Settings ->
-            API & Models, with that provider's own Keychain key and its
+            Keys & models, with that provider's own Keychain key and its
             recorded model from the built-in registry (Soniox file API, Deepgram
             pre-recorded, ElevenLabs speech-to-text, self-hosted
             /v1/audio/transcriptions over https), with the realtime
@@ -252,7 +252,7 @@ Voice flow (Drop / dictation):
             "<Provider> refused the key" and the like, and a take whose
             partial was pasted after all changes nothing. A refused key,
             missing permission or empty balance also marks the key's tile and
-            the feature row (KeyStatusStore) and opens API & Models on the
+            the feature row (KeyStatusStore) and opens Keys & models on the
             take's row once per take; a 403 is shown but not recorded against
             the key. The audio stays for Retry. A later dictation that works
             forgets the mark; the free key check on opening Settings does not
@@ -336,7 +336,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
   One provider has one mark: an OpenAI or Anthropic account shows that same
   bundled model-author mark wherever its provider is drawn (Drop and cleanup
-  tickers, API & Models, first-run keys), never a second asset or an SF Symbol.
+  tickers, Keys & models, first-run keys), never a second asset or an SF Symbol.
   A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
   without keys/content/model requests; recording never waits for it. Cache I/O
   is off the main actor, failed refreshes retain usable artwork, and stale view
@@ -356,7 +356,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Whytap key window skips it; text/voice submission continues without selection.
   No CLI installation, binary/version probe, MCP bootstrap, provider discovery,
   model catalog fetch or paid connection probe is needed to start a request.
-  Settings -> API & Models chooses the exact Agent route/key. OpenRouter uses
+  Settings -> Keys & models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
   Anthropic uses Messages. Direct Anthropic and OpenAI requests ask for low
@@ -458,7 +458,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
   OpenRouter's reported cost includes search; OpenAI stays unpriced.
   WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-  Settings -> API & Models -> API keys saves a separate Tavily key in Keychain
+  Settings -> Keys & models -> API keys saves a separate Tavily key in Keychain
   (byok.tavily.search_api_key), after a GET /usage check without a search. The
   web_search tool sends only its bounded query to POST /search (basic, five
   results, at most two searches per turn); excerpts/URLs go to the chosen model.
@@ -526,13 +526,13 @@ Translation tools:
   (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
   acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
-  Subtitles run only on OpenAI gpt-realtime-translate. API & Models -> Models
+  Subtitles run only on OpenAI gpt-realtime-translate. Keys & models -> Models
   -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
   holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
   choice. It runs exactly when the OpenAI key from API keys can be read;
   without one the card has the usual setup contour, its menu adds "Add an
   OpenAI key…", it counts as a feature without a model, and Start names the
-  missing key and opens API & Models (no system audio is captured). A session
+  missing key and opens Keys & models (no system audio is captured). A session
   stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
   no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
   like Decision: their IDs stay for Costs and history, saved routes are
@@ -1183,7 +1183,7 @@ Update flow (download-on-action):
   docs/decisions/2026-07-08-update-download-spinner-and-post-relaunch-updated-indicator.md
 ```
 
-Presentation: Settings -> API & Models has four internal tabs: API keys,
+Presentation: Settings -> Keys & models has four internal tabs: API keys,
 Models (the initial tab), Costs and API hints. API keys holds the provider keys (Soniox,
 Deepgram, ElevenLabs, OpenRouter, OpenAI, Anthropic, and the user's
 OpenAI-compatible servers) and one model per AI feature (Drop Fast, Drop
@@ -1412,19 +1412,24 @@ Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
 (.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
-present place. Every feature has its own screen now. The older tabs stay in the
-sidebar with their identifiers. Drop has its own screen (DropFeatureView): the
+present place. Every feature has its own screen now. The sidebar
+(SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,
+Hotkeys and General. Meeting notes and Toolbox open from Meeting Notes and
+Hover; Notifications, Backup and Integrations from General's More group
+(SettingsOtherView.moreRows). Each keeps its identifier and link, its
+sidebarHome row stays selected, and SettingsBackBar above it leads back
+(SettingsWindowSelection.backLink). Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
 HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another
 action uses is not saved and recording stays open; Space stays hold-only);
 "Try it here" is the onboarding's native text field; "What it needs" lists the
-catalog's checks with the API & Models ModelMenu in place, Download free model
+catalog's checks with the Keys & models ModelMenu in place, Download free model
 or Use the model on this Mac (APIAndModelsViewModel.useOnDeviceModel: that one
 feature, no Assign window; after a download only if the feature's route is
 still the one it had when the download began, so a model picked meanwhile
 stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
-API & Models on API keys; the sidebar entry still opens Models), Allow,
+Keys & models on API keys; the sidebar entry still opens Models), Allow,
 Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
 Mode, Language you speak, Lower other audio and Stop Drop automatically (off
@@ -1487,7 +1492,7 @@ panes (Vocab, Filler, Case, languages, Notify, History, Monitor) sit on the
 Settings background and follow its appearance through IslandInk (white in the
 always-dark island). WHY: .project-docs/decisions/2026-11-20-toolbox-system-background.md
 UI decisions and verification limits: docs/DESIGN.md.
-API & Models separates function rows; missing setup uses a static orange contour
+Keys & models separates function rows; missing setup uses a static orange contour
 and soft glow instead of Not set/triangle status lines. Actual problem text and
 recovery actions remain. Shared settings rows use spaced, full-point dividers.
 
@@ -1640,7 +1645,7 @@ nothing in the window takes is dropped without the alert sound
 (OnboardingJourneyWindow), and the Try Drop field takes Escape quietly. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
 .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
-Settings -> API & Models (the agent's model is chosen there too; Settings ->
+Settings -> Keys & models (the agent's model is chosen there too; Settings ->
 Other -> Agent turns the native Agent on, which connects it, and holds Allow
 file edits and commands; the workspace path is in the Whytap plugin's
 get_state; the former Agents tab is gone, its whytap://settings/agentMode link
@@ -1648,7 +1653,7 @@ opens Other. WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md),
 and permissions in
 Settings -> Permissions. A feature can request the permission it needs when
 invoked. Drop without a chosen provider, key or endpoint opens
-Settings -> API & Models on that feature's row. Settings opens on API &
+Settings -> Keys & models on that feature's row. Settings opens on API &
 Models; screenshot protection is in
 Other (default off). The former tour, resume state, preview target and
 voice demos were removed. WHY:
@@ -2192,7 +2197,7 @@ means Exodia-Backup); reconnecting the same account keeps the saved one, and a
 token that cannot see it gets an access error without moving the destination. Release tags and formats are unchanged. WHY:
 .project-docs/decisions/2026-11-21-whytap-backup-repository.md
 Connection alone never backs up data.
-API & Models routes, server registrations and their provider keys are included.
+Keys & models routes, server registrations and their provider keys are included.
 Costs history is exported by the live AIUsageStore actor and verified with a
 strict schema/row validator. Restore retains target-only spending and the best
 known price per request ID; older archives without Costs leave it untouched.

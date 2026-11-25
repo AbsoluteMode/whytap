@@ -105,7 +105,7 @@ struct TranslationView: View {
                 Group {
                     if let issue = text.issue, let feature = issue.feature {
                         Button { openSettings(feature) } label: {
-                            Text(issue.message + " Open API & Models →")
+                            Text(issue.message + " Open Keys & models →")
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .buttonStyle(MacButtonInteractionStyle(highlight: .primary, focused: settingsFocused))
@@ -283,7 +283,7 @@ struct TranslationView: View {
                                    alignment: .leading)
                     }
                     if let feature = subtitles.issue?.feature {
-                        Button("Open API & Models") { openSettings(feature) }.controlSize(.small)
+                        Button("Open Keys & models") { openSettings(feature) }.controlSize(.small)
                     }
                 }
                 .padding(.horizontal, 16)
@@ -609,7 +609,7 @@ struct TranslationView: View {
             Text(issue.message).font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)
             if let feature = issue.feature {
-                Button("API & Models") { openSettings(feature) }.controlSize(.small)
+                Button("Keys & models") { openSettings(feature) }.controlSize(.small)
             }
         }.padding(12).background(Color.orange.opacity(0.09), in: RoundedRectangle(cornerRadius: 10))
     }

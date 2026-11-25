@@ -1,3 +1,28 @@
+---
+id: settings-features-refresh-2026-11-25
+type: decision
+title: Settings -> Features rebuilds its snapshot only when what it shows changes
+summary: The Features snapshot reads every provider key on the main thread. A Notify registry reread every 2 s republished an unchanged list and rebuilt it, so Whytap's main thread, and the island's live dictation wing with it, froze about 0.6-0.75 s every few seconds. The view now reacts only to changed Notify and Monitor counts, and the supervisor publishes only changed values.
+status: confirmed
+tags: [settings, features, performance, main-thread, notify, monitor, island, dictation]
+canonical_for: [settings-features-snapshot-refresh]
+verified_at: 2026-11-25
+sources:
+  - type: repository
+    reference: Sources/Sidekey/Settings/Features/SettingsFeaturesView.swift
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Sources/Sidekey/Settings/Features/FeaturesEnvironment.swift
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Sources/Sidekey/Notifications/NotifyScriptSupervisor.swift
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Tests/SidekeyTests/Settings/SettingsFeaturesRefreshTests.swift
+    confirmed_at: 2026-11-25
+related: [2026-11-24-settings-around-features.md]
+---
+
 # Settings -> Features rebuilds its snapshot only when what it shows changes
 
 ## Context

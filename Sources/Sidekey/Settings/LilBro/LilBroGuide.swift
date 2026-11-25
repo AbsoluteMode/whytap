@@ -106,23 +106,31 @@ struct LilBroLocalGuide: LilBroBrain {
 
     static func match(_ question: String) -> LilBroReply {
         let q = withoutInCase(question)
-        // WHY: a macOS setting's name is the question when the person asks to
-        // find or allow it ("Where do I allow Microphone for Drop?") or names
-        // it before any feature ("screen recording for screenshots"); it is
-        // context when a feature comes first ("dictate with my microphone",
-        // "use Drop after enabling Accessibility"). Its own words never count
-        // as a feature's ("monitoring" is not Monitor).
+        // WHY: a macOS setting's name is context in a subordinate part of the
+        // question ("Where is Drop after enabling Accessibility?", "dictate
+        // with my microphone"): the feature opens. Otherwise it is the
+        // question when the person asks to find or allow it ("Where do I
+        // allow Microphone for Drop?", "For Drop, where can I find
+        // Microphone?") or names it before any feature ("Screen Recording for
+        // Screenshots"). Its own words never count as a feature's
+        // ("monitoring" is not Monitor).
         // .project-docs/decisions/2026-11-24-lil-bro.md
         let named = settingNames.compactMap { name in offset(of: name, in: q).map { (name, $0) } }
         if !named.isEmpty {
             let rest = named.reduce(q) { blank($0, pattern: NSRegularExpression.escapedPattern(for: $1.0)) }
-            let settingAt = named.map(\.1).min() ?? 0
-            if !asksForSetting(q, named: named.map(\.0)),
-               let found = featureMatch(in: rest), found.offset < settingAt {
-                return .answer(answer(for: found.feature))
+            let found = featureMatch(in: rest)
+            let direct = named.filter { !isContext(at: $0.1, in: q) }
+            let permissions = LilBroDestination.tab(.permissions)
+            let toPermissions = LilBroAnswer(paragraphs: [line(for: permissions)], destination: permissions)
+            // Every setting is context ("after enabling …", "with my …"): the feature.
+            guard !direct.isEmpty else {
+                return found.map { .answer(answer(for: $0.feature)) } ?? .answer(toPermissions)
             }
-            let destination = LilBroDestination.tab(.permissions)
-            return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))
+            // Asked for directly ("allow …", "where can I find …"), or named
+            // before any feature ("Screen Recording for Screenshots").
+            if asksForSetting(q, named: direct.map(\.0)) { return .answer(toPermissions) }
+            if let found, found.offset < (direct.map(\.1).min() ?? 0) { return .answer(answer(for: found.feature)) }
+            return .answer(toPermissions)
         }
         // The feature words win over generic ones ("dictation shortcut" is Drop).
         if let found = featureMatch(in: q) {
@@ -134,12 +142,27 @@ struct LilBroLocalGuide: LilBroBrain {
         return .unknown(suggestions: starters)
     }
 
-    /// "allow / grant / enable / find / where is … <setting>", within a few
-    /// words, and not "after enabling …".
+    /// Words that put a setting in a subordinate part of the question.
+    private static let contextMarkers: Set<String> = [
+        "after", "once", "when", "whenever", "while", "before", "with", "using", "if", "until", "since",
+    ]
+
+    /// A marker among the five words before the setting, within the same
+    /// part of the sentence: "after enabling", "once I enable", "when I turn
+    /// on", "with my".
+    private static func isContext(at offset: Int, in q: String) -> Bool {
+        let before = String(q.prefix(offset))
+        let part = before.split(omittingEmptySubsequences: false) { ",;:.?!".contains($0) }.last.map(String.init) ?? before
+        let words = part.split { !$0.isLetter && $0 != "'" }.suffix(5)
+        return words.contains { contextMarkers.contains(String($0)) }
+    }
+
+    /// "allow / grant / enable / find / where is <setting>": the verb takes
+    /// the setting itself, with at most an article or "my" between.
     private static func asksForSetting(_ q: String, named: [String]) -> Bool {
         let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
         return named.contains { name in
-            let pattern = "(?<!after |once |when |before )\\b(\(verbs))\\b(?:\\s+\\S+){0,3}?\\s+"
+            let pattern = "\\b(\(verbs))\\s+(?:(?:the|my|a|an|its)\\s+)?"
                 + NSRegularExpression.escapedPattern(for: name)
             return q.range(of: pattern, options: .regularExpression) != nil
         }

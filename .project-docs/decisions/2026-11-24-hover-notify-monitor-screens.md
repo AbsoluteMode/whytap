@@ -44,13 +44,11 @@ had to know that and tell the agent where Whytap's files are.
 - **Hover** is always Ready. Its screen lists the tools "In the island" in
   the island's order (left to right, row by row), Settings pinned last, then
   "More tools" that are off, in the catalog order.
-  - A tool is held by its row and dragged; over another row it takes that
-    row's place at once (live), so the island shows the result while the
-    tool is still held. A row that slides under the pointer after a move is
-    not a new target, so the tool does not flip back. A tool that is off,
-    dropped on a row, joins the island there; dropped on Settings it joins
-    the end; a tool dropped on More tools leaves the island. Tool drags
-    use an internal type, so dropping ordinary text cannot move a tool.
+  - (Replaced on 2026-11-25: the list is no longer dragged; tools are
+    reordered by holding a tile in the island itself, see
+    [island hover reorder](2026-11-25-island-hover-reorder.md).) Originally
+    a tool was held by its row and dragged, with live moves and drops on
+    More tools.
   - Each row has a switch: off takes the tool out of the island, on puts it
     back at the end, before Settings. Move Up, Move Down and Move to Top are
     in the row's context menu and VoiceOver actions.
@@ -131,8 +129,10 @@ redrawing during a drag, pasting the prompt into each of the four agents.
 
 ## Rejected
 
-- Reordering only in the island itself (the mockup's note): Maxim asked for
-  hold-and-drag in Settings; an island drag mode would be a separate change.
+- Reordering only in the island itself (the mockup's note): at first Maxim's
+  words were read as hold-and-drag in Settings; on 2026-11-25 he clarified he
+  meant the island, and that change was made
+  ([island hover reorder](2026-11-25-island-hover-reorder.md)).
 - One list without "More tools": the order of tools that are off would need a
   second stored order the island never uses.
 - A prompt per agent: the agents read the same files; one prompt avoids four

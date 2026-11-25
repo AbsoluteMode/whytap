@@ -419,7 +419,9 @@ struct IslandView: View {
             panelHovering: panelHovering,
             wasExpanded: mouseExpanded,
             glance: hoverPanelGlance,
-            interactionHeld: holdsHoverMenu,
+            // A tool lifted for reordering holds the drawer, even when the
+            // pointer passes outside it mid-drag.
+            interactionHeld: holdsHoverMenu || hoverHitBridge.isReordering,
             screenshotPreparing: appState.screenshotPreparing
         )
         if mouseExpanded != next {
@@ -602,7 +604,8 @@ struct IslandView: View {
         // ⌥N press — D4), then gate the result on the policy so neither path
         // forces the drawer open during a meeting suggestion / agent flow.
         !displayPreferences.hideIslandHoverWidgets
-            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu || appState.programmaticHoverExpansion)
+            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
+                || hoverHitBridge.isReordering || appState.programmaticHoverExpansion)
             && IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
@@ -1375,6 +1378,8 @@ struct IslandView: View {
         // closed drawer before the cursor reaches the pill.
         .onChange(of: pillHovering) { _, _ in recomputeMouseExpanded() }
         .onChange(of: panelHovering) { _, _ in recomputeMouseExpanded() }
+        // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+        .onChange(of: hoverHitBridge.reorderingTool) { _, _ in recomputeMouseExpanded() }
         .onChange(of: appState.screenshotPreparing) { _, preparing in
             guard !preparing else { return }
             recomputeMouseExpanded()
@@ -2735,6 +2740,7 @@ private struct IslandDropModeHoverPanel: View {
             contentsVisible = true
             hoverHitBridge.setSurface(hitTargetSurface)
             hoverHitBridge.setContext(hitTargetContext)
+            hoverHitBridge.layoutStore = hoverStore
             // Brightness keys may have changed the level since the last hover.
             if hoverStore.slots.contains(.brightness) { brightness.refresh() }
         }
@@ -2799,8 +2805,20 @@ private struct IslandDropModeHoverPanel: View {
                     ScrollView(.vertical) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: IslandHoverControlsLayout.columnSpacing),
                                                  count: HoverLayoutStore.columns), spacing: IslandHoverControlsLayout.rowSpacing) {
-                            ForEach(Array(hoverStore.slots.enumerated()), id: \.offset) { offset, tool in
+                            // Identity by tool, so a reorder slides tiles instead of redrawing
+                            // them; an identity transition keeps a replaced tool from fading out
+                            // as a tail after the animation.
+                            ForEach(hoverStore.slots, id: \.self) { tool in
                                 tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
+                                    .transition(.identity)
+                                    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+                                    .scaleEffect(hoverHitBridge.reorderingTool == tool ? 1.14 : 1)
+                                    .shadow(color: .black.opacity(hoverHitBridge.reorderingTool == tool ? 0.45 : 0),
+                                            radius: 8, y: 4)
+                                    .opacity(hoverHitBridge.isReordering && hoverHitBridge.reorderingTool != tool ? 0.82 : 1)
+                                    .zIndex(hoverHitBridge.reorderingTool == tool ? 1 : 0)
+                                    .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.7),
+                                               value: hoverHitBridge.reorderingTool)
                                     .islandHoverHitTarget(
                                         bridge: hoverHitBridge,
                                         id: IslandHoverHitTargetID(surface: .tile, tool: tool),
@@ -2810,7 +2828,7 @@ private struct IslandDropModeHoverPanel: View {
                                     .disabled(tool.isComingSoon)
                                     .overlay(alignment: .top) {
                                         toolHotkeyHint(for: tool)
-                                            .opacity(hoveredTool == tool ? 1 : 0)
+                                            .opacity(hoveredTool == tool && !hoverHitBridge.isReordering ? 1 : 0)
                                             .offset(y: -IslandHoverControlsLayout.hintOffset)
                                             .animation(.easeInOut(duration: 0.15), value: hoveredTool)
                                             .allowsHitTesting(false)

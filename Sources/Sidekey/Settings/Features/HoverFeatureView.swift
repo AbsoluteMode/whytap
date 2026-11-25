@@ -1,18 +1,19 @@
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Settings -> Features -> Hover: the island's tools as a list. The order of
-/// the list is the order in the island; a tool is held and dragged to a new
-/// place, and a switch takes it out of the island or puts it back. Every
-/// change goes straight to `HoverLayoutStore`, which the island observes, so
-/// the island shows it at once. A tool's own shortcut stays on its row.
+/// the list is the order in the island; a switch takes a tool out of the
+/// island or puts it back. Tools are reordered in the island itself (hold a
+/// tile, drag it); here the order is shown, with Move Up/Down in the context
+/// menu and VoiceOver actions for keyboard use. Every change goes straight to
+/// `HoverLayoutStore`, which the island observes. A tool's own shortcut stays
+/// on its row.
 // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
+// WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
 @MainActor
 struct HoverFeatureView: View {
     @ObservedObject var selection: SettingsWindowSelection
     @ObservedObject private var store: HoverLayoutStore
     @ObservedObject private var hotkeys: HotkeyPreferences
-    @StateObject private var drag: HoverToolDragModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private let environment: FeaturesEnvironment
 
@@ -21,11 +22,11 @@ struct HoverFeatureView: View {
         self.environment = environment
         self.store = environment.hoverStore
         self.hotkeys = environment.hotkeys
-        _drag = StateObject(wrappedValue: HoverToolDragModel(store: environment.hoverStore))
     }
 
     static let about = "Small tools that open when you hover the notch. The island shows them in this order, "
-        + "left to right, row by row. Hold a tool and drag it to a new place; switch off the ones you don’t need. "
+        + "left to right, row by row. To change the order, hold a tool in the island and drag it; "
+        + "switch off the ones you don’t need here. "
         + "Search all tools in the island still finds a tool that is off, and its shortcut keeps working."
 
     var body: some View {
@@ -42,14 +43,9 @@ struct HoverFeatureView: View {
                     ForEach(Array(layout.inIsland.enumerated()), id: \.element) { index, tool in
                         if index > 0 { MacRowSeparator() }
                         row(tool, isOn: true, layout: layout)
-                            .onDrop(of: [HoverToolDropDelegate.contentType],
-                                    delegate: HoverToolDropDelegate(target: .tool(tool), model: drag,
-                                                                   reduceMotion: reduceMotion))
                     }
                     if !layout.inIsland.isEmpty { MacRowSeparator() }
                     HoverPinnedSettingsRow()
-                        .onDrop(of: [HoverToolDropDelegate.contentType],
-                                delegate: HoverToolDropDelegate(target: .end, model: drag, reduceMotion: reduceMotion))
                 }
             }
             VStack(alignment: .leading, spacing: 0) {
@@ -68,12 +64,8 @@ struct HoverFeatureView: View {
                         }
                     }
                 }
-                // Dropping a tool here takes it out of the island.
-                .onDrop(of: [HoverToolDropDelegate.contentType],
-                        delegate: HoverToolDropDelegate(target: .off, model: drag, reduceMotion: reduceMotion))
             }
         }
-        .onDisappear { drag.end() }
     }
 
     private func row(_ tool: HoverTool, isOn: Bool, layout: HoverToolLayout) -> some View {
@@ -86,7 +78,6 @@ struct HoverFeatureView: View {
             canMoveDown: layout.canMoveDown(tool),
             setOn: { on in withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { layout.set(tool, on: on, in: store) } },
             move: { step in withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { layout.move(tool, by: step, in: store) } },
-            beginDrag: { drag.begin(tool) },
             destination: destination(for: tool)
         )
     }
@@ -148,113 +139,8 @@ struct HoverToolLayout: Equatable {
     }
 }
 
-/// A drag of one tool: begun on a row, it moves the tool live while it passes
-/// over the rows in the island, and ends on a drop. A tool that is off joins
-/// the island where it is dropped; a tool dropped on More tools leaves it.
-@MainActor
-final class HoverToolDragModel: ObservableObject {
-    enum Target: Equatable {
-        case tool(HoverTool)
-        /// The pinned Settings row: the last place before Settings.
-        case end
-        /// More tools: out of the island.
-        case off
-    }
-
-    @Published private(set) var dragging: HoverTool?
-    let store: HoverLayoutStore
-    /// The row the drag last moved over. A row that slides under the pointer
-    /// after a live move is not a new target, so the tool does not flip back.
-    private var lastEntered: Target?
-
-    init(store: HoverLayoutStore) {
-        self.store = store
-    }
-
-    func begin(_ tool: HoverTool) {
-        guard tool != .settings else { return }
-        dragging = tool
-        lastEntered = nil
-    }
-
-    /// Over a row of the island: a tool already there takes that row's place
-    /// at once, so the person sees where it lands before letting go.
-    func enter(_ target: Target) {
-        guard let tool = dragging, target != lastEntered, target != .tool(tool) else { return }
-        lastEntered = target
-        guard store.slots.contains(tool), let index = index(of: target) else { return }
-        store.placeTool(tool, at: index)
-    }
-
-    @discardableResult
-    func drop(on target: Target) -> Bool {
-        defer { end() }
-        guard let tool = dragging else { return false }
-        if target == .off {
-            guard store.slots.contains(tool) else { return false }
-            store.removeTool(tool)
-            return true
-        }
-        // A tool from the island already moved while it was dragged.
-        if store.slots.contains(tool) { return true }
-        guard let index = index(of: target) else { return false }
-        store.placeTool(tool, at: index)
-        return true
-    }
-
-    func end() {
-        dragging = nil
-        lastEntered = nil
-    }
-
-    private func index(of target: Target) -> Int? {
-        switch target {
-        case .tool(let tool): return store.slots.firstIndex(of: tool)
-        case .end: return store.lockSlotIndex
-        case .off: return nil
-        }
-    }
-}
-
-struct HoverToolDropDelegate: DropDelegate {
-    /// A cancelled drag can leave a remembered tool. Use a process-local
-    /// representation so an unrelated text drop does not consume it.
-    static let contentType = UTType(exportedAs: "com.rootwise.sidekey.hover-tool")
-    let target: HoverToolDragModel.Target
-    let model: HoverToolDragModel
-    let reduceMotion: Bool
-
-    static func provider(for tool: HoverTool) -> NSItemProvider {
-        let provider = NSItemProvider()
-        let data = Data(tool.rawValue.utf8)
-        provider.registerDataRepresentation(forTypeIdentifier: contentType.identifier, visibility: .ownProcess) { completion in
-            completion(data, nil)
-            return nil
-        }
-        return provider
-    }
-
-    @MainActor func validateDrop(info: DropInfo) -> Bool {
-        model.dragging != nil && info.hasItemsConforming(to: [Self.contentType])
-    }
-
-    @MainActor func dropEntered(info: DropInfo) {
-        guard validateDrop(info: info) else { return }
-        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.16)) { model.enter(target) }
-    }
-
-    @MainActor func dropUpdated(info: DropInfo) -> DropProposal? {
-        DropProposal(operation: .move)
-    }
-
-    @MainActor func performDrop(info: DropInfo) -> Bool {
-        guard validateDrop(info: info) else { return false }
-        return withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.18)) { model.drop(on: target) }
-    }
-}
-
-/// One tool: a handle to drag it by, its mark, name and what it does, its
-/// shortcut, and the switch that shows it in the island. The chevron opens
+/// One tool: its mark, name and what it does, its shortcut, and the switch
+/// that shows it in the island. The chevron opens
 /// the shortcut editor and the way to the tool's own settings.
 @MainActor
 struct HoverToolRow: View {
@@ -271,7 +157,6 @@ struct HoverToolRow: View {
     let canMoveDown: Bool
     let setOn: (Bool) -> Void
     let move: (Int) -> Void
-    let beginDrag: () -> Void
     let destination: Destination?
     @State private var expanded = false
     @State private var hovering = false
@@ -287,7 +172,7 @@ struct HoverToolRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 11) {
-                dragArea
+                summary
                 Spacer(minLength: 10)
                 if !shortcut.isEmpty {
                     FeatureShortcutKeys(contents: shortcut)
@@ -318,7 +203,7 @@ struct HoverToolRow: View {
                             .accessibilityLabel("\(destination.title): \(info.title)")
                     }
                 }
-                .padding(.leading, 62)
+                .padding(.leading, 53)
                 .padding(.trailing, 14)
                 .padding(.bottom, 12)
             }
@@ -340,14 +225,9 @@ struct HoverToolRow: View {
         }
     }
 
-    /// The part a person holds to drag: handle, mark and words.
-    private var dragArea: some View {
+    /// Mark and words.
+    private var summary: some View {
         HStack(spacing: 11) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(isOn ? MacSettingsTheme.text3 : MacSettingsTheme.text3.opacity(0.4))
-                .frame(width: 14)
-                .accessibilityHidden(true)
             ZStack {
                 Circle().fill(MacSettingsTheme.hover).frame(width: 28, height: 28)
                 Image(systemName: info.sfSymbol)
@@ -372,21 +252,6 @@ struct HoverToolRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .contentShape(Rectangle())
-        .onDrag {
-            beginDrag()
-            return HoverToolDropDelegate.provider(for: tool)
-        } preview: {
-            HStack(spacing: 8) {
-                Image(systemName: info.sfSymbol).font(.system(size: 12.5))
-                Text(info.title).font(.system(size: 13, weight: .medium))
-            }
-            .foregroundStyle(MacSettingsTheme.text)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(MacSettingsTheme.bgCard, in: Capsule())
-        }
-        .help(isOn ? "Hold and drag to change its place in the island" : "Drag into the island, or switch it on")
     }
 
     @ViewBuilder private var menu: some View {
@@ -407,11 +272,6 @@ struct HoverPinnedSettingsRow: View {
     var body: some View {
         let info = HoverToolRegistry.info(for: .settings)
         HStack(spacing: 11) {
-            Image(systemName: "lock.fill")
-                .font(.system(size: 10))
-                .foregroundStyle(MacSettingsTheme.text3)
-                .frame(width: 14)
-                .accessibilityHidden(true)
             ZStack {
                 Circle().fill(MacSettingsTheme.hover).frame(width: 28, height: 28)
                 Image(systemName: info.sfSymbol)
@@ -428,7 +288,7 @@ struct HoverPinnedSettingsRow: View {
                     .foregroundStyle(MacSettingsTheme.text2)
             }
             Spacer(minLength: 10)
-            Text("Always on")
+            Label("Always on", systemImage: "lock.fill")
                 .font(.system(size: 12))
                 .foregroundStyle(MacSettingsTheme.text3)
         }

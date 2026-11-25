@@ -369,8 +369,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   field. The setting follows the request that starts the turn (after a
   refused provider search, the one without it) and is kept after the first
   accepted exchange. Before that, an HTTP 400 (or OpenRouter 404) that
-  refuses a top-level reasoning setting (by param, leading path, or a named
-  setting path with a refusal) is repeated once with OpenAI low or without
+  refuses a top-level reasoning setting (its param, or a message that opens
+  with the setting as subject; a mention later in the message never counts)
+  is repeated once with OpenAI low or without
   the fields, and a model whose repeat is answered keeps that until relaunch
   (on OpenRouter per pinned endpoint or Auto); apart from this and the web
   search fallback below, no model request is retried. WHY:

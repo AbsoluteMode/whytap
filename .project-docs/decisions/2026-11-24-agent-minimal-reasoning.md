@@ -88,19 +88,20 @@ the tables Smart uses; nothing is duplicated.
   is Tavily or the model has none.
 - **A refused request goes once more.** When the provider answers HTTP 400
   (OpenRouter also 404) and its error refuses a top-level reasoning setting
-  of the request (`ErrorShape.namesReasoning`): a `param` whose first
-  component is `reasoning`, `reasoning_effort`, `thinking` or `output_config`
-  decides alone; a message (or the upstream text OpenRouter quotes) that
-  opens with such a path (`thinking.type: ...`) counts, and one that opens
-  with another request field (`tools:`, `messages:`, `max_tokens:`, or a
-  path into them) is about that field; otherwise one sentence must name the
-  setting by its request path (`reasoning.effort`,
-  `"thinking.type.between_tools"`, `output_config.effort`) or quoted alone
-  (`'thinking'`, `'output_config'`), other quoted text removed, together
-  with a refusal such as "is not supported", "cannot be used" or "not
-  permitted"; and OpenRouter's "no endpoints ... requested parameters"
-  counts. A bare word (reasoning models, thinking blocks, an `effort`
-  property in a tool schema) or a path into the messages or tools is not a
+  of the request (`ErrorShape.namesReasoning`, `reasoning`,
+  `reasoning_effort`, `thinking` or `output_config`). Only shapes in which
+  the setting is what the provider refused count: a `param` whose first
+  component is a setting decides alone; the message (or the upstream text
+  OpenRouter quotes), after a generic prefix such as `Error:`, opens with
+  the setting as its subject, quoted or not, followed by a colon or a
+  refusal (`thinking.type: ...`, `'thinking' is not supported`,
+  `output_config.effort 'xhigh' is not supported`); "the model does not
+  support the 'output_config' parameter"; OpenAI's "The following tools
+  cannot be used with reasoning.effort ..."; and OpenRouter's "no endpoints
+  ... requested parameters". A message that opens with anything else (another
+  request field, quoted or not, or a sentence about message content, a
+  tool's name or a value) is about that, whatever setting it mentions later:
+  a mention anywhere else is never enough. A bare word is not a
   setting. The same request is then sent again with what a refusing model
   gets: on direct OpenAI `low`, which every reasoning model takes (the
   Agent's level since 2026-11-23), when the level sent was lower; otherwise
@@ -182,7 +183,13 @@ request that starts the turn and keeps it. After the builder's review of ticket 
 messages opening with `tools:`, `messages:` or `max_tokens:` that mention a
 setting are not repeated, and refusals of a setting quoted alone
 (`'thinking' is not supported`, `"thinking": Extra inputs are not
-permitted`, `does not support the 'output_config' parameter`) are. `NativeAgentLowEffortTests` updated
+permitted`, `does not support the 'output_config' parameter`) are. After the
+builder's review of ticket 584, the sentence rule (a setting named anywhere
+in a sentence with a refusal) was dropped: a quoted request field opening
+the message, in any quote style and in OpenRouter's upstream text, and a
+quoted setting word that is data (message content, a tool's name, an invalid
+value) were repeated under it. The setting must now open the message as its
+subject. `NativeAgentLowEffortTests` updated
 for the new levels. Not tested: the installed app, how much faster answers
 are, OpenRouter live.
 

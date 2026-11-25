@@ -117,81 +117,53 @@ enum NativeAgentDiagnostics {
         /// Removes quoted text (often the user's own words) and keeps a quoted
         /// tool identifier such as 'web_search' as a bare word.
         /// The error refuses a top-level reasoning setting of the request
-        /// (`reasoning`, `reasoning_effort`, `thinking`, `output_config`):
-        /// - a `param` is decisive: its first component must be a setting
-        ///   (`reasoning.effort`, not `messages.1.content.0.thinking`);
-        /// - a message (or the upstream text OpenRouter quotes) that opens
-        ///   with a path (`thinking.type: ...`) is decided by that path;
-        /// - otherwise one sentence must name a setting by its request path
-        ///   (`reasoning.effort`, `"thinking.type.between_tools"`,
-        ///   `output_config.effort`, or a setting quoted alone: `'thinking'`;
-        ///   other quoted text removed) together with a refusal ("is not
-        ///   supported", "cannot be used", "not permitted").
-        /// - a message that opens with a request field other than a setting
-        ///   (`tools:`, `max_tokens:`) is about that field.
-        /// A bare word ("reasoning models", "thinking blocks", a tool schema's
-        /// `effort` property) is not a setting, and OpenRouter's "no endpoints
-        /// ... requested parameters" counts as a refusal.
+        /// (`reasoning`, `reasoning_effort`, `thinking`, `output_config`). Only
+        /// shapes where the setting is what the provider refused count:
+        /// - a `param` decides alone: its first component must be a setting;
+        /// - the message (or the upstream text OpenRouter quotes), after a
+        ///   generic prefix such as `Error:`, opens with the setting as its
+        ///   subject, quoted or not, followed by a colon or a refusal
+        ///   (`thinking.type: ...`, `'thinking' is not supported`,
+        ///   `output_config.effort 'xhigh' is not supported`);
+        /// - "the model does not support the 'output_config' parameter";
+        /// - OpenAI's "The following tools cannot be used with
+        ///   reasoning.effort ..." and OpenRouter's "no endpoints ...
+        ///   requested parameters".
+        /// A message that opens with anything else (another request field,
+        /// quoted or not, or a sentence about message content, a tool's name
+        /// or a value) is about that, whatever setting it mentions later.
         /// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
         static func refusesReasoning(error: [String: Any]?, raw: String?) -> Bool {
             if let param = error?["param"] as? String { return isReasoningSetting(path: String(param.prefix(200)).lowercased()) }
-            let refusals = ["not supported", "unsupported", "does not support", "doesn't support", "not allowed",
-                            "not permitted", "cannot be used", "can't be used", "unrecognized", "unknown parameter",
-                            "invalid value", "not available", "not enabled", "only supported"]
-            let setting = #"(?<![a-z0-9_.\]\[/-])(?:reasoning_effort|(?:reasoning|thinking|output_config)(?:\.[a-z_]+)+)(?![a-z0-9_])"#
             for text in [error?["message"] as? String, raw].compactMap({ $0 }) {
-                let lower = String(text.prefix(16_384)).lowercased()
+                var lower = String(text.prefix(16_384)).lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
                 if lower.contains("no endpoints") && lower.contains("requested parameters") { return true }
-                if let range = lower.range(of: #"^\s*[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+|\[\d+\])*\s*:"#, options: .regularExpression) {
-                    let path = lower[range].trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ":")))
-                    if isReasoningSetting(path: path) { return true }
-                    // A request path, or a request field named alone (`tools:`,
-                    // `max_tokens:`), that is not a setting decides the error;
-                    // a plain word (`error:`) does not.
-                    if path.contains(".") || path.contains("[") || requestRoots.contains(path) { continue }
+                if let prefix = lower.range(of: #"^(?:error|invalid request|invalid_request_error|bad request)\s*:\s*"#,
+                                            options: .regularExpression) {
+                    lower.removeSubrange(prefix)
                 }
-                let plain = fieldNamesKept(lower)
-                let sentences = plain.replacingOccurrences(of: ". ", with: "\n").split(whereSeparator: { $0 == "\n" || $0 == ";" })
-                for sentence in sentences {
-                    let words = String(sentence)
-                    if words.range(of: setting, options: .regularExpression) != nil, refusals.contains(where: words.contains) { return true }
-                }
+                if refusalShapes.contains(where: { lower.range(of: $0, options: .regularExpression) != nil }) { return true }
             }
             return false
         }
 
-        /// Top-level request fields of the three APIs other than the reasoning
-        /// settings: an error that opens with one of them is about that field.
-        static let requestRoots: Set<String> = [
-            "model", "messages", "input", "system", "instructions", "tools", "tool_choice", "parallel_tool_calls",
-            "max_tokens", "max_output_tokens", "max_completion_tokens", "max_tool_calls", "include", "metadata", "text",
-            "temperature", "top_p", "top_k", "stop", "stop_sequences", "stream", "store", "provider", "response_format",
-            "container", "mcp_servers", "service_tier", "speed", "user", "prompt", "previous_response_id", "truncation",
+        private static let quote = #"['"`‘’“”]?"#
+        private static let settingPath = #"(?:reasoning_effort|reasoning|thinking|output_config)(?:\.[a-z_]+)*"#
+        private static let settingRefusal = #"(?:is|are)\s+(?:not supported|not allowed|not permitted|unsupported|invalid|not available)"#
+        static let refusalShapes = [
+            // The setting is the subject: `thinking: ...`, `'thinking' is not supported`,
+            // `output_config.effort 'xhigh' is not supported`.
+            "^" + quote + settingPath + quote + #"\s*(?::|(?:['"`‘’“”][^'"`‘’“”]{0,40}['"`‘’“”]\s*)?"# + settingRefusal
+                + #"|cannot be used|not supported)"#,
+            #"^(?:the |this )?model(?: [a-z0-9._/:-]+)? does not support (?:the )?"# + quote + settingPath + quote
+                + #" (?:parameter|field|setting|option|argument)"#,
+            #"^the following tools cannot be used with reasoning\.effort\b"#,
         ]
 
         /// The path's first component is a top-level reasoning setting.
         static func isReasoningSetting(path: String) -> Bool {
             let first = path.split(whereSeparator: { $0 == "." || $0 == "[" }).first.map(String.init) ?? ""
             return ["reasoning", "reasoning_effort", "thinking", "output_config"].contains(first)
-        }
-
-        /// Quoted text removed, except a quoted field name
-        /// (`"thinking.type.between_tools"`), which stays as a bare word.
-        static func fieldNamesKept(_ text: String) -> String {
-            let pattern = #"(?<![\p{L}\p{N}])['"`‘“]([^'"`’”]*)['"`’”](?![\p{L}\p{N}])"#
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
-            var result = text
-            for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
-                guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
-                let content = String(text[inner])
-                // A quoted setting named alone ('thinking', "output_config")
-                // becomes `reasoning_effort`, the one bare setting word the
-                // sentence rule accepts.
-                let setting = ["reasoning", "reasoning_effort", "thinking", "output_config"].contains(content)
-                let field = content.range(of: #"^[a-z_]+(\.[a-z_]+)*$"#, options: .regularExpression) != nil
-                result.replaceSubrange(whole, with: setting ? " reasoning_effort " : field ? " " + content + " " : " ")
-            }
-            return result
         }
 
         static func unquoted(_ text: String) -> String {

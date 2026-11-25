@@ -24,12 +24,13 @@ its own.
 The Agent asks its model for the least reasoning the model accepts, so a
 simple question is answered without long thinking; tool use stays. On
 **OpenAI** that is `none`, `minimal` or `low` depending on the model; on
-**Anthropic** low effort, with thinking turned off on the models that allow it
-(Claude Haiku 5.5, Claude Sonnet 5; Claude Sonnet 5.5 when the turn does not
-use Anthropic's web search); on **OpenRouter** reasoning off where the model
-makes it optional, else its lowest level. Models that do not take the setting
-keep their own default, and if a provider refuses it the request is sent once
-more without it. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
+**Anthropic** low effort, with thinking turned off on Claude Haiku 5.5 and
+Claude Sonnet 5, and on Claude Sonnet 5.5 its lowest setting, `between_tools`
+(no thinking before answering), when the turn does not use Anthropic's web
+search; on **OpenRouter** reasoning off where the model makes it optional,
+else its lowest level. Models that do not take the setting keep their own
+default. If a provider refuses the setting on a turn's first request, the
+request is sent once more: on OpenAI at `low`, elsewhere without the setting. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
 a longer one says it reached the model's output limit.
 
 ## Answers and actions

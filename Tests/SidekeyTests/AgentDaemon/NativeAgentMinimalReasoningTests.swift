@@ -447,6 +447,49 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(names(["message": "The model does not support the 'output_config' parameter."]), true)
         XCTAssertEqual(names(["message": "Error: reasoning.effort 'none' is not supported with this model."]), true)
         XCTAssertEqual(names(["message": "Item 'rs_1' of type 'reasoning' was provided without its required following item."]), false)
+        // Builder review, queue #584: a quoted request field opening the
+        // message decides it in every quote style, in OpenRouter's upstream
+        // text too; a quoted setting word that is data is not a refusal.
+        for (open, close) in [("'", "'"), ("\"", "\""), ("`", "`"), ("‘", "’"), ("“", "”")] {
+            for root in ["tools", "messages", "max_tokens", "tools[0].input_schema", "input", "model"] {
+                let message = "\(open)\(root)\(close): property 'reasoning.effort' is not supported."
+                XCTAssertEqual(names(["message": message]), false, message)
+                XCTAssertEqual(names(["message": "Provider returned error", "metadata": ["raw": message]]), false, message)
+            }
+            XCTAssertEqual(names(["message": "\(open)thinking\(close) is not supported for this model."]), true, open)
+        }
+        XCTAssertEqual(names(["message": "The message content 'thinking' is not supported."]), false)
+        XCTAssertEqual(names(["message": "The tool named 'reasoning' is not permitted."]), false)
+        XCTAssertEqual(names(["message": "Invalid value 'output_config' for this tool's name."]), false)
+        XCTAssertEqual(names(["message": "Tool 'reasoning' is not supported."]), false)
+        XCTAssertEqual(names(["message": "The model does not support the 'reasoning' tool."]), false)
+        XCTAssertEqual(names(["message": "The model claude-x does not support the thinking parameter."]), true)
+    }
+
+    /// Builder review, queue #584, on the real loop and on all three routes:
+    /// quoted leading fields and quoted data stay one request each.
+    func testQuotedFieldsAndQuotedDataAreNotRepeatedOnAnyRoute() async throws {
+        let messages = ["'tools': The function schema property 'reasoning.effort' is not supported.",
+                        "\"messages\": Thinking block field 'thinking.type' is not supported at this position.",
+                        "'tools[0].input_schema': property 'thinking.type' is not supported.",
+                        "The message content 'thinking' is not supported.",
+                        "The tool named 'reasoning' is not permitted.",
+                        "Invalid value 'output_config' for this tool's name."]
+        let router = AgentRunOptions(model: "vendor/model", allowActions: false,
+                                     openRouterReasoning: .init(mandatory: false, supportedEfforts: ["low"]))
+        for message in messages {
+            let routes: [(AgentRunOptions, (Int, [String: String], Data))] = [
+                (anthropic("claude-haiku-5-5"), json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400)),
+                (openAI("gpt-5.5"), json(["error": ["type": "invalid_request_error", "message": message]], status: 400)),
+                (router, json(["error": ["code": 400, "message": "Provider returned error", "metadata": ["raw": message]]], status: 400)),
+            ]
+            for (options, response) in routes {
+                let result = try await run("hi", options, [response, json(anthropicFinal("Hello."))])
+                XCTAssertEqual(result.store.status, .failed, "\(options.openCodeProvider) \(message)")
+                XCTAssertEqual(result.bodies.count, 1, "\(options.openCodeProvider) \(message)")
+                XCTAssertEqual(result.usage.count, 1, "\(options.openCodeProvider) \(message)")
+            }
+        }
     }
 
     /// Builder review, queue #548, on the real loop: the three unrelated

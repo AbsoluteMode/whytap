@@ -79,20 +79,28 @@ struct LilBroLocalGuide: LilBroBrain {
     }
 
     static func match(_ question: String) -> LilBroReply {
-        let q = question.lowercased()
-        // A macOS setting's name is the question only when no feature is
-        // asked about besides it: "Where is Input Monitoring?" is Permissions,
-        // "How do I dictate with my microphone?" is Drop. Its own words never
-        // count as a feature's ("monitoring" is not Monitor).
-        let named = settingNames.filter { q.contains($0) }
-        let rest = named.reduce(q) { $0.replacingOccurrences(of: $1, with: " ") }
-        // The feature words win over generic ones ("dictation shortcut" is Drop).
-        if let feature = firstFeature(in: rest) {
-            return .answer(answer(for: feature))
-        }
+        let q = withoutInCase(question)
+        // WHY: a macOS setting's name is the question when the person asks to
+        // find or allow it ("Where do I allow Microphone for Drop?") or names
+        // it before any feature ("screen recording for screenshots"); it is
+        // context when a feature comes first ("dictate with my microphone",
+        // "use Drop after enabling Accessibility"). Its own words never count
+        // as a feature's ("monitoring" is not Monitor).
+        // .project-docs/decisions/2026-11-24-lil-bro.md
+        let named = settingNames.compactMap { name in offset(of: name, in: q).map { (name, $0) } }
         if !named.isEmpty {
+            let rest = named.reduce(q) { blank($0, pattern: NSRegularExpression.escapedPattern(for: $1.0)) }
+            let settingAt = named.map(\.1).min() ?? 0
+            if !asksForSetting(q, named: named.map(\.0)),
+               let found = featureMatch(in: rest), found.offset < settingAt {
+                return .answer(answer(for: found.feature))
+            }
             let destination = LilBroDestination.tab(.permissions)
             return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))
+        }
+        // The feature words win over generic ones ("dictation shortcut" is Drop).
+        if let found = featureMatch(in: q) {
+            return .answer(answer(for: found.feature))
         }
         if let (_, destination) = tabWords.first(where: { q.contains($0.0) }) {
             return .answer(LilBroAnswer(paragraphs: [line(for: destination)], destination: destination))
@@ -100,20 +108,62 @@ struct LilBroLocalGuide: LilBroBrain {
         return .unknown(suggestions: starters)
     }
 
-    /// The feature a question names: a feature's exact name first (the
-    /// longest, so "Google search" beats "search"), then the most specific
-    /// alias, so "Google voice search" is Google search, not Drop's "voice".
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    /// "allow / grant / enable / find / where is … <setting>", within a few
+    /// words, and not "after enabling …".
+    private static func asksForSetting(_ q: String, named: [String]) -> Bool {
+        let verbs = "allow|grant|give|permit|enable|turn on|switch on|find|open|where is|where's|where are"
+        return named.contains { name in
+            let pattern = "(?<!after |once |when |before )\\b(\(verbs))\\b(?:\\s+\\S+){0,3}?\\s+"
+                + NSRegularExpression.escapedPattern(for: name)
+            return q.range(of: pattern, options: .regularExpression) != nil
+        }
+    }
+
+    /// Where a word starts in the question, at a word start ("showcase" is
+    /// not Case; "dictat" still finds "dictation").
+    private static func offset(of word: String, in q: String) -> Int? {
+        guard !word.isEmpty,
+              let range = q.range(of: "\\b" + NSRegularExpression.escapedPattern(for: word), options: .regularExpression)
+        else { return nil }
+        return q.distance(from: q.startIndex, to: range.lowerBound)
+    }
+
+    /// Replaces matches with spaces of the same length, so offsets still line up.
+    private static func blank(_ q: String, pattern: String) -> String {
+        guard let regex = try? NSRegularExpression(pattern: pattern) else { return q }
+        let text = NSMutableString(string: q)
+        for match in regex.matches(in: q, range: NSRange(location: 0, length: text.length)).reversed() {
+            text.replaceCharacters(in: match.range, with: String(repeating: " ", count: match.range.length))
+        }
+        return text as String
+    }
+
     static func firstFeature(in question: String) -> AppFeature? {
-        let q = question.lowercased()
-        func best(_ words: (AppFeature) -> [String]) -> AppFeature? {
-            var found: (feature: AppFeature, length: Int)?
+        featureMatch(in: withoutInCase(question))?.feature
+    }
+
+    /// Lowercased, with the phrase "in case" blanked: "in case I need it" is
+    /// not the Case feature, while "keys in Case" (capital C, its name) is.
+    private static func withoutInCase(_ question: String) -> String {
+        blank(question, pattern: "\\b(?:[Jj]ust )?[Ii]n case\\b").lowercased()
+    }
+
+    /// The feature a question names, and where: a feature's exact name first
+    /// (the longest, so "Google search" beats "search"), then the most
+    /// specific alias, so "Google voice search" is Google search, not Drop's
+    /// "voice".
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    static func featureMatch(in q: String) -> (feature: AppFeature, offset: Int)? {
+        func best(_ words: (AppFeature) -> [String]) -> (feature: AppFeature, offset: Int)? {
+            var found: (feature: AppFeature, offset: Int, length: Int)?
             for feature in AppFeature.allCases {
-                for word in words(feature) where !word.isEmpty && q.contains(word) {
-                    if word.count > (found?.length ?? 0) { found = (feature, word.count) }
+                for word in words(feature) {
+                    if let at = offset(of: word, in: q), word.count > (found?.length ?? 0) {
+                        found = (feature, at, word.count)
+                    }
                 }
             }
-            return found?.feature
+            return found.map { ($0.feature, $0.offset) }
         }
         // Not `kind`: several tools share "Island tools".
         return best { [FeatureCatalog.info(for: $0).name.lowercased()] }

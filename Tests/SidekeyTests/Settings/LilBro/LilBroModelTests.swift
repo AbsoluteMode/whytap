@@ -331,7 +331,7 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(checked, 504)
     }
 
-    /// The builder's matrices for tickets 590, 594 and 597: who turns, switches
+    /// The builder's matrices for tickets 590, 594, 597 and 600: who turns, switches
     /// or gives the setting. "we", "please" and an instruction after a comma
     /// or a sentence ask for it; Drop doing it on its own does not, with or
     /// without commas inside the question.
@@ -401,6 +401,29 @@ final class LilBroLocalGuideTests: XCTestCase {
             { f, s, id in ("Does \(f), by default,\nturn on \(s)?", .feature(id)) },
             { f, s, id in ("Why does \(f), by default, turn on \(s)?", .feature(id)) },
             { f, s, id in ("Can I use \(f) without turning on \(s)?", .feature(id)) },
+            // Ticket 600: a lead-in before the question, embedded questions,
+            // typographic apostrophes, and negative instructions.
+            { f, s, id in ("On this Mac, does \(f), by default, turn on \(s)?", .feature(id)) },
+            { f, s, id in ("Quick question: does \(f), by default, turn \(s) off?", .feature(id)) },
+            { f, s, id in ("If I reinstall, will \(f), on first launch, switch on \(s)?", .feature(id)) },
+            { f, s, id in ("Asking about setup: can \(f), after startup, switch \(s) off?", .feature(id)) },
+            { f, s, id in ("Is setup complete, and will \(f), by default, give \(s) access to other apps?", .feature(id)) },
+            { f, s, id in ("I wonder whether \(f) can start, give another app access to \(s), and then stop.", .feature(id)) },
+            { f, s, id in ("On first launch, does \(f),\nturn on \(s)?", .feature(id)) },
+            { f, s, id in ("Can\u{2019}t \(f) start now, switch \(s) off, and stop cleanly?", .feature(id)) },
+            { f, s, id in ("Won\u{2019}t \(f), by default, turn \(s) access off?", .feature(id)) },
+            { f, s, id in ("Wouldn\u{2019}t \(f), without asking, give \(s) access to other apps?", .feature(id)) },
+            { f, s, id in ("Doesn\u{2019}t \(f), by default, turn on \(s)?", .feature(id)) },
+            { f, s, _ in ("Don't open \(f), turn on \(s).", permissions) },
+            { f, s, _ in ("Don't use \(f), switch \(s) off.", permissions) },
+            { f, s, _ in ("Don't start \(f), give \(f) \(s) access.", permissions) },
+            { f, s, _ in ("Don't start \(f), grant \(f) access to \(s).", permissions) },
+            { f, s, _ in ("Don't start \(f), grant \(f) \(s) access.", permissions) },
+            { f, s, _ in ("Can't open \(f), switch on \(s).", permissions) },
+            { f, s, _ in ("Couldn't start \(f), turn \(s) off.", permissions) },
+            { f, s, _ in ("Don't start \(f), grant Whytap access to \(s).", permissions) },
+            { f, s, _ in ("Don't open \(f). Turn on \(s).", permissions) },
+            { f, s, _ in ("On this Mac, where can I turn on \(s) for \(f)?", permissions) },
         ]
         var checked = 0
         for template in templates {
@@ -412,7 +435,7 @@ final class LilBroLocalGuideTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(checked, 2268)
+        XCTAssertEqual(checked, 3150)
     }
 
     /// An independent review of that fix: other everyday ways to ask for a

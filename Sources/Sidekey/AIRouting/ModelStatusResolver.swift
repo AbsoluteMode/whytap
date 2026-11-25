@@ -1,6 +1,6 @@
 import Foundation
 
-/// The badge on a feature's row in API & Models.
+/// The badge on a feature's row in Keys & models.
 enum ModelRowStatus: Equatable {
     case ok
     case notSet
@@ -86,7 +86,7 @@ extension OpenRouterLLMError {
     }
 }
 
-/// Derives what API & Models shows from the stores: the status of each
+/// Derives what Keys & models shows from the stores: the status of each
 /// feature's row, the picker sections and the group "Switch" actions. Pure
 /// reads of local state; it never touches the network.
 // WHY: .project-docs/decisions/2026-10-19-api-and-models.md

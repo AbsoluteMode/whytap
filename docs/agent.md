@@ -6,7 +6,7 @@ on your Mac, and inference runs at the provider you choose, with your key.
 
 ## Connect
 
-1. In **Settings → API & Models → API keys**, add an OpenRouter, OpenAI or
+1. In **Settings → Keys & models → API keys**, add an OpenRouter, OpenAI or
    Anthropic key.
 2. Under **Models**, choose an **LLM** (and a **Speech** model for spoken
    requests). To give the Agent its own models, open **Advanced**: the
@@ -55,7 +55,7 @@ app stops offering the tool once two are spent. The pages the model cites appear
 source cards. If the model lists none itself, Whytap shows the provider's
 citations (up to five).
 
-**Settings → API & Models → Models → Search** (under Speech and LLM) shows
+**Settings → Keys & models → Models → Search** (under Speech and LLM) shows
 what the Agent searches with now: *Anthropic · built-in*, *OpenAI · built-in*,
 *OpenRouter · web*, *Tavily* or *Off — add a Tavily key*, with the price
 below. Its menu works like the Speech and LLM menus: the built-in search of
@@ -68,7 +68,7 @@ request, the Agent answers without search on the same provider and says so;
 it never switches to Tavily after an error. (The Agent runs only on Anthropic, OpenAI and OpenRouter today; Tavily
 would also serve your own servers if they become Agent routes.) A saved Tavily
 key alone never replaces built-in search.
-Add the key in **Settings → API & Models → API keys** (saving checks the key
+Add the key in **Settings → Keys & models → API keys** (saving checks the key
 without running a search). Only the search query goes to Tavily; the returned
 excerpts and links go to your selected model. With neither, the
 Agent has no search tool; asked to search, it answers in one line that web

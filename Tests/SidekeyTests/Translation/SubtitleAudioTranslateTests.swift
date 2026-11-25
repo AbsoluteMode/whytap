@@ -44,14 +44,14 @@ final class SubtitleAudioTranslateTests: XCTestCase {
                                       openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
         await model.start()?.value
         XCTAssertEqual(model.phase, .failed)
-        XCTAssertEqual(model.issue?.message, "Subtitles need an OpenAI key. Add it in API & Models.")
+        XCTAssertEqual(model.issue?.message, "Subtitles need an OpenAI key. Add it in Keys & models.")
         XCTAssertEqual(model.issue?.feature, .subtitlesAudio)
         XCTAssertEqual(audio.started, 0)
     }
 
     func testAnUnreadableKeyIsNamedToo() {
         let issue = TranslationIssue.from(SubtitleAudioTranslate.Unavailable.unreadableKey, feature: .subtitlesAudio)
-        XCTAssertEqual(issue.message, "Whytap couldn't read the OpenAI key from the Keychain. Check it in API & Models.")
+        XCTAssertEqual(issue.message, "Whytap couldn't read the OpenAI key from the Keychain. Check it in Keys & models.")
         XCTAssertEqual(issue.feature, .subtitlesAudio)
     }
 

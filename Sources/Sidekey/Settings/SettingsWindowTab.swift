@@ -44,7 +44,9 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
         case .features:
             return "Features"
         case .apiAndModels:
-            return "API & Models"
+            // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+            // The raw id `apiAndModels` stays: links and saved selections use it.
+            return "Keys & models"
         case .hotkeys:
             return "Hotkeys"
         case .permissions:

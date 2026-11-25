@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Local to API & Models: feedback covers the full hit target, including plain
+/// Local to Keys & models: feedback covers the full hit target, including plain
 /// provider tiles and rows. Disabled controls never react to a retained hover.
 struct APIModelFeedbackStyle: ButtonStyle {
     var cornerRadius: CGFloat = 6

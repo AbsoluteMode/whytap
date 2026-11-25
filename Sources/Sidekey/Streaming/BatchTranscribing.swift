@@ -14,7 +14,7 @@ protocol BatchTranscribing: Sendable {
 
 /// There is no batch recognizer: `UnavailableBatchTranscriber`, or
 /// `ProviderBatchTranscriber` without a provider and its key chosen in
-/// API & Models.
+/// Keys & models.
 struct BatchTranscriptionUnavailable: Error, Equatable {}
 
 /// No batch recognizer: the default of `BatchAgentAudioTranscriber`, so a

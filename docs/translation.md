@@ -22,7 +22,7 @@ Drag the palette background to move it.
 
 ## Setup
 
-In **Settings → API & Models**, choose:
+In **Settings → Keys & models**, choose:
 
 - **Translation**: a language model from OpenRouter, OpenAI, Anthropic or your
   own OpenAI-compatible server, for typed text.
@@ -54,7 +54,7 @@ The quick palette has two rows: input and translation, like the standalone
 Realtime Translator. Type or paste text and press **Return** (or **Command
 Return**). There is no separate Translate button. The second row shows the
 result, translating status or an actionable error; configuration errors open
-**API & Models** when clicked. Escape closes the palette and cancels its work.
+**Keys & models** when clicked. Escape closes the palette and cancels its work.
 Long input scrolls horizontally; long output wraps and scrolls in the second row.
 
 You can also dictate into the input with Drop. The text is inserted at the

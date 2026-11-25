@@ -37,6 +37,57 @@ struct IslandHoverTileFrameReporter: View {
     }
 }
 
+/// What the floating layer draws: the lifted tile's picture (taken from the
+/// drawer at the lift), where it started, and where it lands. The drawer
+/// drives it; the layer that draws it sits above the drawer's clip, so on
+/// the macOS 14/15 backdrop the tile stays visible outside the drawer.
+@MainActor
+final class IslandHoverReorderStage: ObservableObject {
+    @Published private(set) var tool: HoverTool?
+    @Published private(set) var content: AnyView?
+    @Published private(set) var origin: CGPoint = .zero
+    @Published var settle: CGPoint?
+    @Published var lifted = false
+    /// The lift this picture belongs to (`IslandHoverHitBridge.reorderGeneration`).
+    private(set) var generation = 0
+
+    func begin(_ tool: HoverTool, content: AnyView, origin: CGPoint, generation: Int) {
+        self.tool = tool
+        self.content = content
+        self.origin = origin
+        self.generation = generation
+        settle = nil
+        lifted = false
+    }
+
+    func clear(generation: Int) {
+        guard generation == self.generation else { return }
+        tool = nil
+        content = nil
+        settle = nil
+        lifted = false
+    }
+}
+
+/// Drawn over the whole island (outside the drawer's clip), in the same
+/// coordinate space the tiles report their frames in.
+struct IslandHoverFloatingLayer: View {
+    @ObservedObject var stage: IslandHoverReorderStage
+    let motion: IslandHoverReorderMotion
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            if let content = stage.content {
+                IslandHoverFloatingTile(motion: motion, origin: stage.origin,
+                                        settle: stage.settle, lifted: stage.lifted) { content }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+}
+
 /// The lifted tile. Only this view observes the pointer's travel, so a drag
 /// redraws one tile per frame instead of the whole island.
 struct IslandHoverFloatingTile<Content: View>: View {

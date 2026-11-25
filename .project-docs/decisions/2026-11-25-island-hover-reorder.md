@@ -62,24 +62,34 @@ to live in that same dispatch.
   with another) did not fade the old tile out as a tail; identity by tool now
   carries `.transition(.identity)` for the same reason, and the source
   contract in `IslandHoverPanelControlTests` says so.
-- **Let go.** The release keeps the order (it is already saved) and never
-  activates the tool. Letting go more than 24 points outside the tools
+- **Let go.** The release saves the order once (moves during the drag are
+  on screen only) and never activates the tool. Letting go more than 24 points outside the tools
   (`IslandHoverReorder.cancelsRelease`) puts the order from before the lift
-  back; just past the edge still counts as a drop. Escape does the same only
+  back on screen only, writing nothing (a layout that was never set stays
+  unset); just past the edge still counts as a drop. Escape does the same only
   when the island already has keyboard focus: in the ordinary tools drawer it
   is not key, and a drag must not take focus from the person's app or swallow
   their Escape. Hiding the island, the drawer closing for another reason, or
   the next press end the drag with the order reached.
 - **A layout changed from elsewhere ends the drag.** While a tool is lifted
-  the bridge watches `HoverLayoutStore.slots`; a change the drag did not
-  write (Settings Sync reloading the defaults, Settings, the MCP tool) ends
-  the drag as it is. A later move never re-inserts a tool sync removed, and a
+  the bridge watches `HoverLayoutStore.slots` and `externalReloads`; a change
+  the drag did not write (Settings, the MCP tool) or any Settings Sync reload,
+  even one equal to the unsaved preview, ends the drag as it is. A later move never re-inserts a tool sync removed, and a
   cancel restores the old order only while the same tools are in the island
   (`restoredOrder`), so it never undoes a synced addition or removal.
 - **The drawer stays.** A lifted tool counts as an interaction that holds the
   hover drawer (`interactionHeld` and `isHoverExpanded` in `IslandView`), so
   passing outside the island mid-drag does not fold it; the window keeps the
-  mouse sequence it owns.
+  mouse sequence it owns. The hold lasts until the tile has landed
+  (`settlingTool`, `holdsDrawer`; `didSettle` from the island, or a 0.9 s
+  fallback), so a fly-back released outside the island stays visible. Each
+  lift has a generation, so an older landing never ends a newer lift of the
+  same tile.
+- **Drag intent and permission.** The tile pressed at mouse-down stays the
+  drag candidate when a move under the threshold crosses its edge (that still
+  cancels the click). Before lifting, the bridge re-checks that the window
+  still allows hover dispatch and that the same tile is live; moves arriving
+  while dispatch is not allowed are ignored.
 - **What cannot lift:** Settings (always last), coming-soon tiles, search
   results.
 - **Settings -> Features -> Hover** loses drag-and-drop (handle, drop targets,
@@ -91,9 +101,12 @@ to live in that same dispatch.
 
 - **Smooth motion (REV 2).** On 1757 the tile jumped from cell to cell, the
   whole island redrew on each change and every intermediate order was written
-  to defaults. Now the lifted tool is drawn by a floating layer above the grid
-  (`IslandHoverFloatingTile`, outside the glass container so its glass never
-  melts into the tiles it passes): it starts exactly over its cell (frames
+  to defaults. Now the lifted tool is drawn by a floating layer
+  (`IslandHoverFloatingLayer` / `IslandHoverFloatingTile`, fed by
+  `IslandHoverReorderStage`) laid over the whole island in its hover-zone
+  space, outside the drawer's glass surface, so neither the glass container
+  melts it into other tiles nor the macOS 14/15 backdrop's clip hides it
+  outside the drawer: it starts exactly over its cell (frames
   reported by `IslandHoverTileFramesKey`), follows the pointer frame by frame
   with no animation lag, and rises with a soft spring (1.1x, shadow). Its cell
   stays as an empty place that slides with the neighbours (spring 0.32 s,
@@ -128,10 +141,9 @@ to live in that same dispatch.
 
 `IslandHoverReorderTests` drives the bridge as the window does, on an
 offscreen window that is never shown, with an isolated `HoverLayoutStore`: a
-short click opens the tool and moves nothing; a press released before the hold
-delay never lifts; leaving the tile before the hold cancels click and lift;
-holding lifts after the real timer and the release opens nothing; dragging
-right moves the tool live and the order survives a restart and is the list in
+short click opens the tool and moves nothing; jitter under 4 points stays a
+click; 4 points lift at once and the release opens nothing; a fast flick onto
+another tile lifts and moves; holding still never lifts; dragging right moves the tool live and the order survives a restart and is the list in
 Settings; no flip-back while the pointer stays on a cell; dragging back and
 onto Settings (Settings stays last, is not opened); leaving the grid and
 releasing just past the edge keeps the last place; releasing far outside
@@ -151,6 +163,15 @@ motion model, never the bridge the island observes; nothing is written while
 the tool is held; tile frames reach the grid's space through the scroll view
 and the glass container; source contracts for the floating layer and the
 pointer-following without animation.
+
+The builder review of queue #562 added: crossing the tile edge before the
+threshold still drags; a window that stopped allowing hover never lifts; a
+sync reload equal to the preview wins over a cancel; a cancelled drag leaves
+an unset layout unset; the cancel flight starts where the pointer let go; the
+drawer stays until the tile has landed, with a fallback; an older landing
+never ends a newer lift of the same tile; an offscreen render shows the
+floating tile below the drawer on both the native and the macOS 14/15
+backdrop.
 
 Not checked in a running app (feature sessions do not launch it): the feel of
 the 4-point threshold and of the springs, measured frame rate during a real
@@ -179,4 +200,4 @@ drag.
 - Auto-scrolling a long grid while dragging: the drawer shows up to its
   scroll height; a tool beyond it is moved with Move actions in Settings.
 
-2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth; REV 3 removed the hold delay.
+2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth; REV 3 removed the hold delay; builder review (queue #562) fixed edge, permission, sync, cancel-flight, landing-hold and clip cases.

@@ -149,6 +149,18 @@ final class IslandHoverHitBridge: ObservableObject {
     /// The tool lifted by a press and drag, while it is being moved.
     @Published private(set) var reorderingTool: HoverTool?
     var isReordering: Bool { reorderingTool != nil }
+    /// The tool flying into its cell after a release or cancel, until the
+    /// island reports the landing done (`didSettle`) or a fallback ends it.
+    @Published private(set) var settlingTool: HoverTool?
+    /// Counts lifts, so an older landing never ends a newer one.
+    private(set) var reorderGeneration = 0
+    /// The drawer stays open through the drag and its landing.
+    var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil }
+    /// The floating tile's picture and place, drawn above the drawer's clip.
+    let stage = IslandHoverReorderStage()
+    /// The tile pressed at mouse-down that may still become a drag, kept
+    /// even after a small move crosses its edge and cancels the click.
+    private var dragCandidate: IslandHoverHitSnapshot?
     /// The layout the island shows. Dragging a tile moves tools here,
     /// the same store Settings -> Features -> Hover shows.
     weak var layoutStore: HoverLayoutStore?
@@ -185,6 +197,7 @@ final class IslandHoverHitBridge: ObservableObject {
 
     func cancelPress() {
         tracking.cancel()
+        dragCandidate = nil
         pressedID = nil
     }
     func cancelPress(for surface: IslandHoverHitTargetID.Surface) {
@@ -193,6 +206,7 @@ final class IslandHoverHitBridge: ObservableObject {
 
     func discardSequence() {
         tracking.discardSequence()
+        dragCandidate = nil
         pressedID = nil
         finishReorder()
     }
@@ -201,7 +215,7 @@ final class IslandHoverHitBridge: ObservableObject {
 
     /// The pressed tile moved far enough to be dragged rather than clicked.
     private func startsDrag(at point: CGPoint) -> Bool {
-        guard let pressPoint, tracking.captured?.id.surface == .tile else { return false }
+        guard let pressPoint, dragCandidate != nil else { return false }
         return hypot(point.x - pressPoint.x, point.y - pressPoint.y) >= Self.dragThreshold
     }
 
@@ -209,28 +223,40 @@ final class IslandHoverHitBridge: ObservableObject {
     /// `dragThreshold`; returns false when the press was released, left its
     /// tile or is not a tool that can move. From here on the press never
     /// activates the tool.
+    /// The candidate is re-checked against the live, allowed targets: a
+    /// window that stopped allowing hover dispatch, or a tile that changed,
+    /// never lifts.
     @discardableResult
-    func liftPressedTool() -> Bool {
-        guard reorder == nil, let captured = tracking.captured, captured.id.surface == .tile,
-              let store = layoutStore, IslandHoverReorder.canLift(captured.id.tool, slots: store.slots),
-              let tool = captured.id.tool, let window = pressWindow else { return false }
+    func liftPressedTool(allowed: Bool = true) -> Bool {
+        guard reorder == nil, allowed, let candidate = dragCandidate,
+              let store = layoutStore, IslandHoverReorder.canLift(candidate.id.tool, slots: store.slots),
+              let tool = candidate.id.tool, let window = pressWindow else { return false }
+        let live = snapshots(in: window, allowsHover: allowed, allowsAnswer: false)
+        guard live.contains(where: { $0.owner == candidate.owner && $0.id == candidate.id
+            && $0.context == candidate.context }) else { return false }
         var cells: [Int: CGRect] = [:]
-        for tile in snapshots(in: window, allowsHover: true, allowsAnswer: false)
-        where tile.id.surface == .tile && tile.context == captured.context {
+        for tile in live where tile.id.surface == .tile && tile.context == candidate.context {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
         reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
         liftPoint = pressPoint
         motion.reset()
-        layoutWatch = store.$slots.dropFirst().sink { [weak self] _ in
+        // Settings Sync, Settings or the MCP tool changed the layout: keep
+        // theirs. A sync reload counts even when it equals the preview.
+        let ended: () -> Void = { [weak self] in
             MainActor.assumeIsolated {
                 guard let self, !self.writingLayout else { return }
-                // Settings Sync or Settings wrote this layout: keep theirs.
                 self.finishReorder(save: false)
             }
         }
+        layoutWatch = store.$slots.dropFirst().map { _ in () }
+            .merge(with: store.externalReloads)
+            .sink { ended() }
         tracking.cancel()
+        dragCandidate = nil
         pressedID = nil
+        settlingTool = nil
+        reorderGeneration += 1
         reorderingTool = tool
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         return true
@@ -245,22 +271,40 @@ final class IslandHoverHitBridge: ObservableObject {
         writeLayout { _ = store.placeTool(reorder.tool, at: slot, persist: false) }
     }
 
-    /// Releasing keeps the order the island shows and saves it once.
+    /// Releasing keeps the order the island shows and saves it once. The
+    /// tile then lands; the drawer stays until it has.
     func finishReorder(save: Bool = true) {
         layoutWatch = nil
         guard let reorder else { return }
         if save, let store = layoutStore, store.slots != reorder.original { store.saveLayout() }
         self.reorder = nil
         liftPoint = nil
+        settlingTool = reorder.tool
         reorderingTool = nil
+        let generation = reorderGeneration
+        // If the island never reports the landing (it closed), let go anyway.
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(900))
+            self?.didSettle(generation: generation)
+        }
+    }
+
+    /// The island finished landing the tile of `generation`.
+    func didSettle(generation: Int) {
+        // The picture of that lift goes too (a newer lift keeps its own).
+        stage.clear(generation: generation)
+        guard generation == reorderGeneration, reorder == nil else { return }
+        settlingTool = nil
     }
 
     /// Puts every tool back where it was before the lift (a release outside
     /// the tools, or Escape when the island already has keyboard focus).
     func cancelReorder() {
         guard let reorder else { return }
+        // The saved layout was never touched during the drag: restore the
+        // screen only, so a cancel writes nothing.
         if let store = layoutStore, let order = reorder.restoredOrder(current: store.slots), store.slots != order {
-            writeLayout { store.replaceEditableSlots(with: order) }
+            writeLayout { store.replaceEditableSlots(with: order, persist: false) }
         }
         finishReorder(save: false)
         tracking.discardSequence()
@@ -366,13 +410,17 @@ final class IslandHoverHitBridge: ObservableObject {
         pressedID = tracking.captured?.id
         pressWindow = window
         pressPoint = point
+        dragCandidate = tracking.captured.flatMap { captured in
+            captured.id.surface == .tile
+                && IslandHoverReorder.canLift(captured.id.tool, slots: layoutStore?.slots ?? []) ? captured : nil
+        }
         return consumed
     }
 
     func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
-        if reorder == nil, startsDrag(at: point) { liftPressedTool() }
+        if reorder == nil, startsDrag(at: point) { liftPressedTool(allowed: allowed) }
         if reorder != nil {
-            moveLiftedTool(to: point)
+            if allowed { moveLiftedTool(to: point) }
             return
         }
         let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
@@ -381,7 +429,10 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        dragCandidate = nil
         if let reorder {
+            // The landing starts from where the pointer let go.
+            if let liftPoint { motion.follow(from: liftPoint, to: point) }
             if reorder.cancelsRelease(at: point) {
                 cancelReorder()
             } else {

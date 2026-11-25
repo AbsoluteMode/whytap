@@ -421,7 +421,7 @@ struct IslandView: View {
             glance: hoverPanelGlance,
             // A tool lifted for reordering holds the drawer, even when the
             // pointer passes outside it mid-drag.
-            interactionHeld: holdsHoverMenu || hoverHitBridge.isReordering,
+            interactionHeld: holdsHoverMenu || hoverHitBridge.holdsDrawer,
             screenshotPreparing: appState.screenshotPreparing
         )
         if mouseExpanded != next {
@@ -605,7 +605,7 @@ struct IslandView: View {
         // forces the drawer open during a meeting suggestion / agent flow.
         !displayPreferences.hideIslandHoverWidgets
             && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
-                || hoverHitBridge.isReordering || appState.programmaticHoverExpansion)
+                || hoverHitBridge.holdsDrawer || appState.programmaticHoverExpansion)
             && IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
@@ -1299,6 +1299,12 @@ struct IslandView: View {
             alignment: .top
         )
         .coordinateSpace(name: Self.hoverZoneSpace)
+        // The lifted tool while reordering: above the drawer's clip (the
+        // macOS 14/15 backdrop clips everything inside the drawer).
+        // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+        .overlay(alignment: .topLeading) {
+            IslandHoverFloatingLayer(stage: hoverHitBridge.stage, motion: hoverHitBridge.motion)
+        }
         // Preview bubble for the hovered History row. Lives OUTSIDE the
         // clipped drawer (which would cut anything beyond its bounds) and
         // renders leftward into the window's permanently reserved left
@@ -1379,7 +1385,7 @@ struct IslandView: View {
         .onChange(of: pillHovering) { _, _ in recomputeMouseExpanded() }
         .onChange(of: panelHovering) { _, _ in recomputeMouseExpanded() }
         // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
-        .onChange(of: hoverHitBridge.reorderingTool) { _, _ in recomputeMouseExpanded() }
+        .onChange(of: hoverHitBridge.holdsDrawer) { _, _ in recomputeMouseExpanded() }
         .onChange(of: appState.screenshotPreparing) { _, preparing in
             guard !preparing else { return }
             recomputeMouseExpanded()
@@ -2610,11 +2616,6 @@ private struct IslandDropModeHoverPanel: View {
     /// Island tool reorder: each tile's frame in the grid's space, and the
     /// tool drawn above the grid while it is lifted and while it settles.
     @State private var tileFrames: [HoverTool: CGRect] = [:]
-    @State private var floatingTool: HoverTool?
-    @State private var floatingOrigin: CGPoint = .zero
-    @State private var floatingSettle: CGPoint?
-    @State private var floatingLifted = false
-    private static let tileSpace = "island-hover-tiles"
     @State private var searchQuery = ""
     @State private var searchFocused = false
     @State private var selectedSearchIndex = 0
@@ -2823,8 +2824,8 @@ private struct IslandDropModeHoverPanel: View {
                                     // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
                                     // The lifted tool is drawn by the floating layer; its cell
                                     // stays as an empty place that slides with the others.
-                                    .background(IslandHoverTileFrameReporter(tool: tool, space: Self.tileSpace))
-                                    .opacity(floatingTool == tool ? 0 : 1)
+                                    .background(IslandHoverTileFrameReporter(tool: tool, space: IslandView.hoverZoneSpace))
+                                    .opacity(hoverHitBridge.reorderingTool == tool || hoverHitBridge.settlingTool == tool ? 0 : 1)
                                     .islandHoverHitTarget(
                                         bridge: hoverHitBridge,
                                         id: IslandHoverHitTargetID(surface: .tile, tool: tool),
@@ -2854,11 +2855,7 @@ private struct IslandDropModeHoverPanel: View {
                     // Measure the clipped viewport, never the entire scrolling grid.
                     .islandHoverHitRegion(bridge: hoverHitBridge, surface: .tile)
                 }
-                // Outside the glass container, so the floating tile's glass never
-                // melts into the tiles it passes over.
-                .coordinateSpace(name: Self.tileSpace)
                 .onPreferenceChange(IslandHoverTileFramesKey.self) { tileFrames = $0 }
-                .overlay(alignment: .topLeading) { floatingTileLayer }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
 
             }
@@ -3091,46 +3088,38 @@ private struct IslandDropModeHoverPanel: View {
     // MARK: - Island tool reorder motion
     // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
-    /// The lifted tile, above the grid: it follows the pointer without any
-    /// animation lag, lifts and lands with soft springs, and never takes clicks.
-    @ViewBuilder private var floatingTileLayer: some View {
-        if let tool = floatingTool {
-            IslandHoverFloatingTile(motion: hoverHitBridge.motion, origin: floatingOrigin,
-                                    settle: floatingSettle, lifted: floatingLifted) {
-                tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
-                    .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
-        }
-    }
-
+    /// Lift: hand the floating layer (drawn above the drawer's clip) this
+    /// tile's picture and its place. Release or cancel: once the grid laid out
+    /// the final order, land the tile on its cell, then tell the bridge.
     private func reorderingToolChanged(from old: HoverTool?, to new: HoverTool?) {
-        if let new, let frame = tileFrames[new] {
-            floatingTool = new
-            floatingOrigin = CGPoint(x: frame.midX, y: frame.midY)
-            floatingSettle = nil
-            floatingLifted = false
-            withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.lift) { floatingLifted = true }
+        let stage = hoverHitBridge.stage
+        let generation = hoverHitBridge.reorderGeneration
+        if let new {
+            guard let frame = tileFrames[new] else { return }
+            let picture = tileView(for: new, circleSize: IslandHoverPanelControl.iconSize)
+                .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
+            stage.begin(new, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
+                        generation: generation)
+            withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.lift) { stage.lifted = true }
             return
         }
-        guard let old, floatingTool == old else { return }
-        // Land after the grid laid out the final order (a cancel restores it in
-        // the same pass), so the tile flies to where its cell really is.
+        guard let old, stage.tool == old, stage.generation == generation else {
+            hoverHitBridge.didSettle(generation: generation)
+            return
+        }
+        // A cancel restores the order in the same pass; land on the final cell.
         DispatchQueue.main.async {
-            guard hoverHitBridge.reorderingTool == nil, floatingTool == old else { return }
+            guard hoverHitBridge.reorderGeneration == generation, stage.generation == generation else { return }
+            let motion = hoverHitBridge.motion.translation
             let target = tileFrames[old].map { CGPoint(x: $0.midX, y: $0.midY) }
-                ?? CGPoint(x: floatingOrigin.x + hoverHitBridge.motion.translation.width,
-                           y: floatingOrigin.y + hoverHitBridge.motion.translation.height)
+                ?? CGPoint(x: stage.origin.x + motion.width, y: stage.origin.y + motion.height)
             withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.land) {
-                floatingSettle = target
-                floatingLifted = false
+                stage.settle = target
+                stage.lifted = false
             } completion: {
-                // A new lift during the landing owns the layer now.
-                guard hoverHitBridge.reorderingTool == nil, floatingTool == old else { return }
-                floatingTool = nil
-                floatingSettle = nil
+                // A newer lift owns the layer now; its own landing ends it.
+                stage.clear(generation: generation)
+                hoverHitBridge.didSettle(generation: generation)
             }
         }
     }

@@ -332,9 +332,10 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertTrue(source.contains(".animation(nil, value: motion.translation)"),
                       "Following the pointer must never lag behind an animation")
         let island = try String(contentsOfFile: Self.repoFile("Sources/Sidekey/DynamicIsland/IslandView.swift"), encoding: .utf8)
-        XCTAssertTrue(island.contains(".opacity(floatingTool == tool ? 0 : 1)"),
-                      "The lifted tool's cell is an empty place while the floating tile is drawn")
-        XCTAssertTrue(island.contains(".overlay(alignment: .topLeading) { floatingTileLayer }"))
+        XCTAssertTrue(island.contains(
+            ".opacity(hoverHitBridge.reorderingTool == tool || hoverHitBridge.settlingTool == tool ? 0 : 1)"),
+                      "The lifted tool's cell is an empty place while the floating tile is drawn and lands")
+        XCTAssertTrue(island.contains("IslandHoverFloatingLayer(stage: hoverHitBridge.stage, motion: hoverHitBridge.motion)"))
         XCTAssertFalse(island.contains(".scaleEffect(hoverHitBridge.reorderingTool == tool"),
                        "The grid tile no longer jumps from cell to cell as the lifted tile")
     }
@@ -374,6 +375,132 @@ final class IslandHoverReorderTests: XCTestCase {
     private static func repoFile(_ path: String) -> String {
         URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent(path).path
+    }
+
+    // MARK: - Builder review #562
+
+    func testCrossingTheTileEdgeBeforeTheThresholdStillDrags() {
+        let press = CGPoint(x: point(0).x + 29, y: point(0).y)
+        XCTAssertTrue(bridge.mouseDown(at: press, in: window, allowed: true))
+        drag(to: CGPoint(x: press.x + 2, y: press.y))
+        XCTAssertFalse(bridge.isReordering, "Under the threshold")
+        drag(to: point(2))
+        XCTAssertEqual(bridge.reorderingTool, .inputLang, "The press's drag intent survives a small edge crossing")
+        up(at: point(2))
+        XCTAssertEqual(restored(), [.notes, .monitor, .inputLang, .settings])
+        XCTAssertEqual(activated, [], "The crossing still cancelled the click")
+    }
+
+    func testAWindowThatStoppedAllowingHoverNeverLifts() {
+        XCTAssertTrue(down(0))
+        bridge.mouseDragged(at: point(2), in: window, allowed: false)
+        XCTAssertFalse(bridge.isReordering)
+        XCTAssertEqual(store.slots, tools)
+        bridge.mouseUp(at: point(2), in: window, allowed: false)
+        XCTAssertEqual(activated, [])
+    }
+
+    func testSyncEqualToTheUnsavedPreviewStillWinsOverACancel() {
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        let incoming: [HoverTool] = [.notes, .inputLang, .monitor, .settings]
+        XCTAssertEqual(store.slots, incoming)
+        XCTAssertEqual(restored(), tools, "The preview is not saved yet")
+        syncArrives(incoming)
+        XCTAssertFalse(bridge.isReordering, "A sync reload ends the drag even when it equals the preview")
+        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        XCTAssertEqual(store.slots, incoming)
+        XCTAssertEqual(restored(), incoming, "The cancel did not overwrite what sync brought")
+    }
+
+    func testACancelledDragLeavesAnUnsetLayoutUnset() {
+        defaults.removeObject(forKey: HoverLayoutStore.defaultsKey)
+        store.reloadFromDefaults()
+        let original = store.slots
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        XCTAssertNotEqual(store.slots, original)
+        XCTAssertNil(defaults.object(forKey: HoverLayoutStore.defaultsKey))
+        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        XCTAssertEqual(store.slots, original)
+        XCTAssertNil(defaults.object(forKey: HoverLayoutStore.defaultsKey), "A cancel writes nothing")
+    }
+
+    func testTheCancelFlightStartsWhereThePointerLetGo() {
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        let released = CGPoint(x: point(1).x + 8, y: point(1).y + 105)
+        up(at: released)
+        XCTAssertEqual(store.slots, tools)
+        XCTAssertEqual(bridge.motion.translation, CGSize(width: 68, height: -105))
+    }
+
+    func testTheDrawerStaysUntilTheTileHasLanded() async throws {
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        XCTAssertFalse(bridge.isReordering)
+        XCTAssertEqual(bridge.settlingTool, .inputLang)
+        XCTAssertTrue(bridge.holdsDrawer, "The fly-back stays visible")
+        bridge.didSettle(generation: bridge.reorderGeneration)
+        XCTAssertFalse(bridge.holdsDrawer)
+
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        up(at: point(1))
+        XCTAssertTrue(bridge.holdsDrawer)
+        try await Task.sleep(for: .milliseconds(1_100))
+        XCTAssertFalse(bridge.holdsDrawer, "If the island never reports the landing, the hold ends anyway")
+    }
+
+    func testAnOlderLandingNeverEndsANewerLiftOfTheSameTile() {
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        up(at: point(1))
+        let first = bridge.reorderGeneration
+        XCTAssertEqual(bridge.settlingTool, .inputLang)
+        // The same tile is grabbed again while it is still landing.
+        XCTAssertTrue(down(1))
+        drag(to: point(0))
+        XCTAssertEqual(bridge.reorderingTool, .notes, "The tile drawn in slot 1 of this static grid")
+        let second = bridge.reorderGeneration
+        XCTAssertNotEqual(first, second)
+        bridge.stage.begin(.notes, content: AnyView(EmptyView()), origin: .zero, generation: second)
+        bridge.didSettle(generation: first)
+        XCTAssertTrue(bridge.isReordering)
+        XCTAssertEqual(bridge.stage.tool, .notes, "The newer lift keeps its picture")
+        up(at: point(0))
+        bridge.didSettle(generation: second)
+        XCTAssertFalse(bridge.holdsDrawer)
+        XCTAssertNil(bridge.stage.tool)
+    }
+
+    /// The production layering: the floating layer is an overlay outside the
+    /// drawer's glass surface, which clips its content on the macOS 14/15
+    /// backdrop. The tile must stay visible below the drawer on both paths.
+    func testTheFloatingTileStaysVisibleOutsideTheDrawerOnBothBackdrops() throws {
+        let motion = IslandHoverReorderMotion()
+        motion.follow(from: CGPoint(x: 0, y: 0), to: CGPoint(x: 0, y: -80))
+        let stage = IslandHoverReorderStage()
+        stage.begin(.notes, content: AnyView(Color.red.frame(width: 90, height: 52)),
+                    origin: CGPoint(x: 100, y: 50), generation: 1)
+        stage.lifted = true
+        for legacy in [false, true] {
+            let wasLegacy = IslandHoverGlass.drawsLegacyPathForReview
+            IslandHoverGlass.drawsLegacyPathForReview = legacy
+            defer { IslandHoverGlass.drawsLegacyPathForReview = wasLegacy }
+            let scene = Color.clear.frame(width: 310, height: 100)
+                .islandHoverGlassSurface()
+                .frame(width: 310, height: 200, alignment: .top)
+                .overlay(alignment: .topLeading) { IslandHoverFloatingLayer(stage: stage, motion: motion) }
+            let renderer = ImageRenderer(content: scene)
+            renderer.scale = 1
+            let data = try XCTUnwrap(renderer.nsImage?.tiffRepresentation)
+            let bitmap = try XCTUnwrap(NSBitmapImageRep(data: data))
+            let color = try XCTUnwrap(bitmap.colorAt(x: 100, y: 130)?.usingColorSpace(.deviceRGB))
+            XCTAssertGreaterThan(color.redComponent, 0.8, legacy ? "macOS 14/15 backdrop" : "native glass")
+            XCTAssertGreaterThan(color.alphaComponent, 0.8)
+        }
     }
 
     // MARK: - What cannot move

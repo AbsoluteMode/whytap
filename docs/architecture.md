@@ -1499,10 +1499,15 @@ or the next press end the drag with the order reached. A shorter press stays
 an ordinary click. Motion: the lifted tool is drawn by IslandHoverFloatingTile
 above the grid (outside the glass container), starting over its cell
 (IslandHoverTileFramesKey frames) and following the pointer through
-IslandHoverReorderMotion, which only it observes; its cell stays as an empty
-place sliding with the neighbours; release lands it, cancel flies it back, with
-damped springs (IslandHoverReorderMotionCurve). Moves are unsaved
-(placeTool persist: false) until release (saveLayout). WHY:
+IslandHoverReorderMotion, which only it observes; the layer
+(IslandHoverFloatingLayer, fed by IslandHoverReorderStage) is an overlay of the
+whole island in hoverZoneSpace, outside the drawer's glass clip. Its cell stays
+as an empty place sliding with the neighbours; release lands it, cancel flies
+it back from the release point, with damped springs
+(IslandHoverReorderMotionCurve); the drawer is held until it has landed
+(settlingTool / holdsDrawer). Moves are unsaved (placeTool persist: false)
+until release (saveLayout); a cancel restores the screen only; any Settings
+Sync reload (externalReloads) ends the drag. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

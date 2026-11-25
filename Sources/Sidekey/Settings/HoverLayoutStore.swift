@@ -1,4 +1,5 @@
 // Sources/Sidekey/Settings/HoverLayoutStore.swift
+import Combine
 import Foundation
 
 /// Stores the user's ordered tools, with Settings always pinned at the end.
@@ -35,7 +36,13 @@ final class HoverLayoutStore: ObservableObject {
     func reloadFromDefaults() {
         let loaded = Self.loadSlots(from: defaults)
         if loaded != slots { slots = loaded }
+        externalReloads.send()
     }
+
+    /// Fires on every reload from the defaults (Settings Sync), even when
+    /// the loaded order equals the one on screen: an island drag's unsaved
+    /// preview must yield to it.
+    let externalReloads = PassthroughSubject<Void, Never>()
 
     // MARK: - Mutation
 
@@ -80,9 +87,11 @@ final class HoverLayoutStore: ObservableObject {
 
     /// Applies exactly the selected helpers, without
     /// padding with tools the user did not choose or truncating their choice.
-    func replaceEditableSlots(with tools: [HoverTool]) {
+    /// `persist: false` restores an island drag's cancelled preview on screen
+    /// only, so a cancel never writes (or creates) the saved layout.
+    func replaceEditableSlots(with tools: [HoverTool], persist save: Bool = true) {
         slots = Self.normalized(tools)
-        persist()
+        if save { persist() }
     }
 
     // MARK: - Persistence

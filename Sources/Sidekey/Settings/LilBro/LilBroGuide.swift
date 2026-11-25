@@ -224,19 +224,29 @@ struct LilBroLocalGuide: LilBroBrain {
 
     /// An instruction after a comma inside a question about what something
     /// else does is that thing's action: "Does Drop, by default, turn on
-    /// Microphone?", "Does Drop open at login, turn on Microphone, and start
-    /// automatically?". "For Drop, turn on Microphone." and "How do I set
-    /// it up, turn on Microphone?" still ask.
+    /// Microphone?", "Doesn't Drop, by default, turn on Microphone?", "Can't
+    /// Drop start now, switch Microphone off, and stop cleanly?". The
+    /// question has to start that sentence; a statement before the comma
+    /// ("Drop is installed, turn on Microphone.") or a sentence that has
+    /// ended ("Does Drop work? Turn on Microphone.") leaves an instruction.
     private static func isSomeoneElsesAction(_ match: NSTextCheckingResult, in q: String) -> Bool {
         let actorRange = match.range(withName: "actor")
         guard actorRange.location != NSNotFound, let actor = Range(actorRange, in: q) else { return false }
-        let word = q[actor].trimmingCharacters(in: .whitespaces)
-        guard word.isEmpty || word.count == 1 && ",;:.?!".contains(word) else { return false }
+        let mark = q[actor].trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only a comma-like mark inside a sentence; the start of the
+        // question, ". ", "? " or "! " begins a new instruction.
+        guard mark.count == 1, ",;:".contains(mark) else { return false }
         let before = q[..<actor.lowerBound]
         let sentence = before.lastIndex { ".?!".contains($0) }.map { before[before.index(after: $0)...] } ?? before
-        let otherSubject = "\\b(?:does|do|did|will|would|can|could|is|are|should|may|might)\\s+(?!(?:i|we|you|us)\\b)[\\w']"
-        return String(sentence).range(of: otherSubject, options: .regularExpression) != nil
+        return String(sentence).range(of: someoneElsesQuestion, options: .regularExpression) != nil
     }
+
+    /// A sentence that opens by asking what something other than the person
+    /// does: "Does Drop", "Doesn't Drop", "Why does Agent", "Won't it".
+    private static let someoneElsesQuestion = "^\\s*(?:(?:how|why|when|where|what)\\s+)?"
+        + "(?:does|do|did|will|would|can|could|is|are|should|may|might|"
+        + "doesn't|don't|didn't|won't|wouldn't|can't|couldn't|isn't|aren't|shouldn't)"
+        + "\\s+(?!(?:i|we|you|us)\\b)[\\w']"
 
     /// Every place a setting's name starts: the same setting can be context
     /// once and asked for later ("… with Microphone disabled. Where do I

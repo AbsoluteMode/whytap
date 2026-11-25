@@ -21,6 +21,8 @@ struct SettingsOtherView: View {
     private let privacyPreferences: PrivacyPreferences
     /// Applies the toggle to the live island panel (host-wired).
     private let screenshotProtectionChanged: (Bool) -> Void
+    /// Opens a tab that is no longer in the sidebar (More).
+    private let open: (SettingsWindowTab) -> Void
 
     @State private var islandAutoHideEnabled: Bool
     @State private var screenshotProtectionEnabled: Bool
@@ -29,8 +31,10 @@ struct SettingsOtherView: View {
         displayPicker: DisplayPickerViewModel,
         islandIdlePreferences: IslandIdlePreferences? = nil,
         privacyPreferences: PrivacyPreferences? = nil,
-        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in }
+        screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
+        open: @escaping (SettingsWindowTab) -> Void = { _ in }
     ) {
+        self.open = open
         self.displayPicker = displayPicker
         let resolvedIdlePrefs = islandIdlePreferences ?? IslandIdlePreferences()
         self.islandIdlePreferences = resolvedIdlePrefs
@@ -40,6 +44,13 @@ struct SettingsOtherView: View {
         _screenshotProtectionEnabled = State(initialValue: resolvedPrivacy.screenshotProtectionEnabled)
         _islandAutoHideEnabled = State(initialValue: resolvedIdlePrefs.isEnabled)
     }
+
+    /// Tabs that left the sidebar and open from General.
+    static let moreRows: [(title: String, subtitle: String, tab: SettingsWindowTab)] = [
+        ("Notifications", "Which notifications appear beside the island, and their sounds.", .notifications),
+        ("Backup", "Encrypted backups of your keys and settings, to restore or move to another Mac.", .backup),
+        ("Integrations", "Connect GitHub, where your encrypted backups are kept.", .integrations),
+    ]
 
     /// The clip shows an example combo; the popover names the user's own.
     static func dropAutoStopVideoShortcuts(_ configuration: HotkeyConfiguration) -> [FeatureVideoShortcut] {
@@ -59,7 +70,7 @@ struct SettingsOtherView: View {
                         .font(.system(size: 22, weight: .semibold))
                         .foregroundStyle(MacSettingsTheme.text)
                         .accessibilityAddTraits(.isHeader)
-                    Text("The island itself and your privacy. Each feature’s own settings are on its screen in Features.")
+                    Text("The island itself, your privacy and the rest of Whytap. Each feature’s own settings are on its screen in Features.")
                         .font(.system(size: 13))
                         .foregroundStyle(MacSettingsTheme.text2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -106,6 +117,21 @@ struct SettingsOtherView: View {
                             FeatureVideoButton(video: .screenshotProtection)
                         } trailing: {
                             MacSwitch(isOn: screenshotProtectionToggleBinding, label: "Screenshot protection")
+                        }
+                    }
+                }
+
+                // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+                VStack(alignment: .leading, spacing: 0) {
+                    MacGroupTitle(title: "More")
+                    MacCard {
+                        ForEach(Array(Self.moreRows.enumerated()), id: \.offset) { index, row in
+                            if index > 0 { MacRowSeparator() }
+                            MacRow(title: row.title, subtitle: row.subtitle) {
+                                MacButton(title: "Open", style: .ghost) { open(row.tab) }
+                                    .fixedSize()
+                                    .accessibilityLabel("Open \(row.title)")
+                            }
                         }
                     }
                 }

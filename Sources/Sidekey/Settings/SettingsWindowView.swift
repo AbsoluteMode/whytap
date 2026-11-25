@@ -108,8 +108,13 @@ struct SettingsWindowView: View {
                 .fill(MacSettingsTheme.sep)
                 .frame(width: 1)
 
-            detailPane
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            VStack(spacing: 0) {
+                if let back = selection.backLink {
+                    SettingsBackBar(title: back.title, action: { selection.goBack() })
+                }
+                detailPane
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -119,7 +124,7 @@ struct SettingsWindowView: View {
             // Scrollable tab list
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(alignment: .leading, spacing: SettingsSidebarStyle.rowSpacing) {
-                    ForEach(SettingsWindowTab.availableCases) { tab in
+                    ForEach(SettingsWindowTab.sidebarCases) { tab in
                         sidebarTabButton(tab)
                     }
                 }
@@ -151,9 +156,10 @@ struct SettingsWindowView: View {
     @ViewBuilder
     private func sidebarTabButton(_ tab: SettingsWindowTab) -> some View {
         let isHighlighted: Bool = {
-            if case .tab(let t) = selection.highlightedTarget, t == tab { return true }
+            if case .tab(let t) = selection.highlightedTarget, t.sidebarHome == tab { return true }
             return false
         }()
+        let isSelected = selection.selectedTab.sidebarHome == tab
 
         Button {
             selection.select(tab)
@@ -166,7 +172,7 @@ struct SettingsWindowView: View {
                     .layoutPriority(1)
                 Spacer(minLength: 0)
             }
-            .foregroundStyle(selection.selectedTab == tab && !isHighlighted ? Color.white : MacSettingsTheme.text)
+            .foregroundStyle(isSelected && !isHighlighted ? Color.white : MacSettingsTheme.text)
             .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding)
             .frame(height: SettingsSidebarStyle.rowHeight)
             .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
@@ -174,16 +180,16 @@ struct SettingsWindowView: View {
                 RoundedRectangle(cornerRadius: 7, style: .continuous)
                     .fill(isHighlighted
                           ? MacSettingsTheme.selection
-                          : (selection.selectedTab == tab
+                          : (isSelected
                              ? MacSettingsTheme.accentFill
                              : Color.clear))
             )
             .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isHighlighted)
         }
-        .buttonStyle(SettingsSidebarButtonStyle(isSelected: selection.selectedTab == tab && !isHighlighted,
+        .buttonStyle(SettingsSidebarButtonStyle(isSelected: isSelected && !isHighlighted,
                                                 focused: focusedSidebarControl == tab.id))
         .focused($focusedSidebarControl, equals: tab.id)
-        .accessibilityAddTraits(selection.selectedTab == tab ? .isSelected : [])
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(tab.title)
     }
 
@@ -248,7 +254,8 @@ struct SettingsWindowView: View {
             SettingsOtherView(
                 displayPicker: displayPickerViewModel,
                 privacyPreferences: privacyPreferences,
-                screenshotProtectionChanged: screenshotProtectionChanged
+                screenshotProtectionChanged: screenshotProtectionChanged,
+                open: { selection.select($0) }
             )
         case .agentMode:
             // Never selected: `select` resolves it to Other.
@@ -404,6 +411,23 @@ final class SettingsWindowSelection: ObservableObject {
         }
     }
 
+    /// Where a tab outside the sidebar leads back to: the screen it was
+    /// opened from (Meeting Notes for the notes, Hover for Toolbox) or General.
+    // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    var backLink: (title: String, tab: SettingsWindowTab, feature: AppFeature?)? {
+        switch selectedTab {
+        case .notes: return ("Meeting Notes", .features, .meetings)
+        case .toolbox: return ("Hover", .features, .hover)
+        case .notifications, .integrations, .backup: return ("General", .other, nil)
+        case .features, .apiAndModels, .hotkeys, .permissions, .other, .agentMode: return nil
+        }
+    }
+
+    func goBack() {
+        guard let back = backLink else { return }
+        if let feature = back.feature { open(feature) } else { select(back.tab) }
+    }
+
     /// Opens Keys & models on one feature's row.
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
@@ -467,5 +491,35 @@ enum SettingsSidebarStyle {
         width
             - horizontalPadding * 2
             - buttonHorizontalPadding * 2
+    }
+}
+
+/// The "‹ General" line above a tab that is not in the sidebar, drawn like
+/// the "‹ Features" link of a feature screen.
+struct SettingsBackBar: View {
+    let title: String
+    let action: () -> Void
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Button(action: action) {
+                HStack(spacing: 3) {
+                    Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
+                    Text(title).font(.system(size: 12.5, weight: .medium))
+                }
+                .foregroundStyle(MacSettingsTheme.accent)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.accent, focused: focused))
+            .focused($focused)
+            .accessibilityLabel("Back to \(title)")
+            Spacer(minLength: 0)
+        }
+        .padding(.leading, 18)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
     }
 }

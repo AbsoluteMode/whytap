@@ -1404,7 +1404,12 @@ names a key. Settings opens on the
 Features tab (SettingsWindowTab.features, whytap://settings/features):
 SettingsFeaturesView lists the catalog with each status, read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
-PermissionsSettingsViewModel the older tabs show. A row opens the feature's
+PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
+keys from the Keychain on the main thread, so it is rebuilt only when a value
+it shows changes: Notify and Monitor reach it through
+FeaturesEnvironment.snapshotCountChanges (their counts), and
+NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
+(.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
 present place. Every feature has its own screen now. The older tabs stay in the
 sidebar with their identifiers. Drop has its own screen (DropFeatureView): the

@@ -2901,10 +2901,13 @@ private struct IslandDropModeHoverPanel: View {
 
     private var searchMatches: [HoverTool] { IslandHoverToolSearch.results(for: searchQuery) }
 
+    /// While searching, the footer reads the same index as the row highlight,
+    /// so the two can never disagree; hovering a row moves that index.
     private var descriptionTool: HoverTool? {
-        if let hoveredTool { return hoveredTool }
-        let matches = searchMatches
-        return matches.indices.contains(selectedSearchIndex) ? matches[selectedSearchIndex] : nil
+        if IslandHoverToolSearch.isFiltering(searchQuery) {
+            return IslandHoverToolSearch.selectedTool(in: searchMatches, at: selectedSearchIndex)
+        }
+        return hoveredTool
     }
 
     private func setSearchFocus(_ focused: Bool) {
@@ -2919,7 +2922,12 @@ private struct IslandDropModeHoverPanel: View {
         case .previous, .next:
             if let next = IslandHoverToolSearch.nextSelection(
                 current: selectedSearchIndex, direction: command == .next ? 1 : -1, count: matches.count
-            ) { selectedSearchIndex = next }
+            ) {
+                // The latest input wins: the arrow moves the one highlight
+                // away from a row the pointer still rests on.
+                hoveredTool = nil
+                selectedSearchIndex = next
+            }
         case .activate:
             guard matches.indices.contains(selectedSearchIndex) else { return }
             activateSearchTool(matches[selectedSearchIndex])
@@ -2989,88 +2997,22 @@ private struct IslandDropModeHoverPanel: View {
     }
 
     private var searchResults: some View {
-        let matches = searchMatches
-        return ScrollViewReader { scroll in
-            ScrollView {
-                if matches.isEmpty {
-                    VStack(spacing: 5) {
-                        Text("No tools found")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.85))
-                        Text("Try “language” or “monitor”.")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 20)
-                } else {
-                    LazyVStack(spacing: 2) {
-                        ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
-                            let info = HoverToolRegistry.info(for: tool)
-                            let label = IslandHoverToolSearch.resultLabel(for: tool, query: searchQuery)
-                            let isPressed = hoverHitBridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
-                            let highlight = isPressed ? 0.24 : (selectedSearchIndex == index ? 0.13 : 0)
-                            Button { activateSearchTool(tool) } label: {
-                                HStack(spacing: 10) {
-                                    Image(systemName: info.sfSymbol)
-                                        .font(.system(size: 15))
-                                        .frame(width: 24)
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(label.title)
-                                            .font(.system(size: 12, weight: .medium))
-                                        Text(label.description)
-                                            .font(.system(size: 10))
-                                            .foregroundStyle(.white.opacity(0.5))
-                                            .lineLimit(1)
-                                    }
-                                    Spacer(minLength: 0)
-                                    if let soon = tool.comingSoonBadge {
-                                        IslandSoonBadge(text: soon)
-                                    }
-                                    if tool == .notifs && notificationHub.unreadCount > 0 {
-                                        Circle().fill(.red).frame(width: 6, height: 6)
-                                            .accessibilityHidden(true)
-                                    }
-                                }
-                                .foregroundStyle(.white.opacity(0.9))
-                                .padding(.horizontal, 10)
-                                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 9)
-                                        .fill(.white.opacity(tool.isComingSoon ? 0 : highlight))
-                                )
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .islandHoverHitTarget(
-                                bridge: hoverHitBridge,
-                                id: IslandHoverHitTargetID(surface: .result, tool: tool),
-                                context: hitTargetContext,
-                                action: { activateSearchTool(tool) }
-                            )
-                            .disabled(tool.isComingSoon)
-                            .accessibilityLabel(label.title)
-                            .accessibilityHint(label.description)
-                            .accessibilityValue(tool.comingSoonBadge
-                                ?? (tool == .notifs && notificationHub.unreadCount > 0
-                                    ? "\(notificationHub.unreadCount) new notifications" : ""))
-                            .opacity(tool.isComingSoon ? 0.6 : 1)
-                            .id(index)
-                            .onHover { inside in
-                                if inside, !tool.isComingSoon {
-                                    hoveredTool = tool
-                                    selectedSearchIndex = index
-                                } else if hoveredTool == tool { hoveredTool = nil }
-                            }
-                        }
-                    }
-                    .padding(.horizontal, 8)
-                    .padding(.bottom, 5)
-                }
+        // WHY: .project-docs/decisions/2026-11-25-hover-search-row-identity.md
+        IslandHoverSearchResultsList(
+            query: searchQuery,
+            matches: searchMatches,
+            selectedIndex: selectedSearchIndex,
+            bridge: hoverHitBridge,
+            hitContext: hitTargetContext,
+            unreadNotifications: notificationHub.unreadCount,
+            onActivate: activateSearchTool,
+            onHover: { tool, index, inside in
+                if inside, !tool.isComingSoon {
+                    hoveredTool = tool
+                    selectedSearchIndex = index
+                } else if hoveredTool == tool { hoveredTool = nil }
             }
-            .onChange(of: selectedSearchIndex) { _, index in scroll.scrollTo(index, anchor: .center) }
-            .onChange(of: searchQuery) { _, _ in scroll.scrollTo(0, anchor: .top) }
-        }
+        )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .islandHoverHitRegion(bridge: hoverHitBridge, surface: .result)
     }

@@ -1402,7 +1402,9 @@ step, on Keyboard control's row, not counted again for the shortcut. A
 sentence about an optional part names only what it stops. No catalog text
 names a key. Settings opens on the
 Features tab (SettingsWindowTab.features, whytap://settings/features):
-SettingsFeaturesView lists the catalog with each status, read through
+SettingsFeaturesView lists the catalog with each status and icon
+(AppFeature.symbol: the island tool's icon, else the one its Hotkeys row
+carries; FeatureIcon, also in each screen's header), read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
 PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
 keys from the Keychain on the main thread, so it is rebuilt only when a value

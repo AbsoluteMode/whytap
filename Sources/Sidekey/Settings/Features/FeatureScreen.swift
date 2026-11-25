@@ -121,14 +121,17 @@ struct FeatureScreenHeader: View {
             .focused($backFocused)
             .padding(.leading, -6)
             .accessibilityLabel("Back to Features")
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(info.name)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text)
-                    .accessibilityAddTraits(.isHeader)
-                Text(info.kind)
-                    .font(.system(size: 13))
-                    .foregroundStyle(MacSettingsTheme.text2)
+            HStack(alignment: .center, spacing: 8) {
+                FeatureIcon(feature: info.feature, size: .header)
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(info.name)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(MacSettingsTheme.text)
+                        .accessibilityAddTraits(.isHeader)
+                    Text(info.kind)
+                        .font(.system(size: 13))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                }
             }
             Text(about)
                 .font(.system(size: 13))

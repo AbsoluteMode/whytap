@@ -91,11 +91,14 @@ the tables Smart uses; nothing is duplicated.
   of the request (`ErrorShape.namesReasoning`): a `param` whose first
   component is `reasoning`, `reasoning_effort`, `thinking` or `output_config`
   decides alone; a message (or the upstream text OpenRouter quotes) that
-  opens with such a path (`thinking.type: ...`) counts; otherwise one
-  sentence must name the setting by its request path (`reasoning.effort`,
-  `"thinking.type.between_tools"`, `output_config.effort`; quoted text removed
-  except field names) together with a refusal such as "is not supported" or
-  "cannot be used"; and OpenRouter's "no endpoints ... requested parameters"
+  opens with such a path (`thinking.type: ...`) counts, and one that opens
+  with another request field (`tools:`, `messages:`, `max_tokens:`, or a
+  path into them) is about that field; otherwise one sentence must name the
+  setting by its request path (`reasoning.effort`,
+  `"thinking.type.between_tools"`, `output_config.effort`) or quoted alone
+  (`'thinking'`, `'output_config'`), other quoted text removed, together
+  with a refusal such as "is not supported", "cannot be used" or "not
+  permitted"; and OpenRouter's "no endpoints ... requested parameters"
   counts. A bare word (reasoning models, thinking blocks, an `effort`
   property in a tool schema) or a path into the messages or tools is not a
   setting. The same request is then sent again with what a refusing model
@@ -175,7 +178,11 @@ a repeat after OpenAI GPT-5 mini's search step-up sends no field instead of
 the same `low`; nested message, tool-schema and incidental mentions of a
 setting are not refusals; an OpenRouter refusal is kept per pinned endpoint;
 after a refused provider search Claude Sonnet 5.5 gets `between_tools` on the
-request that starts the turn and keeps it. `NativeAgentLowEffortTests` updated
+request that starts the turn and keeps it. After the builder's review of ticket 548:
+messages opening with `tools:`, `messages:` or `max_tokens:` that mention a
+setting are not repeated, and refusals of a setting quoted alone
+(`'thinking' is not supported`, `"thinking": Extra inputs are not
+permitted`, `does not support the 'output_config' parameter`) are. `NativeAgentLowEffortTests` updated
 for the new levels. Not tested: the installed app, how much faster answers
 are, OpenRouter live.
 

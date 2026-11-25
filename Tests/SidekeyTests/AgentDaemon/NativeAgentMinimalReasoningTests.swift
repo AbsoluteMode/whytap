@@ -437,6 +437,41 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(names(["message": "The tool schema is not supported by reasoning models with thinking enabled."]), false)
         XCTAssertEqual(names(["message": "output_config.effort 'xhigh' is not supported when thinking is disabled on this model."]), true)
         XCTAssertEqual(names(["message": "thinking.type: Input tag 'between_tools' is not supported"]), true)
+        // Builder review, queue #548: a request field opening the message
+        // decides it; a setting quoted alone with a refusal is one.
+        XCTAssertEqual(names(["message": "tools: The function schema property 'reasoning.effort' is not supported."]), false)
+        XCTAssertEqual(names(["message": "messages: Thinking block field 'thinking.type' is not supported at this position."]), false)
+        XCTAssertEqual(names(["message": "max_tokens: The requested limit is not supported, see output_config.effort in the examples."]), false)
+        XCTAssertEqual(names(["message": "'thinking' is not supported for this model."]), true)
+        XCTAssertEqual(names(["message": "\"thinking\": Extra inputs are not permitted."]), true)
+        XCTAssertEqual(names(["message": "The model does not support the 'output_config' parameter."]), true)
+        XCTAssertEqual(names(["message": "Error: reasoning.effort 'none' is not supported with this model."]), true)
+        XCTAssertEqual(names(["message": "Item 'rs_1' of type 'reasoning' was provided without its required following item."]), false)
+    }
+
+    /// Builder review, queue #548, on the real loop: the three unrelated
+    /// 400s stay one request each; the three refusals of a setting quoted
+    /// alone are repeated without the fields and deliver the answer.
+    func testQuotedSettingRefusalsRepeatAndUnrelatedRootsDoNot() async throws {
+        for message in ["tools: The function schema property 'reasoning.effort' is not supported.",
+                        "messages: Thinking block field 'thinking.type' is not supported at this position.",
+                        "max_tokens: The requested limit is not supported, see output_config.effort in the examples."] {
+            let result = try await run("hi", anthropic("claude-haiku-5-5"),
+                                       [json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400)])
+            XCTAssertEqual(result.store.status, .failed, message)
+            XCTAssertEqual(result.bodies.count, 1, message)
+            XCTAssertEqual(result.usage.count, 1, message)
+        }
+        for message in ["'thinking' is not supported for this model.", "\"thinking\": Extra inputs are not permitted.",
+                        "The model does not support the 'output_config' parameter."] {
+            refusals = SmartReasoningRefusals()
+            let result = try await run("hi", anthropic("claude-haiku-5-5"), [
+                json(["type": "error", "error": ["type": "invalid_request_error", "message": message]], status: 400),
+                json(anthropicFinal("Hello.")),
+            ])
+            XCTAssertEqual(result.store.streamingText, "Hello.", message)
+            XCTAssertEqual(result.bodies.map(thinking), ["disabled", nil], message)
+        }
     }
 
     /// Builder review, queue #543: OpenAI GPT-5 mini beside the provider's

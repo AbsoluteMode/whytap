@@ -124,8 +124,11 @@ enum NativeAgentDiagnostics {
         ///   with a path (`thinking.type: ...`) is decided by that path;
         /// - otherwise one sentence must name a setting by its request path
         ///   (`reasoning.effort`, `"thinking.type.between_tools"`,
-        ///   `output_config.effort`; quoted text removed except field names)
-        ///   together with a refusal ("is not supported", "cannot be used").
+        ///   `output_config.effort`, or a setting quoted alone: `'thinking'`;
+        ///   other quoted text removed) together with a refusal ("is not
+        ///   supported", "cannot be used", "not permitted").
+        /// - a message that opens with a request field other than a setting
+        ///   (`tools:`, `max_tokens:`) is about that field.
         /// A bare word ("reasoning models", "thinking blocks", a tool schema's
         /// `effort` property) is not a setting, and OpenRouter's "no endpoints
         /// ... requested parameters" counts as a refusal.
@@ -142,8 +145,10 @@ enum NativeAgentDiagnostics {
                 if let range = lower.range(of: #"^\s*[a-z_][a-z0-9_]*(?:\.[a-z0-9_]+|\[\d+\])*\s*:"#, options: .regularExpression) {
                     let path = lower[range].trimmingCharacters(in: .whitespaces.union(CharacterSet(charactersIn: ":")))
                     if isReasoningSetting(path: path) { return true }
-                    // A request path that is not a setting decides the error.
-                    if path.contains(".") || path.contains("[") { continue }
+                    // A request path, or a request field named alone (`tools:`,
+                    // `max_tokens:`), that is not a setting decides the error;
+                    // a plain word (`error:`) does not.
+                    if path.contains(".") || path.contains("[") || requestRoots.contains(path) { continue }
                 }
                 let plain = fieldNamesKept(lower)
                 let sentences = plain.replacingOccurrences(of: ". ", with: "\n").split(whereSeparator: { $0 == "\n" || $0 == ";" })
@@ -154,6 +159,15 @@ enum NativeAgentDiagnostics {
             }
             return false
         }
+
+        /// Top-level request fields of the three APIs other than the reasoning
+        /// settings: an error that opens with one of them is about that field.
+        static let requestRoots: Set<String> = [
+            "model", "messages", "input", "system", "instructions", "tools", "tool_choice", "parallel_tool_calls",
+            "max_tokens", "max_output_tokens", "max_completion_tokens", "max_tool_calls", "include", "metadata", "text",
+            "temperature", "top_p", "top_k", "stop", "stop_sequences", "stream", "store", "provider", "response_format",
+            "container", "mcp_servers", "service_tier", "speed", "user", "prompt", "previous_response_id", "truncation",
+        ]
 
         /// The path's first component is a top-level reasoning setting.
         static func isReasoningSetting(path: String) -> Bool {
@@ -170,8 +184,12 @@ enum NativeAgentDiagnostics {
             for match in regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).reversed() {
                 guard let whole = Range(match.range, in: text), let inner = Range(match.range(at: 1), in: text) else { continue }
                 let content = String(text[inner])
+                // A quoted setting named alone ('thinking', "output_config")
+                // becomes `reasoning_effort`, the one bare setting word the
+                // sentence rule accepts.
+                let setting = ["reasoning", "reasoning_effort", "thinking", "output_config"].contains(content)
                 let field = content.range(of: #"^[a-z_]+(\.[a-z_]+)*$"#, options: .regularExpression) != nil
-                result.replaceSubrange(whole, with: field ? " " + content + " " : " ")
+                result.replaceSubrange(whole, with: setting ? " reasoning_effort " : field ? " " + content + " " : " ")
             }
             return result
         }

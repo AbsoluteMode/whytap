@@ -1,3 +1,4 @@
+import Combine
 import SwiftUI
 
 /// What the Features screens read besides the two Settings view models: the
@@ -22,9 +23,15 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
+    /// The switches of the features that have one. The Agent's connects the
+    /// native Agent and returns why it did not turn on.
+    var setAgent: @MainActor (Bool) async -> String?
+    var setMeetings: (Bool) -> Void
+    var setGoogle: (Bool) -> Void
+    /// "Allow file edits and commands".
+    var agentSettings: AgentSettingsStore
     /// Hover, Notify and Monitor: the island's tool layout, the Notify
-    /// sources and their sounds, Monitor's dashboards (read, never polled
-    /// here), where agents put their files, and the clipboard a prompt is
+    /// sources and their sounds, Monitor's dashboard files (read locally), where agents put their files, and the clipboard a prompt is
     /// copied to. Tests pass temporary ones; nothing touches the user's own.
     // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
     var hoverStore: HoverLayoutStore
@@ -34,6 +41,8 @@ struct FeaturesEnvironment {
     var monitor: MonitorStore
     var notifyRoot: URL
     var copyText: (String) -> Void
+    /// Starts Shot's capture, as its island tool does.
+    var openScreenshot: () -> Void
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
@@ -45,6 +54,11 @@ struct FeaturesEnvironment {
          agentOn: @escaping () -> Bool = { false },
          meetingsOn: @escaping () -> Bool = { false },
          googleOn: @escaping () -> Bool = { false },
+         setAgent: @escaping @MainActor (Bool) async -> String? = { _ in nil },
+         setMeetings: @escaping (Bool) -> Void = { _ in },
+         setGoogle: @escaping (Bool) -> Void = { _ in },
+         agentSettings: AgentSettingsStore? = nil,
+         openScreenshot: @escaping () -> Void = {},
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil,
@@ -68,9 +82,14 @@ struct FeaturesEnvironment {
         self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
         self.autoStop = autoStop ?? .shared
         self.openHoverPanel = openHoverPanel
+        self.setAgent = setAgent
+        self.setMeetings = setMeetings
+        self.setGoogle = setGoogle
+        self.agentSettings = agentSettings ?? .shared
         self.hoverStore = hoverStore ?? .shared
         self.notifySupervisor = notifySupervisor ?? .shared
         self.meetingNotifications = meetingNotifications ?? .shared
+        self.openScreenshot = openScreenshot
         self.notificationSounds = notificationSounds ?? .shared
         self.monitor = monitor ?? FeaturesEnvironment.sharedMonitor
         self.notifyRoot = notifyRoot
@@ -80,6 +99,18 @@ struct FeaturesEnvironment {
     /// One reader of Monitor's files for every Settings window. It is never
     /// started, so Settings does not connect to servers.
     static let sharedMonitor = MonitorStore()
+
+    /// Fires when the number of Notify sources or available Monitor dashboards
+    /// changes. Each snapshot reads provider keys on the main thread, so a
+    /// reread with the same counts leaves it alone.
+    // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
+    var snapshotCountChanges: AnyPublisher<Void, Never> {
+        notifySupervisor.$sources.map(\.count).removeDuplicates()
+            .combineLatest(monitor.$availableDashboardCount)
+            .dropFirst()
+            .map { _ in () }
+            .eraseToAnyPublisher()
+    }
 
     static func copyToClipboard(_ text: String) {
         let pasteboard = NSPasteboard.general
@@ -115,13 +146,13 @@ extension FeatureSetupSnapshot {
             microphoneGranted: permissions.snapshot.microphoneGranted,
             screenRecordingGranted: permissions.screenRecordingGranted,
             screenNeedsRestart: permissions.screenNeedsRestart,
+            systemAudioHeard: SystemAudioAccess.heard(),
             dropShortcut: permissions.dropHotkeyStatus,
             agentOn: environment.agentOn(),
             meetingsOn: environment.meetingsOn(),
             googleOn: environment.googleOn(),
             notifySources: environment.notifySupervisor.sources.count,
-            monitorDashboards: environment.monitor.dashboards.count
-                + (environment.monitor.serverStatusListed && environment.monitor.serverError == nil ? 1 : 0)
+            monitorDashboards: environment.monitor.availableDashboardCount
         )
     }
 

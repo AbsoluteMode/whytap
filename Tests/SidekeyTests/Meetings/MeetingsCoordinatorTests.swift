@@ -1378,7 +1378,7 @@ final class MeetingsCoordinatorTests: XCTestCase {
 
     /// Neither pipeline configured (the BYOK processor declines, no local
     /// processor wired): the recording stays staged for a later launch and
-    /// the meeting is surfaced as failed with the Settings > API & Models hint.
+    /// the meeting is surfaced as failed with the Settings > Keys & models hint.
     func test_dispatch_marks_meeting_failed_when_no_processor_configured() async throws {
         let config = MeetingsConfig(defaults: testDefaults)
         config.isEnabled = true

@@ -105,22 +105,29 @@ final class NotifyScriptSupervisor: ObservableObject {
                 guard !Task.isCancelled, self.generation == run else { return }
                 switch snapshot {
                 case .success(let (scripts, invalid)):
-                    self.error = invalid.isEmpty ? nil : "Invalid source configuration: " + invalid.joined(separator: ", ")
+                    self.publishError(invalid.isEmpty ? nil : "Invalid source configuration: " + invalid.joined(separator: ", "))
                     self.reconcile(scripts)
                 case .failure:
-                    self.error = "Couldn’t read notification sources (maximum 16)."
+                    self.publishError("Couldn’t read notification sources (maximum 16).")
                     self.reconcile([])
                 }
                 do { try await Task.sleep(nanoseconds: 2_000_000_000) } catch { return }
             }
         }
     }
-    private func reconcile(_ scripts: [NotifyScript]) {
+    /// The registry is reread every 2 s. Republishing an unchanged list or
+    /// error redraws every observer, Settings among them, for nothing.
+    // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
+    func reconcile(_ scripts: [NotifyScript]) {
         for old in sources where !scripts.contains(where: { $0 == old.script }) { stopSource(old.id) }
-        sources = scripts.map { script in
+        let next = scripts.map { script in
             sources.first(where: { $0.script == script }) ?? NotifySourceStatus(id: script.id, script: script, message: script.enabled ? "Starting…" : "Off")
         }
+        if next != sources { sources = next }
         for script in scripts where script.enabled && processes[script.id] == nil && retries[script.id] == nil { launch(script) }
+    }
+    private func publishError(_ next: String?) {
+        if error != next { error = next }
     }
     private func stopSource(_ id: String) {
         tokens[id] = nil; decoders[id] = nil; retries.removeValue(forKey: id)?.cancel()

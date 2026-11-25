@@ -178,13 +178,13 @@ final class AppControlController {
             // Same account/key visibility and feature compatibility as the picker.
             guard models.accountIsAvailableForSelection(account),
                   models.sections(for: feature).contains(where: { $0.account == account }) else {
-                return .failure("not_configured", "Add this provider in API & Models before assigning a model.")
+                return .failure("not_configured", "Add this provider in Keys & models before assigning a model.")
             }
             let changed = await models.select(model: model, account: account, for: feature)
             guard !Task.isCancelled else { return .failure("cancelled", "Request cancelled; read state before retrying.") }
             guard changed else {
                 if args["expected"] != routeValue(feature) { return conflict() }
-                return .failure("model_not_selected", "The model check failed or another check is in progress. The previous route was kept. Check API & Models for details.")
+                return .failure("model_not_selected", "The model check failed or another check is in progress. The previous route was kept. Check Keys & models for details.")
             }
             // A changed model is already Auto; an unchanged model keeps its pin,
             // matching the model picker. Provider changes have a separate tool.

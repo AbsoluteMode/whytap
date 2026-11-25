@@ -330,7 +330,7 @@ final class TranslationTests: XCTestCase {
         XCTAssertEqual(SubtitleCaption.rows(lines: many, live: "").map(\.source), (9...20).map { "s\($0)" })
         let next = UUID()
         XCTAssertEqual(SubtitleCaption.rows(lines: [], live: "heard", liveID: next).last?.id, next)
-        let issue = TranslationIssue(message: "Set up Subtitles in API & Models.", feature: .subtitlesAudio)
+        let issue = TranslationIssue(message: "Set up Subtitles in Keys & models.", feature: .subtitlesAudio)
         XCTAssertEqual(SubtitleCaption.status(hasRows: true, phase: .failed, issue: issue), issue.message)
     }
 

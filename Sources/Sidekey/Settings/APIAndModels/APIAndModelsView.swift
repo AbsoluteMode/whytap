@@ -5,7 +5,7 @@ enum APIAndModelsSection: String, CaseIterable {
     case keys = "API keys", models = "Models", costs = "Costs", hints = "API hints"
 }
 
-/// Four sections in one API & Models surface. One model menu
+/// Four sections in one Keys & models surface. One model menu
 /// per feature row: a provider is never picked on its own, only through the
 /// model it serves.
 @MainActor
@@ -612,11 +612,11 @@ struct APIAndModelsView: View {
 
     private static let providerSlotWidth: CGFloat = 132
 
-    /// Subtitles' model row, laid out like every single-model row: its one
-    /// model is preselected and the menu offers only it. Without the OpenAI
-    /// key the card shows the same setup contour as any row without a model,
-    /// and the menu leads to API keys.
-    // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+    /// Subtitles' model row, laid out like every single-model row: the engine
+    /// the keys give is preselected and the menu offers only it (Soniox with
+    /// its key, otherwise OpenAI). Without either key the card shows the same
+    /// setup contour as any row without a model, and the menu leads to API keys.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
     private func fixedModelRow(_ slot: AudioTranslateSlot) -> some View {
         GeometryReader { geometry in
             let modelWidth = max(90, geometry.size.width - 52 - 20 - Self.providerSlotWidth)
@@ -629,7 +629,7 @@ struct APIAndModelsView: View {
                     Button {} label: { Label(slot.label, systemImage: "checkmark") }
                     if !slot.isActive {
                         Divider()
-                        Button("Add an OpenAI key…", action: showKeySetup)
+                        Button("Add a Soniox key…", action: showKeySetup)
                     }
                 }
                 Color.clear.frame(width: Self.providerSlotWidth, height: 1)
@@ -640,7 +640,7 @@ struct APIAndModelsView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Subtitles")
         .accessibilityValue(slot.isActive ? "" : "Needs setup")
-        .help(slot.isActive ? slot.label : "Add an OpenAI key in API keys.")
+        .help(slot.isActive ? slot.label : "Add a Soniox key (or an OpenAI key) in API keys.")
     }
 
     private func pickers(for row: FeatureRow, paired: Bool) -> some View {

@@ -26,15 +26,15 @@ struct TranslationIssue: Equatable {
             if case .invalidLanguageConfiguration(_, let reason) = routeError {
                 return Self(message: reason.localizedDescription, feature: routeError.feature)
             }
-            return Self(message: "Choose a provider and model for \(routeError.feature.title) in API & Models.", feature: routeError.feature)
+            return Self(message: "Choose a provider and model for \(routeError.feature.title) in Keys & models.", feature: routeError.feature)
         }
         if let llm = error as? OpenRouterLLMError {
             switch llm {
             case .notConfigured, .missingKey, .missingBaseURL, .invalidBaseURL, .missingModel:
-                return Self(message: "Choose a provider and model for \(feature.title) in API & Models.", feature: feature)
+                return Self(message: "Choose a provider and model for \(feature.title) in Keys & models.", feature: feature)
             case .unexpectedStatus(let status, _):
                 if status == 401 || status == 403 {
-                    return Self(message: "The translation provider refused the API key. Check it in API & Models.", feature: feature)
+                    return Self(message: "The translation provider refused the API key. Check it in Keys & models.", feature: feature)
                 }
                 if status == 429 { return Self(message: "The translation provider is busy or its limit was reached. Try again shortly.") }
             default: break
@@ -43,15 +43,16 @@ struct TranslationIssue: Equatable {
         if let failure = error as? SpeechTranslationFailure {
             return speechTranslation(failure, target: nil)
         }
-        // Subtitles' one engine needs the OpenAI key: say so instead of
-        // refusing quietly, and open API & Models on Subtitles.
-        // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
+        // Subtitles need the Soniox or the OpenAI key: say so instead of
+        // refusing quietly, and open Keys & models on Subtitles.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
         if let unavailable = error as? SubtitleAudioTranslate.Unavailable {
             switch unavailable {
             case .missingKey:
-                return Self(message: "Subtitles need an OpenAI key. Add it in API & Models.", feature: .subtitlesAudio)
+                return Self(message: "Subtitles need a Soniox or OpenAI key. Add one in Keys & models.",
+                            feature: .subtitlesAudio)
             case .unreadableKey:
-                return Self(message: "Whytap couldn't read the OpenAI key from the Keychain. Check it in API & Models.",
+                return Self(message: "Whytap couldn't read the Subtitles key from the Keychain. Check it in Keys & models.",
                             feature: .subtitlesAudio)
             }
         }
@@ -67,24 +68,31 @@ struct TranslationIssue: Equatable {
 
 extension TranslationIssue {
     /// Live speech translation (OpenAI) failures, from status codes and error
-    /// codes only. Setup problems open API & Models on Subtitles audio.
+    /// codes only. Setup problems open Keys & models on Subtitles audio.
     // WHY: .project-docs/decisions/2026-11-21-subtitle-speech-translation.md
-    static func speechTranslation(_ failure: SpeechTranslationFailure, target: String?) -> Self {
+    /// `provider` names the engine the session ran on (Soniox or OpenAI).
+    static func speechTranslation(_ failure: SpeechTranslationFailure, target: String?,
+                                  provider: String = "OpenAI") -> Self {
         switch failure {
         case .refusedKey:
-            return Self(message: "OpenAI refused the API key. Check it in API & Models.", feature: .subtitlesAudio)
+            return Self(message: "\(provider) refused the API key. Check it in Keys & models.", feature: .subtitlesAudio)
         case .noCredit:
-            return Self(message: "Your OpenAI account is out of credit. Add credit to use Subtitles.",
+            return Self(message: "Your \(provider) account is out of credit. Add credit to use Subtitles.",
                         feature: .subtitlesAudio)
         case .busy:
-            return Self(message: "OpenAI is busy or its limit was reached. Try again shortly.")
+            return Self(message: "\(provider) is busy or its limit was reached. Try again shortly.")
         case .unsupportedLanguage:
             let name = target.flatMap { AppLanguage.find(code: $0)?.englishName } ?? "this language"
-            return Self(message: "OpenAI live translation does not support \(name). Choose another target language.")
+            return Self(message: "\(provider) live translation does not support \(name). Choose another target language.")
         case .connectionLost:
-            return Self(message: "The translation connection ended. Check your network and start again.")
+            return Self(message: "The \(provider) connection ended. Check your network and start again.")
         case .provider:
-            return Self(message: "OpenAI stopped translating. Start again.")
+            return Self(message: "\(provider) stopped translating. Start again.")
+        case .permissionDenied:
+            return Self(message: "This \(provider) key may not use live translation. Check its permissions or use another key in Keys & models.",
+                        feature: .subtitlesAudio)
+        case .modelUnavailable:
+            return Self(message: "\(provider) live translation is not available for this key's project or region. Check your \(provider) project.")
         }
     }
 }

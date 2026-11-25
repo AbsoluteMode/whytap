@@ -16,6 +16,9 @@ final class MonitorStore: ObservableObject {
     /// read, so the mistake is visible) and the board was not deleted.
     /// WHY: .project-docs/decisions/2026-11-23-monitor-server-status-optional.md
     @Published private(set) var serverStatusListed = false
+    /// Saved dashboards plus a usable Server status board, after each reload.
+    // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
+    @Published private(set) var availableDashboardCount = 0
 
     /// Server status's ID in the deleted list; never a snapshot's ID.
     static let serverStatusID = "server-status"
@@ -106,6 +109,10 @@ final class MonitorStore: ObservableObject {
     }
 
     func reloadFiles() {
+        defer {
+            let count = dashboards.count + (serverStatusListed && serverError == nil ? 1 : 0)
+            if count != availableDashboardCount { availableDashboardCount = count }
+        }
         let fm = FileManager.default
         let files = (try? fm.contentsOfDirectory(at: dashboardsDirectory,
                                                 includingPropertiesForKeys: [.isRegularFileKey, .isSymbolicLinkKey, .fileSizeKey],

@@ -38,13 +38,13 @@ struct MeetingNotesFailure: Error, CustomStringConvertible, Equatable {
         self.isLaterPart = isLaterPart
         switch error as? OpenRouterLLMError {
         case .notConfigured, .missingModel:
-            reason = "Meeting notes has no model. Choose one in Settings > API & Models."
+            reason = "Meeting notes has no model. Choose one in Settings > Keys & models."
         case .missingKey:
-            reason = "The key of the Meeting notes provider is missing. Add it in Settings > API & Models."
+            reason = "The key of the Meeting notes provider is missing. Add it in Settings > Keys & models."
         case .missingBaseURL, .invalidBaseURL:
-            reason = "The Meeting notes server has no usable address. Check it in Settings > API & Models."
+            reason = "The Meeting notes server has no usable address. Check it in Settings > Keys & models."
         case .unexpectedStatus(401, _), .unexpectedStatus(403, _):
-            reason = "The Meeting notes provider refused the key. Check it in Settings > API & Models."
+            reason = "The Meeting notes provider refused the key. Check it in Settings > Keys & models."
         case .unexpectedStatus(402, _):
             reason = "The Meeting notes provider is out of credit."
         case .unexpectedStatus(429, _):
@@ -52,9 +52,9 @@ struct MeetingNotesFailure: Error, CustomStringConvertible, Equatable {
         case .unexpectedStatus(let status, _) where status >= 500:
             reason = "The Meeting notes provider is not responding (\(status))."
         case .unexpectedStatus(let status, _):
-            reason = "The Meeting notes model refused the request (\(status)). Try another model in Settings > API & Models."
+            reason = "The Meeting notes model refused the request (\(status)). Try another model in Settings > Keys & models."
         case .emptyContent, .outputLimitReached, .inputRejected, .decoding:
-            reason = "The Meeting notes model returned no usable note. Try another model in Settings > API & Models."
+            reason = "The Meeting notes model returned no usable note. Try another model in Settings > Keys & models."
         case nil:
             reason = error is URLError ? "No connection to the Meeting notes provider."
                 : "The meeting note could not be written."
@@ -167,7 +167,7 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
 
     func shouldProcessDirectly() -> Bool {
         // Recording and notes each run on the model chosen for them. Until both
-        // are chosen in Settings -> API & Models the meeting stays staged.
+        // are chosen in Settings -> Keys & models the meeting stays staged.
         routing.route(for: .meetings) != nil && routing.route(for: .meetingNotes) != nil
     }
 

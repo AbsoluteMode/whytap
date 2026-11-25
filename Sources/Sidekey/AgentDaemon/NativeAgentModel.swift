@@ -61,7 +61,7 @@ struct NativeAgentModel {
 
     mutating func next(tools: [[String: Any]], structuredCompletion: Bool = false) async throws -> (String, [NativeAgentToolCall]) {
         guard !structuredCompletion || !tools.isEmpty else { throw NativeAgentFinalAnswer.invalid() }
-        guard let model = options.model, !model.isEmpty else { throw NativeAgentError.message("Choose an Agent model in Settings → API & Models.") }
+        guard let model = options.model, !model.isEmpty else { throw NativeAgentError.message("Choose an Agent model in Settings → Keys & models.") }
         // Bound accumulated text before a provider request; image data has its own cap.
         let textBudget = min(180_000, max(8000, ((options.openCodeModelSpec?.contextLimit ?? 32_768) - 4096) * 2))
         var textSize = system.count

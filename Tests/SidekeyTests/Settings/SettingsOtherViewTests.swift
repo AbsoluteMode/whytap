@@ -17,157 +17,40 @@ final class SettingsOtherViewTests: XCTestCase {
         return try String(contentsOf: url, encoding: .utf8)
     }
 
-    // MARK: - Drop group
+    // MARK: - What is left: the island and privacy
 
-    /// The first group is "Drop": its switches are all about Drop. Learn from
-    /// my edits is shelved (branch shelf/drop-learning) and not in it.
-    func test_firstGroupIsDropWithItsSwitches() throws {
+    /// Every feature's switches moved to its screen in Features; General keeps
+    /// only what belongs to no feature.
+    func test_generalHoldsOnlyTheIslandAndPrivacy() throws {
         let s = try source()
-        XCTAssertTrue(s.contains("MacGroupTitle(title: \"Drop\")"))
-        XCTAssertFalse(s.contains("MacGroupTitle(title: \"Recording\")"))
-        let drop = try XCTUnwrap(s.range(of: "MacGroupTitle(title: \"Drop\")"))
-        let next = try XCTUnwrap(s.range(of: "MacGroupTitle(title: \"Features\")"))
-        let group = String(s[drop.upperBound..<next.lowerBound])
-        for title in ["Lower other audio while speaking", "Stop Drop automatically"] {
-            XCTAssertTrue(group.contains(title), title)
+        for title in ["\"Island\"", "\"Privacy\"", "Auto-hide island", "Show island on", "Screenshot protection"] {
+            XCTAssertTrue(s.contains(title), title)
         }
-        XCTAssertFalse(s.contains("Learn from my edits"))
+        for moved in ["Lower other audio while speaking", "Stop Drop automatically", "MacSwitch(isOn: meetings",
+                      "MacSwitch(isOn: google", "agentSection", "MacGroupTitle(title: \"Drop\")",
+                      "MacGroupTitle(title: \"Features\")"] {
+            XCTAssertFalse(s.contains(moved), "\(moved) belongs to a feature screen now")
+        }
     }
 
-    // MARK: - Volume-duck row
-
-    func test_containsVolumeDuckRow() throws {
+    func test_viewStaysPure() throws {
         let s = try source()
-        XCTAssertTrue(
-            s.contains("Lower other audio while speaking"),
-            "volume-duck row title must be present"
-        )
+        XCTAssertFalse(s.contains("UserPreferencesCache"), "view must not touch the cache directly")
+        XCTAssertFalse(s.contains("URLSession"), "view must not touch the network directly")
     }
 
-    func test_volumeDuckRowBindsToVolumeDuckConfig() throws {
-        let s = try source()
-        XCTAssertTrue(s.contains("volumeDuckConfig"), "binds to the injected VolumeDuckConfig")
-        XCTAssertTrue(s.contains("volumeDuckEnabled"), "uses local mirror state for the binding")
-    }
-
-    // MARK: - Meeting Notes row
-
-    func test_containsMeetingNotesRow() throws {
-        let s = try source()
-        XCTAssertTrue(
-            s.contains("Meeting Notes"),
-            "Meeting Notes row title must be present"
-        )
-    }
-
-    // MARK: - Google search row
-
-    func test_containsGoogleSearchRow() throws {
-        let s = try source()
-        XCTAssertTrue(
-            s.contains("Google search"),
-            "Google search row title must be present"
-        )
-    }
-
-    // MARK: - Island auto-hide row
-
-    func test_containsIslandAutoHideRow() throws {
-        let s = try source()
-        XCTAssertTrue(
-            s.contains("Auto-hide island"),
-            "island auto-hide row title must be present"
-        )
-    }
-
-    /// Like volume-duck: binds to an injected `IslandIdlePreferences` via a local
-    /// mirror, not the cache/network.
     func test_islandAutoHideBindsToInjectedPreferences() throws {
         let s = try source()
         XCTAssertTrue(s.contains("islandIdlePreferences"), "binds to the injected IslandIdlePreferences")
         XCTAssertTrue(s.contains("islandAutoHideEnabled"), "uses local mirror state for the binding")
     }
 
-    /// The toggle re-reads its live value on appear so a tab revisit never shows
-    /// a stale switch (same regression guard as the other rows).
-    func test_onAppearReReadsIslandAutoHide() throws {
+    /// A tab revisit recreates the view: the switches re-read their live values.
+    func test_onAppearReReadsLiveState() throws {
         let s = try source()
-        guard let appearRange = s.range(of: ".onAppear {") else {
-            XCTFail("SettingsOtherView must re-read live state in .onAppear")
-            return
-        }
-        let appearBody = s[appearRange.lowerBound...]
-        XCTAssertTrue(
-            appearBody.contains("islandAutoHideEnabled = islandIdlePreferences.isEnabled"),
-            "onAppear re-reads the island auto-hide flag"
-        )
-    }
-
-    // MARK: - Capability toggles go through injected closures
-
-    func test_togglesUseInjectedClosuresNotCacheDirectly() throws {
-        let s = try source()
-        XCTAssertTrue(s.contains("onMeetingsToggle"), "meetings toggle routes through the injected closure")
-        XCTAssertTrue(s.contains("onGoogleToggle"), "google toggle routes through the injected closure")
-        XCTAssertFalse(
-            s.contains("UserPreferencesCache"),
-            "view must not touch the cache directly — keep it pure"
-        )
-        XCTAssertFalse(
-            s.contains("URLSession"),
-            "view must not touch the network directly"
-        )
-    }
-
-    // MARK: - Live getter seeds (not static Bools)
-
-    func test_seedsAreLiveGettersNotStaticBools() throws {
-        let s = try source()
-        XCTAssertTrue(
-            s.contains("meetingsEnabled: @escaping () -> Bool"),
-            "meetings seed is a live getter closure"
-        )
-        XCTAssertTrue(
-            s.contains("googleEnabled: @escaping () -> Bool"),
-            "google seed is a live getter closure"
-        )
-        // The stale static-seed param names must be gone.
-        XCTAssertFalse(s.contains("initialMeetingsEnabled"), "no static meetings seed")
-        XCTAssertFalse(s.contains("initialGoogleEnabled"), "no static google seed")
-    }
-
-    // MARK: - State mirrors
-
-    func test_localStateForMeetingsAndGoogle() throws {
-        let s = try source()
-        XCTAssertTrue(s.contains("meetingsEnabled"), "local meetings state mirror")
-        XCTAssertTrue(s.contains("googleEnabled"), "local google state mirror")
-    }
-
-    // MARK: - Re-read on appear (regression guard)
-
-    /// The original bug: `@State` seeded once from a static Bool went stale on a
-    /// tab revisit (SwiftUI recreates the view). The fix re-reads the live
-    /// getters in `.onAppear`, exactly as volume-duck already does. Guard that
-    /// `.onAppear` refreshes all three mirrors from their live sources.
-    func test_onAppearReReadsLiveCapabilityState() throws {
-        let s = try source()
-        guard let appearRange = s.range(of: ".onAppear {") else {
-            XCTFail("SettingsOtherView must re-read live state in .onAppear")
-            return
-        }
-        let appearBody = s[appearRange.lowerBound...]
-        XCTAssertTrue(
-            appearBody.contains("volumeDuckEnabled = volumeDuckConfig.isEnabled"),
-            "onAppear re-reads the volume-duck flag"
-        )
-        XCTAssertTrue(
-            appearBody.contains("meetingsEnabled = meetingsEnabledProvider()"),
-            "onAppear re-reads the meetings capability via its live getter"
-        )
-        XCTAssertTrue(
-            appearBody.contains("googleEnabled = googleEnabledProvider()"),
-            "onAppear re-reads the google capability via its live getter"
-        )
+        let appear = try XCTUnwrap(s.range(of: ".onAppear {"))
+        let body = s[appear.lowerBound...]
+        XCTAssertTrue(body.contains("islandAutoHideEnabled = islandIdlePreferences.isEnabled"))
+        XCTAssertTrue(body.contains("screenshotProtectionEnabled = privacyPreferences.screenshotProtectionEnabled"))
     }
 }

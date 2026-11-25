@@ -2,7 +2,7 @@ import Foundation
 import OSLog
 
 /// Where a batch take goes: the provider, model and key of the route of the
-/// feature the take belongs to (API & Models), or nowhere.
+/// feature the take belongs to (Keys & models), or nowhere.
 /// WHY: .project-docs/decisions/2026-10-18-provider-batch-transcription.md
 enum ProviderBatchRoute: Equatable, Sendable {
     case soniox(apiKey: String, model: String)

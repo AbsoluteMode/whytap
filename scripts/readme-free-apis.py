@@ -3,7 +3,7 @@
 
 The offers live in one place, `APIHintsView.hints` in
 Sources/Sidekey/Settings/APIAndModels/APIHintsView.swift, which Settings ->
-API & Models -> API hints shows. This script turns the offers that need no
+Keys & models -> API hints shows. This script turns the offers that need no
 card (`access: .noCard`) into small linked cards (docs/assets/readme/
 free-api-*.svg, dark and light, logos from Resources/UsefulLinkIcons) at the
 end of README.md, under one line with the newest check date. Only the
@@ -220,7 +220,7 @@ def responsive(kind, alt, width):
     )
 
 
-# "My setup": the maintainer's own routes from Settings -> API & Models, as
+# "My setup": the maintainer's own routes from Settings -> Keys & models, as
 # they are, one column (Maxim asked on 2026-11-22: "just my setup, as it
 # actually is"). Speech runs on ElevenLabs and every text feature on Claude
 # Sonnet 5.5 with an Anthropic key (Maxim, 2026-11-22: "replace OpenRouter

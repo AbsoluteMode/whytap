@@ -331,6 +331,30 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(checked, 504)
     }
 
+    /// An independent review of that fix: other everyday ways to ask for a
+    /// setting or to mention one in passing.
+    func test_other_ways_to_ask_for_a_setting_or_mention_it_in_passing() {
+        let cases: [(String, LilBroDestination)] = [
+            ("For Drop, how do I turn Microphone on?", .tab(.permissions)),
+            ("How do I give Drop access to the Microphone?", .tab(.permissions)),
+            ("Can I use Drop without having to enable Microphone?", .feature(.drop)),
+            ("I tried using Drop with Microphone disabled. Where do I enable Microphone?", .tab(.permissions)),
+            ("Can I use Drop after I go into System Settings and enable Microphone?", .feature(.drop)),
+            ("For Drop, if prompted can I turn on Microphone?", .tab(.permissions)),
+            ("Can I use Drop if Zoom says to enable Microphone?", .feature(.drop)),
+            ("If I use Agent can I allow Accessibility?", .tab(.permissions)),
+            ("While dictating with Drop can I turn on Microphone?", .tab(.permissions)),
+            ("When I open Drop, where do I allow Microphone?", .tab(.permissions)),
+            ("Does Agent work when Accessibility is off?", .feature(.agent)),
+            ("How do I use Screenshots if Screen Recording is denied?", .feature(.screenshots)),
+            ("After allowing Microphone, how do I use Drop?", .feature(.drop)),
+            ("Can I use Subtitles with System audio?", .feature(.translateSubtitles)),
+        ]
+        for (question, expected) in cases {
+            XCTAssertEqual(destination(question), expected, question)
+        }
+    }
+
     func test_a_hotkey_is_not_an_api_key() {
         XCTAssertEqual(destination("change a hotkey"), .tab(.hotkeys))
         XCTAssertEqual(destination("where do I paste my OpenAI key"), .apiKeys)

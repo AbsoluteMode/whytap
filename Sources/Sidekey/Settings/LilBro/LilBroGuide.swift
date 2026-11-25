@@ -89,11 +89,11 @@ struct LilBroLocalGuide: LilBroBrain {
         // Screenshots"). Its own words never count as a feature's
         // ("monitoring" is not Monitor).
         // .project-docs/decisions/2026-11-24-lil-bro.md
-        let named = settingNames.compactMap { name in offset(of: name, in: q).map { (name, $0) } }
+        let named = settingNames.flatMap { name in offsets(of: name, in: q).map { (name, $0) } }
         if !named.isEmpty {
             let rest = named.reduce(q) { blank($0, pattern: NSRegularExpression.escapedPattern(for: $1.0)) }
             let found = featureMatch(in: rest)
-            let direct = named.filter { !isContext(at: $0.1, in: q, settingsBlanked: rest) }
+            let direct = named.filter { !isContext(at: $0.1, in: q) }
             let permissions = LilBroDestination.tab(.permissions)
             let toPermissions = LilBroAnswer(paragraphs: [line(for: permissions)], destination: permissions)
             // Every setting is context ("after enabling …", "with my …"): the feature.
@@ -118,30 +118,35 @@ struct LilBroLocalGuide: LilBroBrain {
 
     /// Words that put a setting in a subordinate part of the question.
     private static let contextMarkers: Set<String> = [
-        "after", "once", "when", "whenever", "while", "before", "with", "using", "if", "until", "since",
+        "after", "once", "when", "whenever", "while", "before", "with", "without", "using", "if", "until",
+        "since",
     ]
 
-    /// A marker among the seven words before the setting, within the same
-    /// part of the sentence, that leads to the setting itself: "after
-    /// enabling", "once I allow Whytap to use", "with my". A marker
-    /// followed by a feature belongs to that feature ("With Drop can I enable
-    /// Microphone?", "When using Screenshots can I allow …"), so the setting
-    /// is still the question.
-    private static func isContext(at offset: Int, in q: String, settingsBlanked rest: String) -> Bool {
+    /// Where the main question starts after a leading part: "can I", "do I",
+    /// "where", "how" ("With Drop can I enable Microphone?", "If I use Agent,
+    /// where is Accessibility?").
+    private static let mainClause = "\\b(?:(?:can|could|do|does|did|should|shall|will|would|may|must)\\s+(?:i|you|we|it|whytap)|where|how|what|which)\\b"
+
+    /// A marker before the setting in the same part of the sentence, with
+    /// the main question not yet started between them: "after enabling",
+    /// "once I allow Whytap to use", "with my", "without having to enable".
+    /// A main question after the marker ("With Drop can I enable
+    /// Microphone?", "When using Screenshots can I allow …") ends that part,
+    /// so the setting is the question again.
+    private static func isContext(at offset: Int, in q: String) -> Bool {
         let before = Array(q.prefix(offset))
         let clauseStart = before.lastIndex { ",;:.?!".contains($0) }.map { $0 + 1 } ?? 0
-        var words: [(word: String, end: Int)] = []
+        var markerEnd: Int?
         var index = clauseStart
         while index < before.count {
             guard before[index].isLetter || before[index] == "'" else { index += 1; continue }
             let start = index
             while index < before.count, before[index].isLetter || before[index] == "'" { index += 1 }
-            words.append((String(before[start..<index]), index))
+            if contextMarkers.contains(String(before[start..<index])) { markerEnd = index }
         }
-        guard let marker = words.suffix(7).last(where: { contextMarkers.contains($0.word) }) else { return false }
-        let blanked = Array(rest)
-        guard marker.end <= offset, offset <= blanked.count else { return true }
-        return featureMatch(in: String(blanked[marker.end..<offset])) == nil
+        guard let markerEnd else { return false }
+        let between = String(before[markerEnd...])
+        return between.range(of: mainClause, options: .regularExpression) == nil
     }
 
     /// "allow / grant / enable / find / where is <setting>": the verb takes
@@ -157,9 +162,29 @@ struct LilBroLocalGuide: LilBroBrain {
         let reach = "(?:(?:to use|access to|permission to use|permission for)\\s+)?"
         let place = "(?:(?:macos|mac|system|apple)\\s+)?"
         return named.contains { name in
-            let pattern = "\\b(\(verbs))\\s+" + article + recipient + reach + article + place
-                + NSRegularExpression.escapedPattern(for: name)
-            return q.range(of: pattern, options: .regularExpression) != nil
+            let setting = NSRegularExpression.escapedPattern(for: name)
+            let patterns = [
+                "\\b(\(verbs))\\s+" + article + recipient + reach + article + place + setting,
+                // "turn Microphone on", "switch the Accessibility permission on"
+                "\\b(?:turn|switch)\\s+" + article + recipient + place + setting
+                    + "\\s+(?:(?:access|permission|setting)\\s+)?on\\b",
+                // "give Drop access to the Microphone"
+                "\\b(?:give|grant)\\s+(?:[\\w']+\\s+){1,2}(?:access|permission)\\s+(?:to|for)\\s+"
+                    + article + place + setting,
+            ]
+            return patterns.contains { q.range(of: $0, options: .regularExpression) != nil }
+        }
+    }
+
+    /// Every place a setting's name starts: the same setting can be context
+    /// once and asked for later ("… with Microphone disabled. Where do I
+    /// enable Microphone?").
+    private static func offsets(of word: String, in q: String) -> [Int] {
+        guard !word.isEmpty,
+              let regex = try? NSRegularExpression(pattern: "\\b" + NSRegularExpression.escapedPattern(for: word))
+        else { return [] }
+        return regex.matches(in: q, range: NSRange(q.startIndex..., in: q)).compactMap { match in
+            Range(match.range, in: q).map { q.distance(from: q.startIndex, to: $0.lowerBound) }
         }
     }
 

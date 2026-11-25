@@ -61,9 +61,9 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     /// carry it, so Costs can replace the estimate with the exact charge.
     var usageReference: String? { clientReferenceID }
     /// Soniox revises the original's non-final tokens in every response and
-    /// sends its translation only final, a clause at a time, cut at words
-    /// (measured live on 2026-11-25: 0 of about 340 translated tokens were
-    /// non-final; no piece of over 100 began inside a word).
+    /// sends its translation only final, a clause at a time in one frame, cut
+    /// at words (measured live on 2026-11-25: 0 of about 340 translated tokens
+    /// were non-final; no piece of over 100 began inside a word).
     // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
     var streamsOriginalPreview: Bool { true }
     private let lock = NSLock()
@@ -235,6 +235,19 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
             }
             resolveStart(.success(()))
         }
+        // One response is one caption update: its final original, its
+        // translated piece whole (Soniox sends a clause as subword tokens in
+        // one frame) and the original not final yet, applied together so the
+        // overlay never shows a half-applied frame (queue #579).
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+        var update: [SpeechTranslationEvent] = []
+        var piece = ""
+        var pieceHeard = 0
+        func closePiece() {
+            guard !piece.isEmpty else { return }
+            update.append(.translationPiece(piece, elapsedMs: pieceHeard))
+            piece = ""
+        }
         // Every response carries all of the original that is not final yet.
         var heardAhead = ""
         for token in object["tokens"] as? [[String: Any]] ?? [] {
@@ -245,24 +258,28 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
             }
             switch token["translation_status"] as? String {
             case "translation":
-                let heard = lock.withLock { heardMs }
-                continuation.yield(.translation(text, elapsedMs: heard))
+                piece += text
+                pieceHeard = lock.withLock { heardMs }
             default:
+                closePiece()
                 // "original", or "none" when the spoken language is already the target.
                 let end = (token["end_ms"] as? NSNumber)?.intValue
                 if let end { lock.withLock { heardMs = max(heardMs, end) } }
-                continuation.yield(.source(text, elapsedMs: end))
+                update.append(.source(text, elapsedMs: end))
                 if (token["translation_status"] as? String) == "none" {
-                    // Nothing to translate: the original is the subtitle.
-                    continuation.yield(.translation(text, elapsedMs: end))
+                    // Nothing to translate: the original is the subtitle, a
+                    // subword at a time like any original.
+                    update.append(.translation(text, elapsedMs: end))
                 }
             }
         }
+        closePiece()
         let changed = lock.withLock { () -> Bool in
             defer { preview = heardAhead }
             return preview != heardAhead
         }
-        if changed { continuation.yield(.sourcePreview(heardAhead)) }
+        if changed { update.append(.sourcePreview(heardAhead)) }
+        if !update.isEmpty { continuation.yield(.update(update)) }
         if (object["finished"] as? Bool) == true {
             let audio = lock.withLock { acceptedBytes } / 48
             os_log("soniox translate finished session=%{public}@ audio_ms=%d", log: Self.log, type: .info,

@@ -54,7 +54,7 @@ final class SpeechTranslationLiveProbeTests: XCTestCase {
                 switch event {
                 case .source(let text, let elapsed): log(["type": "source", "text": text, "elapsed": elapsed ?? -1])
                 case .translation(let text, let elapsed): log(["type": "translation", "text": text, "elapsed": elapsed ?? -1])
-                case .sourcePreview: break
+                case .sourcePreview, .translationPiece, .update: break
                 case .closed: log(["type": "closed"])
                 case .failed(let failure): log(["type": "failed", "error": String(describing: failure)])
                 }

@@ -26,23 +26,32 @@ final class SonioxLiveProbeTests: XCTestCase {
         var now: TimeInterval { Date().timeIntervalSince(started) }
 
         func record(_ event: SpeechTranslationEvent) {
+            apply(event)
+            flush(force: false)
+        }
+
+        /// As `LiveSubtitleModel.apply`: a frame (`.update`) is applied whole.
+        private func apply(_ event: SpeechTranslationEvent) {
             let at = Int(now * 1_000)
             switch event {
             case .source(let text, let elapsed):
                 pairer.addSource(text, elapsedMs: elapsed)
                 log.append(["at": at, "kind": "source", "text": text, "elapsed": elapsed ?? -1])
-            case .translation(let text, let elapsed):
-                pairer.addTranslation(text, elapsedMs: elapsed, now: now)
+            case .translation(let text, let elapsed), .translationPiece(let text, let elapsed):
+                let whole: Bool
+                if case .translationPiece = event { whole = true } else { whole = false }
+                pairer.addTranslation(text, elapsedMs: elapsed, now: now, whole: whole)
                 log.append(["at": at, "kind": "translation", "text": text, "elapsed": elapsed ?? -1])
             case .sourcePreview(let text):
                 pairer.setPreview(text)
                 log.append(["at": at, "kind": "preview", "text": text])
+            case .update(let frame):
+                for part in frame { apply(part) }
             case .closed:
                 log.append(["at": at, "kind": "closed"])
             case .failed(let failure):
                 log.append(["at": at, "kind": "failed", "failure": "\(failure)"])
             }
-            flush(force: false)
         }
 
         func flush(force: Bool) {

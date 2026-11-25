@@ -31,24 +31,35 @@ final class SubtitleStreamingPreviewPairerTests: XCTestCase {
                        "the words past the cut continue in the next row")
     }
 
-    func testATranslatedPieceShowsWholeAtOnce() {
-        var soniox = SubtitleSpeechPairer(streamingPreview: true)
-        var openAI = SubtitleSpeechPairer()
-        soniox.addTranslation("Микрофон превращает звуковые волны", elapsedMs: 900, now: 1)
-        openAI.addTranslation("Микрофон превращает звуковые волны", elapsedMs: 900, now: 1)
-        XCTAssertEqual(soniox.showLive(now: 1).translation, "Микрофон превращает звуковые волны")
-        XCTAssertEqual(openAI.showLive(now: 1).translation, "Микрофон превращает звуковые",
-                       "OpenAI streams parts of words: its last word still waits")
+    func testAWholePieceShowsAtOnceAndADeltaWaitsForItsWord() {
+        var pairer = SubtitleSpeechPairer(streamingPreview: true)
+        pairer.addTranslation("Микрофон превращает звуковые волны", elapsedMs: 900, now: 1, whole: true)
+        XCTAssertEqual(pairer.showLive(now: 1).translation, "Микрофон превращает звуковые волны")
+        // A target-language original mirrored subword by subword.
+        pairer.addTranslation(" и зву", elapsedMs: 1_000, now: 1.1)
+        XCTAssertEqual(pairer.showLive(now: 1.1).translation, "Микрофон превращает звуковые волны и",
+                       "a delta's last word still waits for its end")
     }
 
-    func testABrokenSessionKeepsTheWholeLastPiece() {
+    func testABrokenSessionKeepsTheWholePieceAndDropsAnUnfinishedWord() {
         var pairer = SubtitleSpeechPairer(streamingPreview: true)
         pairer.addSource("Sound waves", elapsedMs: 900)
-        pairer.addTranslation("Звуковые волны", elapsedMs: 900, now: 1)
-        pairer.setPreview(" into a")
+        pairer.addTranslation("Звуковые волны", elapsedMs: 900, now: 1, whole: true)
+        pairer.addSource(" Bon", elapsedMs: 1_100)
+        pairer.addTranslation(" Bon", elapsedMs: 1_100, now: 1.1)
+        pairer.setPreview("jour")
         pairer.dropUnfinishedWord()
-        XCTAssertEqual(pairer.take(now: 1, force: true), [.init(source: "Sound waves", translation: "Звуковые волны")],
-                       "a final piece is whole words and the preview is not a pair's")
+        XCTAssertEqual(pairer.take(now: 1.2, force: true), [.init(source: "Sound waves Bon", translation: "Звуковые волны")],
+                       "the whole piece stays, the unfinished subword goes, the preview is not a pair's")
+    }
+
+    func testATargetLanguageSubwordAloneNeverSettlesAsAWord() {
+        var pairer = SubtitleSpeechPairer(streamingPreview: true)
+        pairer.addSource("Bon", elapsedMs: 200)
+        pairer.addTranslation("Bon", elapsedMs: 200, now: 1)
+        XCTAssertEqual(pairer.showLive(now: 1).translation, "")
+        pairer.dropUnfinishedWord()
+        XCTAssertEqual(pairer.take(now: 1.2, force: true).map(\.translation), [""])
     }
 
     func testOpenAISessionsKeepTheOriginalInStepWithItsTranslation() {

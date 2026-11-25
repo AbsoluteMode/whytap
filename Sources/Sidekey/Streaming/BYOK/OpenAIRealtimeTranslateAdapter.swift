@@ -12,6 +12,12 @@ enum SpeechTranslationEvent: Equatable {
     /// provider may still revise it. Each one replaces the previous; empty
     /// clears it. Only sessions with `streamsOriginalPreview` send it.
     case sourcePreview(String)
+    /// A whole translated piece (Soniox: one frame's clause), complete words
+    /// only, unlike `.translation`'s deltas that may end inside a word.
+    case translationPiece(String, elapsedMs: Int?)
+    /// One provider frame's events, applied together before the caption is
+    /// published: a frame never shows half-applied.
+    case update([SpeechTranslationEvent])
     /// The provider flushed the last audio and closed the session.
     case closed
     case failed(SpeechTranslationFailure)
@@ -48,9 +54,9 @@ protocol SpeechTranslationSession: AnyObject {
     var providerName: String { get }
     /// The provider's reference for this session in its usage logs, if any.
     var usageReference: String? { get }
-    /// The session sends `.sourcePreview` and its translation in whole-word
-    /// pieces: the live row shows the original as heard and each translated
-    /// piece at once.
+    /// The session sends `.sourcePreview` and its translation as
+    /// `.translationPiece`s, grouped per frame in `.update`: the live row
+    /// shows the original as heard and each translated piece at once.
     var streamsOriginalPreview: Bool { get }
 }
 

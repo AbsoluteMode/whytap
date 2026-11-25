@@ -48,12 +48,17 @@ struct SubtitleSpeechPairer {
 
     /// `liveOriginalAsHeard` for this pairer (tests compare both).
     var originalAsHeard = SubtitleSpeechPairer.liveOriginalAsHeard
-    /// The provider streams the original before it is final and its
-    /// translation in whole-word pieces (Soniox, `init(streamingPreview:)`):
-    /// the live row's original runs on as heard, past sentence ends still
-    /// waiting for their translation, and the translation's last word shows
-    /// at once instead of waiting `wordHold` for the next delta.
+    /// The provider streams the original before it is final (Soniox,
+    /// `init(streamingPreview:)`): the live row's original runs on as heard,
+    /// past sentence ends still waiting for their translation.
     private(set) var streamsPreview = false
+    /// Characters of the translation known to end on a whole word: a whole
+    /// piece (`addTranslation(whole:)`) shows at once instead of waiting
+    /// `wordHold`, and survives a broken session. Deltas after it (a
+    /// target-language original mirrored subword by subword) still go by
+    /// word boundaries.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+    private var wholeThrough = 0
     /// The original heard after the last final words, still revised by the
     /// provider (`setPreview`). It follows the live row's original as heard
     /// and never goes into a pair: its words reach the pairs once final.
@@ -62,7 +67,7 @@ struct SubtitleSpeechPairer {
 
     /// A session whose provider streams the original before it is final
     /// (`SpeechTranslationSession.streamsOriginalPreview`): the original
-    /// shows as heard and each translated piece at once.
+    /// shows as heard.
     init(streamingPreview: Bool = false) {
         if streamingPreview {
             originalAsHeard = true
@@ -163,12 +168,13 @@ struct SubtitleSpeechPairer {
 
     /// Characters of the translation up to its last whole word.
     private var wholeWordCount: Int {
-        if streamsPreview { return translation.count }
+        let known = min(wholeThrough, translation.count)
+        guard known < translation.count else { return known }
         let text = String(translation.map(\.character))
         guard let last = text.last, !last.isWhitespace, !SubtitleSegmenter.clauseMarks.contains(last),
               !SubtitleSegmenter.endsSentence(text) else { return translation.count }
-        guard let space = text.lastIndex(where: \.isWhitespace) else { return 0 }
-        return text.distance(from: text.startIndex, to: space)
+        guard let space = text.lastIndex(where: \.isWhitespace) else { return known }
+        return max(known, text.distance(from: text.startIndex, to: space))
     }
 
     private func text(_ characters: ArraySlice<(character: Character, elapsed: Int)>) -> String {
@@ -194,24 +200,25 @@ struct SubtitleSpeechPairer {
         preview = text
     }
 
-    mutating func addTranslation(_ text: String, elapsedMs: Int?, now: TimeInterval) {
+    /// `whole`: the text ends on a whole word (a provider's complete piece).
+    mutating func addTranslation(_ text: String, elapsedMs: Int?, now: TimeInterval, whole: Bool = false) {
         let elapsed = elapsedMs ?? lastElapsed
         lastElapsed = max(lastElapsed, elapsed)
         translation += text.map { ($0, elapsed) }
+        if whole { wholeThrough = translation.count }
         lastTranslationAt = now
     }
 
     /// The session broke off: drop a word the model had only begun, so the
     /// pairs kept on screen never end in a fragment.
     mutating func dropUnfinishedWord() {
-        guard !streamsPreview else { return }
         let text = String(translation.map(\.character))
         guard let last = text.last, !last.isWhitespace, !SubtitleSegmenter.clauseMarks.contains(last),
               !SubtitleSegmenter.endsSentence(text) else { return }
         // Never below what the live row showed in whole words (a clause mark
         // the next fragment followed without a space). A last word shown
         // only after `wordHold` may be a fragment and goes.
-        let keep = max(shownWholeTranslation,
+        let keep = max(shownWholeTranslation, min(wholeThrough, translation.count),
                        text.lastIndex(where: \.isWhitespace).map { text.distance(from: text.startIndex, to: $0) } ?? 0)
         translation.removeLast(translation.count - keep)
         shownTranslation = min(shownTranslation, translation.count)
@@ -260,6 +267,7 @@ struct SubtitleSpeechPairer {
         let translationCount = min(translation.count, max(translationCount, shownTranslation))
         let piece = translation.prefix(translationCount)
         translation.removeFirst(translationCount)
+        wholeThrough = max(0, wholeThrough - translationCount)
         let elapsed = piece.last?.elapsed ?? lastElapsed
         let translated = String(piece.map(\.character)).trimmingCharacters(in: .whitespacesAndNewlines)
         let (cutCount, sentenceEnd) = sourceCut(at: elapsed, cut: cut, translationLength: translated.count)

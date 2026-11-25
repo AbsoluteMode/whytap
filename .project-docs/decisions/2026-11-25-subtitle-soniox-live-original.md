@@ -68,8 +68,14 @@ only):
   late does not hold the next one back. When the pair settles at its cut, the
   words after the cut continue in the next row. This is the as-heard trade
   that the user chose by asking for it.
-- **Translation.** Each piece shows whole at once, with no `wordHold`, and a
-  broken session keeps its last piece whole.
+- **One frame, one update.** Each Soniox response becomes one `.update`: its
+  final original, its translated subword tokens joined into one
+  `.translationPiece`, and the new preview. `LiveSubtitleModel` applies the
+  whole update before it publishes, so the overlay never shows half a frame.
+- **Translation.** A whole piece shows at once, with no `wordHold`, and a
+  broken session keeps it. Text already in the target language (`none`) is
+  mirrored subword by subword and keeps the word-boundary rules: a lone
+  subword never shows or settles as a word.
 - **Pairs.** Pairs hold final words only, so a preview never enters one. Cuts,
   pauses and Stop work as before.
 - **OpenAI.** OpenAI sessions are unchanged: the original stays in step with
@@ -109,6 +115,17 @@ Scenario tests:
   OpenAI unchanged.
 - `SonioxSubtitlesModelTests`: the real model shows the non-final original
   before any translation, a clause whole at once, and pairs of final words.
+
+Builder review (queue #579) found three regressions in the first head, all
+fixed. A finalized word and the next preview were published one at a time,
+which showed "HelloHello". One frame's translated subwords were published one
+by one ("Bon", then the whole clause). Because whole-piece handling applied to
+everything from Soniox, a lone target-language subword survived a disconnect
+as a translation.
+
+The builder's three tests now pass. They are covered in
+`SonioxSubtitlesModelTests`, together with a word really said twice, and in
+`testATranslatedClauseInOneFrameIsOneWholePiece`.
 
 Not checked: the installed app on real system audio.
 

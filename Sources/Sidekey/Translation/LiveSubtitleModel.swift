@@ -416,28 +416,17 @@ final class LiveSubtitleModel: ObservableObject {
         for await event in translator.events {
             guard generation == token, !Task.isCancelled else { return }
             switch event {
-            case .source(let text, let elapsed):
-                receivedEvents += 1
-                pairer.addSource(text, elapsedMs: elapsed)
-                publishSoon(token: token)
-            case .sourcePreview(let text):
-                receivedEvents += 1
-                pairer.setPreview(text)
-                publishSoon(token: token)
-            case .translation(let text, let elapsed):
-                receivedEvents += 1
-                pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
-                publishSoon(token: token)
-                // Numbers only: with the adapter's arrival log, whether a delay
-                // that grows builds up at the provider or before the caption.
-                let sent = Int(translator.acceptedAudioSeconds() * 1_000)
-                os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
-                       elapsed ?? -1, sent, sent - (elapsed ?? 0))
             case .closed:
                 closedCleanly = true
             case .failed(let failure):
                 fail(.speechTranslation(failure, target: targetCode, provider: translator.providerName), token: token)
                 return
+            default:
+                // A provider frame (`.update`) is applied whole before it is
+                // published: the caption never shows half of it.
+                // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+                apply(event, translator: translator)
+                publishSoon(token: token)
             }
             if pairer.liveSource.count > 4_000 {
                 fail(.init(message: "The translation is too far behind the speech. Start again."), token: token)
@@ -458,6 +447,32 @@ final class LiveSubtitleModel: ObservableObject {
         guard generation == token else { return }
         live = ""; liveTranslation = ""; runTask = nil
         setPhase(.idle)
+    }
+
+    /// Feeds one text event to the pairer; the caller publishes.
+    private func apply(_ event: SpeechTranslationEvent, translator: SpeechTranslationSession) {
+        switch event {
+        case .source(let text, let elapsed):
+            receivedEvents += 1
+            pairer.addSource(text, elapsedMs: elapsed)
+        case .sourcePreview(let text):
+            receivedEvents += 1
+            pairer.setPreview(text)
+        case .translation(let text, let elapsed), .translationPiece(let text, let elapsed):
+            receivedEvents += 1
+            let whole: Bool
+            if case .translationPiece = event { whole = true } else { whole = false }
+            pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime, whole: whole)
+            // Numbers only: with the adapter's arrival log, whether a delay
+            // that grows builds up at the provider or before the caption.
+            let sent = Int(translator.acceptedAudioSeconds() * 1_000)
+            os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
+                   elapsed ?? -1, sent, sent - (elapsed ?? 0))
+        case .update(let frame):
+            for part in frame { apply(part, translator: translator) }
+        case .closed, .failed:
+            break
+        }
     }
 
     /// Deltas often arrive several at once: the caption is published at once

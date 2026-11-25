@@ -1,0 +1,122 @@
+---
+id: island-hover-reorder-2026-11-25
+type: decision
+title: Tools are reordered by holding a tile in the island's hover; Settings keeps only switches
+summary: In the island's hover drawer a tool tile held for 0.35 s lifts, the other tiles make way as it is dragged, and letting go keeps the order in HoverLayoutStore, the same layout Settings -> Features -> Hover lists. A short press is still a click; Settings never lifts; the lifted tool holds the drawer open; Escape restores the earlier order. Drag-and-drop is removed from the Settings Hover list, which keeps the switches and Move Up/Down for keyboard and VoiceOver.
+status: confirmed
+tags: [island, hover, toolbox, reorder, settings, features]
+canonical_for: [island-hover-reorder]
+verified_at: 2026-11-25
+sources:
+  - type: user-confirmed
+    reference: On 2026-11-24 the maintainer said he would improve the Hover itself so that a tool can be held and swapped with another in the hover, leaving on and off to the toggles (translated). On 2026-11-25, after the Settings list shipped, he said it did not drag for him, asked why Settings, and repeated that the tools should be held and dragged in the hover, since they are now switched on with toggles (translated; ORCH-TASK 103 REV 1).
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Sources/Sidekey/DynamicIsland/IslandHoverHitBridge.swift
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Sources/Sidekey/DynamicIsland/IslandView.swift
+    confirmed_at: 2026-11-25
+  - type: repository
+    reference: Tests/SidekeyTests/DynamicIsland/IslandHoverReorderTests.swift
+    confirmed_at: 2026-11-25
+related: []
+---
+
+## Context
+
+[Settings -> Features -> Hover](2026-11-24-hover-notify-monitor-screens.md)
+listed the island's tools with switches and let a row be dragged to change the
+order. Maxim meant something else: change the order in the island itself, by
+holding a tool in the hover and moving it, with the switches in Settings only
+turning tools on and off. In build 1753 the Settings drag also did not work for
+him.
+
+The island's hover is a non-activating panel over another app. Its clicks do
+not reach SwiftUI gestures; `IslandPanel.sendEvent` dispatches them through
+`IslandHoverHitBridge` against measured tile frames. A drag in the island has
+to live in that same dispatch.
+
+## Decision
+
+- **Hold to lift.** A mouse-down on a tile starts a 0.35 s timer
+  (`reorderHoldDelay`). If the button is still down and the pointer has not
+  left the tile, the tool lifts (`liftPressedTool`): the press stops being a
+  button, the tile grows (1.14x) with a shadow, the others dim slightly and a
+  light haptic is played on trackpads. A shorter press stays an ordinary click;
+  leaving the tile before the timer cancels both, as before.
+- **Drag over cells.** At the lift the bridge measures every tile's frame once
+  by slot (`IslandHoverReorder.cells`). While the button is held, the pointer
+  over a cell calls `HoverLayoutStore.placeTool` for that slot, so the tool
+  takes that place at once and the others slide (tiles are identified by
+  tool, animated with a spring unless Reduce Motion is on). Outside the grid
+  nothing moves. Settings' cell means "last, before Settings".
+- **Let go.** The release keeps the order (it is already saved) and never
+  activates the tool. Escape puts the order from before the lift back. Hiding
+  the island, the drawer closing for another reason, or the next press end the
+  drag with the order reached.
+- **The drawer stays.** A lifted tool counts as an interaction that holds the
+  hover drawer (`interactionHeld` and `isHoverExpanded` in `IslandView`), so
+  passing outside the island mid-drag does not fold it; the window keeps the
+  mouse sequence it owns.
+- **What cannot lift:** Settings (always last), coming-soon tiles, search
+  results.
+- **Settings -> Features -> Hover** loses drag-and-drop (handle, drop targets,
+  `HoverToolDragModel`, the internal drag type). It keeps the list in the
+  island's order, the switches, the shortcut editor, and Move Up / Move Down /
+  Move to Top in the context menu and VoiceOver actions, which are the way to
+  reorder without a pointer. The screen's text says the order is changed by
+  holding a tool in the island.
+
+## Why
+
+- It is what Maxim asked for: the order is a property of the island, so it is
+  changed where it is seen; Settings only decides what is in it.
+- Measuring the cells once and mapping "pointer over cell i" to "tool at
+  place i" is idempotent. A tile sliding under the pointer during the
+  animation cannot send the tool back, which a per-tile "entered" rule could.
+- The window-level dispatch is the only layer that reliably receives the
+  island's mouse events; a SwiftUI `onDrag`/`DragGesture` would miss the first
+  mouse in this inactive overlay.
+- A hold delay keeps every existing click unchanged.
+- Settings' drag in 1753 most likely failed because its drag type was
+  declared with `UTType(exportedAs:)` without a matching
+  `UTExportedTypeDeclarations` entry in the app's Info.plist, so the drop
+  targets never accepted it. Fixing it would have kept two ways to drag the
+  same order; removing it is simpler and matches the decision above.
+
+## What we tested
+
+`IslandHoverReorderTests` drives the bridge as the window does, on an
+offscreen window that is never shown, with an isolated `HoverLayoutStore`: a
+short click opens the tool and moves nothing; a press released before the hold
+delay never lifts; leaving the tile before the hold cancels click and lift;
+holding lifts after the real timer and the release opens nothing; dragging
+right moves the tool live and the order survives a restart and is the list in
+Settings; no flip-back while the pointer stays on a cell; dragging back and
+onto Settings (Settings stays last, is not opened); leaving the grid and
+releasing outside keeps the last place; Escape restores the order; the drawer
+closing or the island hiding ends the drag; the next press is a click again;
+Settings cannot lift and still opens; only tools in the island that work can
+lift; the cell under the pointer is the target; a lifted tool holds the drawer
+without the pointer. `HoverFeatureTests` keep the list, switches, shortcuts
+and Move actions. The full `swift test` ran.
+
+Not checked in a running app (feature sessions do not launch it): the feel of
+the 0.35 s hold, the lift animation and the drawer staying open while the
+pointer leaves the island during a real drag.
+
+## Rejected
+
+- Fixing the Settings drag (declaring the type) and keeping both: two places
+  to drag one order, and Maxim asked for the island.
+- A drag that starts immediately on movement: it would turn a slightly moving
+  click into a reorder and break every existing tile click.
+- Per-tile "entered" targets with a last-target guard (the Settings model):
+  in a grid, animated tiles pass under the pointer; fixed cells cannot flip.
+- Removing a tool by dragging it out of the island: on and off stay with the
+  switches in Settings, as Maxim asked.
+- Auto-scrolling a long grid while dragging: the drawer shows up to its
+  scroll height; a tool beyond it is moved with Move actions in Settings.
+
+2026-11-25, ORCH-TASK 103 REV 1.

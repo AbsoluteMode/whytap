@@ -75,11 +75,47 @@ struct IslandHoverPointerTracking {
     mutating func discardSequence() { captured = nil; consumesSequence = false }
 }
 
+/// A tool lifted by a long press in the island's tool grid. The grid's cells
+/// stay where they were when the tool was lifted; only which tool sits in
+/// which cell changes. The pointer over a cell puts the lifted tool in that
+/// cell, so a tile sliding under the pointer never sends it back.
+// WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+struct IslandHoverReorder: Equatable {
+    let tool: HoverTool
+    /// The order before the lift, for Escape.
+    let original: [HoverTool]
+    /// Cell frames in window coordinates by slot index, measured at the lift.
+    let cells: [Int: CGRect]
+
+    /// The slot under the pointer, or nil outside the grid (the tool stays).
+    func slot(at point: CGPoint) -> Int? {
+        cells.filter { $0.value.contains(point) }.keys.min()
+    }
+
+    /// Settings is always last and cannot be lifted; a tool that is not in
+    /// the island has no cell to leave.
+    static func canLift(_ tool: HoverTool?, slots: [HoverTool]) -> Bool {
+        guard let tool, tool != .settings, !tool.isComingSoon else { return false }
+        return slots.contains(tool)
+    }
+}
+
 /// The reporters are geometry sources, never mouse catchers. Dispatch remains
 /// at NSWindow.sendEvent, the layer that receives first mouse in this overlay.
 @MainActor
 final class IslandHoverHitBridge: ObservableObject {
     @Published private(set) var pressedID: IslandHoverHitTargetID?
+    /// The tool held up by a long press, while it is being moved.
+    @Published private(set) var reorderingTool: HoverTool?
+    var isReordering: Bool { reorderingTool != nil }
+    /// The layout the island shows. A long press on a tile moves tools here,
+    /// the same store Settings -> Features -> Hover shows.
+    weak var layoutStore: HoverLayoutStore?
+    /// How long a tile is held before it lifts (a shorter press is a click).
+    var reorderHoldDelay: Duration = .milliseconds(350)
+    private var reorder: IslandHoverReorder?
+    private var holdTask: Task<Void, Never>?
+    private weak var pressWindow: NSWindow?
     private var tracking = IslandHoverPointerTracking()
     private var targets: [UUID: WeakTarget] = [:]
     private var regions: [IslandHoverHitTargetID.Surface: WeakRegion] = [:]
@@ -97,9 +133,14 @@ final class IslandHoverHitBridge: ObservableObject {
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
         if !enabled, tracking.captured?.id.surface != .agentAnswer { cancelPress() }
+        // The drawer closed for another reason (an agent, a meeting): the
+        // order reached so far is already saved.
+        if !enabled { finishReorder() }
     }
 
     func cancelPress() {
+        holdTask?.cancel()
+        holdTask = nil
         tracking.cancel()
         pressedID = nil
     }
@@ -108,8 +149,79 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func discardSequence() {
+        holdTask?.cancel()
+        holdTask = nil
         tracking.discardSequence()
         pressedID = nil
+        finishReorder()
+    }
+
+    // MARK: - Long-press reorder
+
+    /// Lifts the tile still held since mouse-down. Called by the hold timer;
+    /// returns false when the press was released, left its tile or is not a
+    /// tool that can move. From here on the press never activates the tool.
+    @discardableResult
+    func liftPressedTool() -> Bool {
+        holdTask?.cancel()
+        holdTask = nil
+        guard reorder == nil, let captured = tracking.captured, captured.id.surface == .tile,
+              let store = layoutStore, IslandHoverReorder.canLift(captured.id.tool, slots: store.slots),
+              let tool = captured.id.tool, let window = pressWindow else { return false }
+        var cells: [Int: CGRect] = [:]
+        for tile in snapshots(in: window, allowsHover: true, allowsAnswer: false)
+        where tile.id.surface == .tile && tile.context == captured.context {
+            if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
+        }
+        reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
+        tracking.cancel()
+        pressedID = nil
+        reorderingTool = tool
+        NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
+        return true
+    }
+
+    /// The lifted tool takes the place of the cell under the pointer at once.
+    func moveLiftedTool(to point: CGPoint) {
+        guard let reorder, let store = layoutStore, let slot = reorder.slot(at: point),
+              store.slots.firstIndex(of: reorder.tool) != slot else { return }
+        withAnimation(Self.reorderAnimation) { _ = store.placeTool(reorder.tool, at: slot) }
+    }
+
+    /// Releasing keeps the order the island shows (it is already saved).
+    func finishReorder() {
+        guard reorder != nil else { return }
+        reorder = nil
+        reorderingTool = nil
+    }
+
+    /// Escape puts every tool back where it was before the lift.
+    func cancelReorder() {
+        guard let reorder else { return }
+        if let store = layoutStore, store.slots != reorder.original {
+            withAnimation(Self.reorderAnimation) { store.replaceEditableSlots(with: reorder.original) }
+        }
+        finishReorder()
+        tracking.discardSequence()
+    }
+
+    private static var reorderAnimation: Animation? {
+        NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+            ? nil : .spring(response: 0.26, dampingFraction: 0.84)
+    }
+
+    private func scheduleLift() {
+        holdTask?.cancel()
+        holdTask = nil
+        guard tracking.captured?.id.surface == .tile,
+              IslandHoverReorder.canLift(tracking.captured?.id.tool, slots: layoutStore?.slots ?? []) else { return }
+        let owner = tracking.captured?.owner
+        let delay = reorderHoldDelay
+        holdTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self, self.tracking.captured?.owner == owner else { return }
+            self.liftPressedTool()
+        }
     }
 
     func setSurface(_ surface: IslandHoverHitTargetID.Surface) {
@@ -194,19 +306,36 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) -> Bool {
+        finishReorder()
         let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
         let consumed = tracking.begin(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
+        pressWindow = window
+        scheduleLift()
         return consumed
     }
 
     func mouseDragged(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        if reorder != nil {
+            moveLiftedTool(to: point)
+            return
+        }
         let targets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
         tracking.move(at: point, targets: targets, enabled: allowed || allowsAnswer)
         pressedID = tracking.captured?.id
+        if tracking.captured == nil { holdTask?.cancel(); holdTask = nil }
     }
 
     func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
+        holdTask?.cancel()
+        holdTask = nil
+        if reorder != nil {
+            moveLiftedTool(to: point)
+            finishReorder()
+            tracking.discardSequence()
+            pressedID = nil
+            return
+        }
         let liveTargets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
         let owner = tracking.end(at: point, targets: liveTargets, enabled: allowed || allowsAnswer)
         let action = owner.flatMap { targets[$0]?.view?.activate }

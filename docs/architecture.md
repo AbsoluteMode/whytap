@@ -1458,11 +1458,8 @@ Case need nothing and read Ready. WHY:
 
 Hover, Notify and Monitor are features with their own screens too. Hover
 (HoverFeatureView) lists the island's tools in HoverLayoutStore order with
-Settings pinned last, then the tools that are off. A row is held and dragged
-(HoverToolDragModel: over another row the tool takes its place live; a row
-sliding under the pointer is not a new target; an off tool dropped on a row
-joins there; dropped on More tools it leaves). Only the internal tool drag
-type can update the list. A tool's switch removes it or puts
+Settings pinned last, then the tools that are off. The list is not dragged:
+tools are reordered in the island (below). A tool's switch removes it or puts
 it back before Settings; Move Up/Down/to Top are in its menu and VoiceOver
 actions. The island observes the same store, so it changes at once. The
 chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
@@ -1473,6 +1470,19 @@ sources (NotificationSourcesGroups, shared with the Notifications tab) or the
 dashboards with freshness (a MonitorStore that is only read, never started,
 so Settings never polls servers), and CodingAgentPromptCard: the marks of
 Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
+
+Island tool reorder: in the hover drawer's tool grid, a tile held for
+IslandHoverHitBridge.reorderHoldDelay (0.35 s) without leaving it lifts
+(liftPressedTool; Settings and coming-soon tools never lift). The bridge
+measures the grid's cells once (IslandHoverReorder.cells); while the button is
+held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
+so the island and Settings -> Features -> Hover change at once and a tile
+sliding under the pointer cannot send the tool back. A lifted tool is drawn
+larger with a shadow, holds the drawer open (IslandView interactionHeld and
+isHoverExpanded), and its release never activates it. Escape restores the
+order before the lift; hide, drawer close or the next press end the drag with
+the order reached. A shorter press stays an ordinary click. WHY:
+.project-docs/decisions/2026-11-25-island-hover-reorder.md
 CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md

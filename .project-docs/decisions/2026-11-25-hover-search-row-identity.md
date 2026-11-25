@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHoverSearchResultsListTests.swift
     confirmed_at: 2026-11-25
-related: [.project-docs/decisions/2026-10-17-hover-tool-search.md]
+related: [2026-10-17-hover-tool-search.md]
 ---
 
 ## Context

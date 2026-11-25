@@ -291,7 +291,7 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
                                        size: CGSize(width: TranslationView.overlayContentWidth,
                                                     height: TranslationView.captionHeight),
                                        inset: TranslationView.bandInset)
-        for offered in [TranslationView.captionHeight, TranslationView.stoppedCaptionHeight, 86, 60] {
+        for offered in [TranslationView.captionHeight, 108, 86, 60] {
             let height = layout.height(proposed: offered)
             let cap = layout.columnCap(height: height)
             XCTAssertLessThanOrEqual(cap + 2 * TranslationView.bandInset.height, height * (1 - SteadyPairsLayout.topFade))
@@ -321,23 +321,13 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         XCTAssertLessThanOrEqual(column.fittingSize.height, 100.5)
     }
 
-    /// While capture runs (Connecting, listening) the caption keeps one size,
-    /// whatever it shows. Stop shows the stopped box at once, while the last
-    /// translation still settles (finishing).
-    func testTheRunningBoxKeepsOneSizeAndStopShowsTheStoppedBoxAtOnce() {
-        for phase in [SubtitlePhase.connecting, .listening] {
-            for hasRows in [false, true] {
-                XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: hasRows, hasIssue: false),
-                               .fixed(TranslationView.captionHeight), "\(phase), rows: \(hasRows)")
-            }
-        }
-        for phase in [SubtitlePhase.finishing, .idle] {
-            XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: true, hasIssue: false),
-                           .fixed(TranslationView.stoppedCaptionHeight), "\(phase)")
-            XCTAssertEqual(TranslationView.overlayCaption(phase: phase, hasRows: false, hasIssue: false), .hidden)
-        }
-        XCTAssertEqual(TranslationView.overlayCaption(phase: .failed, hasRows: true, hasIssue: true), .hugging)
+    /// Nothing shows instead of pairs once a session stopped: Stop shows the
+    /// stopped box at once, while the last translation still settles.
+    func testStopShowsNoStatusWhileTheLastTranslationSettles() {
+        XCTAssertEqual(SubtitleCaption.status(hasRows: false, phase: .connecting, issue: nil), "Connecting…")
+        XCTAssertEqual(SubtitleCaption.status(hasRows: false, phase: .listening, issue: nil), "Waiting for speech…")
         XCTAssertNil(SubtitleCaption.status(hasRows: false, phase: .finishing, issue: nil))
+        XCTAssertNil(SubtitleCaption.status(hasRows: true, phase: .listening, issue: nil))
     }
 
     /// The panel can be resized down to its minimum width: the caption takes
@@ -355,17 +345,24 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
         let columns = layout.columns(width: narrow)
         XCTAssertEqual(columns.source + columns.translation + 18 + 2 * TranslationView.bandInset.width, narrow, accuracy: 1)
         XCTAssertEqual(layout.columns(width: narrow), columns)
+        // The overlay's caption fills the box the user sized, any size.
+        var filling = layout
+        filling.fills = true
+        XCTAssertEqual(filling.width(proposed: 2_000), 2_000)
+        XCTAssertEqual(filling.height(proposed: 500), 500)
+        XCTAssertEqual(filling.width(proposed: nil), TranslationView.overlayContentWidth)
+        XCTAssertEqual(filling.columns(width: 2_000), filling.columns(width: 2_000))
     }
 
     /// The subtitles panel cannot be made smaller than the size every state
-    /// was rendered at: 360 pt wide (the caption narrows) and its own height.
+    /// was rendered at (`SubtitleOverlayFrame.minimumSize`).
     func testTheSubtitlesPanelMinimumIsTheCheckedSize() throws {
         let controller = TranslationWindowController(textModel: TextTranslationModel(makeService: { FixtureTranslator() }),
                                                      subtitleModel: LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }),
                                                      openSettings: { _ in }, activityChanged: { _ in })
         let panel = try XCTUnwrap(controller.window)
         controller.resize(for: .subtitles)
-        XCTAssertEqual(panel.minSize, NSSize(width: 360, height: TranslationWindowController.subtitleSize.height))
+        XCTAssertEqual(panel.minSize, SubtitleOverlayFrame.minimumSize)
         controller.resize(for: .text)
         XCTAssertEqual(panel.minSize.height, 120)
     }

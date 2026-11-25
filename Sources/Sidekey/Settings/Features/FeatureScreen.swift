@@ -147,6 +147,7 @@ struct FeatureVideoStrip: View {
     var bundle: Bundle = FeatureVideo.resourceBundle
     @Environment(\.isEnabled) private var isEnabled
     @State private var playing = false
+    @State private var poster: NSImage?
     @FocusState private var focused: Bool
 
     /// The feature's first clip.
@@ -196,18 +197,54 @@ struct FeatureVideoStrip: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
+        .task(id: url) {
+            guard let url, let video = clip.video else { poster = nil; return }
+            poster = FeatureVideoPoster.cached(url)
+            if poster == nil { poster = await FeatureVideoPoster.load(video, url: url) }
+        }
     }
 
-    private func strip(available: Bool) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 6, style: .continuous)
+    /// The clip's frame with a play mark, or a quiet tile until it is read
+    /// (and for a clip not made yet).
+    // WHY: .project-docs/decisions/2026-11-25-feature-clip-posters.md
+    private func thumbnail(available: Bool) -> some View {
+        let shape = RoundedRectangle(cornerRadius: 6, style: .continuous)
+        let image = available ? (poster ?? clip.video?.url(in: bundle).flatMap(FeatureVideoPoster.cached)) : nil
+        return ZStack {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: Self.posterSize.width, height: Self.posterSize.height)
+                    .clipShape(shape)
+                    .overlay { shape.strokeBorder(MacSettingsTheme.sep, lineWidth: 1) }
+                Circle()
+                    .fill(.black.opacity(0.55))
+                    .frame(width: 24, height: 24)
+                    .overlay {
+                        Image(systemName: playing ? "stop.fill" : "play.fill")
+                            .font(.system(size: 10, weight: .bold))
+                            .foregroundStyle(.white)
+                            .offset(x: playing ? 0 : 1)
+                    }
+            } else {
+                shape
                     .fill(MacSettingsTheme.hover)
-                    .frame(width: 54, height: 34)
+                    .frame(width: Self.posterSize.width, height: Self.posterSize.height)
                 Image(systemName: available ? "play.fill" : "film")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(available ? MacSettingsTheme.text : MacSettingsTheme.text3)
             }
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// 16:9, like the clips.
+    static let posterSize = CGSize(width: 96, height: 54)
+
+    private func strip(available: Bool) -> some View {
+        HStack(spacing: 12) {
+            thumbnail(available: available)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Watch how \(clip.name) works")
                     .font(.system(size: 13))

@@ -1438,8 +1438,10 @@ island editors. The same switches remain in the island. Every
 feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
 (snapshot, view models, environment, the setup actions and the per-check
 notes), FeatureScreenHeader, FeatureSwitchCard (status in words), the Needs
-setup box, FeatureVideoStrip (a bundled clip plays in place on click; without
-one a "Video coming" row says what it will show), FeatureShortcutsGroup
+setup box, FeatureVideoStrip (a frame of the bundled clip at
+FeatureVideo.posterSeconds with a play mark, read once by FeatureVideoPoster;
+the clip plays in place on click; without one a "Video coming" row says what
+it will show), FeatureShortcutsGroup
 (one recording session shared by the shortcut rows), FeatureNeedsGroup, the
 feature's own settings and FeatureExamplesGroup. FeatureScreens maps each
 feature with place .screen to its screen. Drop keeps DropFeatureView around

@@ -126,7 +126,7 @@ struct NativeAgentTools {
                 return .init(text: await NativeAgentCommand().run(command: command, directory: directory, helper: helper))
             case "web_search":
                 guard let key = keys.read(account: TavilySearch.keychainAccount) else {
-                    throw NativeAgentError.message("Connect Tavily in Settings → API & Models → API keys to search the web.")
+                    throw NativeAgentError.message("Connect Tavily in Settings → Keys & models → API keys to search the web.")
                 }
                 return .init(text: try await tavily.search(query: required("query"), key: key))
             case "fetch_url":

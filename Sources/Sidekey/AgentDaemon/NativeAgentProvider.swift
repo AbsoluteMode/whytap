@@ -33,7 +33,7 @@ final class NativeAgentProvider: CLIProvider {
     func probe() async -> ConnectOutcome {
         await MainActor.run {
             let options = AgentSettingsStore.shared.options(for: .native)
-            guard options.model != nil else { return .failed(code: "missing_model", message: "Choose an Agent model in API & Models.") }
+            guard options.model != nil else { return .failed(code: "missing_model", message: "Choose an Agent model in Keys & models.") }
             guard self.key(for: options) != nil else { return .notLoggedIn }
             do { _ = try workspace(); return .connected(sessionID: nil) }
             catch { return .failed(code: "workspace", message: "Couldn’t prepare the agent workspace. Check its permissions.") }
@@ -80,8 +80,8 @@ final class NativeAgentProvider: CLIProvider {
     private func runTurn(prompt: String, resumeSessionID: String?, options: AgentRunOptions,
                          continuation: AsyncStream<AgentSSEEvent>.Continuation) async throws {
         try Task.checkCancellation()
-        guard let key = key(for: options) else { throw NativeAgentError.message("Add the selected model provider’s API key in Settings → API & Models.") }
-        guard options.openCodeModelSpec?.toolCall != false else { throw NativeAgentError.message("This model does not support tools. Choose a tool-capable Agent model in API & Models.") }
+        guard let key = key(for: options) else { throw NativeAgentError.message("Add the selected model provider’s API key in Settings → Keys & models.") }
+        guard options.openCodeModelSpec?.toolCall != false else { throw NativeAgentError.message("This model does not support tools. Choose a tool-capable Agent model in Keys & models.") }
         let directory = try options.workingDirectory ?? workspace()
         let route = "\(options.openCodeProvider.rawValue)/\(options.model ?? "")/\(options.openRouterProvider ?? "")"
         var conversation = NativeAgentConversation.load(directory: directory, resumeID: resumeSessionID, route: route)

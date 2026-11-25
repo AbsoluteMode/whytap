@@ -120,7 +120,7 @@ final class SpeechTranslationModelTests: XCTestCase {
         let model = makeModel(translator: { throw SpeechTranslationFailure.refusedKey }, audio: audio)
         model.start()
         try await wait(model.phase == .failed)
-        XCTAssertEqual(model.issue, TranslationIssue(message: "OpenAI refused the API key. Check it in API & Models.",
+        XCTAssertEqual(model.issue, TranslationIssue(message: "OpenAI refused the API key. Check it in Keys & models.",
                                                      feature: .subtitlesAudio))
         XCTAssertEqual(audio.started, 0, "system audio is never captured")
     }

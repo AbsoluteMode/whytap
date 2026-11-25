@@ -155,6 +155,13 @@ accepted the second version.
   files other sessions own (the window controller, the main menu); a rename
   is its own change, decided by Maxim.
 
+- API & Models is called "Keys & models" (approved mockup): in the sidebar,
+  in every message that sends the reader there and in the current documents.
+  The raw tab id `apiAndModels`, `whytap://settings/apiAndModels`, type and
+  file names stay. Dated decisions and old plans keep the name they had.
+  The OpenCode install hint now points to Settings → Features → Agent instead
+  of the removed Settings → Other.
+
 ## Why
 
 - A newcomer thinks in features, not in providers, routes and permissions.

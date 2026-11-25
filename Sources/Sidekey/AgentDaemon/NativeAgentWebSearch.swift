@@ -2,7 +2,7 @@ import Foundation
 
 /// How the native Agent searches the web in one turn. By default the Agent
 /// model's provider searches (built-in); Tavily serves a model without it, or
-/// when the user picks Tavily in API & Models → Models → Search. A Tavily key
+/// when the user picks Tavily in Keys & models → Models → Search. A Tavily key
 /// alone never replaces built-in search.
 /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
 enum NativeAgentWebSearch: Equatable {
@@ -89,17 +89,17 @@ enum NativeAgentWebSearch: Equatable {
         case .none:
             return "Web search is off: this model has no built-in search and Tavily is not connected. When the request "
                 + "asks to search or needs current or recent facts, answer in one line that web search is off for this model "
-                + "and is turned on by adding a Tavily key in Settings → API & Models → API keys (status unverified); "
+                + "and is turned on by adding a Tavily key in Settings → Keys & models → API keys (status unverified); "
                 + "never present recent facts as checked."
         case .refused:
             return "Web search is unavailable for this request: the provider refused its search tool. When the request "
                 + "needs current or recent facts, answer in one line that web search is unavailable for this model right now "
-                + "and that Tavily can be chosen in Settings → API & Models → Models → Search (status unverified); "
+                + "and that Tavily can be chosen in Settings → Keys & models → Models → Search (status unverified); "
                 + "never present recent facts as checked."
         }
     }
 
-    /// What the Search row in API & Models → Models shows: "Anthropic ·
+    /// What the Search row in Keys & models → Models shows: "Anthropic ·
     /// built-in", "OpenRouter · web", "Tavily", "Off — add a Tavily key".
     var label: String {
         switch self {
@@ -155,7 +155,7 @@ enum NativeAgentWebSearch: Equatable {
     }
 }
 
-/// The Search row of API & Models → Models, beside Speech and LLM: what the
+/// The Search row of Keys & models → Models, beside Speech and LLM: what the
 /// Agent searches with now and what its menu offers.
 /// WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
 struct AgentSearchRow: Equatable {

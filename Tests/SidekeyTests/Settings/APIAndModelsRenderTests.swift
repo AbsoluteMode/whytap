@@ -3,7 +3,7 @@ import SwiftUI
 import XCTest
 @testable import Sidekey
 
-/// Offscreen pictures of API & Models for review, written only when
+/// Offscreen pictures of Keys & models for review, written only when
 /// `EXODIA_APIMODELS_RENDER_DIR` is set. Every network path is a stub.
 @MainActor
 final class APIAndModelsRenderTests: XCTestCase {

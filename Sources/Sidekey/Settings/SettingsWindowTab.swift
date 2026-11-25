@@ -43,8 +43,11 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
         switch self {
         case .features:
             return "Features"
+        // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+        // Keep the case and return adjacent for the landing catalog parser.
+        // The raw id `apiAndModels` stays: links and saved selections use it.
         case .apiAndModels:
-            return "API & Models"
+            return "Keys & models"
         case .hotkeys:
             return "Hotkeys"
         case .permissions:

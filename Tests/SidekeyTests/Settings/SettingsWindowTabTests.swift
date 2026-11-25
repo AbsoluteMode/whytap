@@ -64,7 +64,7 @@ final class SettingsWindowTabTests: XCTestCase {
     }
 
     func test_api_and_models_tab_metadata() {
-        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "API & Models")
+        XCTAssertEqual(SettingsWindowTab.apiAndModels.title, "Keys & models")
         XCTAssertEqual(SettingsWindowTab.apiAndModels.id, "apiAndModels")
         XCTAssertNil(SettingsWindowTab.apiAndModels.pdfResourceName)
         XCTAssertEqual(SettingsWindowTab.apiAndModels.fallbackSystemImageName, "cpu")
@@ -72,7 +72,7 @@ final class SettingsWindowTabTests: XCTestCase {
 
     func test_no_models_tab_left() {
         let titles = SettingsWindowTab.allCases.map { $0.title }
-        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by API & Models")
+        XCTAssertFalse(titles.contains("Models"), "the Models tab is replaced by Keys & models")
     }
 
     func test_hotkeys_tab_metadata_uses_hover_icon() {

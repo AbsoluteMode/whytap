@@ -349,14 +349,14 @@ private struct SettingsNotesUnavailableView: View {
 final class SettingsWindowSelection: ObservableObject {
     @Published var selectedTab: SettingsWindowTab
     @Published var notesController: MeetingsContentController?
-    /// The feature row API & Models scrolls to and highlights; the tab clears it once shown.
+    /// The feature row Keys & models scrolls to and highlights; the tab clears it once shown.
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
     @Published var shownFeature: AppFeature?
-    /// The part of API & Models to open on next (API keys from a feature's
-    /// screen); API & Models takes it once and clears it.
+    /// The part of Keys & models to open on next (API keys from a feature's
+    /// screen); Keys & models takes it once and clears it.
     @Published var requestedAPISection: APIAndModelsSection?
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
@@ -404,13 +404,13 @@ final class SettingsWindowSelection: ObservableObject {
         }
     }
 
-    /// Opens API & Models on one feature's row.
+    /// Opens Keys & models on one feature's row.
     func focus(_ feature: AIFeature) {
         select(.apiAndModels)
         focusedFeature = feature
     }
 
-    /// Opens API & Models on API keys, where a key is added or replaced:
+    /// Opens Keys & models on API keys, where a key is added or replaced:
     /// "Add a key" and "Fix the key" on a feature's screen.
     // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
     func showAPIKeys() {

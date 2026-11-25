@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/DropFeatureTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md, 2026-11-25-settings-features-refresh.md]
+related: [2026-11-20-other-feature-videos.md, 2026-11-23-keyboard-control-protection-override.md, 2026-11-24-feature-screen-videos.md, 2026-11-25-settings-features-refresh.md, 2026-11-24-lil-bro.md]
 ---
 
 ## Context

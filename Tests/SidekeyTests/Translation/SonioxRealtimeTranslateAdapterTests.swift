@@ -50,8 +50,10 @@ final class SonioxRealtimeTranslateAdapterTests: XCTestCase {
     }
 
     /// The scenario Maxim tests: the original word by word and its
-    /// translation in one stream. Only final tokens are passed on; a
-    /// translation is placed at the end of the original it translates.
+    /// translation in one stream. Final tokens are passed on as they come; the
+    /// original not final yet follows as a preview that each response
+    /// replaces; a translation is placed at the end of the original it
+    /// translates.
     func testTheOriginalAndItsTranslationArriveInOneStream() async throws {
         let transport = StubWebSocketTransport()
         transport.deliverText(Self.ready)
@@ -82,15 +84,55 @@ final class SonioxRealtimeTranslateAdapterTests: XCTestCase {
         """#)
         let received = await events(session)
         XCTAssertEqual(received, [
+            .sourcePreview("Hel"),
             .source("Hello", elapsedMs: 400),
             .source(" world.", elapsedMs: 900),
+            .sourcePreview(""),
             .translation("Привет,", elapsedMs: 900),
             .translation(" мир.", elapsedMs: 900),
+            .sourcePreview(" Next"),
             .source(" Next one.", elapsedMs: 1_800),
+            .sourcePreview(""),
             .translation(" Следующий.", elapsedMs: 1_800),
             .closed,
         ])
+        XCTAssertTrue(session.streamsOriginalPreview)
         XCTAssertTrue(transport.cancelled, "the socket is released after finished")
+    }
+
+    /// What is heard shows before Soniox finalizes it (REV 3): each response's
+    /// non-final original is the preview, a response that repeats it sends
+    /// nothing, and a non-final translation (Soniox sends none, measured)
+    /// never enters it; text already in the target language does.
+    func testTheOriginalNotFinalYetIsAPreviewEachResponseReplaces() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(Self.ready)
+        let session = try await open(transport)
+        transport.deliverText(#"{"tokens":[{"text":"To","is_final":false,"translation_status":"original","end_ms":200}]}"#)
+        transport.deliverText(#"{"tokens":[{"text":"To","is_final":false,"translation_status":"original","end_ms":200}]}"#)
+        transport.deliverText(#"""
+        {"tokens":[
+          {"text":"Today","is_final":true,"translation_status":"original","end_ms":400},
+          {"text":" we","is_final":false,"translation_status":"original","end_ms":600},
+          {"text":" ta","is_final":false,"translation_status":"original","end_ms":800},
+          {"text":"Сего","is_final":false,"translation_status":"translation"},
+          {"text":" да","is_final":false,"translation_status":"none","end_ms":900},
+          {"text":"<end>","is_final":false}
+        ]}
+        """#)
+        await session.endInput()
+        transport.deliverText(#"""
+        {"tokens":[{"text":" we talk.","is_final":true,"translation_status":"original","end_ms":1000}],"finished":true}
+        """#)
+        let received = await events(session)
+        XCTAssertEqual(received, [
+            .sourcePreview("To"),
+            .source("Today", elapsedMs: 400),
+            .sourcePreview(" we ta да"),
+            .source(" we talk.", elapsedMs: 1_000),
+            .sourcePreview(""),
+            .closed,
+        ])
     }
 
     /// Speech already in the target language has nothing to translate: it is
@@ -475,6 +517,55 @@ final class SonioxSubtitlesModelTests: XCTestCase {
         XCTAssertEqual(model.lines.map(\.source), ["Welcome back everyone.", "Today we talk about rivers."])
         XCTAssertEqual(model.lines.map(\.translation), ["С возвращением, все.", "Сегодня поговорим о реках."])
         XCTAssertEqual(audio.finished, 1)
+    }
+
+    /// Maxim on build 1761: "still slow". The original shows as Soniox hears
+    /// it, before it is final and before any translation; a sentence whose
+    /// translation runs late never holds the next one back; each translated
+    /// clause shows whole at once; the pair then settles with final words
+    /// only.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+    func testTheOriginalShowsAsHeardAndATranslatedClauseAtOnce() async throws {
+        let transport = StubWebSocketTransport()
+        transport.deliverText(#"{"tokens":[]}"#)
+        let audio = FixtureSubtitleAudio()
+        let model = makeModel(transport, audio: audio)
+        model.start()
+        try await wait(model.phase == .listening)
+        transport.deliverText(#"{"tokens":[{"text":"First","is_final":false,"translation_status":"original","end_ms":300}]}"#)
+        try await wait(model.live == "First")
+        XCTAssertEqual(model.liveTranslation, "", "nothing waits for the translation")
+        transport.deliverText(#"""
+        {"tokens":[
+          {"text":"First, the microphone turns sound waves","is_final":true,"translation_status":"original","end_ms":2000},
+          {"text":" into a list.","is_final":true,"translation_status":"original","end_ms":2900},
+          {"text":" Those num","is_final":false,"translation_status":"original","end_ms":3300}
+        ]}
+        """#)
+        try await wait(model.live.hasSuffix("Those num"))
+        XCTAssertEqual(model.live, "First, the microphone turns sound waves into a list. Those num",
+                       "a sentence still waiting for its translation does not stop the next")
+        transport.deliverText(#"{"tokens":[{"text":"Сначала микрофон превращает звуковые волны","is_final":true,"translation_status":"translation"}]}"#)
+        try await wait(model.liveTranslation.hasSuffix("волны"))
+        XCTAssertEqual(model.liveTranslation, "Сначала микрофон превращает звуковые волны",
+                       "the clause's last word does not wait for the next piece")
+        transport.deliverText(#"""
+        {"tokens":[
+          {"text":" в список.","is_final":true,"translation_status":"translation"},
+          {"text":" Those numbers","is_final":false,"translation_status":"original","end_ms":3600}
+        ]}
+        """#)
+        try await wait(model.lines.count == 1)
+        XCTAssertEqual(model.lines.first?.source, "First, the microphone turns sound waves into a list.")
+        XCTAssertEqual(model.lines.first?.translation, "Сначала микрофон превращает звуковые волны в список.")
+        try await wait(model.live == "Those numbers")
+        model.stop()
+        try await wait(transport.sent.last == .text(""))
+        transport.deliverText(#"{"tokens":[{"text":" Those numbers.","is_final":true,"translation_status":"original","end_ms":3800}],"finished":true}"#)
+        try await wait(model.phase == .idle)
+        XCTAssertNil(model.issue)
+        XCTAssertEqual(model.lines.map(\.source), ["First, the microphone turns sound waves into a list.", "Those numbers."],
+                       "a preview never enters a pair; the final words do")
     }
 
     func testABrokenSonioxSocketKeepsThePairsAndSaysSo() async throws {

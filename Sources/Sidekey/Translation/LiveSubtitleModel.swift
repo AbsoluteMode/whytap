@@ -352,6 +352,9 @@ final class LiveSubtitleModel: ObservableObject {
     /// pairs. Stop flushes the audio and waits for the provider's close.
     private func runSpeechTranslation(_ translator: SpeechTranslationSession, token: UUID) async throws {
         self.translator = translator
+        // Soniox: the original shows as heard, the translation piece by piece.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+        pairer = SubtitleSpeechPairer(streamingPreview: translator.streamsOriginalPreview)
         let source = makeAudio()
         self.source = source
         let relay = SubtitleAudioRelay(source: source) { [weak self] in
@@ -416,6 +419,10 @@ final class LiveSubtitleModel: ObservableObject {
             case .source(let text, let elapsed):
                 receivedEvents += 1
                 pairer.addSource(text, elapsedMs: elapsed)
+                publishSoon(token: token)
+            case .sourcePreview(let text):
+                receivedEvents += 1
+                pairer.setPreview(text)
                 publishSoon(token: token)
             case .translation(let text, let elapsed):
                 receivedEvents += 1

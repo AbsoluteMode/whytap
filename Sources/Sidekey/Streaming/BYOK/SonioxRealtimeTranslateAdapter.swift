@@ -60,6 +60,12 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     /// The `client_reference_id` sent in the config: Soniox's usage logs
     /// carry it, so Costs can replace the estimate with the exact charge.
     var usageReference: String? { clientReferenceID }
+    /// Soniox revises the original's non-final tokens in every response and
+    /// sends its translation only final, a clause at a time, cut at words
+    /// (measured live on 2026-11-25: 0 of about 340 translated tokens were
+    /// non-final; no piece of over 100 began inside a word).
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+    var streamsOriginalPreview: Bool { true }
     private let lock = NSLock()
     private var receiveTask: Task<Void, Never>?
     private var ready: CheckedContinuation<Void, Error>?
@@ -73,6 +79,8 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     private var acceptedBytes = 0
     /// End of the last final original token: the translation's position.
     private var heardMs = 0
+    /// The last `.sourcePreview` sent, so an unchanged one is not repeated.
+    private var preview = ""
     private let clientReferenceID = UUID().uuidString
     /// Numbers and codes only; never transcript text, keys or audio.
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "soniox-realtime-translate")
@@ -227,9 +235,14 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
             }
             resolveStart(.success(()))
         }
+        // Every response carries all of the original that is not final yet.
+        var heardAhead = ""
         for token in object["tokens"] as? [[String: Any]] ?? [] {
-            guard (token["is_final"] as? Bool) == true, let text = token["text"] as? String, !text.isEmpty,
-                  text != "<end>", text != "<fin>" else { continue }
+            guard let text = token["text"] as? String, !text.isEmpty, text != "<end>", text != "<fin>" else { continue }
+            guard (token["is_final"] as? Bool) == true else {
+                if (token["translation_status"] as? String) != "translation" { heardAhead += text }
+                continue
+            }
             switch token["translation_status"] as? String {
             case "translation":
                 let heard = lock.withLock { heardMs }
@@ -245,6 +258,11 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
                 }
             }
         }
+        let changed = lock.withLock { () -> Bool in
+            defer { preview = heardAhead }
+            return preview != heardAhead
+        }
+        if changed { continuation.yield(.sourcePreview(heardAhead)) }
         if (object["finished"] as? Bool) == true {
             let audio = lock.withLock { acceptedBytes } / 48
             os_log("soniox translate finished session=%{public}@ audio_ms=%d", log: Self.log, type: .info,

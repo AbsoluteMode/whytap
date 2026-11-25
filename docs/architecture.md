@@ -548,7 +548,11 @@ Translation tools:
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run on Soniox stt-rt-v6 one-way live translation
   (SonioxRealtimeTranslateAdapter: original and translation in one WebSocket,
-  final tokens only, a translation placed at its original's end_ms) whenever
+  a translation placed at its original's end_ms; the live row shows the
+  original as heard from non-final tokens (.sourcePreview), past sentences
+  still waiting for translation, and each final translated clause whole at
+  once; pairs hold final words only. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md) whenever
   the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
   only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
   -> Subtitles is an ordinary row whose model is preselected by the key:

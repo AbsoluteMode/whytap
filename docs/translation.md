@@ -30,8 +30,8 @@ In **Settings → Keys & models**, choose:
   keys: **Soniox · stt-rt-v6** when your Soniox key (the one Drop uses) is
   saved in **API keys**, otherwise **OpenAI · gpt-realtime-translate** with
   your OpenAI key. Both hear and translate in one step. Soniox gives each
-  phrase's translation about a second after it ends, for about $0.12 per hour
-  of audio; OpenAI runs 3–4 seconds behind, for about $3.06 per hour. There is
+  phrase's translation about a second after it ends and shows the original
+  as it is heard, about a second behind, for about $0.12 per hour of audio; OpenAI runs 3–4 seconds behind, for about $3.06 per hour. There is
   nothing to choose. Without either key the row looks like any other row that
   cannot run yet, its menu offers **Add a Soniox key…**, and **Start** says
   "Subtitles need a Soniox or OpenAI key" with a button to **API & Models**. Subtitles models chosen in earlier versions (Speech and LLM) are no

@@ -46,10 +46,35 @@ public final class FileDescriptorLineSource: MCPLineSource, @unchecked Sendable 
     private var eof = false
     private var drained = false
     private var closed = false
+    /// An unterminated frame is kept only up to this size; the rest of that
+    /// line is dropped and the server answers the truncated frame as too large.
+    private let maxFrameBytes: Int
+    /// Bytes of the current unterminated frame kept in `buffer`.
+    private var frameLength = 0
 
-    public init(fd: Int32 = STDIN_FILENO, prefill: Data = Data()) {
+    public static let defaultMaxFrameBytes = 512 * 1024 + 1 // just above AppControlMCPServer.maxLineBytes
+
+    public init(fd: Int32 = STDIN_FILENO, prefill: Data = Data(), maxFrameBytes: Int = defaultMaxFrameBytes) {
         self.fd = fd
-        self.buffer = prefill
+        self.buffer = Data()
+        self.maxFrameBytes = maxFrameBytes
+        append(prefill)
+    }
+
+    /// Lock held (or in init). Keeps at most `maxFrameBytes` of every frame.
+    private func append<Bytes: Collection>(_ chunk: Bytes) where Bytes.Element == UInt8 {
+        var rest = chunk[...]
+        while !rest.isEmpty {
+            let newline = rest.firstIndex(of: 0x0A)
+            let segment = rest[..<(newline ?? rest.endIndex)]
+            let kept = segment.prefix(max(0, maxFrameBytes - frameLength))
+            buffer.append(contentsOf: kept)
+            frameLength += kept.count
+            guard let newline else { break }
+            buffer.append(0x0A)
+            frameLength = 0
+            rest = rest[rest.index(after: newline)...]
+        }
     }
 
     public func waitForLine() -> Bool {
@@ -70,7 +95,7 @@ public final class FileDescriptorLineSource: MCPLineSource, @unchecked Sendable 
             if !drained && !closed && !eof {
                 var chunk = [UInt8](repeating: 0, count: 64 * 1024)
                 let count = read(fd, &chunk, chunk.count)
-                if count > 0 { buffer.append(contentsOf: chunk[0..<count]) }
+                if count > 0 { append(chunk[0..<count]) }
                 else if count == 0 || errno != EINTR && errno != EAGAIN { eof = true }
             }
             condition.unlock()
@@ -84,20 +109,24 @@ public final class FileDescriptorLineSource: MCPLineSource, @unchecked Sendable 
     public func takeLine() -> String? {
         condition.lock(); defer { condition.unlock() }
         guard !drained, !closed else { return nil }
-        return Self.splitLine(&buffer, atEOF: eof)
+        let line = Self.splitLine(&buffer, atEOF: eof)
+        if buffer.isEmpty { frameLength = 0 }
+        return line
     }
 
     public func drainForHandover() -> Data {
         condition.lock(); defer { condition.unlock() }
         drained = true
         let data = buffer
-        buffer = Data()
+        buffer = Data(); frameLength = 0
         return data
     }
 
     public func restore(_ data: Data) {
         condition.lock()
-        buffer = data + buffer
+        let after = buffer
+        buffer = Data(); frameLength = 0
+        append(data); append(after)
         drained = false
         condition.broadcast()
         condition.unlock()

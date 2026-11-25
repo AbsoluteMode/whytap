@@ -49,11 +49,19 @@ public final class CaseMCPServer {
             let (reply, replayable) = handover.track { handle(line: line) }
             if replayable {
                 let unread = source.drainForHandover()
-                if handover.handOver(initialized: true, probed: true, input: Data((line + "\n").utf8) + unread) {
+                switch handover.handOver(initialized: true, probed: true, held: [line], waiting: [],
+                                         unread: unread, write: write) {
+                case .replaced:
                     source.close()
                     return
+                case .answeredCarried:
+                    source.restore(Data())
+                    continue
+                case .answerHere, .waitForCompleteFrame:
+                    // A frame still arriving: answer this request here; the
+                    // next denied request tries again.
+                    source.restore(unread)
                 }
-                source.restore(unread)
             }
             if let reply { write(reply) }
         }

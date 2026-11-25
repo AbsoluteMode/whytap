@@ -42,19 +42,29 @@ final class HelperBuildHandoverTests: XCTestCase {
     private final class Disk: HelperBuildIdentifying, @unchecked Sendable {
         private let lock = NSLock()
         private var _hasNewBuild: Bool
-        init(hasNewBuild: Bool) { _hasNewBuild = hasNewBuild }
+        private var _resumes = true
+        init(hasNewBuild: Bool, resumes: Bool = true) { _hasNewBuild = hasNewBuild; _resumes = resumes }
         var hasNewBuild: Bool { get { lock.withLock { _hasNewBuild } } set { lock.withLock { _hasNewBuild = newValue } } }
-        func newBuildAvailable() -> Bool { hasNewBuild }
+        var resumes: Bool { get { lock.withLock { _resumes } } set { lock.withLock { _resumes = newValue } } }
+        func verifiedReplacement() -> HelperReplacement? {
+            hasNewBuild ? HelperReplacement(codeHashes: [Data(repeating: 7, count: 20)], resumesSession: resumes) : nil
+        }
     }
 
     /// Everything one helper image's relauncher was asked to hand over.
     private final class Relaunches: @unchecked Sendable {
         private let lock = NSLock()
         private var _states: [MCPResumeState] = []
+        private var _fresh = 0
         let succeed: Bool
         init(succeed: Bool = true) { self.succeed = succeed }
         var states: [MCPResumeState] { lock.withLock { _states } }
-        func record(_ state: MCPResumeState) -> Bool { lock.withLock { _states.append(state) }; return succeed }
+        /// Execs into a build that cannot resume (no state).
+        var fresh: Int { lock.withLock { _fresh } }
+        func record(_ state: MCPResumeState?) -> Bool {
+            lock.withLock { if let state { _states.append(state) } else { _fresh += 1 } }
+            return succeed
+        }
     }
 
     private final class Output: @unchecked Sendable {
@@ -107,7 +117,8 @@ final class HelperBuildHandoverTests: XCTestCase {
         private let done = DispatchSemaphore(value: 0)
         var probes = 0
         init(app: App, stdin: Stdin, disk: Disk, resumed: MCPResumeState? = nil,
-             relaunches: Relaunches = Relaunches(), now: @escaping () -> Date = Date.init, caseMCP: Bool = false) {
+             relaunches: Relaunches = Relaunches(), now: @escaping () -> Date = Date.init, caseMCP: Bool = false,
+             beforeProbeSends: @escaping () -> Void = {}) {
             self.app = app; self.stdin = stdin; self.relaunches = relaunches
             handover = MCPBuildHandover(identity: disk, resumed: resumed, now: now, relaunch: relaunches.record)
             let client = BuildFollowingBrokerClient(inner: app, handover: handover)
@@ -120,6 +131,7 @@ final class HelperBuildHandoverTests: XCTestCase {
                 } else {
                     AppControlMCPServer(accessProbe: { [self] in
                         probes += 1
+                        beforeProbeSends()
                         _ = try? client.send(.appControl(AppControlRequest("request_access")))
                     }, caseServer: CaseMCPServer(client: client, executablePath: "/A.app/Contents/Helpers/whytap"),
                     cancellableCall: { request, cancellation in
@@ -156,7 +168,8 @@ final class HelperBuildHandoverTests: XCTestCase {
         let disk = Disk(hasNewBuild: false)
         let old = Image(app: app, stdin: session, disk: disk)
         session.send(Self.initialize, Self.initialized, Self.call(2))
-        waitFor({ old.output.ids() == [1, 2] && old.probes == 1 }, "the first build answers normally")
+        waitFor({ old.output.ids() == [1, 2] && app.operations.contains("request_access") }, "the first build answers normally")
+        Thread.sleep(forTimeInterval: 0.05) // the probe's completion is recorded after its answer
 
         // The update: the bundle is replaced and the app trusts only the new file.
         disk.hasNewBuild = true
@@ -332,6 +345,172 @@ final class HelperBuildHandoverTests: XCTestCase {
         XCTAssertTrue(fresh.output.lines.joined().contains("OPENAI_API_KEY"))
     }
 
+    // MARK: Builder review 565
+
+    func test_a_cancellation_already_buffered_before_exec_is_never_dispatched() throws {
+        let session = Stdin()
+        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: Disk(hasNewBuild: true),
+                          resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
+        let handover = image.handover
+        // Hold the gate's handover until both lines are buffered: the call is
+        // denied, then its cancellation sits unread when the handover drains.
+        session.send(Self.call(2), #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}"#,
+                     Self.call(3))
+        XCTAssertTrue(image.waitUntilStopped())
+        _ = handover
+        let state = try XCTUnwrap(image.relaunches.states.first)
+        let carried = String(decoding: state.input, as: UTF8.self)
+        XCTAssertFalse(carried.contains(#""id":2"#), "the cancelled call is not replayed")
+        XCTAssertFalse(carried.contains("notifications/cancelled"))
+        XCTAssertTrue(carried.contains(#""id":3"#))
+    }
+
+    func test_carried_input_drops_a_call_cancelled_later_in_the_same_bytes() {
+        let cancel2 = #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":2}}"#
+        let cancel9 = #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}"#
+        XCTAssertEqual(MCPCarriedInput.droppingCancelled([Self.call(2), Self.call(3), cancel2, cancel9]),
+                       [Self.call(3), cancel9], "an unmatched cancellation is harmless and kept")
+        // A cancellation before its request (id reuse) does not cancel it.
+        XCTAssertEqual(MCPCarriedInput.droppingCancelled([cancel2, Self.call(2)]), [cancel2, Self.call(2)])
+    }
+
+    func test_an_access_probe_still_in_flight_is_repeated_by_the_new_image() throws {
+        let session = Stdin()
+        let probeStarted = DispatchSemaphore(value: 0)
+        let releaseProbe = DispatchSemaphore(value: 0)
+        let app = App(.deniesStaleHelper)
+        let stale = Image(app: app, stdin: session, disk: Disk(hasNewBuild: true), beforeProbeSends: {
+            probeStarted.signal()
+            _ = releaseProbe.wait(timeout: .now() + 5)
+        })
+        session.send(Self.initialize, Self.initialized)
+        XCTAssertEqual(probeStarted.wait(timeout: .now() + 5), .success)
+        session.send(Self.call(2))
+        XCTAssertTrue(stale.waitUntilStopped())
+        releaseProbe.signal()
+        let state = try XCTUnwrap(stale.relaunches.states.first)
+        XCTAssertTrue(state.initialized)
+        XCTAssertFalse(state.probed, "scheduled is not done: the probe had sent nothing")
+    }
+
+    func test_a_replacement_that_cannot_resume_answers_every_carried_request_then_takes_over() {
+        let session = Stdin()
+        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: Disk(hasNewBuild: true, resumes: false),
+                          resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
+        session.send(Self.call(2), Self.call(3))
+        XCTAssertTrue(image.waitUntilStopped())
+        XCTAssertEqual(image.relaunches.fresh, 1, "exec into the rollback build without a state")
+        XCTAssertEqual(image.relaunches.states.count, 0)
+        XCTAssertEqual(image.output.ids().sorted(), [2, 3], "the triggering call gets an explicit answer")
+        XCTAssertTrue(image.output.lines.allSatisfy { $0.contains("Retry the request") })
+    }
+
+    func test_a_rollback_waits_for_a_frame_still_arriving_before_exec() {
+        let session = Stdin()
+        let image = Image(app: App(.deniesStaleHelper), stdin: session, disk: Disk(hasNewBuild: true, resumes: false),
+                          resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
+        let next = Self.call(3)
+        let split = next.index(next.startIndex, offsetBy: 12)
+        session.sendPartial(Self.call(2) + "\n" + String(next[..<split]))
+        Thread.sleep(forTimeInterval: 0.3)
+        XCTAssertEqual(image.relaunches.fresh, 0, "no exec while a request is half written")
+        session.sendPartial(String(next[split...]) + "\n")
+        XCTAssertTrue(image.waitUntilStopped())
+        XCTAssertEqual(image.relaunches.fresh, 1)
+        XCTAssertEqual(image.output.ids().sorted(), [2, 3])
+    }
+
+    func test_the_file_is_verified_again_right_before_exec() {
+        final class FlipDisk: HelperBuildIdentifying, @unchecked Sendable {
+            private let lock = NSLock()
+            private var calls = 0
+            func verifiedReplacement() -> HelperReplacement? {
+                lock.withLock { calls += 1; return calls == 1 ? HelperReplacement(codeHashes: [Data([1])], resumesSession: true) : nil }
+            }
+        }
+        let relaunches = Relaunches()
+        let handover = MCPBuildHandover(identity: FlipDisk(), resumed: nil, relaunch: relaunches.record)
+        handover.observe(.denied(reason: .untrustedHelper))
+        XCTAssertTrue(handover.isRequested)
+        let outcome = handover.handOver(initialized: true, probed: true, held: [Self.call(2)], waiting: [],
+                                        unread: Data(), write: { _ in })
+        XCTAssertEqual(outcome, .answerHere, "the file no longer verifies: nothing is executed")
+        XCTAssertEqual(relaunches.states.count + relaunches.fresh, 0)
+        XCTAssertFalse(handover.isRequested)
+    }
+
+    func test_an_envelope_over_the_shared_bound_is_answered_here() {
+        let relaunches = Relaunches()
+        let handover = MCPBuildHandover(identity: Disk(hasNewBuild: true), resumed: nil, relaunch: relaunches.record)
+        handover.observe(.denied(reason: .untrustedHelper))
+        let big = Data(repeating: 0x61, count: MCPResumeState.maxEncodedBytes)
+        XCTAssertEqual(handover.handOver(initialized: true, probed: true, held: [Self.call(2)], waiting: [],
+                                         unread: big, write: { _ in }), .answerHere)
+        XCTAssertEqual(relaunches.states.count, 0, "the writer never execs with an envelope the reader rejects")
+        XCTAssertNil(MCPResumeState(initialized: true, probed: true, input: big, relaunches: []).encoded())
+        let fits = MCPResumeState(initialized: true, probed: true, input: Data(repeating: 0x61, count: 1024), relaunches: [])
+        XCTAssertEqual(fits.encoded().flatMap(MCPResumeState.decode), fits)
+    }
+
+    func test_too_many_waiting_lines_abandon_the_handover_and_everything_is_answered_here() {
+        let session = Stdin()
+        let app = App(.trusts)
+        let release = DispatchSemaphore(value: 0)
+        app.onSend = { request in
+            if case .appControl(let call) = request, call.operation == "meetings_search" { release.wait() }
+        }
+        let image = Image(app: app, stdin: session, disk: Disk(hasNewBuild: true),
+                          resumed: MCPResumeState(initialized: true, probed: true, input: Data(), relaunches: []))
+        session.send(Self.call(2, "whytap_meetings_search"))
+        Thread.sleep(forTimeInterval: 0.1)
+        app.onSend = nil
+        app.mode = .deniesStaleHelper
+        session.send(Self.call(3))
+        waitFor({ image.handover.isRequested }, "the update is noticed")
+        let pings = (0...MCPBuildHandover.maxWaitingLines).map { #"{"jsonrpc":"2.0","id":\#(1000 + $0),"method":"ping"}"# }
+        for ping in pings { session.send(ping) }
+        waitFor({ image.output.ids().count >= pings.count + 1 }, "pings and the denied call are answered here")
+        app.mode = .trusts
+        release.signal()
+        finish(image, session, answering: [2, 3])
+        XCTAssertEqual(image.relaunches.states.count, 0)
+    }
+
+    func test_an_image_that_is_not_the_verified_replacement_refuses_carried_requests() {
+        let carried = MCPCarriedInput.join([Self.call(2), #"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":9}}"#])
+            + Data(#"{"jsonrpc":"2.0","id":3"#.utf8)
+        let state = MCPResumeState(initialized: true, probed: true, input: carried, relaunches: [Date()],
+                                   expectedCodeHashes: [Data(repeating: 1, count: 20)])
+        XCTAssertEqual(state.admitted(runningHash: Data(repeating: 1, count: 20), write: { _ in XCTFail("no refusal") }), state)
+        var written: [String] = []
+        let admitted = state.admitted(runningHash: Data(repeating: 2, count: 20)) { written.append($0) }
+        XCTAssertEqual(written.count, 1, "one explicit error for the one carried request")
+        XCTAssertTrue(written[0].contains(#""id":2"#) && written[0].contains("-32000"))
+        XCTAssertEqual(admitted.input, Data(#"{"jsonrpc":"2.0","id":3"#.utf8), "the unfinished frame stays for stdin to complete")
+        XCTAssertFalse(admitted.probed)
+        XCTAssertEqual(admitted.relaunches.count, 1)
+    }
+
+    func test_an_unterminated_frame_is_bounded() {
+        let stdin = Stdin()
+        let source = FileDescriptorLineSource(fd: stdin.read, maxFrameBytes: 64)
+        stdin.sendPartial(String(repeating: "x", count: 200))
+        stdin.sendPartial(String(repeating: "y", count: 200) + "\nnext\n")
+        stdin.close()
+        XCTAssertTrue(source.waitForLine())
+        XCTAssertEqual(source.takeLine(), String(repeating: "x", count: 64), "kept only up to the bound")
+        XCTAssertTrue(source.waitForLine())
+        XCTAssertEqual(source.takeLine(), "next")
+        XCTAssertEqual(FileDescriptorLineSource.defaultMaxFrameBytes, AppControlMCPServer.maxLineBytes + 1,
+                       "a truncated frame is always answered as too large")
+    }
+
+    func test_identity_without_a_baseline_accepts_no_replacement() {
+        let identity = SystemHelperBuildIdentity(executable: URL(fileURLWithPath: CommandLine.arguments[0]))
+        XCTAssertNil(identity.verifiedReplacement(), "fail closed before the signer is known")
+        XCTAssertNil(SystemHelperBuildIdentity(executable: URL(fileURLWithPath: "/nonexistent/whytap")).verifiedReplacement())
+    }
+
     // MARK: Resume state transfer
 
     func test_resume_state_travels_through_an_inherited_unlinked_file_only() throws {
@@ -357,7 +536,5 @@ final class HelperBuildHandoverTests: XCTestCase {
 
     func test_running_code_hash_comes_from_the_kernel() {
         XCTAssertEqual(SystemHelperBuildIdentity.runningHash()?.count, 20)
-        // A file that is not a signed helper is never a "new build".
-        XCTAssertFalse(SystemHelperBuildIdentity(executable: URL(fileURLWithPath: "/nonexistent/whytap")).newBuildAvailable())
     }
 }

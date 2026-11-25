@@ -1884,12 +1884,15 @@ the app tools. Case -> Connect writes this `whytap` entry and removes its older
 .project-docs/decisions/2026-11-21-one-whytap-mcp-server.md A long-lived
 `whytap mcp` / `app mcp` / `app screen-mcp` / `case mcp` started before an
 update follows the new build in place: when the broker denies it as an
-untrusted helper and the helper file on disk is a different validly signed
-build (kernel cdhash of the running code vs. the file's), it `execve`s that
+untrusted helper and the helper file on disk is a different build that strictly
+validates (all architectures) against the designated requirement the helper
+recorded from itself at start (kernel cdhash vs. the file's), it `execve`s that
 file with the same pid, parent and stdio, carrying the MCP handshake and every
-unanswered request (`MCPBuildHandover`, `FileDescriptorLineSource`); at most
-three relaunches per 120 s, never into an invalid file. The broker check is
-unchanged. WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+unanswered, uncancelled request (`MCPBuildHandover`, `FileDescriptorLineSource`);
+the new image resumes only as the verified code. A rollback build without the
+protocol gets the carried requests answered with an explicit retry error first.
+At most three relaunches per 120 s; ad-hoc helpers never follow. The broker
+check is unchanged. WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
 The app-control server reads
 live build/activity/route metadata and changes allowlisted models, provider pins,
 Drop mode, languages and idle

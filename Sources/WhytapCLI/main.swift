@@ -19,12 +19,20 @@ let resumed = MCPResumeState.takeFromEnvironment()
 var handover: MCPBuildHandover?
 if CaseHostBundle.bundleID(forExecutable: hostExecutable) != nil,
    [["mcp"], ["app", "mcp"], ["app", "screen-mcp"], ["case", "mcp"]].contains(arguments) {
+    let identity = SystemHelperBuildIdentity(executable: URL(fileURLWithPath: resolvedPath))
+    // The signer this image was launched with; read while the file still is
+    // the running code, off the handshake path.
+    identity.captureBaselineInBackground()
+    // Resume only as the exact build the previous image verified.
+    let admitted = resumed?.admitted(runningHash: SystemHelperBuildIdentity.runningHash()) {
+        FileHandle.standardOutput.write(Data(($0 + "\n").utf8))
+    }
     handover = MCPBuildHandover(
-        identity: SystemHelperBuildIdentity(executable: URL(fileURLWithPath: resolvedPath)),
-        resumed: resumed,
+        identity: identity,
+        resumed: admitted,
         relaunch: { state in
             HelperRelauncher.exec(path: resolvedPath, arguments: CommandLine.arguments, state: state)
-            return false // exec returned: it failed
+            return false // exec returned: nothing was executed
         })
 }
 if let bundleID = CaseHostBundle.bundleID(forExecutable: hostExecutable) {

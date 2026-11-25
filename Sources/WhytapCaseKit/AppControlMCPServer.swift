@@ -51,44 +51,59 @@ public final class AppControlMCPServer {
         let pending = AppControlPendingCalls()
         let output = NSLock()
         let group = DispatchGroup()
-        // Orders taking a line, starting or finishing a call, and the handover,
-        // so every unanswered request is either in flight or carried over.
+        // Orders taking a line, a call's move from pending to answered or held,
+        // and the handover, so every unanswered request is in exactly one place.
         let gate = NSLock()
         var initialized = handover?.resumed?.initialized ?? false
-        var probed = handover?.resumed?.probed ?? false
+        // Scheduled once per connection; carried as done only once the app
+        // answered it, so a new image repeats a probe the old one never sent.
+        var probeScheduled = handover?.resumed?.probed ?? false
+        var probeDone = probeScheduled
         var inFlight = 0
         var held: [(key: String, line: String, reply: String?)] = []
-        var deferred: [String] = []
+        var waiting: [String] = []
+        var waitingBytes = 0
         var finished = false
         func emit(_ line: String?) {
             guard let line else { return }
             output.withLock { write(line) }
         }
         func startProbe() {
-            guard initialized, !probed, !screenOnly, let accessProbe else { return }
-            probed = true
-            DispatchQueue.global(qos: .utility).async { accessProbe() }
+            guard initialized, !probeScheduled, !screenOnly, let accessProbe else { return }
+            probeScheduled = true
+            DispatchQueue.global(qos: .utility).async {
+                accessProbe()
+                gate.withLock { probeDone = true }
+            }
+        }
+        // Gate held. Answers here: held calls get their own replies, the
+        // waiting lines go back in front of the unread input.
+        func answerHere(unread: Data) {
+            held.forEach { emit($0.reply) }
+            let restored = MCPCarriedInput.join(waiting) + unread
+            held = []; waiting = []; waitingBytes = 0
+            source.restore(restored)
         }
         // Gate held. Execs the new build once nothing is in flight; returns
-        // only when the handover failed (then everything is answered here) or
-        // a test relauncher stood in for exec (then this server stops).
+        // only when nothing was executed or a test relauncher stood in for it.
         func handOverIfReady() {
             guard let handover, !finished, inFlight == 0, handover.isRequested else { return }
-            var carried = Data()
-            for line in held.map(\.line) + deferred { carried.append(Data((line + "\n").utf8)) }
             let unread = source.drainForHandover()
-            if handover.handOver(initialized: initialized, probed: probed, input: carried + unread) {
-                finished = true; held = []; deferred = []
+            switch handover.handOver(initialized: initialized, probed: probeDone, held: held.map(\.line),
+                                     waiting: waiting, unread: unread, write: emit) {
+            case .replaced:
+                finished = true; held = []; waiting = []
                 source.close()
-                return
+            case .answerHere:
+                answerHere(unread: unread)
+            case .waitForCompleteFrame:
+                source.restore(unread)
+            case .answeredCarried:
+                held = []; waiting = []; waitingBytes = 0
+                source.restore(Data())
             }
-            held.forEach { emit($0.reply) }
-            var restored = Data()
-            for line in deferred { restored.append(Data((line + "\n").utf8)) }
-            held = []; deferred = []
-            source.restore(restored + unread)
         }
-        // A resumed image probes only if the old one could not.
+        // A resumed image probes only if the old one's probe never completed.
         startProbe()
         while source.waitForLine() {
             gate.lock()
@@ -103,7 +118,12 @@ public final class AppControlMCPServer {
                 } else if let cancelledKey, pending.contains(cancelledKey) {
                     pending.cancel(cancelledKey) // still in flight in this image
                 } else {
-                    deferred.append(line)
+                    waiting.append(line)
+                    waitingBytes += line.utf8.count + 1
+                    if waiting.count > MCPBuildHandover.maxWaitingLines || waitingBytes > MCPBuildHandover.maxWaitingBytes {
+                        handover?.abandon()
+                        answerHere(unread: Data())
+                    }
                 }
                 handOverIfReady()
                 gate.unlock()
@@ -122,8 +142,10 @@ public final class AppControlMCPServer {
                 DispatchQueue.global(qos: .userInitiated).async { [self] in
                     let (reply, replayable) = handover.map { $0.track { handle(line: line, cancellation: cancellation) } }
                         ?? (handle(line: line, cancellation: cancellation), false)
-                    pending.end(key)
                     gate.withLock {
+                        // Leaves pending and becomes answered or held in one
+                        // step: a cancellation always finds it in one of them.
+                        pending.end(key)
                         inFlight -= 1
                         if replayable && !cancellation.isCancelled && !finished {
                             held.append((key, line, reply))

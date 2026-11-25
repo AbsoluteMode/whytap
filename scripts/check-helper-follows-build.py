@@ -1,23 +1,26 @@
 #!/usr/bin/env python3
 """Live check: a running `whytap mcp` keeps serving after its helper file is
-replaced by another build. Uses a throwaway bundle and a fake broker that makes
-the app's trust check (running cdhash == cdhash of the valid helper on disk).
-Never touches /Applications/Whytap.app or the user's broker socket.
+replaced by another build, with a real `execve`.
+
+Uses a throwaway `Selftest.app`, a throwaway keychain with two self-signed
+code-signing certificates (the helper's signer and an impostor) and a fake
+broker that makes the app's trust check: the kernel's cdhash of the peer's
+running code must equal the cdhash of the validly signed helper on disk.
+Never touches /Applications/Whytap.app, the user's keychains or broker socket.
 
 usage: scripts/check-helper-follows-build.py [path/to/built/whytap]
 WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
 """
-import ctypes, json, os, plistlib, re, shutil, socket, subprocess, sys, tempfile, threading, time, uuid
+import ctypes, json, os, plistlib, re, secrets, shutil, socket, struct, subprocess, sys, tempfile, threading, time, uuid
 
 BUILT = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else ".build/debug/whytap")
 BUNDLE_ID = "ai.whytap.selftest-" + uuid.uuid4().hex[:8]
 SUPPORT = os.path.expanduser(f"~/Library/Application Support/{BUNDLE_ID}")
 SOCKET = os.path.join(SUPPORT, "case-broker.sock")
 LOCAL_PEERPID = 0x002
-
-
 LIBC = ctypes.CDLL(None, use_errno=True)
 CS_OPS_CDHASH = 5
+RESUME_KEY = b"WHYTAP_MCP_RESUME_V1_FD"
 
 
 def running_cdhash(pid):
@@ -34,10 +37,68 @@ def file_cdhash(path):
     return match.group(1) if match else None
 
 
-def install(helper, identifier, corrupt=False):
+def run(command):
+    subprocess.run(command, check=True, capture_output=True)
+
+
+class Keychain:
+    """A temporary keychain, never added to the search list."""
+    PASSWORD = "selftest"
+
+    def __init__(self, work):
+        self.path = os.path.join(work, "selftest.keychain-db")
+        run(["security", "create-keychain", "-p", self.PASSWORD, self.path])
+        run(["security", "unlock-keychain", "-p", self.PASSWORD, self.path])
+        for name in ("Whytap Selftest Signer", "Whytap Selftest Impostor"):
+            self.add_identity(work, name)
+        run(["security", "set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s",
+             "-k", self.PASSWORD, self.path])
+
+    def add_identity(self, work, name):
+        stem = os.path.join(work, uuid.uuid4().hex)
+        with open(stem + ".cfg", "w") as f:
+            f.write(f"[req]\ndistinguished_name=dn\nx509_extensions=ext\nprompt=no\n[dn]\nCN={name}\n"
+                    "[ext]\nbasicConstraints=critical,CA:false\nkeyUsage=critical,digitalSignature\n"
+                    "extendedKeyUsage=critical,codeSigning\n")
+        run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", stem + ".key",
+             "-out", stem + ".pem", "-days", "1", "-config", stem + ".cfg"])
+        export = ["openssl", "pkcs12", "-export", "-inkey", stem + ".key", "-in", stem + ".pem",
+                  "-out", stem + ".p12", "-passout", "pass:" + self.PASSWORD]
+        if subprocess.run(export + ["-legacy"], capture_output=True).returncode != 0:
+            run(export)
+        run(["security", "import", stem + ".p12", "-k", self.path, "-P", self.PASSWORD, "-T", "/usr/bin/codesign"])
+
+    def delete(self):
+        subprocess.run(["security", "delete-keychain", self.path], capture_output=True)
+
+
+def patch_uuid(data):
+    """A different build of the same code: a new LC_UUID changes the cdhash."""
+    magic, _, _, _, ncmds = struct.unpack_from("<IiiII", data, 0)
+    assert magic == 0xFEEDFACF, "expects a thin 64-bit debug build"
+    offset = 32
+    for _ in range(ncmds):
+        cmd, size = struct.unpack_from("<II", data, offset)
+        if cmd == 0x1B:
+            data[offset + 8:offset + 24] = secrets.token_bytes(16)
+            return
+        offset += size
+    raise AssertionError("no LC_UUID")
+
+
+def install(helper, keychain, signer="Whytap Selftest Signer", resumes=True, corrupt=False):
     staged = helper + ".new"
-    shutil.copy2(BUILT, staged)
-    subprocess.run(["codesign", "-f", "-s", "-", "-i", identifier, staged], check=True, capture_output=True)
+    data = bytearray(open(BUILT, "rb").read())
+    patch_uuid(data)
+    if not resumes:  # a rollback build that does not know this envelope
+        data = bytearray(bytes(data).replace(RESUME_KEY, b"WHYTAP_MCP_RESUME_V0_FD"))
+    with open(staged, "wb") as f:
+        f.write(data)
+    os.chmod(staged, 0o755)
+    if signer == "-":
+        run(["codesign", "-f", "-s", "-", "-i", "whytap", staged])
+    else:
+        run(["codesign", "-f", "-s", signer, "--keychain", keychain.path, "-i", "whytap", staged])
     if corrupt:  # a signed file whose code no longer matches its signature
         with open(staged, "r+b") as f:
             f.seek(0x4000 + 100)
@@ -67,7 +128,7 @@ class Broker:
     def serve(self, conn):
         with conn:
             pid = int.from_bytes(conn.getsockopt(0, LOCAL_PEERPID, 4), "little")
-            disk_valid = subprocess.run(["codesign", "-v", self.helper], capture_output=True).returncode == 0
+            disk_valid = subprocess.run(["codesign", "-v", "--strict", self.helper], capture_output=True).returncode == 0
             trusted = disk_valid and running_cdhash(pid) == file_cdhash(self.helper)
             ppid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout or 0)
             if not trusted:
@@ -88,6 +149,9 @@ class Broker:
                 op = request["appControl"]["_0"]["operation"]
                 answer = {"appControl": {"_0": {"ok": True, "data": {"operation": op, "pid": pid}}}}
             conn.sendall(json.dumps(answer).encode() + b"\n")
+
+    def denied(self):
+        return sum(1 for entry in self.log if entry[0] == "denied")
 
     def close(self):
         self.stop = True
@@ -125,9 +189,23 @@ class Client:
     def call(self, name, arguments=None):
         return self.send("tools/call", {"name": name, "arguments": arguments or {}})
 
+    def handshake(self):
+        self.send("initialize", {"protocolVersion": "2025-06-18"})
+        self.reply()
+        self.send("notifications/initialized", notify=True)
+
+    def close(self):
+        self.proc.stdin.close()
+        self.proc.wait(timeout=10)
+
 
 def payload(reply):
     return json.loads(reply["result"]["content"][0]["text"])
+
+
+def ok(reply, rid, pid):
+    return (reply["id"] == rid and "result" in reply and not reply["result"]["isError"]
+            and payload(reply)["data"]["pid"] == pid)
 
 
 def check(condition, text):
@@ -136,91 +214,121 @@ def check(condition, text):
         raise SystemExit(1)
 
 
+def settle(client):
+    """A first call; meanwhile the helper captures its signer in the background."""
+    rid = client.call("whytap_get_state")
+    return client.reply()["id"] == rid
+
+
 def main():
     work = tempfile.mkdtemp(prefix="whytap-follow-")
+    keychain = Keychain(work)
     contents = os.path.join(work, "Selftest.app", "Contents")
     os.makedirs(os.path.join(contents, "Helpers"))
     with open(os.path.join(contents, "Info.plist"), "wb") as f:
         plistlib.dump({"CFBundleIdentifier": BUNDLE_ID}, f)
     helper = os.path.join(contents, "Helpers", "whytap")
-    install(helper, "selftest.a")
+    install(helper, keychain)
     broker = Broker(helper)
     try:
+        # 1. Follow, repeatedly, then the loop budget.
         client = Client(helper, ["mcp"])
         pid = client.proc.pid
-        client.send("initialize", {"protocolVersion": "2025-06-18"})
-        check(client.reply()["result"]["serverInfo"]["name"] == "whytap", "initialize answered")
-        client.send("notifications/initialized", notify=True)
-        rid = client.call("whytap_get_state")
-        first = client.reply()
-        check(first["id"] == rid and payload(first)["data"]["pid"] == pid, "call on the first build")
-
-        for step, identifier in enumerate(["selftest.b", "selftest.c"], 1):
-            install(helper, identifier)
+        client.handshake()
+        check(settle(client), "call on the first build")
+        for step in (1, 2):
+            install(helper, keychain)
             rid = client.call("whytap_get_state")
-            answer = client.reply()
-            check(answer["id"] == rid and answer["result"]["isError"] is False
-                  and payload(answer)["data"]["pid"] == pid,
-                  f"replacement {step}: same process answers the next call from the new build")
-            check(running_cdhash(pid) == file_cdhash(helper), f"replacement {step}: running code is the new file")
-
-        install(helper, "selftest.d")
+            check(ok(client.reply(), rid, pid), f"replacement {step}: the same process answers the next call from the new build")
+            check(running_cdhash(pid) == file_cdhash(helper), f"replacement {step}: the process runs the new file's code")
+        install(helper, keychain)
         ids = [client.call("whytap_get_state"), client.call("whytap_list_models")]
         answers = [client.reply(), client.reply()]
-        check(sorted(a["id"] for a in answers) == sorted(ids) and all(not a["result"]["isError"] for a in answers),
+        check(sorted(a["id"] for a in answers) == sorted(ids) and all(ok(a, a["id"], pid) for a in answers),
               "two pipelined calls after a replacement each get exactly one answer")
-        parents = {entry[2] for entry in broker.log}
-        check(parents == {os.getpid()}, "the app always sees the harness as the helper's parent")
-
-        running = running_cdhash(pid)
-        install(helper, "selftest.broken", corrupt=True)
-        before = len(broker.log)
+        check({entry[2] for entry in broker.log} == {os.getpid()}, "the app always sees the harness as the helper's parent")
+        install(helper, keychain)
+        before = running_cdhash(pid)
         rid = client.call("whytap_get_state")
         answer = client.reply()
-        check(answer["id"] == rid and answer["result"]["isError"] is True
-              and client.proc.poll() is None and running_cdhash(pid) == running,
-              "an invalid new build: the old helper answers 'unavailable' and does not exec")
-        check(len(broker.log) - before == 1, "invalid build: one request, no retry loop")
+        check(answer["id"] == rid and answer["result"]["isError"] and running_cdhash(pid) == before,
+              "loop budget: a fourth relaunch within two minutes is refused, the call is answered")
+        client.close()
 
-        install(helper, "selftest.e")
+        # 2. Files that must never be executed, then a rollback build.
+        install(helper, keychain)
+        client = Client(helper, ["mcp"])
+        pid = client.proc.pid
+        client.handshake()
+        settle(client)
+        for label, options in (("an invalidly signed file", {"corrupt": True}),
+                               ("a valid file from another signer", {"signer": "Whytap Selftest Impostor"}),
+                               ("a valid ad-hoc file", {"signer": "-"})):
+            before, denied = running_cdhash(pid), broker.denied()
+            install(helper, keychain, **options)
+            rid = client.call("whytap_get_state")
+            answer = client.reply()
+            check(answer["id"] == rid and answer["result"]["isError"] and running_cdhash(pid) == before
+                  and broker.denied() - denied == 1 and client.proc.poll() is None,
+                  f"{label}: not executed, one denied request, the call is answered")
+        install(helper, keychain, resumes=False)
         rid = client.call("whytap_get_state")
         answer = client.reply()
-        check(answer["id"] == rid and answer["result"]["isError"] is True and client.proc.poll() is None,
-              "loop budget: a fourth relaunch within two minutes is refused, the call answers")
+        check(answer["id"] == rid and "error" in answer and "Retry" in answer["error"]["message"],
+              "rollback to a build without the protocol: the triggering call gets an explicit answer")
+        # The refusal is written before the exec, so give the exec a moment.
+        deadline = time.time() + 5
+        while running_cdhash(pid) != file_cdhash(helper) and time.time() < deadline:
+            time.sleep(0.05)
+        check(running_cdhash(pid) == file_cdhash(helper), "rollback: the same process runs the rollback build")
+        rid = client.call("whytap_get_state")
+        check(ok(client.reply(), rid, pid), "rollback: later calls are answered by the rollback build")
+        client.close()
 
+        # 3. An ad-hoc helper fails closed (its requirement is its own cdhash).
+        install(helper, keychain, signer="-")
+        client = Client(helper, ["mcp"])
+        pid = client.proc.pid
+        client.handshake()
+        settle(client)
+        before = running_cdhash(pid)
+        install(helper, keychain, signer="-")
+        rid = client.call("whytap_get_state")
+        answer = client.reply()
+        check(answer["id"] == rid and answer["result"]["isError"] and running_cdhash(pid) == before,
+              "ad-hoc helper: never follows another build")
+        client.close()
+
+        # 4. case mcp and app mcp follow; no broker means no exec loop.
+        install(helper, keychain)
         case = Client(helper, ["case", "mcp"])
-        case.send("initialize", {"protocolVersion": "2025-06-18"})
-        case.reply()
+        case.handshake()
         case.call("case_list_keys")
         check("SELFTEST_KEY" in json.dumps(case.reply()), "case mcp on the current build")
-        install(helper, "selftest.f")
+        app = Client(helper, ["app", "mcp"])
+        app.handshake()
+        check(settle(app), "app mcp on the current build")
+        install(helper, keychain)
         rid = case.call("case_list_keys")
         answer = case.reply()
         check(answer["id"] == rid and "SELFTEST_KEY" in json.dumps(answer), "case mcp follows a replacement")
-
-        app = Client(helper, ["app", "mcp"])
-        app.send("initialize", {"protocolVersion": "2025-06-18"})
-        app.reply()
-        install(helper, "selftest.g")
         rid = app.call("whytap_get_state")
-        answer = app.reply()
-        check(answer["id"] == rid and payload(answer)["data"]["pid"] == app.proc.pid, "app mcp follows a replacement")
-
+        check(ok(app.reply(), rid, app.proc.pid), "app mcp follows a replacement")
         broker.close()
         broker = None
-        install(helper, "selftest.h")
+        install(helper, keychain)
+        before = running_cdhash(app.proc.pid)
         rid = app.call("whytap_get_state")
         answer = app.reply(timeout=30)
-        check(answer["id"] == rid and answer["result"]["isError"] is True and app.proc.poll() is None,
-              "Whytap not running: the call answers 'unavailable', no exec loop")
-
-        for c in (client, case, app):
-            c.proc.stdin.close()
-            c.proc.wait(timeout=10)
+        check(answer["id"] == rid and answer["result"]["isError"] and running_cdhash(app.proc.pid) == before
+              and app.proc.poll() is None, "Whytap not running: the call answers 'unavailable', no exec")
+        for c in (case, app):
+            c.close()
         check(True, "all servers exit on EOF")
     finally:
         if broker:
             broker.close()
+        keychain.delete()
         shutil.rmtree(SUPPORT, ignore_errors=True)
         shutil.rmtree(work, ignore_errors=True)
 

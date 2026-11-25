@@ -1,8 +1,9 @@
 # Add or change a hover tool
 
 The user chooses any number of tools in **Settings → Features → Hover** (a list
-in the island's order: hold a row and drag it, switch a tool off or on) or in
-**Settings, Toolbox**. Selected tools wrap
+in the island's order: switch a tool off or on, Move Up/Down in its menu) or in
+**Settings, Toolbox**, and reorders them in the island itself: hold a tile about
+0.35 s until it lifts, drag it over another tile, let go. Selected tools wrap
 into rows of three compact capsules, 52 points high. The drawer has exactly the
 same width as the compact island, using its actual notch-derived `compactWidth`.
 Each cell width is `(panelWidth - 24 - 16) / 3`: 90 points for a 310-point island,
@@ -39,7 +40,8 @@ All paths below start at `Sources/Sidekey/`.
 | Measured pointer targets, viewport clipping and down/up ownership | `DynamicIsland/IslandHoverHitBridge.swift`, `DynamicIsland/IslandPanel.swift` |
 | Catalog search, aliases, AppKit search field and keyboard commands | `DynamicIsland/IslandHoverToolSearch.swift` |
 | Drag/drop catalog, fixed Add and selected layout | `Settings/ToolboxSettingsView.swift` |
-| Hover screen: ordered list, live drag, switches | `Settings/Features/HoverFeatureView.swift` |
+| Hover screen: ordered list, switches, Move actions | `Settings/Features/HoverFeatureView.swift` |
+| Long-press reorder in the island's tool grid | `DynamicIsland/IslandHoverHitBridge.swift` (`IslandHoverReorder`) |
 | Embedded History, Record and translation panels | `Settings/ToolboxMiniApps.swift` |
 | App services and hotkey dispatch | `AppDelegate.swift` (`onToolHotkeyActivated`) |
 | Feature hotkey labels and hints | `Hotkeys/HotkeysSettingsView.swift`, `HelpWindowController.swift` |
@@ -115,7 +117,12 @@ focus without saving the draft; clicking another window also releases focus.
 For a lost or misplaced click, inspect the measured target and viewport in
 `IslandHoverHitBridge`, rather than adding a mouse-catching overlay. Down and up
 must refer to the same unchanged control; dragging out, changing context or
-closing the panel cancels activation. Internal search editing transitions must
+closing the panel cancels activation. A tile held for `reorderHoldDelay` lifts
+instead (`liftPressedTool`): the grid's cells are measured once at the lift,
+the pointer over a cell puts the tool there, the lifted tool holds the drawer
+open, the release never activates it, a release far outside the tools restores
+the earlier order and a layout change the drag did not make ends it
+([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)). Internal search editing transitions must
 not resign the key window before the result receives its owned mouse-up.
 
 For flat glass or missing hover feedback, read the current

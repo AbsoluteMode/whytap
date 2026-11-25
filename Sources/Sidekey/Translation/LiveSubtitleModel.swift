@@ -93,14 +93,25 @@ final class LiveSubtitleModel: ObservableObject {
     @Published private(set) var liveID = UUID()
     @Published private(set) var issue: TranslationIssue?
     @Published private(set) var hasAudio = false
+    /// Listening has heard only silence for `accessHintDelay`, and no capture
+    /// has ever heard this Mac's sound: macOS may be withholding system
+    /// audio. Only then does the overlay offer the privacy pane.
+    // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+    @Published private(set) var silenceMayMeanNoAccess = false
     var onActivityChange: (() -> Void)?
 
     private let connectionTimeout: Duration
     private var connectionWatchdog: Task<Void, Never>?
     private let flushInterval: Duration
     private let makeAudio: () -> TerminalSystemAudioSourceStreaming
-    /// Opens Subtitles' one engine, OpenAI live speech translation, or says
-    /// why it cannot (no OpenAI key).
+    private let systemAudioHeard: () -> Bool
+    private let accessHintDelay: Duration
+    private var accessHint: Task<Void, Never>?
+    /// Another capture (a meeting, the detector) can prove the grant while
+    /// the hint is already shown: it goes away then too.
+    nonisolated(unsafe) private var accessObserver: NSObjectProtocol?
+    /// Opens Subtitles' engine (Soniox live translation, or OpenAI's without
+    /// a Soniox key), or says why it cannot (no key).
     private let openTranslator: (_ source: String?, _ target: String) async throws -> SpeechTranslationSession
     private var translator: SpeechTranslationSession?
     private var pairer = SubtitleSpeechPairer()
@@ -111,7 +122,8 @@ final class LiveSubtitleModel: ObservableObject {
     private var audioTask: Task<Void, Never>?
     private var timer: Task<Void, Never>?
     private var stopWatchdog: Task<Void, Never>?
-    /// Subtitles cost about $3 per hour of audio on the user's own key: a
+    /// Subtitles cost up to about $3 per hour of audio on the user's own key
+    /// (OpenAI; Soniox about $0.12): a
     /// session stops by itself after an hour of listening, quietly, exactly
     /// as if Stop had been pressed. Start begins a new hour. No timer or
     /// message is shown, at the user's request.
@@ -137,19 +149,17 @@ final class LiveSubtitleModel: ObservableObject {
         flushInterval: Duration = .milliseconds(80),
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
+        accessHintDelay: Duration = .seconds(5),
+        systemAudioHeard: @escaping () -> Bool = { SystemAudioAccess.heard() },
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
             CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
         },
-        // Subtitles run only on Audio translate (OpenAI gpt-realtime-translate)
-        // with the OpenAI key from API keys; without it Start names the fix.
-        // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
-        openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession = { _, target in
-            let key = try SubtitleAudioTranslate.key()
-            let session = try await OpenAIRealtimeTranslateAdapter(apiKey: key, model: SubtitleAudioTranslate.model)
-                .open(target: target)
-            let context = AIUsageContext(feature: .subtitlesAudio, account: SubtitleAudioTranslate.account,
-                                         model: SubtitleAudioTranslate.model)
-            return AIUsageMeteredSpeechTranslation(session: session, context: context)
+        // Subtitles run on Soniox live translation with the Soniox key, or on
+        // OpenAI gpt-realtime-translate with the OpenAI key; without either
+        // Start names the fix.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+        openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession = { source, target in
+            try await SubtitleAudioTranslate.open(source: source, target: target)
         }
     ) {
         self.openTranslator = openTranslator
@@ -157,6 +167,24 @@ final class LiveSubtitleModel: ObservableObject {
         self.connectionTimeout = connectionTimeout
         self.flushInterval = flushInterval
         self.makeAudio = makeAudio
+        self.accessHintDelay = accessHintDelay
+        self.systemAudioHeard = systemAudioHeard
+        accessObserver = NotificationCenter.default.addObserver(
+            forName: SystemAudioAccess.didChange, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.accessMayBeProven() }
+        }
+    }
+
+    deinit {
+        if let accessObserver { NotificationCenter.default.removeObserver(accessObserver) }
+    }
+
+    /// The grant was proven elsewhere: no hint, now or later this session.
+    private func accessMayBeProven() {
+        guard systemAudioHeard() else { return }
+        accessHint?.cancel(); accessHint = nil
+        silenceMayMeanNoAccess = false
     }
 
     @discardableResult func start() -> Task<Void, Never>? {
@@ -184,6 +212,8 @@ final class LiveSubtitleModel: ObservableObject {
         pairer = SubtitleSpeechPairer(); nextOrdinal = 0; liveID = UUID()
         receivedEvents = 0; publishedEvents = 0
         hasAudio = false
+        accessHint?.cancel(); accessHint = nil
+        silenceMayMeanNoAccess = false
         setPhase(.connecting)
         connectionWatchdog = Task { [weak self] in
             try? await Task.sleep(for: self?.connectionTimeout ?? .seconds(15))
@@ -199,6 +229,10 @@ final class LiveSubtitleModel: ObservableObject {
                 let translator = try await self.openTranslator(language, self.targetCode)
                 guard self.generation == token, !Task.isCancelled else { await translator.close(); return }
                 try await self.runSpeechTranslation(translator, token: token)
+            } catch let failure as SubtitleAudioTranslate.EngineFailure {
+                guard self.generation == token, !Task.isCancelled else { return }
+                self.fail(.speechTranslation(failure.failure, target: self.targetCode, provider: failure.provider),
+                          token: token)
             } catch let failure as SpeechTranslationFailure {
                 guard self.generation == token, !Task.isCancelled else { return }
                 self.fail(.speechTranslation(failure, target: self.targetCode), token: token)
@@ -263,6 +297,7 @@ final class LiveSubtitleModel: ObservableObject {
         timer?.cancel(); timer = nil
         stopWatchdog?.cancel(); stopWatchdog = nil
         connectionWatchdog?.cancel(); connectionWatchdog = nil
+        accessHint?.cancel(); accessHint = nil
         live = ""; liveTranslation = ""
         setPhase(.finishing)
         let task = Task { [weak self] in
@@ -290,6 +325,15 @@ final class LiveSubtitleModel: ObservableObject {
         cancel()
     }
 
+    /// The first sound of a session: the caption can start, and no
+    /// permission hint is due.
+    private func markHeard() {
+        guard !hasAudio else { return }
+        hasAudio = true
+        silenceMayMeanNoAccess = false
+        accessHint?.cancel(); accessHint = nil
+    }
+
     private func setPhase(_ value: SubtitlePhase) { phase = value; onActivityChange?() }
 
     private func releaseCapture() async {
@@ -308,6 +352,9 @@ final class LiveSubtitleModel: ObservableObject {
     /// pairs. Stop flushes the audio and waits for the provider's close.
     private func runSpeechTranslation(_ translator: SpeechTranslationSession, token: UUID) async throws {
         self.translator = translator
+        // Soniox: the original shows as heard, the translation piece by piece.
+        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+        pairer = SubtitleSpeechPairer(streamingPreview: translator.streamsOriginalPreview)
         let source = makeAudio()
         self.source = source
         let relay = SubtitleAudioRelay(source: source) { [weak self] in
@@ -326,6 +373,17 @@ final class LiveSubtitleModel: ObservableObject {
             guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening else { return }
             self.stop()
         }
+        // A quiet Mac is not a refusal: the hint waits, and never appears
+        // once any capture has heard sound on this Mac.
+        if !systemAudioHeard() {
+            let delay = accessHintDelay
+            accessHint = Task { [weak self] in
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self, self.generation == token, self.phase == .listening,
+                      !self.hasAudio, !self.systemAudioHeard() else { return }
+                self.silenceMayMeanNoAccess = true
+            }
+        }
         // Audio goes out off the main actor: a busy caption never holds it
         // back (the relay's 128 buffers would fill and stop the session).
         // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
@@ -337,7 +395,7 @@ final class LiveSubtitleModel: ObservableObject {
                     guard !Task.isCancelled else { return }
                     if !heard, pcm.contains(where: { $0 != 0 }) {
                         heard = true
-                        await MainActor.run { if self?.hasAudio == false { self?.hasAudio = true } }
+                        await self?.markHeard()
                     }
                     await session.sendAudio(pcm)
                 }
@@ -358,24 +416,17 @@ final class LiveSubtitleModel: ObservableObject {
         for await event in translator.events {
             guard generation == token, !Task.isCancelled else { return }
             switch event {
-            case .source(let text, let elapsed):
-                receivedEvents += 1
-                pairer.addSource(text, elapsedMs: elapsed)
-                publishSoon(token: token)
-            case .translation(let text, let elapsed):
-                receivedEvents += 1
-                pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime)
-                publishSoon(token: token)
-                // Numbers only: with the adapter's arrival log, whether a delay
-                // that grows builds up at the provider or before the caption.
-                let sent = Int(translator.acceptedAudioSeconds() * 1_000)
-                os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
-                       elapsed ?? -1, sent, sent - (elapsed ?? 0))
             case .closed:
                 closedCleanly = true
             case .failed(let failure):
-                fail(.speechTranslation(failure, target: targetCode), token: token)
+                fail(.speechTranslation(failure, target: targetCode, provider: translator.providerName), token: token)
                 return
+            default:
+                // A provider frame (`.update`) is applied whole before it is
+                // published: the caption never shows half of it.
+                // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+                apply(event, translator: translator)
+                publishSoon(token: token)
             }
             if pairer.liveSource.count > 4_000 {
                 fail(.init(message: "The translation is too far behind the speech. Start again."), token: token)
@@ -386,7 +437,7 @@ final class LiveSubtitleModel: ObservableObject {
         // Only session.closed after Stop is a complete ending; anything else
         // may have lost the last translation.
         guard phase == .finishing, closedCleanly else {
-            fail(.speechTranslation(.connectionLost, target: targetCode), token: token)
+            fail(.speechTranslation(.connectionLost, target: targetCode, provider: translator.providerName), token: token)
             return
         }
         stopWatchdog?.cancel(); stopWatchdog = nil
@@ -398,10 +449,39 @@ final class LiveSubtitleModel: ObservableObject {
         setPhase(.idle)
     }
 
+    /// Feeds one text event to the pairer; the caller publishes.
+    private func apply(_ event: SpeechTranslationEvent, translator: SpeechTranslationSession) {
+        switch event {
+        case .source(let text, let elapsed):
+            receivedEvents += 1
+            pairer.addSource(text, elapsedMs: elapsed)
+        case .sourcePreview(let text):
+            receivedEvents += 1
+            pairer.setPreview(text)
+        case .translation(let text, let elapsed), .translationPiece(let text, let elapsed):
+            receivedEvents += 1
+            let whole: Bool
+            if case .translationPiece = event { whole = true } else { whole = false }
+            pairer.addTranslation(text, elapsedMs: elapsed, now: ProcessInfo.processInfo.systemUptime, whole: whole)
+            // Numbers only: with the adapter's arrival log, whether a delay
+            // that grows builds up at the provider or before the caption.
+            let sent = Int(translator.acceptedAudioSeconds() * 1_000)
+            os_log("processed elapsed_ms=%d sent_ms=%d trail_ms=%d", log: Self.log, type: .info,
+                   elapsed ?? -1, sent, sent - (elapsed ?? 0))
+        case .update(let frame):
+            for part in frame { apply(part, translator: translator) }
+        case .closed, .failed:
+            break
+        }
+    }
+
     /// Deltas often arrive several at once: the caption is published at once
-    /// when the last publish is `publishInterval` old, otherwise by the flush
-    /// timer, so a burst redraws (and restarts its motion) once.
+    /// when the last change it showed is `publishInterval` old, otherwise by
+    /// the flush timer, so a burst redraws (and restarts its motion) once.
+    /// Only a flush that changed the caption counts: the timer's empty ticks
+    /// used to make almost every delta wait for the next tick (about 80 ms).
     // WHY: .project-docs/decisions/2026-11-23-subtitle-pairs-close-speed.md
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
     static let publishInterval: TimeInterval = 0.08
     private var lastPublish: TimeInterval = 0
 
@@ -411,20 +491,23 @@ final class LiveSubtitleModel: ObservableObject {
 
     private func flushPairs(token: UUID, force: Bool = false) {
         guard generation == token else { return }
-        lastPublish = ProcessInfo.processInfo.systemUptime
+        let now = ProcessInfo.processInfo.systemUptime
         publishedEvents = receivedEvents
+        var changed = false
         let carry = pairer.takeCarry()
-        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry }
-        for pair in pairer.take(now: ProcessInfo.processInfo.systemUptime, force: force) {
+        if !carry.isEmpty, let last = lines.indices.last { lines[last].source += carry; changed = true }
+        for pair in pairer.take(now: now, force: force) {
             let translated = !pair.translation.isEmpty
             lines.append(SubtitleLine(id: liveID, source: pair.source, translation: translated ? pair.translation : nil,
                                       failed: !translated, ordinal: nextOrdinal))
             nextOrdinal += 1
             liveID = UUID()
-            if lines.count > 40 { lines.removeFirst() }
+            if lines.count > SubtitleCaption.historyPairs { lines.removeFirst() }
+            changed = true
         }
-        let row = pairer.showLive(now: ProcessInfo.processInfo.systemUptime)
-        if live != row.source { live = row.source }
-        if liveTranslation != row.translation { liveTranslation = row.translation }
+        let row = pairer.showLive(now: now)
+        if live != row.source { live = row.source; changed = true }
+        if liveTranslation != row.translation { liveTranslation = row.translation; changed = true }
+        if changed { lastPublish = now }
     }
 }

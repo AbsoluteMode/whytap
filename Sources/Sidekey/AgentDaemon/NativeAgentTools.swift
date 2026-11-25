@@ -73,7 +73,7 @@ struct NativeAgentTools {
                 return await NativeAgentAppControl.execute(call, handler: appControl)
             }
             guard Self.definitions(allowActions: allowActions).contains(where: { $0["name"] as? String == call.name }) else {
-                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be disabled in Settings → Other.")
+                throw NativeAgentError.message("This tool is unavailable. File edits and commands may be turned off in Settings → Features → Agent.")
             }
             let args = call.arguments
             func required(_ name: String) throws -> String {
@@ -126,7 +126,7 @@ struct NativeAgentTools {
                 return .init(text: await NativeAgentCommand().run(command: command, directory: directory, helper: helper))
             case "web_search":
                 guard let key = keys.read(account: TavilySearch.keychainAccount) else {
-                    throw NativeAgentError.message("Connect Tavily in Settings → API & Models → API keys to search the web.")
+                    throw NativeAgentError.message("Connect Tavily in Settings → Keys & models → API keys to search the web.")
                 }
                 return .init(text: try await tavily.search(query: required("query"), key: key))
             case "fetch_url":

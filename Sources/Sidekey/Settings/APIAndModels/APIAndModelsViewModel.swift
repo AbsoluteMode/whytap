@@ -38,15 +38,20 @@ struct FeatureRow: Equatable, Identifiable {
     var id: AIFeature { feature }
 }
 
-/// Subtitles' row: OpenAI gpt-realtime-translate, preselected; it runs only
-/// with the OpenAI key.
+/// Subtitles' row: the engine the keys give, preselected. Soniox live
+/// translation with the Soniox key, otherwise OpenAI gpt-realtime-translate
+/// with the OpenAI key; no engine choice.
+// WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
 // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
 struct AudioTranslateSlot: Equatable {
-    let key: SubtitleAudioTranslate.KeyState
+    var soniox: SubtitleAudioTranslate.KeyState
+    var openAI: SubtitleAudioTranslate.KeyState
 
-    /// Subtitles can run: the key can be read.
-    var isActive: Bool { key == .present }
-    var label: String { "OpenAI · \(SubtitleAudioTranslate.model)" }
+    var engine: SubtitleAudioTranslate.Engine? { SubtitleAudioTranslate.engine(soniox: soniox, openAI: openAI) }
+    /// Subtitles can run: one of the keys can be read.
+    var isActive: Bool { engine != nil }
+    /// Without a key, the engine a Soniox key would give.
+    var label: String { (engine ?? .soniox).label }
 }
 
 /// One line of the Models card: what the user turns on (Drop Smart, Meetings)
@@ -61,7 +66,7 @@ struct FeatureGroup: Equatable, Identifiable {
     /// What the collapsed line names: Subtitles' one model, otherwise every
     /// route's model.
     var summaryParts: [String] {
-        if audioTranslate != nil { return [SubtitleAudioTranslate.model] }
+        if let slot = audioTranslate { return [(slot.engine ?? .soniox).model] }
         return rows.map(\.modelSummary)
     }
     var summary: String { summaryParts.joined(separator: " · ") }
@@ -71,7 +76,7 @@ struct FeatureGroup: Equatable, Identifiable {
         rows.contains { $0.feature == feature }
             || (audioTranslate != nil && [.subtitlesAudio, .subtitlesTranslation].contains(feature))
     }
-    /// Subtitles ask for setup without the OpenAI key, other groups for an
+    /// Subtitles ask for setup without a Soniox or OpenAI key, other groups for an
     /// unset route.
     var needsSetup: Bool {
         if let slot = audioTranslate { return !slot.isActive }
@@ -124,7 +129,7 @@ struct AssignProposal: Equatable {
     let items: [AssignItem]
 }
 
-/// State and actions of the API & Models tab. Routes change only through an
+/// State and actions of the Keys & models tab. Routes change only through an
 /// explicit pick, a Switch action or the assign window: adding a key proposes,
 /// removing one un-sets, and neither moves a feature to another provider.
 /// Keys go from the Keychain straight to the checker, catalog and probe; none
@@ -145,7 +150,7 @@ struct KeyStoreFailure: Equatable {
 final class APIAndModelsViewModel: ObservableObject {
     @Published private(set) var chips: [KeyChip] = []
     @Published private(set) var rows: [FeatureRow] = []
-    @Published private(set) var audioTranslate = AudioTranslateSlot(key: .missing)
+    @Published private(set) var audioTranslate = AudioTranslateSlot(soniox: .missing, openAI: .missing)
 
     /// `rows` as the Models card shows them.
     var groups: [FeatureGroup] {
@@ -250,7 +255,7 @@ final class APIAndModelsViewModel: ObservableObject {
             .store(in: &observers)
     }
 
-    /// API & Models → Models → Search: the Agent model's search (`.auto`) or Tavily.
+    /// Keys & models → Models → Search: the Agent model's search (`.auto`) or Tavily.
     func selectSearch(_ choice: AgentWebSearchChoice) {
         agentSettings.webSearchChoice = choice
         recompute()
@@ -1066,11 +1071,11 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private func recompute() {
         let chips = keyedAccounts().map(chip(for:))
-        let slot = AudioTranslateSlot(key: .init(lookup(SubtitleAudioTranslate.account)))
+        let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)))
         if audioTranslate != slot { audioTranslate = slot }
         let rows = AIFeature.activeCases.map(row(for:))
         let groups = resolver.aliasGroups()
-        // Subtitles without the OpenAI key count as a feature without a model.
+        // Subtitles without a Soniox or OpenAI key count as a feature without a model.
         let unset = rows.filter { $0.status == .notSet }.count + (slot.isActive ? 0 : 1)
         let banner: String?
         if chips.isEmpty || unset == 0 {

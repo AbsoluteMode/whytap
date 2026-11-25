@@ -123,7 +123,7 @@ final class OpenCodeProviderTests: XCTestCase {
         guard case .error(let code, _, _) = events.first else { return XCTFail("Expected missing model error") }
         XCTAssertEqual(code, "missing_model")
         if case .error(_, let message, _) = events.first {
-            XCTAssertEqual(message, "Choose a model in API & Models.")
+            XCTAssertEqual(message, "Choose a model in Keys & models.")
         }
     }
 
@@ -134,7 +134,7 @@ final class OpenCodeProviderTests: XCTestCase {
         for await event in noKey.run(prompt: "hello", resumeSessionID: nil, options: AgentRunOptions()) { events.append(event) }
         guard case .error(let code, let message, _) = events.first else { return XCTFail("Expected missing key error") }
         XCTAssertEqual(code, "missing_key")
-        XCTAssertEqual(message, "Add your OpenRouter key in Settings → API & Models.")
+        XCTAssertEqual(message, "Add your OpenRouter key in Settings → Keys & models.")
 
         let badModel = OpenCodeProvider(locate: { URL(fileURLWithPath: "/tmp/opencode") }, readKey: { _ in "test-key" },
             runStreaming: { _, _, _, _, _, _, _ in CodexProcessHandle.noop })
@@ -142,7 +142,7 @@ final class OpenCodeProviderTests: XCTestCase {
         for await event in badModel.run(prompt: "hello", resumeSessionID: nil, options: AgentRunOptions(model: "has space")) { events.append(event) }
         guard case .error(let badCode, let badMessage, _) = events.first else { return XCTFail("Expected missing model error") }
         XCTAssertEqual(badCode, "missing_model")
-        XCTAssertEqual(badMessage, "Choose a model in API & Models.")
+        XCTAssertEqual(badMessage, "Choose a model in Keys & models.")
     }
 
     /// The Agent route on Anthropic: OpenCode's `anthropic` provider, the key
@@ -198,12 +198,12 @@ final class OpenCodeProviderTests: XCTestCase {
         XCTAssertFalse(started, "an OpenRouter key never stands in for the Anthropic one")
         guard case .error(let code, let message, _) = events.first else { return XCTFail("Expected missing key error") }
         XCTAssertEqual(code, "missing_key")
-        XCTAssertEqual(message, "Add your Anthropic key in Settings → API & Models.")
+        XCTAssertEqual(message, "Add your Anthropic key in Settings → Keys & models.")
 
         var mapper = OpenCodeEventMapper(provider: .anthropic)
         let auth = mapper.map(line: #"{"type":"error","error":{"name":"ProviderAuthError"}}"#)
         guard case .error(_, let authMessage, _) = auth.first else { return XCTFail("Expected auth error") }
-        XCTAssertEqual(authMessage, "Check your Anthropic key in Settings → API & Models.")
+        XCTAssertEqual(authMessage, "Check your Anthropic key in Settings → Keys & models.")
 
         let directory = try temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
@@ -250,7 +250,7 @@ final class OpenCodeProviderTests: XCTestCase {
         XCTAssertTrue(mapper.failed)
         guard case .error(let code, let message, _) = events.first else { return XCTFail("Expected error") }
         XCTAssertEqual(code, "opencode_auth")
-        XCTAssertEqual(message, "Check your OpenRouter key in Settings → API & Models.")
+        XCTAssertEqual(message, "Check your OpenRouter key in Settings → Keys & models.")
         XCTAssertFalse(message.contains("secret-key"))
         XCTAssertFalse(message.contains("private prompt"))
     }

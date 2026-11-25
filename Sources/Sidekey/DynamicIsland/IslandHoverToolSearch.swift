@@ -53,6 +53,17 @@ enum IslandHoverToolSearch {
             && terms.contains { !shot.contains($0) && copyText.contains($0) }
     }
 
+    /// The one tool both the row highlight and the footer show.
+    static func selectedTool(in matches: [HoverTool], at index: Int) -> HoverTool? {
+        matches.indices.contains(index) ? matches[index] : nil
+    }
+
+    /// Row fill opacity: a press is stronger than the selection; "Soon" rows stay flat.
+    static func rowHighlight(isSelected: Bool, isPressed: Bool, isComingSoon: Bool) -> Double {
+        guard !isComingSoon else { return 0 }
+        return isPressed ? 0.24 : (isSelected ? 0.13 : 0)
+    }
+
     static func nextSelection(current: Int, direction: Int, count: Int) -> Int? {
         guard count > 0 else { return nil }
         return ((min(max(0, current), count - 1) + direction) % count + count) % count
@@ -90,6 +101,117 @@ enum IslandHoverToolSearch {
         case .settings: return "preferences настройки"
         }
     }
+}
+
+/// The search results. Every row is identified by its tool, never by its
+/// position: a position id inside the tool-keyed ForEach froze the visible
+/// rows of the LazyVStack at their first render, so the highlight and even
+/// the titles stayed on the first query while the footer moved on.
+// WHY: .project-docs/decisions/2026-11-25-hover-search-row-identity.md
+@MainActor
+struct IslandHoverSearchResultsList: View {
+    let query: String
+    let matches: [HoverTool]
+    let selectedIndex: Int
+    @ObservedObject var bridge: IslandHoverHitBridge
+    let hitContext: String
+    let unreadNotifications: Int
+    let onActivate: (HoverTool) -> Void
+    /// (tool, index, pointer inside)
+    let onHover: (HoverTool, Int, Bool) -> Void
+
+    var body: some View {
+        ScrollViewReader { scroll in
+            ScrollView {
+                if matches.isEmpty {
+                    VStack(spacing: 5) {
+                        Text("No tools found")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.85))
+                        Text("Try “language” or “monitor”.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 20)
+                } else {
+                    LazyVStack(spacing: 2) {
+                        ForEach(Array(matches.enumerated()), id: \.element) { index, tool in
+                            row(tool, index: index)
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.bottom, 5)
+                }
+            }
+            // Minimal scroll (no anchor): a row already in view, such as the
+            // one under the pointer, never moves.
+            .onChange(of: selectedIndex) { _, index in
+                if let tool = IslandHoverToolSearch.selectedTool(in: matches, at: index) { scroll.scrollTo(tool) }
+            }
+            .onChange(of: query) { _, _ in
+                if let first = matches.first { scroll.scrollTo(first, anchor: .top) }
+            }
+        }
+    }
+
+    private func row(_ tool: HoverTool, index: Int) -> some View {
+        let info = HoverToolRegistry.info(for: tool)
+        let label = IslandHoverToolSearch.resultLabel(for: tool, query: query)
+        let isSelected = index == selectedIndex
+        let isPressed = bridge.pressedID == IslandHoverHitTargetID(surface: .result, tool: tool)
+        let showsUnread = tool == .notifs && unreadNotifications > 0
+        return Button { onActivate(tool) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: info.sfSymbol)
+                    .font(.system(size: 15))
+                    .frame(width: 24)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(label.title)
+                        .font(.system(size: 12, weight: .medium))
+                    Text(label.description)
+                        .font(.system(size: 10))
+                        .foregroundStyle(.white.opacity(0.5))
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                if let soon = tool.comingSoonBadge {
+                    IslandSoonBadge(text: soon)
+                }
+                if showsUnread {
+                    Circle().fill(.red).frame(width: 6, height: 6)
+                        .accessibilityHidden(true)
+                }
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .padding(.horizontal, 10)
+            .frame(maxWidth: .infinity, minHeight: Self.rowHeight, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(.white.opacity(IslandHoverToolSearch.rowHighlight(
+                        isSelected: isSelected, isPressed: isPressed, isComingSoon: tool.isComingSoon)))
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .islandHoverHitTarget(
+            bridge: bridge,
+            id: IslandHoverHitTargetID(surface: .result, tool: tool),
+            context: hitContext,
+            action: { onActivate(tool) }
+        )
+        .disabled(tool.isComingSoon)
+        .accessibilityLabel(label.title)
+        .accessibilityHint(label.description)
+        .accessibilityValue(tool.comingSoonBadge
+            ?? (showsUnread ? "\(unreadNotifications) new notifications" : ""))
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .opacity(tool.isComingSoon ? 0.6 : 1)
+        .id(tool)
+        .onHover { inside in onHover(tool, index, inside) }
+    }
+
+    static let rowHeight: CGFloat = 42
 }
 
 enum IslandHoverSearchCommand {

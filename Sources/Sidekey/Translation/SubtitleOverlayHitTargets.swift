@@ -22,7 +22,15 @@ import SwiftUI
 // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
 @MainActor
 final class SubtitleOverlayHitTargets: ObservableObject {
-    enum Control: Hashable { case close, session, copy }
+    /// `latest` returns the scrolled-back caption to the newest pairs; `fix`
+    /// (Open Keys & models) and `audio` (Open audio permissions) repair a
+    /// problem. `controls` (the language and session row) never acts here: a
+    /// press there is its menus', not a move of the overlay
+    /// (`SubtitleOverlayFrameTracker`).
+    enum Control: Hashable { case close, session, copy, latest, controls, fix, audio }
+
+    /// The buttons this dispatches on the first click of a non-key panel.
+    static let buttons: [Control] = [.close, .session, .latest, .fix, .audio]
 
     /// How far a press on the translation may move and still be a click.
     static let clickSlop: CGFloat = 3
@@ -81,6 +89,12 @@ final class SubtitleOverlayHitTargets: ObservableObject {
         return frame.isEmpty ? nil : frame
     }
 
+    /// True when `point` is on a shown control of the overlay: a press there
+    /// is the control's, never a move of the window.
+    func isControl(at point: CGPoint, in window: NSWindow) -> Bool {
+        [Control.close, .session, .latest, .controls, .fix, .audio].contains { frame(of: $0, in: window)?.contains(point) == true }
+    }
+
     /// True while the press is still on the view, action and frame it began on.
     private func pressHolds(at point: CGPoint, in window: NSWindow) -> Bool {
         guard let press, let view = press.view, shownView(press.control, in: window) === view,
@@ -115,13 +129,28 @@ final class SubtitleOverlayHitTargets: ObservableObject {
 
     private var localMonitor: Any?
 
+    /// A long translation scrolls: its scroller sits inside the copy block,
+    /// and a click there scrolls instead of copying.
+    // WHY: .project-docs/decisions/2026-11-24-click-to-copy-translation.md
+    static func isOnScroller(_ point: CGPoint, in window: NSWindow) -> Bool {
+        func scrollers(in view: NSView) -> [NSScroller] {
+            view.subviews.flatMap { ($0 as? NSScroller).map { [$0] } ?? scrollers(in: $0) }
+        }
+        guard let content = window.contentView else { return false }
+        return scrollers(in: content).contains { scroller in
+            !scroller.isHiddenOrHasHiddenAncestor && scroller.isEnabled && scroller.alphaValue > 0
+                && scroller.convert(scroller.bounds, to: nil).contains(point)
+        }
+    }
+
     private func handle(_ event: NSEvent, in window: NSWindow, buttons handlesButtons: Bool) -> Bool {
         let point = event.locationInWindow
         switch event.type {
         case .leftMouseDown:
             cancelPress()
             consumes = false
-            let buttons = handlesButtons ? [Control.close, .session] : []
+            // A Control-click is the overlay's context menu, never a button's.
+            let buttons = handlesButtons && !event.modifierFlags.contains(.control) ? Self.buttons : []
             if let control = buttons.first(where: { frame(of: $0, in: window)?.contains(point) == true }),
                let view = shownView(control, in: window) {
                 press = Press(control: control, view: view, action: view.action, frame: frame(of: view))
@@ -132,7 +161,8 @@ final class SubtitleOverlayHitTargets: ObservableObject {
             // Control-click is the context menu's; a double click selects a
             // word. The text keeps the press either way.
             if !event.modifierFlags.contains(.control), event.clickCount <= 1,
-               frame(of: .copy, in: window)?.contains(point) == true, let view = shownView(.copy, in: window) {
+               frame(of: .copy, in: window)?.contains(point) == true, !Self.isOnScroller(point, in: window),
+               let view = shownView(.copy, in: window) {
                 copyPress = (view, point)
                 pressed = .copy
             }

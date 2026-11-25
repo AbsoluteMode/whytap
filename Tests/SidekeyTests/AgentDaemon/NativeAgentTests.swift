@@ -1119,12 +1119,11 @@ final class NativeAgentTests: XCTestCase {
             if connected { store.markConnected(.native) } else { store.disconnect() }
             for dark in [false, true] {
                 for width in [560.0, 760.0] {
-                    // The Agents tab became the Agent group in Settings -> Other.
-                    let section = AgentOtherSection(viewModel: model, settings: settings, store: store, agentEnabled: { true },
-                                                    onAgentToggle: { _ in }, openAPIAndModels: { _ in },
-                                                    shortcuts: { .defaults })
-                    let view = SettingsOtherView(displayPicker: DisplayPickerViewModel(), agentSection: section,
-                                                 hotkeys: { .defaults })
+                    // The Agents tab became the Agent's screen in Features;
+                    // its own setting is drawn here.
+                    _ = model
+                    let view = AgentFeatureSettings(settings: settings)
+                        .padding(24)
                         .background(MacSettingsTheme.bgContent)
                         .environment(\.colorScheme, dark ? .dark : .light)
                     let host = NSHostingView(rootView: view)

@@ -1432,7 +1432,7 @@ struct ArtifactRestoreTransaction {
 /// `selectedSections`, which the local block/key history uses to put one
 /// Settings block back (or reset it to source defaults) without touching the
 /// blocks the user edited meanwhile. A missing list still means "all blocks".
-/// Schema 3 includes API & Models' binary routing document. Older snapshots
+/// Schema 3 includes Keys & models' binary routing document. Older snapshots
 /// cannot clear current routes simply because their format predated that key.
 struct ArtifactSettingsPayload: Codable, Equatable {
     static let currentSchema = 4

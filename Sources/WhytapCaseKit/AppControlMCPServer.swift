@@ -18,68 +18,160 @@ public final class AppControlMCPServer {
     /// access prompt for this harness. It must not launch Whytap or delay
     /// `initialize`; hosts drop a server that answers late.
     // WHY: .project-docs/decisions/2026-11-20-harness-access.md
-    private let accessProbe: (() -> Void)?
+    /// Returns whether the app answered it (only then is it carried as done
+    /// across a build handover). `accessProbe:` closures report no answer.
+    private let accessProbe: (() -> Bool)?
     /// Names-only Case tools (`case_*`) of the unified server; nil for `app mcp`.
     private let caseServer: CaseMCPServer?
     public init(screenOnly: Bool = false, todo: ((String, [String: AppControlValue]) -> AppControlResponse)? = nil,
-                accessProbe: (() -> Void)? = nil, caseServer: CaseMCPServer? = nil,
+                accessProbe: (() -> Void)? = nil, confirmedAccessProbe: (() -> Bool)? = nil, caseServer: CaseMCPServer? = nil,
                 call: @escaping (AppControlRequest) -> AppControlResponse) {
-        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = accessProbe
+        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = confirmedAccessProbe ?? accessProbe.map { probe in { probe(); return false } }
         self.caseServer = screenOnly ? nil : caseServer
         self.call = { request, _ in call(request) }
     }
     public init(screenOnly: Bool = false, todo: ((String, [String: AppControlValue]) -> AppControlResponse)? = nil,
-                accessProbe: (() -> Void)? = nil, caseServer: CaseMCPServer? = nil,
+                accessProbe: (() -> Void)? = nil, confirmedAccessProbe: (() -> Bool)? = nil, caseServer: CaseMCPServer? = nil,
                 cancellableCall: @escaping (AppControlRequest, AppControlCancellation?) -> AppControlResponse) {
-        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = accessProbe
+        self.screenOnly = screenOnly; self.todo = todo; self.accessProbe = confirmedAccessProbe ?? accessProbe.map { probe in { probe(); return false } }
         self.caseServer = screenOnly ? nil : caseServer
         self.call = cancellableCall
     }
 
     /// Keep stdin readable while a probe is running, so MCP cancellation or
     /// EOF shuts down that request's socket and cancels the app's pending task.
-    public func run(readLine: () -> String?, write: @escaping (String) -> Void) {
+    public func run(readLine: @escaping () -> String?, write: @escaping (String) -> Void) {
+        run(source: ClosureLineSource(readLine), write: write, handover: nil)
+    }
+
+    /// `handover` (MCP modes of the helper) lets a helper started before a
+    /// Whytap update replace itself with the new build: calls the app denied
+    /// as a stale helper are held back, later lines wait, and once no call is
+    /// in flight the process execs the new file with everything unanswered.
+    // WHY: .project-docs/decisions/2026-11-25-helper-follows-new-build.md
+    public func run(source: MCPLineSource, write: @escaping (String) -> Void, handover: MCPBuildHandover?) {
         let pending = AppControlPendingCalls()
         let output = NSLock()
         let group = DispatchGroup()
-        var initialized = false
-        var probed = false
+        // Orders taking a line, a call's move from pending to answered or held,
+        // and the handover, so every unanswered request is in exactly one place.
+        let gate = NSLock()
+        var initialized = handover?.resumed?.initialized ?? false
+        // Scheduled once per connection; carried as done only once the app
+        // answered it, so a new image repeats a probe the old one never sent.
+        var probeScheduled = handover?.resumed?.probed ?? false
+        var probeDone = probeScheduled
+        var inFlight = 0
+        var held: [(key: String, line: String, reply: String?)] = []
+        var waiting: [String] = []
+        var waitingBytes = 0
+        var finished = false
         func emit(_ line: String?) {
             guard let line else { return }
             output.withLock { write(line) }
         }
-        while let line = readLine() {
+        func startProbe() {
+            guard initialized, !probeScheduled, !screenOnly, let accessProbe else { return }
+            probeScheduled = true
+            DispatchQueue.global(qos: .utility).async {
+                // Done only when the app answered it; no answer is carried as not done.
+                let confirmed = accessProbe()
+                gate.withLock { if confirmed { probeDone = true } }
+            }
+        }
+        // Gate held. Answers here: held calls get their own replies, the
+        // waiting lines go back in front of the unread input.
+        func answerHere(unread: Data) {
+            held.forEach { emit($0.reply) }
+            let restored = MCPCarriedInput.join(waiting) + unread
+            held = []; waiting = []; waitingBytes = 0
+            source.restore(restored)
+        }
+        // Gate held. Execs the new build once nothing is in flight; returns
+        // only when nothing was executed or a test relauncher stood in for it.
+        func handOverIfReady() {
+            guard let handover, !finished, inFlight == 0, handover.isRequested else { return }
+            let unread = source.drainForHandover()
+            switch handover.handOver(initialized: initialized, probed: probeDone, held: held.map(\.line),
+                                     waiting: waiting, unread: unread, write: emit) {
+            case .replaced:
+                finished = true; held = []; waiting = []
+                source.close()
+            case .answerHere:
+                answerHere(unread: unread)
+            case .answered(let rest):
+                held = []; waiting = []; waitingBytes = 0
+                source.restore(rest)
+            }
+        }
+        // A resumed image probes only if the old one's probe never completed.
+        startProbe()
+        while source.waitForLine() {
+            gate.lock()
+            guard !finished, let line = source.takeLine() else { gate.unlock(); continue }
             let bytes = line.utf8.count <= Self.maxLineBytes ? line.data(using: .utf8) : nil
             let request = bytes.flatMap { try? JSONDecoder().decode(AppControlValue.self, from: $0) }?.object
-            if request?["jsonrpc"] == .string("2.0"), request?["method"] == .string("notifications/cancelled"),
-               let id = request?["params"]?.object?["requestId"], let key = Self.requestKey(id) {
-                pending.cancel(key)
+            let cancelledKey = request?["jsonrpc"] == .string("2.0") && request?["method"] == .string("notifications/cancelled")
+                ? request?["params"]?.object?["requestId"].flatMap(Self.requestKey) : nil
+            if handover?.isRequested == true {
+                if let cancelledKey, let index = held.firstIndex(where: { $0.key == cancelledKey }) {
+                    held.remove(at: index) // cancelled before the new image saw it: never replayed
+                } else if let cancelledKey, pending.contains(cancelledKey) {
+                    pending.cancel(cancelledKey) // still in flight in this image
+                } else {
+                    waiting.append(line)
+                    waitingBytes += line.utf8.count + 1
+                    if waiting.count > MCPBuildHandover.maxWaitingLines || waitingBytes > MCPBuildHandover.maxWaitingBytes {
+                        handover?.abandon()
+                        answerHere(unread: Data())
+                    }
+                }
+                handOverIfReady()
+                gate.unlock()
+                continue
+            }
+            if let cancelledKey {
+                pending.cancel(cancelledKey)
             } else if request?["method"] == .string("tools/call"), let id = request?["id"], let key = Self.requestKey(id) {
                 guard let cancellation = pending.begin(key) else {
                     emit(error(id, -32000, "Duplicate request id or too many pending calls"))
+                    gate.unlock()
                     continue
                 }
+                inFlight += 1
                 group.enter()
                 DispatchQueue.global(qos: .userInitiated).async { [self] in
-                    let reply = handle(line: line, cancellation: cancellation)
-                    pending.end(key)
-                    if !cancellation.isCancelled { emit(reply) }
+                    let (reply, replayable) = handover.map { $0.track { handle(line: line, cancellation: cancellation) } }
+                        ?? (handle(line: line, cancellation: cancellation), false)
+                    gate.withLock {
+                        // Leaves pending and becomes answered or held in one
+                        // step: a cancellation always finds it in one of them.
+                        pending.end(key)
+                        inFlight -= 1
+                        if replayable && !cancellation.isCancelled && !finished {
+                            held.append((key, line, reply))
+                        } else if !cancellation.isCancelled && !finished {
+                            emit(reply)
+                        }
+                        handOverIfReady()
+                    }
                     group.leave()
                 }
             } else {
                 if request?["method"] == .string("initialize") { initialized = true }
                 // Once per connection, after its handshake, and never waited
                 // for: the server exits on EOF whatever the app is doing.
-                if request?["method"] == .string("notifications/initialized"), initialized, !probed,
-                   !screenOnly, let accessProbe {
-                    probed = true
-                    DispatchQueue.global(qos: .utility).async { accessProbe() }
-                }
+                if request?["method"] == .string("notifications/initialized") { startProbe() }
                 emit(handle(line: line))
+                handOverIfReady()
             }
+            gate.unlock()
         }
+        gate.withLock { finished = true }
         pending.cancelAll()
         group.wait()
+        // Input ended while calls waited for a handover: answer them here.
+        gate.withLock { held.forEach { emit($0.reply) }; held = [] }
     }
 
     /// Bounded, but above the largest To-do batch the tools advertise (100 titles
@@ -340,6 +432,7 @@ private final class AppControlPendingCalls: @unchecked Sendable {
         }
     }
     func end(_ key: String) { lock.withLock { _ = calls.removeValue(forKey: key) } }
+    func contains(_ key: String) -> Bool { lock.withLock { calls[key] != nil } }
     func cancel(_ key: String) { lock.withLock { calls[key]?.cancel() } }
     func cancelAll() { lock.withLock { for call in calls.values { call.cancel() } } }
 }

@@ -12,6 +12,8 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case googleSearch
     case translateSubtitles
     case screenshots
+    case todo
+    case caseVault = "case"
     /// The island's hover tools: which ones show and in what order.
     case hover
     /// Notify: cards beside the island from sources a coding agent sets up.
@@ -20,6 +22,36 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case monitor
 
     var id: String { rawValue }
+
+    /// The island tool whose icon the feature shows, so the list and the
+    /// island read as one thing.
+    var islandTool: HoverTool? {
+        switch self {
+        case .translateSubtitles: return .translate
+        case .screenshots: return .screenshot
+        case .todo: return .tasks
+        case .caseVault: return .caseVault
+        case .notify: return .notifs
+        case .monitor: return .monitor
+        case .drop, .agent, .meetings, .googleSearch, .hover: return nil
+        }
+    }
+
+    /// The feature's icon: its island tool's, or the one its shortcuts carry
+    /// in Hotkeys (Drop's mic, the Agent's sparkles, Record, Google's
+    /// magnifying glass); Hover, the tools' grid.
+    // WHY: .project-docs/decisions/2026-11-25-feature-icons.md
+    var symbol: String {
+        if let islandTool { return HoverToolRegistry.info(for: islandTool).sfSymbol }
+        switch self {
+        case .drop: return "mic"
+        case .agent: return "sparkles"
+        case .meetings: return "record.circle"
+        case .googleSearch: return "magnifyingglass"
+        case .hover: return "square.grid.2x2"
+        case .translateSubtitles, .screenshots, .todo, .caseVault, .notify, .monitor: return "questionmark"
+        }
+    }
 }
 
 /// How a feature is turned on. A switch is listed only where the app really
@@ -68,6 +100,8 @@ enum FeatureHotkey: Hashable {
         case .tool(.screenshot): return "Capture an area"
         case .tool(.notifs): return "Open Notify"
         case .tool(.monitor): return "Open Monitor"
+        case .tool(.tasks): return "Open To-do"
+        case .tool(.caseVault): return "Open Case"
         case .tool(let tool): return HoverToolRegistry.info(for: tool).title
         }
     }
@@ -131,7 +165,7 @@ struct FeatureRequirement: Equatable, Identifiable {
     enum Kind: Equatable {
         /// A model route of `AIRoutingStore`.
         case model(AIFeature)
-        /// Subtitles run only on the OpenAI key (`SubtitleAudioTranslate`).
+        /// Subtitles run on the Soniox key, or the OpenAI key without it (`SubtitleAudioTranslate`).
         case subtitlesKey
         case permission(FeaturePermission)
         /// Drop's shortcut is installed and macOS delivers it.
@@ -165,7 +199,7 @@ enum FeatureSetupAction: Equatable {
     /// No provider that can serve the feature has a key yet.
     case addKey(AIFeature)
     /// The route's key is refused and no other model would work: the key
-    /// has to be fixed or replaced in API & Models.
+    /// has to be fixed or replaced in Keys & models.
     case fixKey(AIFeature)
     case addOpenAIKey
     case allow(FeaturePermission)
@@ -180,7 +214,7 @@ enum FeatureSetupAction: Equatable {
         case .chooseModel: return "Choose a model"
         case .addKey: return "Add a key"
         case .fixKey: return "Fix the key"
-        case .addOpenAIKey: return "Add an OpenAI key"
+        case .addOpenAIKey: return "Add a Soniox key"
         case .allow(let permission): return "Allow \(permission.title)"
         case .openInputMonitoring: return "Open Input Monitoring"
         case .restartWhytap: return "Restart Whytap"
@@ -299,6 +333,9 @@ struct FeatureSetupSnapshot: Equatable {
     var microphoneGranted = false
     var screenRecordingGranted = false
     var screenNeedsRestart = false
+    /// A capture has heard the Mac's sound: System audio is allowed. macOS
+    /// has no status check for it, so this is the only proof.
+    var systemAudioHeard = false
     var dropShortcut: DropHotkeyStatus = .ready
     var agentOn = false
     var meetingsOn = false
@@ -310,6 +347,14 @@ struct FeatureSetupSnapshot: Equatable {
     var monitorDashboards = 0
 
     func modelStatus(_ feature: AIFeature) -> ModelRowStatus { models[feature] ?? .notSet }
+}
+
+/// One clip on a feature's screen; `video` is nil until the clip is made,
+/// and the strip then says what it will show.
+struct FeatureClip: Equatable {
+    let name: String
+    let video: FeatureVideo?
+    let caption: String
 }
 
 /// One feature as data: what it is called, what it does in one phrase, its
@@ -334,8 +379,16 @@ struct FeatureInfo: Equatable, Identifiable {
     /// Things to ask or do, shown at the bottom of the screen.
     var examples: [String] = []
     var examplesTitle = "Things to try"
+    /// The first clip's name where it is not the feature's ("Translate").
+    var clipName: String?
+    /// Further clips on the same screen, each with its own strip.
+    var moreClips: [FeatureClip] = []
 
     var id: AppFeature { feature }
+    /// Every clip of the screen, the feature's own first.
+    var clips: [FeatureClip] {
+        [FeatureClip(name: clipName ?? name, video: video, caption: clipCaption)] + moreClips
+    }
     var hasSwitch: Bool { activation == .userSwitch }
 }
 
@@ -360,30 +413,87 @@ enum FeatureCatalog {
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",
                 line: "Ask for a quick task by text or voice: it finds, converts, copies and changes settings.",
                 video: .agent, hotkeys: [.agentText, .agentVoice, .agentClose],
-                activation: .userSwitch, place: .tab(.agentMode))
+                activation: .userSwitch, place: .screen,
+                about: "A helper for quick jobs on your Mac. Use its shortcut to type a request, or its voice shortcut to say it. "
+                    + "The answer appears in the island; links and files in it can be opened or pasted.",
+                clipCaption: "The shortcut, “Find my last invoice PDF”, then open it or paste its path.",
+                examples: [
+                    "Find my last invoice PDF in Downloads",
+                    "Convert the PNG on my desktop to JPG",
+                    "What’s on my screen? Sum it up",
+                    "Search the web for today’s euro to dollar rate",
+                    "Add “call the bank” to my To-do",
+                    "Switch Drop to Smart mode",
+                ],
+                examplesTitle: "Things to ask")
         case .meetings:
             return FeatureInfo(
                 feature: feature, name: "Meeting Notes", kind: "Notes from your calls",
                 line: "Takes notes on your calls: transcript, summary, tasks and decisions.",
-                video: .meetings, hotkeys: [.meetingRecord], activation: .userSwitch, place: .tab(.other))
+                video: .meetings, hotkeys: [.meetingRecord], activation: .userSwitch, place: .screen,
+                about: "When a call starts, Whytap offers to take notes. Say yes, or use the shortcut at any time: "
+                    + "it transcribes the call and writes a note with a summary, tasks and decisions. "
+                    + "The note and the transcript stay on this Mac.",
+                clipCaption: "A call starts, Take notes, and the note with its tasks appears.")
         case .googleSearch:
             return FeatureInfo(
                 feature: feature, name: "Google search", kind: "Search from anywhere",
                 line: "Type or say a query from anywhere; it opens in Google.",
                 video: .googleSearch, hotkeys: [.googleText, .googleVoice],
-                activation: .userSwitch, place: .tab(.other))
+                activation: .userSwitch, place: .screen,
+                about: "A search box one shortcut away, in any app. Type the query, or use the voice shortcut and say it. "
+                    + "The results open in Google in your browser.",
+                clipCaption: "The voice shortcut, “weather in Lisbon tomorrow”, and Google opens.")
         case .translateSubtitles:
             return FeatureInfo(
                 feature: feature, name: "Translate & Subtitles", kind: "Island tools",
                 line: "Translate text in a small window, or show live translated subtitles for a call or video.",
                 video: .translate, hotkeys: [.tool(.translate), .tool(.subtitles)],
-                activation: .islandTools([.translate, .subtitles]), place: .tool(.translate))
+                activation: .islandTools([.translate, .subtitles]), place: .screen,
+                about: "Two tools in the island. Translate turns text you type or paste into another language "
+                    + "with your text model. Subtitles listens to your Mac’s sound and shows a live translation on screen.",
+                clipCaption: "Type a reply, get the translation, click it to copy.",
+                clipName: "Translate",
+                // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+                moreClips: [FeatureClip(name: "Subtitles", video: .subtitles,
+                                        caption: "A lecture plays, and each line appears with its translation.")])
         case .screenshots:
             return FeatureInfo(
                 feature: feature, name: "Screenshots", kind: "Island tool Shot",
                 line: "Capture an area, annotate it, blur text and numbers.",
                 video: .screenshot, hotkeys: [.tool(.screenshot)],
-                activation: .islandTools([.screenshot]), place: .tool(.screenshot))
+                activation: .islandTools([.screenshot]), place: .screen,
+                about: "Pick an area of the screen, draw arrows and text on it, blur anything private, "
+                    + "then copy or save it. In the island it is called Shot.",
+                clipCaption: "Shot, drag over an area, blur the private details, add an arrow, copy.")
+        case .todo:
+            return FeatureInfo(
+                feature: feature, name: "To-do", kind: "Island tool",
+                line: "Quick tasks in the island. The Agent and your coding tools can add to it.",
+                video: nil, hotkeys: [.tool(.tasks)],
+                activation: .islandTools([.tasks]), place: .screen,
+                about: "A short task list in the island. Type a task and press Return; click one to finish it. "
+                    + "The Agent, and coding tools connected to Whytap, can add tasks for you. The list stays on this Mac.",
+                clipCaption: "To-do in the island, a task typed in, then ticked off.",
+                examples: [
+                    "Ask the Agent: “Add ‘renew the passport’ to my To-do”",
+                    "Ask Claude Code or Codex: “Turn my last call into tasks”",
+                ],
+                examplesTitle: "Ways to add tasks")
+        case .caseVault:
+            return FeatureInfo(
+                feature: feature, name: "Case", kind: "Secrets for coding agents",
+                line: "Keeps API keys on this Mac. Coding agents use them by name and never see the values.",
+                video: nil, hotkeys: [.tool(.caseVault)],
+                activation: .islandTools([.caseVault]), place: .screen,
+                about: "A local vault for the API keys your coding agents need. They see key names only; "
+                    + "a command started through Case gets the values, and the island can ask you before each one.",
+                clipCaption: "A coding agent asks for a key, the island asks you, the command runs.",
+                examples: [
+                    "Ask Claude Code: “Deploy with my API key from Case”",
+                    "Ask Codex: “Which keys are in Case for this project?”",
+                ],
+                examplesTitle: "Things to ask your coding agent")
         // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
         case .hover:
             return FeatureInfo(
@@ -488,8 +598,8 @@ enum FeatureCatalog {
                 FeatureRequirement(kind: .model(.translation), title: "Text model for Translate",
                                    detail: "Translates the text you type or paste. Subtitles work without it.",
                                    optional: true),
-                FeatureRequirement(kind: .subtitlesKey, title: "OpenAI key for Subtitles",
-                                   detail: "Live subtitles run only on OpenAI's live translation model. Translate works without it.",
+                FeatureRequirement(kind: .subtitlesKey, title: "Soniox or OpenAI key for Subtitles",
+                                   detail: "Live subtitles run on Soniox live translation, or on OpenAI's without a Soniox key. Translate works without it.",
                                    optional: true),
                 FeatureRequirement(kind: .permission(.systemAudio), title: FeaturePermission.systemAudio.title,
                                    detail: "Subtitles listen to your Mac's sound.", optional: true),
@@ -501,7 +611,7 @@ enum FeatureCatalog {
             ]
         // Nothing to grant or pay for: the island draws them, and Notify's
         // and Monitor's sources are local programs the person's agent writes.
-        case .hover, .notify, .monitor:
+        case .todo, .caseVault, .hover, .notify, .monitor:
             return []
         }
     }
@@ -517,7 +627,7 @@ enum FeatureCatalog {
         case .model(let feature):
             return modelState(feature, snapshot: snapshot)
         case .subtitlesKey:
-            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No OpenAI key", action: .addOpenAIKey)
+            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No Soniox or OpenAI key", action: .addOpenAIKey)
         case .permission(let permission):
             return permissionState(permission, snapshot: snapshot)
         case .dropShortcut:
@@ -529,7 +639,7 @@ enum FeatureCatalog {
         let isSpeech = feature.mode == .realtime || feature.mode == .recorded
         switch snapshot.modelStatus(feature) {
         // A model not probed yet, an alias or one that expires later still
-        // runs; API & Models says the rest on its own row.
+        // runs; Keys & models says the rest on its own row.
         case .ok, .notVerified, .deprecatedAlias, .expiring:
             return .met
         case .notSet:
@@ -584,7 +694,10 @@ enum FeatureCatalog {
             return snapshot.screenRecordingGranted ? .met
                 : .unmet(reason: "Allow \(permission.title)", action: .allow(.screenRecording))
         case .systemAudio:
-            return .askedLater(note: "macOS asks at the first recording")
+            // Allowed once a capture has heard sound; until then macOS has
+            // not been asked, or the Mac was quiet, and nothing can tell.
+            // WHY: .project-docs/decisions/2026-11-25-system-audio-heard-means-allowed.md
+            return snapshot.systemAudioHeard ? .met : .askedLater(note: "macOS asks at the first recording")
         }
     }
 
@@ -619,7 +732,7 @@ enum FeatureCatalog {
 
     static func isOn(_ feature: AppFeature, snapshot: FeatureSetupSnapshot) -> Bool {
         switch feature {
-        case .drop, .translateSubtitles, .screenshots, .hover, .notify, .monitor: return true
+        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor: return true
         case .agent: return snapshot.agentOn
         case .meetings: return snapshot.meetingsOn
         case .googleSearch: return snapshot.googleOn
@@ -724,7 +837,7 @@ enum FeatureCatalog {
         case .model:
             return "\(subject) can’t work until it has a model."
         case .subtitlesKey:
-            return "Subtitles can’t start until Whytap has an OpenAI key. Translate doesn’t need it."
+            return "Subtitles can’t start until Whytap has a Soniox or OpenAI key. Translate doesn’t need it."
         case .permission(.keyboard):
             switch check.state {
             case .unmet(_, .restartWhytap):

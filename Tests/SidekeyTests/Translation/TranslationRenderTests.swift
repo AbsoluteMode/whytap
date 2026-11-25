@@ -190,7 +190,7 @@ final class SubtitlePairRenderTests: XCTestCase {
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
         try renderOverlay(all, name: "subtitles-pairs-stopped.png")
         await all.model.cancel().value
-        // No OpenAI key: Start names the fix instead of refusing quietly.
+        // No Soniox or OpenAI key: Start names the fix instead of refusing quietly.
         let noKey = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
                                       openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
         await noKey.start()?.value
@@ -224,17 +224,28 @@ final class SubtitlePairRenderTests: XCTestCase {
         try renderOverlay(narrow, name: "subtitles-openai-live-480.png", width: 480)
         await narrow.model.cancel().value
         try renderOverlay(Session(model: noKey), name: "subtitles-no-key-480.png", width: 480)
-        // The panel's own minimum width.
+        // The panel's own minimum size, and a box the user made large.
+        let minimum = SubtitleOverlayFrame.minimumSize
         let smallest = try await session(until: 31_600, pairs: 5)
-        try renderOverlay(smallest, name: "subtitles-openai-live-360.png", width: 360)
+        try renderOverlay(smallest, name: "subtitles-openai-live-min.png", width: minimum.width, height: minimum.height)
+        try renderOverlay(smallest, name: "subtitles-openai-live-large.png", width: 1_000, height: 420)
         await smallest.model.cancel().value
         let stopped = try await session(until: .max, pairs: 8)
         stopped.model.stop()
         for _ in 0..<400 where stopped.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
-        try renderOverlay(stopped, name: "subtitles-pairs-stopped-360.png", width: 360)
+        try renderOverlay(stopped, name: "subtitles-pairs-stopped-min.png", width: minimum.width, height: minimum.height)
+        // Scrolled back: older pairs, a bottom fade and Latest.
+        let scroll = SubtitleCaptionScroll()
+        try renderOverlay(stopped, name: "subtitles-pairs-following.png", scroll: scroll)
+        scroll.scroll(by: 90)
+        try renderOverlay(stopped, name: "subtitles-pairs-scrolled-back.png", scroll: scroll)
         await stopped.model.cancel().value
 
-        try renderOverlay(Session(model: noKey), name: "subtitles-no-key-360.png", width: 360)
+        try renderOverlay(Session(model: noKey), name: "subtitles-no-key-min.png", width: minimum.width, height: minimum.height)
+        // Before the first session: the box the user sized, its controls and one hint.
+        let idle = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() }, openTranslator: { _, _ in FakeSpeechTranslation() })
+        try renderOverlay(Session(model: idle), name: "subtitles-idle.png")
+        try renderOverlay(Session(model: idle), name: "subtitles-idle-min.png", width: minimum.width, height: minimum.height)
     }
 
     private struct Session {
@@ -255,15 +266,17 @@ final class SubtitlePairRenderTests: XCTestCase {
         return Session(model: model, speech: speech)
     }
 
-    private func view(_ session: Session, embedded: Bool) -> TranslationView {
+    private func view(_ session: Session, embedded: Bool, scroll: SubtitleCaptionScroll? = nil) -> TranslationView {
         let presentation = TranslationWindowController.Presentation()
         presentation.mode = .subtitles
         return TranslationView(text: TextTranslationModel(makeService: { FixtureTranslator() }), subtitles: session.model,
-                               presentation: presentation, openSettings: { _ in }, embedded: embedded)
+                               presentation: presentation, openSettings: { _ in }, embedded: embedded,
+                               scroll: scroll ?? SubtitleCaptionScroll())
     }
 
     /// The overlay panel is 760 x 190 pt; it floats over whatever plays.
-    private func renderOverlay(_ session: Session, name: String, width: CGFloat = 760, height: CGFloat = 190) throws {
+    private func renderOverlay(_ session: Session, name: String, width: CGFloat = 760, height: CGFloat = 190,
+                               scroll: SubtitleCaptionScroll? = nil) throws {
         let frame = ZStack {
             LinearGradient(colors: [Color(red: 0.10, green: 0.13, blue: 0.20), Color(red: 0.20, green: 0.16, blue: 0.22)],
                            startPoint: .topLeading, endPoint: .bottomTrailing)
@@ -273,17 +286,17 @@ final class SubtitlePairRenderTests: XCTestCase {
                 .offset(x: 260, y: 20)
             VStack {
                 Spacer()
-                view(session, embedded: false).frame(width: width, height: height)
+                view(session, embedded: false, scroll: scroll).frame(width: width, height: height)
                     // The panel edge, so anything drawn past it shows.
                     .border(Color.red.opacity(0.5))
             }
         }
-        .frame(width: 860, height: 300)
+        .frame(width: max(860, width + 100), height: max(300, height + 110))
         .environment(\.colorScheme, .dark)
         // An AppKit host draws the box's blur view (ImageRenderer cannot);
         // offscreen it has no window content to blur, so only its tint shows.
         let host = NSHostingView(rootView: frame)
-        host.frame = NSRect(x: 0, y: 0, width: 860, height: 300)
+        host.frame = NSRect(x: 0, y: 0, width: max(860, width + 100), height: max(300, height + 110))
         host.layoutSubtreeIfNeeded()
         let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
         host.cacheDisplay(in: host.bounds, to: bitmap)

@@ -153,14 +153,14 @@ free offer and a searchable "I speak" language, Screen Recording (for Shot)
 becomes an optional row on the permissions page, a page introduces tool
 shortcuts and hover tools, and the last page can connect Claude Code and Codex.
 
-Later you can change everything in **Settings → API & Models** (keys, the On
+Later you can change everything in **Settings → Keys & models** (keys, the On
 this Mac model, a model per feature) and **Settings → Permissions**. A feature
-without a model opens API & Models on its row when you use it; Whytap never
+without a model opens Keys & models on its row when you use it; Whytap never
 picks another provider for you. If you used **Local** before October 2026,
 choose a speech model again: the old local models were removed.
 
 For the optional Agent, add an OpenRouter, OpenAI or Anthropic key, choose the
-Agent model in **API & Models**, then turn on **Agent** in **Settings → Other**.
+Agent model in **Keys & models**, then turn on **Agent** in **Settings → Features → Agent**.
 Read [Whytap Agent](agent.md) first: once on, it can edit files and run
 commands. Meeting recording also asks for **System Audio Recording**.
 
@@ -199,7 +199,7 @@ built for people and teams who already have one of these:
 | Subtitles | no | an OpenAI key, about $3 per hour of audio (from the version after 2.2.26; 2.2.26 uses a speech model plus a language model) |
 | Shot (OCR, blur), History, To-do, Case, Notify, Display | yes | nothing |
 
-The free tiers listed under API & Models → API hints and in the README are
+The free tiers listed under Keys & models → API hints and in the README are
 good for trying Whytap; heavier use is billed by your provider. Settings → API
 & Models → Costs shows what each feature has cost so far.
 

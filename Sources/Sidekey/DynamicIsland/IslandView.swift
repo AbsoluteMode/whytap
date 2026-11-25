@@ -2805,9 +2805,12 @@ private struct IslandDropModeHoverPanel: View {
                     ScrollView(.vertical) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: IslandHoverControlsLayout.columnSpacing),
                                                  count: HoverLayoutStore.columns), spacing: IslandHoverControlsLayout.rowSpacing) {
-                            // Identity by tool, so a reorder slides tiles instead of redrawing them.
+                            // Identity by tool, so a reorder slides tiles instead of redrawing
+                            // them; an identity transition keeps a replaced tool from fading out
+                            // as a tail after the animation.
                             ForEach(hoverStore.slots, id: \.self) { tool in
                                 tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
+                                    .transition(.identity)
                                     // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
                                     .scaleEffect(hoverHitBridge.reorderingTool == tool ? 1.14 : 1)
                                     .shadow(color: .black.opacity(hoverHitBridge.reorderingTool == tool ? 0.45 : 0),

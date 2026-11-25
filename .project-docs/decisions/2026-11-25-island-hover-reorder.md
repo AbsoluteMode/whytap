@@ -51,6 +51,10 @@ to live in that same dispatch.
   takes that place at once and the others slide (tiles are identified by
   tool, animated with a spring unless Reduce Motion is on). Outside the grid
   nothing moves. Settings' cell means "last, before Settings".
+  Tiles used to be identified by slot index so that replacing a tool (Case
+  with another) did not fade the old tile out as a tail; identity by tool now
+  carries `.transition(.identity)` for the same reason, and the source
+  contract in `IslandHoverPanelControlTests` says so.
 - **Let go.** The release keeps the order (it is already saved) and never
   activates the tool. Escape puts the order from before the lift back. Hiding
   the island, the drawer closing for another reason, or the next press end the

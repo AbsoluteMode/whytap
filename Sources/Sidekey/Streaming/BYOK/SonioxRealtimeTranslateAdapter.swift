@@ -42,6 +42,8 @@ struct SonioxRealtimeTranslateAdapter {
     /// language. Cancelling the calling task closes the socket at once and
     /// throws `CancellationError`.
     func open(source: String?, target: String) async throws -> SpeechTranslationSession {
+        // An open cancelled before it began never connects.
+        try Task.checkCancellation()
         let transport = makeTransport()
         transport.resume()
         let session = SonioxRealtimeTranslateSession(transport: transport)
@@ -110,6 +112,8 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     }
 
     private func open(source: String?, target: String, deadline: Duration) async throws {
+        // Cancelled already (the handler runs at once then): send nothing.
+        guard !Task.isCancelled, lock.withLock({ startFailure == nil }) else { throw CancellationError() }
         startReceiveLoop()
         do {
             try await send(.text(Self.json(Self.config(source: source, target: target, reference: clientReferenceID))))
@@ -153,8 +157,11 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         waiter?.resume(with: result)
         guard case .failure(let error) = result else { return }
         if error is CancellationError {
-            lock.withLock { clientClosed = true }
-            receiveTask?.cancel()
+            let task = lock.withLock { () -> Task<Void, Never>? in
+                clientClosed = true
+                return receiveTask
+            }
+            task?.cancel()
             finish(.closed)
             transport.cancel(reason: "client closed")
         } else {
@@ -162,8 +169,10 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         }
     }
 
+    /// Published under the lock: a cancellation that lands meanwhile still
+    /// stops the loop (`clientClosed` is checked after publishing).
     private func startReceiveLoop() {
-        receiveTask = Task { [weak self] in
+        let task = Task { [weak self] in
             while let self, !Task.isCancelled {
                 switch await self.transport.receive() {
                 case .failure(let error):
@@ -187,6 +196,11 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
                 }
             }
         }
+        let closed = lock.withLock { () -> Bool in
+            receiveTask = task
+            return clientClosed
+        }
+        if closed { task.cancel() }
     }
 
     /// Returns true when the session is over.
@@ -242,25 +256,30 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         return false
     }
 
-    /// An error frame's failure, by its stable `error_type`
-    /// (https://docs.soniox.com/stt/rt/error-handling), else its HTTP status.
-    /// A language is named only when Soniox's request error says so.
+    /// The documented STT `error_type`s
+    /// (https://docs.soniox.com/api-reference/errors) and what each means
+    /// here; nil leaves it to the HTTP status.
+    static let errorTypes: [String: SpeechTranslationFailure?] = [
+        "unauthenticated": .refusedKey, "temp_api_key_session_expired": .refusedKey,
+        "permission_denied": .permissionDenied,
+        "organization_balance_exhausted": .noCredit, "organization_monthly_budget_exhausted": .noCredit,
+        "project_monthly_budget_exhausted": .noCredit,
+        "limit_exceeded": .busy, "max_concurrent_connections_reached": .busy,
+        "model_not_available": .modelUnavailable,
+        "request_timeout": .connectionLost, "service_unavailable": .connectionLost,
+        "connection_replaced": .connectionLost,
+        "invalid_request": nil, "reconnect_failed": .provider, "max_duration_reached": .provider,
+        "internal_error": .provider,
+    ]
+
+    /// One policy for every Soniox refusal, in-band or at the handshake: a
+    /// documented `error_type` first, otherwise (no type, an unfamiliar one,
+    /// or a refused upgrade with only its status) the HTTP status. A
+    /// language is named only when a start-time 400 says so.
     static func failure(code: Int, type: String? = nil, message: String? = nil,
                         starting: Bool) -> SpeechTranslationFailure {
+        if let type, let known = errorTypes[type], let failure = known { return failure }
         let aboutLanguage = message.map { $0.range(of: "language", options: .caseInsensitive) != nil } ?? false
-        switch type {
-        case "unauthenticated", "temp_api_key_session_expired": return .refusedKey
-        case "permission_denied": return .permissionDenied
-        case "organization_balance_exhausted", "organization_monthly_budget_exhausted",
-             "project_monthly_budget_exhausted": return .noCredit
-        case "limit_exceeded", "max_concurrent_connections_reached": return .busy
-        case "model_not_available": return .modelUnavailable
-        case "request_timeout", "service_unavailable", "connection_replaced": return .connectionLost
-        case "invalid_request":
-            return starting && aboutLanguage ? .unsupportedLanguage : .provider
-        case .some: return .provider
-        case nil: break
-        }
         switch code {
         case 400 where starting && aboutLanguage: return .unsupportedLanguage
         case 401: return .refusedKey
@@ -272,20 +291,18 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
         }
     }
 
-    private static func loggable(_ type: String?) -> String {
-        guard let type, type.count <= 64, type.allSatisfy({ $0.isLetter || $0 == "_" }) else { return "-" }
-        return type
+    /// Logs carry only a documented identifier, never server text.
+    static func loggable(_ type: String?) -> String {
+        guard let type else { return "none" }
+        return errorTypes.keys.contains(type) ? type : "other"
     }
 
-    /// A refused upgrade has no error message: only its HTTP status.
+    /// A refused upgrade has no error frame: only its HTTP status, read by
+    /// the same policy. Without one the connection was lost.
     private func failure(for error: Error) -> SpeechTranslationFailure {
         if let failure = error as? SpeechTranslationFailure { return failure }
-        switch transport.responseStatusCode {
-        case 401, 403: return .refusedKey
-        case 402: return .noCredit
-        case 429: return .busy
-        default: return .connectionLost
-        }
+        guard let status = transport.responseStatusCode, status >= 400 else { return .connectionLost }
+        return Self.failure(code: status, starting: !lock.withLock { started })
     }
 
     private func fail(_ failure: SpeechTranslationFailure) {
@@ -351,8 +368,11 @@ final class SonioxRealtimeTranslateSession: SpeechTranslationSession, @unchecked
     }
 
     func close() async {
-        lock.withLock { closing = true; clientClosed = true }
-        receiveTask?.cancel()
+        let task = lock.withLock { () -> Task<Void, Never>? in
+            closing = true; clientClosed = true
+            return receiveTask
+        }
+        task?.cancel()
         finish(.closed)
         transport.cancel(reason: "client closed")
     }

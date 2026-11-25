@@ -259,6 +259,74 @@ final class SonioxRealtimeTranslateAdapterTests: XCTestCase {
         XCTAssertTrue(transport.cancelled)
     }
 
+    /// Review #572, finding 1: an open cancelled before it begins never
+    /// starts the socket or sends the config.
+    func testAnAlreadyCancelledOpenNeverConnects() async throws {
+        let transport = StubWebSocketTransport()
+        let adapter = SonioxRealtimeTranslateAdapter(transport: { transport })
+        let opening = Task { () async throws -> SpeechTranslationSession in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return try await adapter.open(source: "en", target: "ru")
+        }
+        do { _ = try await opening.value; XCTFail() } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        XCTAssertFalse(transport.resumed)
+        XCTAssertTrue(transport.sent.isEmpty)
+
+        // The session itself, started in a task already cancelled.
+        let direct = StubWebSocketTransport()
+        let session = SonioxRealtimeTranslateSession(transport: direct)
+        let start = Task { () async throws in
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await session.start(source: "en", target: "ru", deadline: .seconds(30))
+        }
+        do { try await start.value; XCTFail() } catch { XCTAssertTrue(error is CancellationError, "\(error)") }
+        XCTAssertTrue(direct.sent.isEmpty, "no config is sent")
+        XCTAssertTrue(direct.cancelled)
+        var events: [SpeechTranslationEvent] = []
+        for await event in session.events { events.append(event) }
+        XCTAssertEqual(events, [.closed])
+    }
+
+    /// Review #572, finding 2: one policy in-band and at the handshake; an
+    /// unfamiliar error type falls back to its status.
+    func testOneErrorPolicyForTypesStatusesAndHandshakes() async throws {
+        typealias S = SonioxRealtimeTranslateSession
+        XCTAssertEqual(S.failure(code: 401, type: "brand_new_type", starting: true), .refusedKey)
+        XCTAssertEqual(S.failure(code: 402, type: "brand_new_type", starting: false), .noCredit)
+        XCTAssertEqual(S.failure(code: 429, type: "brand_new_type", starting: false), .busy)
+        XCTAssertEqual(S.failure(code: 400, type: "brand_new_type", message: "Invalid language hint.", starting: true),
+                       .unsupportedLanguage)
+        for (status, expected) in [(401, SpeechTranslationFailure.refusedKey), (403, .permissionDenied),
+                                   (402, .noCredit), (429, .busy), (503, .connectionLost)] {
+            let inBand = StubWebSocketTransport()
+            inBand.deliverText(#"{"tokens":[],"error_code":\#(status),"error_message":"x"}"#)
+            do { _ = try await open(inBand); XCTFail() } catch let failure as SpeechTranslationFailure {
+                XCTAssertEqual(failure, expected, "in-band \(status)")
+            }
+            let handshake = StubWebSocketTransport()
+            handshake.responseStatusCode = status
+            handshake.deliver(.failure(URLError(.badServerResponse)))
+            do { _ = try await open(handshake); XCTFail() } catch let failure as SpeechTranslationFailure {
+                XCTAssertEqual(failure, expected, "handshake \(status)")
+            }
+        }
+        let lost = StubWebSocketTransport()
+        lost.deliver(.failure(URLError(.networkConnectionLost)))
+        do { _ = try await open(lost); XCTFail() } catch let failure as SpeechTranslationFailure {
+            XCTAssertEqual(failure, .connectionLost, "no status: the connection was lost")
+        }
+    }
+
+    /// Review #572, finding 3: logs name only documented error types.
+    func testLogsNameOnlyDocumentedErrorTypes() {
+        typealias S = SonioxRealtimeTranslateSession
+        XCTAssertEqual(S.loggable("unauthenticated"), "unauthenticated")
+        XCTAssertEqual(S.loggable("model_not_available"), "model_not_available")
+        XCTAssertEqual(S.loggable("hello_from_the_transcript"), "other")
+        XCTAssertEqual(S.loggable("Invalid language hint."), "other")
+        XCTAssertEqual(S.loggable(nil), "none")
+    }
+
     /// Finding 2: only a transcription response opens the session. A control
     /// frame does not, so a refused key after it still fails the open; a
     /// `finished` before any response is a failed open.

@@ -67,7 +67,10 @@ OpenAI's API has no latency setting. The user asked to switch.
   `model_not_available` -> not available for the key's project or region;
   `request_timeout` / `service_unavailable` -> lost connection;
   `invalid_request` at start whose message names a language -> unsupported
-  language; anything else -> the provider stopped. A socket lost mid-session
+  language; an unfamiliar type, or a refused upgrade with only its status,
+  goes by the status (401 key, 403 permission, 402 credit, 429 busy, 408/503
+  lost connection); anything else -> the provider stopped. Logs carry only a
+  documented error type. A socket lost mid-session
   or after the end of audio is a lost connection; pairs on screen stay. Every
   message names the engine in use ("The Soniox connection ended…").
 - **Costs.** The session is recorded as `soniox:<client_reference_id>`, the
@@ -126,6 +129,15 @@ ready, so a refused key after it returned a session; every start 400 read as
 the language, including `model_not_available`; Costs recorded a random id, so
 the exact Soniox charge never replaced the estimate. The live probe was run
 again after the fix: 21 pairs, `finished` at the end.
+
+The second review (queue #572) found that an open cancelled before it began
+still started the socket and sent the config, that an unfamiliar error type
+and a refused upgrade did not follow the same status policy as in-band
+errors (a handshake 403 read as a refused key, in-band as no permission),
+and that the log accepted any alphabetic error type from the server. Now a
+cancelled open never connects, one policy (documented type, else the HTTP
+status) serves frames and handshakes, and logs carry only a documented type,
+"other" or "none".
 
 ## Rejected
 

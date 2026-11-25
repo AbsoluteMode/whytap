@@ -2758,7 +2758,7 @@ private struct IslandDropModeHoverPanel: View {
             setSearchFocus(false)
         }
         .onChange(of: hoverStore.slots) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
-        .onChange(of: hoverHitBridge.reorderingTool) { old, new in reorderingToolChanged(from: old, to: new) }
+        .onChange(of: hoverHitBridge.reorderPhase) { _, phase in reorderPhaseChanged(phase) }
         .onChange(of: mode) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: searchQuery) { _, _ in
             hoverHitBridge.setSurface(hitTargetSurface)
@@ -3090,36 +3090,41 @@ private struct IslandDropModeHoverPanel: View {
 
     /// Lift: hand the floating layer (drawn above the drawer's clip) this
     /// tile's picture and its place. Release or cancel: once the grid laid out
-    /// the final order, land the tile on its cell, then tell the bridge.
-    private func reorderingToolChanged(from old: HoverTool?, to new: HoverTool?) {
+    /// the final order, land the tile on its cell, then tell the bridge. The
+    /// phase carries the lift's generation, so a release and a new lift of the
+    /// same tile in one display pass still start a new picture.
+    private func reorderPhaseChanged(_ phase: IslandHoverHitBridge.ReorderPhase) {
         let stage = hoverHitBridge.stage
-        let generation = hoverHitBridge.reorderGeneration
-        if let new {
-            guard let frame = tileFrames[new] else { return }
-            let picture = tileView(for: new, circleSize: IslandHoverPanelControl.iconSize)
+        let generation = phase.generation
+        switch phase.state {
+        case .idle:
+            return
+        case .lifted:
+            guard let tool = phase.tool, stage.generation != generation || stage.tool == nil,
+                  let frame = tileFrames[tool] else { return }
+            let picture = tileView(for: tool, circleSize: IslandHoverPanelControl.iconSize)
                 .frame(height: IslandHoverControlsLayout.rowHeight, alignment: .center)
-            stage.begin(new, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
+            stage.begin(tool, content: AnyView(picture), origin: CGPoint(x: frame.midX, y: frame.midY),
                         generation: generation)
             withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.lift) { stage.lifted = true }
-            return
-        }
-        guard let old, stage.tool == old, stage.generation == generation else {
-            hoverHitBridge.didSettle(generation: generation)
-            return
-        }
-        // A cancel restores the order in the same pass; land on the final cell.
-        DispatchQueue.main.async {
-            guard hoverHitBridge.reorderGeneration == generation, stage.generation == generation else { return }
-            let motion = hoverHitBridge.motion.translation
-            let target = tileFrames[old].map { CGPoint(x: $0.midX, y: $0.midY) }
-                ?? CGPoint(x: stage.origin.x + motion.width, y: stage.origin.y + motion.height)
-            withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.land) {
-                stage.settle = target
-                stage.lifted = false
-            } completion: {
-                // A newer lift owns the layer now; its own landing ends it.
-                stage.clear(generation: generation)
+        case .settling:
+            guard let tool = phase.tool, stage.tool == tool, stage.generation == generation else {
                 hoverHitBridge.didSettle(generation: generation)
+                return
+            }
+            // A cancel restores the order in the same pass; land on the final cell.
+            DispatchQueue.main.async {
+                guard hoverHitBridge.reorderPhase == phase, stage.generation == generation else { return }
+                let motion = hoverHitBridge.motion.translation
+                let target = tileFrames[tool].map { CGPoint(x: $0.midX, y: $0.midY) }
+                    ?? CGPoint(x: stage.origin.x + motion.width, y: stage.origin.y + motion.height)
+                withAnimation(reduceMotion ? nil : IslandHoverReorderMotionCurve.land) {
+                    stage.settle = target
+                    stage.lifted = false
+                } completion: {
+                    // A newer lift owns the layer now; its own landing ends it.
+                    hoverHitBridge.didSettle(generation: generation)
+                }
             }
         }
     }

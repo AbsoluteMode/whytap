@@ -146,14 +146,25 @@ final class IslandHoverHitBridge: ObservableObject {
     private var pressPoint: CGPoint?
     private var liftPoint: CGPoint?
     @Published private(set) var pressedID: IslandHoverHitTargetID?
+    /// Where the reorder is, with the lift it belongs to. The island observes
+    /// this, not the tool alone: a release and a new lift of the same tile in
+    /// one display pass still change the generation, so the new lift gets its
+    /// own picture.
+    struct ReorderPhase: Equatable {
+        enum State: Equatable { case idle, lifted, settling }
+        var state: State = .idle
+        var tool: HoverTool?
+        var generation = 0
+    }
+    @Published private(set) var reorderPhase = ReorderPhase()
     /// The tool lifted by a press and drag, while it is being moved.
-    @Published private(set) var reorderingTool: HoverTool?
+    var reorderingTool: HoverTool? { reorderPhase.state == .lifted ? reorderPhase.tool : nil }
     var isReordering: Bool { reorderingTool != nil }
     /// The tool flying into its cell after a release or cancel, until the
     /// island reports the landing done (`didSettle`) or a fallback ends it.
-    @Published private(set) var settlingTool: HoverTool?
+    var settlingTool: HoverTool? { reorderPhase.state == .settling ? reorderPhase.tool : nil }
     /// Counts lifts, so an older landing never ends a newer one.
-    private(set) var reorderGeneration = 0
+    var reorderGeneration: Int { reorderPhase.generation }
     /// The drawer stays open through the drag and its landing.
     var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil }
     /// The floating tile's picture and place, drawn above the drawer's clip.
@@ -255,9 +266,7 @@ final class IslandHoverHitBridge: ObservableObject {
         tracking.cancel()
         dragCandidate = nil
         pressedID = nil
-        settlingTool = nil
-        reorderGeneration += 1
-        reorderingTool = tool
+        reorderPhase = ReorderPhase(state: .lifted, tool: tool, generation: reorderPhase.generation + 1)
         NSHapticFeedbackManager.defaultPerformer.perform(.levelChange, performanceTime: .now)
         return true
     }
@@ -279,8 +288,7 @@ final class IslandHoverHitBridge: ObservableObject {
         if save, let store = layoutStore, store.slots != reorder.original { store.saveLayout() }
         self.reorder = nil
         liftPoint = nil
-        settlingTool = reorder.tool
-        reorderingTool = nil
+        reorderPhase = ReorderPhase(state: .settling, tool: reorder.tool, generation: reorderPhase.generation)
         let generation = reorderGeneration
         // If the island never reports the landing (it closed), let go anyway.
         Task { @MainActor [weak self] in
@@ -293,8 +301,8 @@ final class IslandHoverHitBridge: ObservableObject {
     func didSettle(generation: Int) {
         // The picture of that lift goes too (a newer lift keeps its own).
         stage.clear(generation: generation)
-        guard generation == reorderGeneration, reorder == nil else { return }
-        settlingTool = nil
+        guard generation == reorderGeneration, reorder == nil, reorderPhase.state == .settling else { return }
+        reorderPhase = ReorderPhase(state: .idle, tool: nil, generation: generation)
     }
 
     /// Puts every tool back where it was before the lift (a release outside
@@ -433,7 +441,12 @@ final class IslandHoverHitBridge: ObservableObject {
         if let reorder {
             // The landing starts from where the pointer let go.
             if let liftPoint { motion.follow(from: liftPoint, to: point) }
-            if reorder.cancelsRelease(at: point) {
+            if !allowed {
+                // Hover dispatch stopped: keep the last allowed order, never
+                // the cell under an ineligible release.
+                finishReorder()
+                tracking.discardSequence()
+            } else if reorder.cancelsRelease(at: point) {
                 cancelReorder()
             } else {
                 moveLiftedTool(to: point)

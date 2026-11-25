@@ -453,7 +453,7 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertFalse(bridge.holdsDrawer, "If the island never reports the landing, the hold ends anyway")
     }
 
-    func testAnOlderLandingNeverEndsANewerLiftOfTheSameTile() {
+    func testAnOlderLandingNeverEndsANewerLiftOfAnotherTile() {
         XCTAssertTrue(down(0))
         drag(to: point(1))
         up(at: point(1))
@@ -463,6 +463,7 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertTrue(down(1))
         drag(to: point(0))
         XCTAssertEqual(bridge.reorderingTool, .notes, "The tile drawn in slot 1 of this static grid")
+        XCTAssertNil(bridge.settlingTool, "A new lift ends the older landing's hold")
         let second = bridge.reorderGeneration
         XCTAssertNotEqual(first, second)
         bridge.stage.begin(.notes, content: AnyView(EmptyView()), origin: .zero, generation: second)
@@ -473,6 +474,79 @@ final class IslandHoverReorderTests: XCTestCase {
         bridge.didSettle(generation: second)
         XCTAssertFalse(bridge.holdsDrawer)
         XCTAssertNil(bridge.stage.tool)
+    }
+
+    func testAReleaseAfterHoverDispatchStoppedKeepsTheLastAllowedOrder() {
+        XCTAssertTrue(down(0))
+        drag(to: CGPoint(x: point(0).x + 5, y: point(0).y))
+        XCTAssertEqual(bridge.reorderingTool, .inputLang)
+        bridge.mouseDragged(at: point(2), in: window, allowed: false)
+        XCTAssertEqual(store.slots, tools)
+        bridge.mouseUp(at: point(2), in: window, allowed: false)
+        XCTAssertEqual(store.slots, tools, "An ineligible release cannot move the order")
+        XCTAssertEqual(restored(), tools, "An ineligible release cannot save a new order")
+        XCTAssertFalse(bridge.isReordering)
+    }
+
+    /// The real island, mounted offscreen (never shown): release a tile and
+    /// grab the same tile again before SwiftUI redraws. The island must start
+    /// a picture for the new lift, and the older landing must not erase it.
+    func testGrabbingTheSameTileAgainBeforeARedrawGetsItsOwnPicture() throws {
+        let state = AppState()
+        state.programmaticHoverExpansion = true
+        let liveBridge = IslandHoverHitBridge()
+        let prefs = DisplayPreferences(defaults: defaults)
+        let hosting = NSHostingView(rootView: IslandView(appState: state, hoverHitBridge: liveBridge,
+                                                         displayPreferences: prefs, hoverLayout: store)
+            .frame(width: 700, height: 430, alignment: .top))
+        let panel = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 700, height: 430),
+                             styleMask: .borderless, backing: .buffered, defer: false)
+        panel.isReleasedWhenClosed = false
+        panel.contentView = hosting
+        defer { panel.close() }
+        func layOut() {
+            for _ in 0..<4 {
+                hosting.layoutSubtreeIfNeeded()
+                RunLoop.main.run(until: Date().addingTimeInterval(0.025))
+            }
+        }
+        layOut()
+        liveBridge.setEnabled(true)
+        var found: CGPoint?
+        search: for y in stride(from: 4, to: 426, by: 8) {
+            for x in stride(from: 4, to: 696, by: 8) {
+                let candidate = CGPoint(x: x, y: y)
+                if liveBridge.mouseDown(at: candidate, in: panel, allowed: true),
+                   liveBridge.pressedID?.tool == .inputLang {
+                    found = candidate
+                    break search
+                }
+            }
+        }
+        let press = try XCTUnwrap(found, "The island offers the Input language tile")
+        let moved = CGPoint(x: press.x, y: press.y - IslandHoverHitBridge.dragThreshold)
+        liveBridge.mouseDragged(at: moved, in: panel, allowed: true)
+        XCTAssertEqual(liveBridge.reorderingTool, .inputLang)
+        layOut()
+        let first = liveBridge.reorderGeneration
+        XCTAssertEqual(liveBridge.stage.generation, first, "The island staged the first lift")
+        XCTAssertNotNil(liveBridge.stage.content)
+
+        liveBridge.mouseUp(at: press, in: panel, allowed: true)
+        XCTAssertEqual(liveBridge.settlingTool, .inputLang)
+        // The next press arrives in the same display pass.
+        XCTAssertTrue(liveBridge.mouseDown(at: press, in: panel, allowed: true))
+        liveBridge.mouseDragged(at: moved, in: panel, allowed: true)
+        XCTAssertEqual(liveBridge.reorderingTool, .inputLang)
+        let second = liveBridge.reorderGeneration
+        XCTAssertGreaterThan(second, first)
+        layOut()
+        XCTAssertEqual(liveBridge.stage.generation, second, "The new lift has its own picture")
+        liveBridge.didSettle(generation: first)
+        XCTAssertNotNil(liveBridge.stage.content, "The older landing cannot erase the tile being dragged")
+        XCTAssertTrue(liveBridge.isReordering)
+        liveBridge.mouseUp(at: press, in: panel, allowed: true)
+        XCTAssertFalse(panel.isVisible, "Offscreen: never shown over the person's work")
     }
 
     /// The production layering: the floating layer is an overlay outside the

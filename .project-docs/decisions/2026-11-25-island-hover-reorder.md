@@ -83,13 +83,16 @@ to live in that same dispatch.
   mouse sequence it owns. The hold lasts until the tile has landed
   (`settlingTool`, `holdsDrawer`; `didSettle` from the island, or a 0.9 s
   fallback), so a fly-back released outside the island stays visible. Each
-  lift has a generation, so an older landing never ends a newer lift of the
-  same tile.
+  lift has a generation, and the island observes the phase with it
+  (`ReorderPhase`: idle, lifted, settling + generation), so a release and a
+  new lift of the same tile in one display pass still start a new picture and
+  an older landing never ends a newer lift.
 - **Drag intent and permission.** The tile pressed at mouse-down stays the
   drag candidate when a move under the threshold crosses its edge (that still
   cancels the click). Before lifting, the bridge re-checks that the window
   still allows hover dispatch and that the same tile is live; moves arriving
-  while dispatch is not allowed are ignored.
+  while dispatch is not allowed are ignored, and a release then keeps the last
+  allowed order instead of the cell under the pointer.
 - **What cannot lift:** Settings (always last), coming-soon tiles, search
   results.
 - **Settings -> Features -> Hover** loses drag-and-drop (handle, drop targets,
@@ -169,9 +172,12 @@ threshold still drags; a window that stopped allowing hover never lifts; a
 sync reload equal to the preview wins over a cancel; a cancelled drag leaves
 an unset layout unset; the cancel flight starts where the pointer let go; the
 drawer stays until the tile has landed, with a fallback; an older landing
-never ends a newer lift of the same tile; an offscreen render shows the
+never ends a newer lift; an offscreen render shows the
 floating tile below the drawer on both the native and the macOS 14/15
-backdrop.
+backdrop. Queue #564 added: grabbing the same tile again before a redraw, on
+the real `IslandView` mounted offscreen, gets its own picture that the older
+landing cannot erase; a release after hover dispatch stopped keeps the last
+allowed order.
 
 Not checked in a running app (feature sessions do not launch it): the feel of
 the 4-point threshold and of the springs, measured frame rate during a real

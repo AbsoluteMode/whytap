@@ -141,9 +141,9 @@ accepted the second version.
   as in the mockup: they share requirements, a window and a Toolbox pane.
   Drop's Smart mode stays on Drop's screen (Mode), not a screen of its own.
 - A screen can hold more than one clip (`FeatureInfo.moreClips`, one strip
-  each). Translate & Subtitles shows a Translate clip and a Subtitles clip;
-  the Subtitles slot waits for `FeatureVideo.subtitles`
-  (Resources/FeatureVideos/subtitles.mp4) and says "Video coming" until then.
+  each). Translate & Subtitles shows a Translate clip and a Subtitles clip
+  (`FeatureVideo.subtitles`, Resources/FeatureVideos/subtitles.mp4, bundled
+  2026-11-25).
 - Other is taken apart. Its Drop, Meeting Notes, Google search and Agent rows
   live on their feature screens; what belongs to no feature (auto-hide, which
   display, screenshot protection) stays under the same raw id `other`, now

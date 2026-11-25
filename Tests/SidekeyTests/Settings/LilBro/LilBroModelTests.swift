@@ -331,7 +331,7 @@ final class LilBroLocalGuideTests: XCTestCase {
         XCTAssertEqual(checked, 504)
     }
 
-    /// The builder's matrices for tickets 590 and 594: who turns, switches
+    /// The builder's matrices for tickets 590, 594 and 597: who turns, switches
     /// or gives the setting. "we", "please" and an instruction after a comma
     /// or a sentence ask for it; Drop doing it on its own does not, with or
     /// without commas inside the question.
@@ -375,6 +375,32 @@ final class LilBroLocalGuideTests: XCTestCase {
             { f, s, id in ("On this Mac, does \(f) switch \(s) off when it closes?", .feature(id)) },
             { f, s, _ in ("How do I set up \(f), turn on \(s)?", permissions) },
             { f, s, _ in ("Can we, for \(f), turn on \(s)?", permissions) },
+            // Ticket 597: the question has to open its own sentence.
+            { f, s, _ in ("\(f) is installed; turn on \(s).", permissions) },
+            { f, s, _ in ("\(f) is installed, turn on \(s).", permissions) },
+            { f, s, _ in ("\(f) can start now; switch \(s) off.", permissions) },
+            { f, s, _ in ("\(f) can start now, switch \(s) off.", permissions) },
+            { f, s, _ in ("I know what \(f) can do, give \(f) \(s) access.", permissions) },
+            { f, s, _ in ("\(f) is installed. Turn on \(s).", permissions) },
+            { f, s, _ in ("\(f) is installed, can you turn on \(s)?", permissions) },
+            { f, s, _ in ("\(f) is installed. Switch on \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Turn off \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Turn \(s) off.", permissions) },
+            { f, s, _ in ("\(f) is ready! Switch off \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Give \(f) \(s) access.", permissions) },
+            { f, s, _ in ("Does \(f) work? Give \(f) access to \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Grant \(f) \(s) access.", permissions) },
+            { f, s, _ in ("Does \(f) work? Grant \(f) access to \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Enable \(s).", permissions) },
+            { f, s, _ in ("The first step for \(f) is this: turn on \(s).", permissions) },
+            { f, s, _ in ("Does \(f) work? Turn on \(s).", permissions) },
+            { f, s, id in ("Doesn't \(f), by default, turn on \(s)?", .feature(id)) },
+            { f, s, id in ("Can't \(f) start now, switch \(s) off, and stop cleanly?", .feature(id)) },
+            { f, s, id in ("Won't \(f), by default, turn \(s) access off?", .feature(id)) },
+            { f, s, id in ("Wouldn't \(f), without asking, give \(s) access to other apps?", .feature(id)) },
+            { f, s, id in ("Does \(f), by default,\nturn on \(s)?", .feature(id)) },
+            { f, s, id in ("Why does \(f), by default, turn on \(s)?", .feature(id)) },
+            { f, s, id in ("Can I use \(f) without turning on \(s)?", .feature(id)) },
         ]
         var checked = 0
         for template in templates {
@@ -386,7 +412,7 @@ final class LilBroLocalGuideTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(checked, 1218)
+        XCTAssertEqual(checked, 2268)
     }
 
     /// An independent review of that fix: other everyday ways to ask for a

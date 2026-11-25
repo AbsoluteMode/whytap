@@ -148,6 +148,51 @@ final class SwitchFeatureScreensTests: XCTestCase {
             .first { $0.combo == .optionPeriod }?.holdEnabled, true)
     }
 
+    /// Every edit reaches the live monitor through the controller's real
+    /// subscription, including a one-field change (the Google gesture alone)
+    /// and a one-field reload from settings sync.
+    func testShortcutEditsReachTheLiveMonitorThroughTheController() async throws {
+        let fixture = try await fixture(.usual)
+        let preferences = fixture.hotkeys
+        let monitor = RightCmdGestureMonitor()
+        let agent = AgentController(gestureMonitor: monitor)
+        agent.bindHotkeyPreferencesIfSupported(preferences)
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+
+        var edited = preferences.configuration
+        edited.googleSearchTextShortcut = .combo(.optionD)
+        try preferences.apply(edited)
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+        edited.googleSearchVoiceShortcut = .combo(.optionPeriod)
+        try preferences.apply(edited)
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+        edited.googleSearchVoiceGesture = .tap
+        try preferences.apply(edited)
+        XCTAssertEqual(preferences.configuration.googleSearchVoiceGesture, .tap)
+        XCTAssertEqual(monitor.configurationForTesting.googleSearchVoiceGesture, .tap)
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+        edited.agentTextShortcut = .combo(.optionFour)
+        try preferences.apply(edited)
+        XCTAssertEqual(monitor.configurationForTesting.agentTextShortcut, .combo(.optionFour))
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+
+        // Settings sync writes one field and reloads.
+        let elsewhere = HotkeyPreferences(defaults: fixture.defaults)
+        var synced = elsewhere.configuration
+        synced.googleSearchVoiceGesture = .hold
+        try elsewhere.apply(synced)
+        preferences.reloadFromDefaults()
+        XCTAssertEqual(monitor.configurationForTesting.googleSearchVoiceGesture, .hold)
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+
+        preferences.resetToDefaults()
+        XCTAssertEqual(monitor.configurationForTesting, preferences.configuration)
+        XCTAssertEqual(monitor.configurationForTesting.googleSearchTextShortcut, .modifier(.rightOption))
+        XCTAssertFalse(RightCmdGestureMonitor.plannedCombosForTesting(for: monitor.configurationForTesting)
+            .contains { $0.google })
+        withExtendedLifetime(agent) {}
+    }
+
     /// The default Right Option split stays on the modifier path: no Google
     /// combo is registered for it.
     func testDefaultGoogleRightOptionRegistersNoCombo() {

@@ -164,6 +164,7 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
 
     var hasLocalMonitorForTesting: Bool { localMonitor != nil }
     var hasGlobalMonitorForTesting: Bool { globalMonitor != nil }
+    var configurationForTesting: HotkeyConfiguration { stateMachine.configuration }
 
     func setActivationKey(_ key: HotkeyModifierKey) {
         let configuration = HotkeyConfiguration(

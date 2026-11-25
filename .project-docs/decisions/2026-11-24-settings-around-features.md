@@ -130,7 +130,10 @@ accepted the second version.
   saved as a key combo now registers like an Agent combo, with Google's own
   callbacks and hot-key ids 19/20, and the Agent controller rebinds on a
   Google-only change; the Right Option default stays on the modifier path
-  (builder review 537). An Agent turned on
+  (builder review 537). The rebind builds the monitor's configuration from
+  the six emitted values: `@Published` emits before it stores, so rereading
+  the preferences left the changed field stale (a Google gesture Hold → Tap
+  stayed Hold; builder review 540). An Agent turned on
   elsewhere clears the screen's earlier "why it did not turn on".
 
 ## Why

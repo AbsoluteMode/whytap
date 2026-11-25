@@ -509,12 +509,26 @@ Translation tools:
   NewestRowsLayout). Every other pair sits on a faint band that follows the
   pair's position in the session. WHY:
   .project-docs/decisions/2026-11-21-subtitle-phrase-pairs.md
-  The caption is 146 pt high while connecting or listening. The audio
-  permissions link sits inside it. Stop immediately shows Start and a
-  108 pt caption if there are rows. With no rows the stopped box shows
-  only its controls, and a problem hugs its message. The caption takes the
-  panel's width up to 708 pt and the height the controls leave, so the
-  360 x 190 pt minimum panel fits every state. The live pair
+  The box fills the panel (less a 10 pt transparent margin for its shadow),
+  so its size depends only on the panel, never on what it shows: the
+  controls row above the caption when stopped, the caption alone while
+  running (controls on hover), a hint before the first session. The audio
+  permissions link sits inside the caption. The user drags the box anywhere
+  and resizes it by its edges and corners (margin plus 6 pt inside the edge,
+  18 pt corners; minimum 480 x 150 pt, SubtitleOverlayFrame); the panel's
+  sendEvent runs both (SubtitleOverlayFrameTracker) except on controls
+  (language menus, session button, ×, fix buttons), and a tracking area shows
+  the resize cursor. The frame is saved after each move or resize
+  (sidekey.translation.subtitleFrame) and restored on the display it was
+  left on, clamped to it; when that display is gone, the saved size returns
+  at the bottom centre of the island's display. A scroll over the box
+  scrolls the caption back (SubtitleCaptionScroll): it then anchors to the
+  pair at its top, new pairs arrive below without moving it, a bottom fade
+  and "Latest" show, and scrolling to the newest pair or Latest follows
+  again. A session keeps 200 pairs (SubtitleCaption.historyPairs); 24 are
+  laid out while following. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+  The live pair
   settles in place under LiveSubtitleModel.liveID; its original shows only up
   to the audio position its translation has reached (and its first sentence
   end), and SubtitleSpeechPairer.showLive remembers what the row showed, so

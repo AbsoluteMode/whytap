@@ -84,17 +84,25 @@ struct SteadyPairsLayout: Layout {
         return Columns(source: source, translation: inner - source)
     }
 
-    /// The panel can be resized narrower than the box's usual width: the
-    /// caption takes the width it is given, up to `size.width`.
+    /// The caption fills the box the user sized (`SubtitleOverlayFrame`):
+    /// it takes the width and height it is offered. Without `fills`, at most
+    /// `size`. Unspecified, `size`.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
+    var fills = false
+    /// Scrolled back: the pair the caption keeps in place; nil follows the newest.
+    var anchor: SubtitleCaptionScroll.Anchor?
+    /// Receives where the rows were placed, for the next scroll.
+    var geometry: SubtitleCaptionGeometry?
+
     func width(proposed: CGFloat?) -> CGFloat {
         guard let proposed, proposed.isFinite else { return size.width }
-        return max(0, min(proposed, size.width))
+        return max(0, fills ? proposed : min(proposed, size.width))
     }
 
-    /// The caption is as tall as it is offered, up to `size.height`.
+    /// The caption is as tall as it is offered (up to `size.height` unless it fills).
     func height(proposed: CGFloat?) -> CGFloat {
         guard let proposed, proposed.isFinite else { return size.height }
-        return max(0, min(proposed, size.height))
+        return max(0, fills ? proposed : min(proposed, size.height))
     }
 
     /// The tallest a column gets in a caption this high: the newest row then
@@ -135,13 +143,35 @@ struct SteadyPairsLayout: Layout {
         CGSize(width: width(proposed: proposal.width), height: height(proposed: proposal.height))
     }
 
+    /// Where the rows' content starts (its top, y down), given each row's
+    /// top within the content, the content's height and the caption's
+    /// bounds. Following: the newest row at the bottom. Anchored: the
+    /// anchored row stays where it was, or the oldest row at the top when
+    /// it is gone; never past the oldest row's top or the newest row's bottom.
+    static func contentTop(rowTops: [(id: UUID?, top: CGFloat)], total: CGFloat, bounds: CGRect,
+                           anchor: SubtitleCaptionScroll.Anchor?) -> CGFloat {
+        let following = bounds.maxY - total
+        guard let anchor, total > bounds.height else { return following }
+        let top = rowTops.first { $0.id == anchor.id }.map { bounds.minY + anchor.top - $0.top } ?? bounds.minY
+        return min(max(top, following), bounds.minY)
+    }
+
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let columns = columns(width: bounds.width)
         let cap = columnCap(height: bounds.height)
-        var y = bounds.maxY
-        for group in groups(subviews).reversed() {
-            let row = measure(subviews, group, columns, cap: cap)
-            y -= row.height
+        let groups = groups(subviews)
+        let rows = groups.map { measure(subviews, $0, columns, cap: cap) }
+        var tops: [(id: UUID?, top: CGFloat)] = []
+        var y: CGFloat = 0
+        for (group, row) in zip(groups, rows) {
+            tops.append((subviews[group.lowerBound][SubtitleRowID.self], y))
+            y += row.height + rowSpacing
+        }
+        let total = max(0, y - rowSpacing)
+        let contentTop = Self.contentTop(rowTops: tops, total: total, bounds: bounds, anchor: anchor)
+        var placed: [SubtitleCaptionGeometry.Row] = []
+        for ((group, row), entry) in zip(zip(groups, rows), tops) {
+            let y = contentTop + entry.top
             subviews[group.lowerBound].place(at: CGPoint(x: bounds.minX, y: y), anchor: .topLeading,
                                              proposal: ProposedViewSize(width: bounds.width, height: row.height))
             subviews[group.lowerBound + 1].place(
@@ -151,8 +181,11 @@ struct SteadyPairsLayout: Layout {
                 at: CGPoint(x: bounds.minX + inset.width + columns.source + columnSpacing,
                             y: y + inset.height + row.translationY), anchor: .topLeading,
                 proposal: ProposedViewSize(width: columns.translation, height: cap))
-            y -= rowSpacing
+            if let id = entry.id {
+                placed.append(.init(id: id, top: y - bounds.minY, bottom: y - bounds.minY + row.height))
+            }
         }
+        geometry?.placed = .init(rows: placed, height: bounds.height)
     }
 }
 

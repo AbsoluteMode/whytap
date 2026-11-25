@@ -7,7 +7,9 @@ import Foundation
 /// with the field goes again without it. OpenRouter keeps its catalog policy
 /// (`OpenRouterReasoningPolicy`); custom servers, translation and meetings get
 /// nothing from here. The model and provider are never changed.
+/// The built-in Agent reads the same tables (`NativeAgentEffort`).
 // WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
+// WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
 enum SmartDirectReasoning {
     /// `reasoning_effort` for direct OpenAI Chat Completions, or `nil` to send
     /// none. Values are what each model accepted on 2026-11-24:
@@ -19,7 +21,8 @@ enum SmartDirectReasoning {
     ///   o-series model not listed here is asked for `low`, which all of them
     ///   take).
     /// GPT-4.1 and GPT-4o refuse the argument; chat snapshots, pro models and
-    /// any other generation get none, as for the Agent.
+    /// any other generation get none, as for the Agent. Families match by
+    /// prefix: a variant (`gpt-5.1-codex`) gets its family's level.
     static func openAIEffort(model: String) -> String? {
         guard NativeAgentEffort.openAIReasoning(model) else { return nil }
         let id = openAIBase(model)
@@ -158,6 +161,11 @@ final class SmartReasoningRefusals: @unchecked Sendable {
 
     func record(_ api: OpenAICompatibleLLMEndpoint.TextAPI, model: String) {
         lock.withLock { _ = refused.insert(Self.key(api, model)) }
+    }
+
+    /// Forgets every refusal (tests that share the process-wide list).
+    func removeAll() {
+        lock.withLock { refused.removeAll() }
     }
 
     private static func key(_ api: OpenAICompatibleLLMEndpoint.TextAPI, _ model: String) -> String {

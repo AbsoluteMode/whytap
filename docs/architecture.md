@@ -359,11 +359,29 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   Settings -> Keys & models chooses the exact Agent route/key. OpenRouter uses
   Chat Completions (including an explicit endpoint pin without fallback),
   OpenAI uses Responses with store:false and encrypted reasoning replay, and
-  Anthropic uses Messages. Direct Anthropic and OpenAI requests ask for low
-  effort (NativeAgentEffort: output_config.effort / reasoning.effort, only on
-  models documented or catalogued to take it), allow 16,384 output tokens (or
+  Anthropic uses Messages. Every route asks for the least reasoning the model
+  accepts (NativeAgentEffort, from the tables Drop Smart uses: OpenAI
+  reasoning.effort none, minimal or low; Anthropic output_config.effort low
+  plus thinking disabled on Claude Haiku 5.5 and Claude Sonnet 5 and
+  between_tools on Claude Sonnet 5.5; OpenRouter reasoning off or the lowest
+  level of its saved catalog entry). In a turn with the provider's own web
+  search OpenAI minimal becomes low and Claude Sonnet 5.5 gets no thinking
+  field. The setting follows the request that starts the turn (after a
+  refused provider search, the one without it) and is kept after the first
+  accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no
+  endpoints ... requested parameters") to a request that carried a reasoning
+  field, except a refusal of the provider's own web search, without reading
+  the error text as in Smart (so an unrelated 400 is sent once more and fails
+  the same way: unbilled, no tool runs, never a second time, and the request the search
+  fallback sends next is not repeated; the 404 wording must be in one
+  sentence of one message), is repeated once with OpenAI low or without
+  the fields, and a model whose repeat is answered keeps that until relaunch
+  (on OpenRouter per pinned endpoint or Auto); apart from this and the web
+  search fallback below, no model request is retried. WHY:
+  .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md Direct
+  Anthropic and OpenAI requests allow 16,384 output tokens (or
   the catalog's lower limit, even without a context length) and
-  wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s and gets no effort.
+  wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s.
   A finished direct Anthropic plain-text reply (end_turn, text blocks only) is
   the answer, checked like finish_answer; cards come from its text as usual.
   A cut answer reports the output limit. WHY:

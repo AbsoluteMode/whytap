@@ -144,6 +144,16 @@ accepted the second version.
   each). Translate & Subtitles shows a Translate clip and a Subtitles clip;
   the Subtitles slot waits for `FeatureVideo.subtitles`
   (Resources/FeatureVideos/subtitles.mp4) and says "Video coming" until then.
+- Other is taken apart. Its Drop, Meeting Notes, Google search and Agent rows
+  live on their feature screens; what belongs to no feature (auto-hide, which
+  display, screenshot protection) stays under the same raw id `other`, now
+  titled **General**, so `whytap://settings/other` and the landing's catalog
+  parser keep working (the parser reads ids, not titles; the title change
+  needs a catalog refresh there).
+- API & Models keeps its name for now. The mockup calls it "Keys & models",
+  but about fifty messages and eleven documents say "API & Models", some in
+  files other sessions own (the window controller, the main menu); a rename
+  is its own change, decided by Maxim.
 
 ## Why
 

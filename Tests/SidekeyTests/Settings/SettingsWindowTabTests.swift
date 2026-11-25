@@ -115,8 +115,12 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.last, .other)
     }
 
-    func test_other_tab_title_is_Other() {
-        XCTAssertEqual(SettingsWindowTab.other.title, "Other")
+    /// Other is gone as a name: what is left is General. The raw id stays
+    /// `other` so `whytap://settings/other` keeps working.
+    func test_other_tab_is_now_general_with_the_same_id() {
+        XCTAssertEqual(SettingsWindowTab.other.title, "General")
+        XCTAssertEqual(SettingsWindowTab.other.rawValue, "other")
+        XCTAssertFalse(SettingsWindowTab.availableCases.map(\.title).contains("Other"))
     }
 
     func test_other_tab_fallback_image_name() {

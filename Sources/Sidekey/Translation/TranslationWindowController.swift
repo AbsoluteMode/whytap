@@ -32,6 +32,8 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
     let presentation = Presentation()
     /// × and the session button, clicked through the panel's `sendEvent`.
     let hitTargets = SubtitleOverlayHitTargets()
+    /// Click-to-copy of a translation and its "Copied ✓", shared with the Toolbox pane.
+    let copier: PromptCopier
     private var embeddingID: UUID?
     var isEmbedded: Bool { embeddingID != nil }
     private let panel: TranslationPanel
@@ -56,8 +58,10 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
 
     init(textModel: TextTranslationModel? = nil, subtitleModel: LiveSubtitleModel? = nil,
          defaults: UserDefaults = .standard,
+         pasteboard: NSPasteboard = .general,
          openSettings: @escaping (AIFeature) -> Void,
          activityChanged: @escaping (Bool) -> Void) {
+        copier = TranslationView.makeCopier(pasteboard: pasteboard)
         text = textModel ?? TextTranslationModel()
         subtitles = subtitleModel ?? LiveSubtitleModel()
         self.defaults = defaults
@@ -95,7 +99,8 @@ final class TranslationWindowController: NSObject, NSWindowDelegate {
                 openSettings(feature)
             },
             close: { [weak self] in self?.dismiss() },
-            hitTargets: hitTargets
+            hitTargets: hitTargets,
+            copier: copier
         ))
         panel.hitTargets = hitTargets
         adoptTextWidth(restoredFrame: panel.frame)

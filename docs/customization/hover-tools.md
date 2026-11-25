@@ -120,7 +120,8 @@ must refer to the same unchanged control; dragging out, changing context or
 closing the panel cancels activation. A tile held for `reorderHoldDelay` lifts
 instead (`liftPressedTool`): the grid's cells are measured once at the lift,
 the pointer over a cell puts the tool there, the lifted tool holds the drawer
-open, the release never activates it and Escape restores the earlier order
+open, the release never activates it, a release far outside the tools restores
+the earlier order and a layout change the drag did not make ends it
 ([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)). Internal search editing transitions must
 not resign the key window before the result receives its owned mouse-up.
 

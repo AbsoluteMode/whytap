@@ -1475,6 +1475,9 @@ sources (NotificationSourcesGroups, shared with the Notifications tab) or the
 dashboards with freshness (a MonitorStore that is only read, never started,
 so Settings never polls servers), and CodingAgentPromptCard: the marks of
 Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
+CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
+enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
+.project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
 Island tool reorder: in the hover drawer's tool grid, a tile held for
 IslandHoverHitBridge.reorderHoldDelay (0.35 s) without leaving it lifts
@@ -1484,13 +1487,13 @@ held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
 so the island and Settings -> Features -> Hover change at once and a tile
 sliding under the pointer cannot send the tool back. A lifted tool is drawn
 larger with a shadow, holds the drawer open (IslandView interactionHeld and
-isHoverExpanded), and its release never activates it. Escape restores the
-order before the lift; hide, drawer close or the next press end the drag with
-the order reached. A shorter press stays an ordinary click. WHY:
+isHoverExpanded), and its release never activates it. A release more than
+24 pt outside the tools restores the order before the lift (Escape only when
+the island already has keyboard focus); a layout change the drag did not
+write (Settings Sync) ends it without undoing that change; hide, drawer close
+or the next press end the drag with the order reached. A shorter press stays
+an ordinary click. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
-CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
-enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
-.project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar

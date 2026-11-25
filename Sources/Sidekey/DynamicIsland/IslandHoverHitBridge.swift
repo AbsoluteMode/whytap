@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
@@ -87,9 +88,26 @@ struct IslandHoverReorder: Equatable {
     /// Cell frames in window coordinates by slot index, measured at the lift.
     let cells: [Int: CGRect]
 
+    /// How far past the grid a release still counts as "in the grid".
+    static let releaseMargin: CGFloat = 24
+
     /// The slot under the pointer, or nil outside the grid (the tool stays).
     func slot(at point: CGPoint) -> Int? {
         cells.filter { $0.value.contains(point) }.keys.min()
+    }
+
+    /// Letting go well outside the tools puts them back as they were: the
+    /// pointer's way to cancel, since the island is not key during a drag.
+    func cancelsRelease(at point: CGPoint) -> Bool {
+        let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
+        guard !grid.isNull else { return false }
+        return !grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin).contains(point)
+    }
+
+    /// The order to put back on cancel, or nil when the layout changed from
+    /// elsewhere (Settings Sync, Settings) and the lift no longer describes it.
+    func restoredOrder(current: [HoverTool]) -> [HoverTool]? {
+        Set(current) == Set(original) && current.count == original.count ? original : nil
     }
 
     /// Settings is always last and cannot be lifted; a tool that is not in
@@ -114,6 +132,10 @@ final class IslandHoverHitBridge: ObservableObject {
     /// How long a tile is held before it lifts (a shorter press is a click).
     var reorderHoldDelay: Duration = .milliseconds(350)
     private var reorder: IslandHoverReorder?
+    /// Watches the layout while a tool is lifted: a change the drag did not
+    /// make (Settings Sync, Settings, the MCP tool) ends the drag as it is.
+    private var layoutWatch: AnyCancellable?
+    private var writingLayout = false
     private var holdTask: Task<Void, Never>?
     private weak var pressWindow: NSWindow?
     private var tracking = IslandHoverPointerTracking()
@@ -174,6 +196,12 @@ final class IslandHoverHitBridge: ObservableObject {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
         reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
+        layoutWatch = store.$slots.dropFirst().sink { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self, !self.writingLayout else { return }
+                self.finishReorder()
+            }
+        }
         tracking.cancel()
         pressedID = nil
         reorderingTool = tool
@@ -184,25 +212,33 @@ final class IslandHoverHitBridge: ObservableObject {
     /// The lifted tool takes the place of the cell under the pointer at once.
     func moveLiftedTool(to point: CGPoint) {
         guard let reorder, let store = layoutStore, let slot = reorder.slot(at: point),
-              store.slots.firstIndex(of: reorder.tool) != slot else { return }
-        withAnimation(Self.reorderAnimation) { _ = store.placeTool(reorder.tool, at: slot) }
+              let current = store.slots.firstIndex(of: reorder.tool), current != slot else { return }
+        writeLayout { _ = store.placeTool(reorder.tool, at: slot) }
     }
 
     /// Releasing keeps the order the island shows (it is already saved).
     func finishReorder() {
+        layoutWatch = nil
         guard reorder != nil else { return }
         reorder = nil
         reorderingTool = nil
     }
 
-    /// Escape puts every tool back where it was before the lift.
+    /// Puts every tool back where it was before the lift (a release outside
+    /// the tools, or Escape when the island already has keyboard focus).
     func cancelReorder() {
         guard let reorder else { return }
-        if let store = layoutStore, store.slots != reorder.original {
-            withAnimation(Self.reorderAnimation) { store.replaceEditableSlots(with: reorder.original) }
+        if let store = layoutStore, let order = reorder.restoredOrder(current: store.slots), store.slots != order {
+            writeLayout { store.replaceEditableSlots(with: order) }
         }
         finishReorder()
         tracking.discardSequence()
+    }
+
+    private func writeLayout(_ change: () -> Void) {
+        writingLayout = true
+        defer { writingLayout = false }
+        withAnimation(Self.reorderAnimation) { change() }
     }
 
     private static var reorderAnimation: Animation? {
@@ -329,10 +365,14 @@ final class IslandHoverHitBridge: ObservableObject {
     func mouseUp(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) {
         holdTask?.cancel()
         holdTask = nil
-        if reorder != nil {
-            moveLiftedTool(to: point)
-            finishReorder()
-            tracking.discardSequence()
+        if let reorder {
+            if reorder.cancelsRelease(at: point) {
+                cancelReorder()
+            } else {
+                moveLiftedTool(to: point)
+                finishReorder()
+                tracking.discardSequence()
+            }
             pressedID = nil
             return
         }

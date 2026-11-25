@@ -2,7 +2,7 @@
 id: island-hover-reorder-2026-11-25
 type: decision
 title: Tools are reordered by holding a tile in the island's hover; Settings keeps only switches
-summary: In the island's hover drawer a tool tile held for 0.35 s lifts, the other tiles make way as it is dragged, and letting go keeps the order in HoverLayoutStore, the same layout Settings -> Features -> Hover lists. A short press is still a click; Settings never lifts; the lifted tool holds the drawer open; Escape restores the earlier order. Drag-and-drop is removed from the Settings Hover list, which keeps the switches and Move Up/Down for keyboard and VoiceOver.
+summary: In the island's hover drawer a tool tile held for 0.35 s lifts, the other tiles make way as it is dragged, and letting go keeps the order in HoverLayoutStore, the same layout Settings -> Features -> Hover lists. A short press is still a click; Settings never lifts; the lifted tool holds the drawer open; letting go far outside the tools restores the earlier order, and a layout change from elsewhere (Settings Sync) ends the drag without undoing it. Drag-and-drop is removed from the Settings Hover list, which keeps the switches and Move Up/Down for keyboard and VoiceOver.
 status: confirmed
 tags: [island, hover, toolbox, reorder, settings, features]
 canonical_for: [island-hover-reorder]
@@ -56,9 +56,19 @@ to live in that same dispatch.
   carries `.transition(.identity)` for the same reason, and the source
   contract in `IslandHoverPanelControlTests` says so.
 - **Let go.** The release keeps the order (it is already saved) and never
-  activates the tool. Escape puts the order from before the lift back. Hiding
-  the island, the drawer closing for another reason, or the next press end the
-  drag with the order reached.
+  activates the tool. Letting go more than 24 points outside the tools
+  (`IslandHoverReorder.cancelsRelease`) puts the order from before the lift
+  back; just past the edge still counts as a drop. Escape does the same only
+  when the island already has keyboard focus: in the ordinary tools drawer it
+  is not key, and a drag must not take focus from the person's app or swallow
+  their Escape. Hiding the island, the drawer closing for another reason, or
+  the next press end the drag with the order reached.
+- **A layout changed from elsewhere ends the drag.** While a tool is lifted
+  the bridge watches `HoverLayoutStore.slots`; a change the drag did not
+  write (Settings Sync reloading the defaults, Settings, the MCP tool) ends
+  the drag as it is. A later move never re-inserts a tool sync removed, and a
+  cancel restores the old order only while the same tools are in the island
+  (`restoredOrder`), so it never undoes a synced addition or removal.
 - **The drawer stays.** A lifted tool counts as an interaction that holds the
   hover drawer (`interactionHeld` and `isHoverExpanded` in `IslandView`), so
   passing outside the island mid-drag does not fold it; the window keeps the
@@ -99,7 +109,11 @@ holding lifts after the real timer and the release opens nothing; dragging
 right moves the tool live and the order survives a restart and is the list in
 Settings; no flip-back while the pointer stays on a cell; dragging back and
 onto Settings (Settings stays last, is not opened); leaving the grid and
-releasing outside keeps the last place; Escape restores the order; the drawer
+releasing just past the edge keeps the last place; releasing far outside
+restores the order through the same window events; a cancel restores it;
+Settings Sync removing the lifted tool ends the drag and the tool stays off;
+Settings Sync adding or removing another tool is kept when the drag is
+cancelled; a stale lift never restores an old membership; the drawer
 closing or the island hiding ends the drag; the next press is a click again;
 Settings cannot lift and still opens; only tools in the island that work can
 lift; the cell under the pointer is the target; a lifted tool holds the drawer
@@ -118,9 +132,13 @@ pointer leaves the island during a real drag.
   click into a reorder and break every existing tile click.
 - Per-tile "entered" targets with a last-target guard (the Settings model):
   in a grid, animated tiles pass under the pointer; fixed cells cannot flip.
+- A global Escape for the drag: a passive monitor would also send Escape to
+  the person's app (closing its dialog, say); an active tap that swallows it
+  would be a second input filter for a rare need. Release outside is the
+  pointer's own cancel.
 - Removing a tool by dragging it out of the island: on and off stay with the
   switches in Settings, as Maxim asked.
 - Auto-scrolling a long grid while dragging: the drawer shows up to its
   scroll height; a tool beyond it is moved with Move actions in Settings.
 
-2026-11-25, ORCH-TASK 103 REV 1.
+2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases.

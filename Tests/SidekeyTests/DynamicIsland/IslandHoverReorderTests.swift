@@ -7,7 +7,7 @@ import XCTest
 /// a click still opens a tool; holding a tile lifts it, moving the pointer
 /// over another tile puts it there at once, letting go keeps the order the
 /// island shows (and Settings -> Features -> Hover shows the same order);
-/// Escape puts everything back. Events go through the same window-level
+/// Letting go far outside the tools puts everything back. Events go through the same window-level
 /// dispatch as in the app, against an offscreen window that is never shown.
 @MainActor
 final class IslandHoverReorderTests: XCTestCase {
@@ -141,21 +141,41 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertEqual(activated, [], "Dropping on Settings does not open Settings")
     }
 
-    func testLeavingTheGridKeepsTheLastPlaceAndReleasingOutsideKeepsIt() {
+    func testPassingOutsideTheGridKeepsTheLastPlaceAndAReleaseNearTheEdgeKeepsIt() {
         XCTAssertTrue(down(0))
         XCTAssertTrue(bridge.liftPressedTool())
         drag(to: point(1))
-        let outside = CGPoint(x: point(1).x, y: point(1).y + 200)
-        drag(to: outside)
-        XCTAssertEqual(store.slots, [.notes, .inputLang, .monitor, .settings])
-        up(at: outside)
+        drag(to: CGPoint(x: point(1).x, y: point(1).y + 200))
+        XCTAssertEqual(store.slots, [.notes, .inputLang, .monitor, .settings], "Outside the grid nothing moves")
+        drag(to: point(1))
+        // Just past the tiles' edge, as a hand overshoots: still a drop.
+        let nearEdge = CGPoint(x: point(1).x, y: point(1).y + 22 + IslandHoverReorder.releaseMargin / 2)
+        up(at: nearEdge)
         XCTAssertFalse(bridge.isReordering)
         XCTAssertEqual(restored(), [.notes, .inputLang, .monitor, .settings])
     }
 
     // MARK: - Ways out
 
-    func testEscapePutsEveryToolBack() {
+    /// The island is not key while the tools are shown, so a key cannot reach
+    /// it without taking focus from the person's app. Letting go well outside
+    /// the tools is the cancel, through the same window events as a drop.
+    func testReleasingFarOutsideTheToolsPutsEveryToolBack() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        drag(to: point(2))
+        XCTAssertEqual(store.slots, [.notes, .monitor, .inputLang, .settings])
+        up(at: CGPoint(x: point(2).x, y: point(2).y + 200))
+        XCTAssertEqual(store.slots, tools)
+        XCTAssertEqual(restored(), tools)
+        XCTAssertFalse(bridge.isReordering)
+        XCTAssertFalse(bridge.consumesPointerSequence)
+        XCTAssertEqual(activated, [])
+    }
+
+    /// Escape reaches the island only when it already has keyboard focus
+    /// (IslandPanel.sendEvent); the cancel it calls restores the order.
+    func testCancelPutsEveryToolBack() {
         XCTAssertTrue(down(0))
         XCTAssertTrue(bridge.liftPressedTool())
         drag(to: point(2))
@@ -164,6 +184,49 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertEqual(restored(), tools)
         XCTAssertFalse(bridge.isReordering)
         XCTAssertFalse(bridge.consumesPointerSequence)
+    }
+
+    // MARK: - The layout changes from elsewhere mid-drag (Settings Sync)
+
+    /// Another Mac's layout arriving through Settings Sync: written to the
+    /// defaults, then the store reloads, as the sync route does.
+    private func syncArrives(_ slots: [HoverTool]) {
+        defaults.set(slots.map(\.rawValue), forKey: HoverLayoutStore.defaultsKey)
+        store.reloadFromDefaults()
+    }
+
+    func testSyncRemovingTheLiftedToolEndsTheDragAndNeverBringsItBack() {
+        XCTAssertTrue(down(1))
+        XCTAssertTrue(bridge.liftPressedTool())
+        drag(to: point(0))
+        syncArrives([.inputLang, .monitor, .settings])
+        XCTAssertFalse(bridge.isReordering, "The lift no longer describes the island")
+        drag(to: point(2))
+        up(at: point(2))
+        XCTAssertEqual(store.slots, [.inputLang, .monitor, .settings])
+        XCTAssertEqual(restored(), [.inputLang, .monitor, .settings], "A removed tool is not switched back on")
+        XCTAssertEqual(activated, [], "The ended press still opens nothing")
+    }
+
+    func testSyncAddingOrRemovingAnotherToolIsKeptWhenTheDragIsCancelled() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        drag(to: point(1))
+        syncArrives([.vocab, .notes, .inputLang, .settings])
+        XCTAssertFalse(bridge.isReordering)
+        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        bridge.cancelReorder()
+        XCTAssertEqual(store.slots, [.vocab, .notes, .inputLang, .settings])
+        XCTAssertEqual(restored(), [.vocab, .notes, .inputLang, .settings],
+                       "Vocab stays on and Monitor stays off, as the sync left them")
+    }
+
+    func testAStaleLiftNeverRestoresAnOldMembership() {
+        let reorder = IslandHoverReorder(tool: .notes, original: tools, cells: [:])
+        XCTAssertEqual(reorder.restoredOrder(current: [.notes, .inputLang, .monitor, .settings]), tools)
+        XCTAssertNil(reorder.restoredOrder(current: [.inputLang, .monitor, .settings]))
+        XCTAssertNil(reorder.restoredOrder(current: tools + [.vocab]))
+        XCTAssertFalse(reorder.cancelsRelease(at: .zero), "Without measured cells a release is never a cancel")
     }
 
     func testTheDrawerClosingOrTheIslandHidingEndsTheDragWithTheOrderSoFar() {

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SonioxRealtimeTranslateAdapterTests.swift
     confirmed_at: 2026-11-25
-related: [2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-11-25-subtitle-soniox-live-original.md]
 ---
 
 # Subtitles run on Soniox live translation, OpenAI only without a Soniox key
@@ -53,7 +53,9 @@ OpenAI's API has no latency setting. The user asked to switch.
   config is still being sent. Audio goes in
   100 ms binary frames; Stop sends the rest and an empty text frame, and only
   `finished` is a clean end.
-- **One stream, the same pairs.** Only final tokens are passed on, as the
+- **One stream, the same pairs.** (Superseded for the live row by
+  2026-11-25-subtitle-soniox-live-original.md: the non-final original now
+  shows as heard.) Only final tokens are passed on, as the
   append-only deltas `SpeechTranslationSession` promises; `<end>` and `<fin>`
   are dropped. An original token carries its `end_ms`; a translated token has
   no timestamp and takes the end of the last final original token, the audio
@@ -142,7 +144,8 @@ status) serves frames and handshakes, and logs carry only a documented type,
 ## Rejected
 
 - An engine choice in Keys & models (Soniox / OpenAI): cancelled by the user.
-- Showing Soniox's non-final tokens: faster by a few hundred ms, but shown
+- Showing Soniox's non-final tokens (later taken for the live row's
+  original, 2026-11-25-subtitle-soniox-live-original.md): faster by a few hundred ms, but shown
   words would change and move.
 - The config frame's `api_key`: Soniox deprecates it; the header works.
 

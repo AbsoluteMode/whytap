@@ -535,9 +535,10 @@ Translation tools:
   measurement pass's; Clear, a new session or mode drop it. WHY:
   .project-docs/decisions/2026-11-25-subtitle-overlay-move-resize-scroll.md
   The live pair
-  settles in place under LiveSubtitleModel.liveID; its original shows only up
-  to the audio position its translation has reached (and its first sentence
-  end), and SubtitleSpeechPairer.showLive remembers what the row showed, so
+  settles in place under LiveSubtitleModel.liveID; with OpenAI its original
+  shows only up to the audio position its translation has reached (and its
+  first sentence end; Soniox shows it as heard, below), and
+  SubtitleSpeechPairer.showLive remembers what the row showed, so
   the settled pair keeps at least that much of both streams through any cut. A column is at most SteadyPairsLayout.columnCap high and shows its
   newest lines (NewestLinesColumn), so a long original never hides its
   translation; older lines leave at the top behind a fade, a line at a time. On hover
@@ -548,7 +549,13 @@ Translation tools:
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
   Subtitles run on Soniox stt-rt-v6 one-way live translation
   (SonioxRealtimeTranslateAdapter: original and translation in one WebSocket,
-  final tokens only, a translation placed at its original's end_ms) whenever
+  a translation placed at its original's end_ms; each frame is one .update
+  applied whole before the caption is published; the live row shows the
+  original as heard from non-final tokens (.sourcePreview), past sentences
+  still waiting for translation, and a frame's translated subwords as one
+  whole .translationPiece; target-language text keeps word-boundary
+  handling; pairs hold final words only. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md) whenever
   the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
   only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
   -> Subtitles is an ordinary row whose model is preselected by the key:
@@ -575,8 +582,8 @@ Translation tools:
   sentence that ended (elapsed_ms) before it, plus later sentences the model
   joined: of the sentence ends heard by the cut, the one whose length (the
   session's translation-to-original ratio) and delay (the session's median)
-  fit the translation best. The live pair shows whole words only; a held last
-  word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
+  fit the translation best. The live pair shows whole words only (a whole
+  Soniox piece at once); a held last word is shown at the first flush after 0.3 s without a following delta. × and the session button take their click in
   TranslationPanel.sendEvent from frames they measured
   (SubtitleOverlayHitTargets), like the island: a press acts only on the
   button view, action and frame it began on, while the panel shows

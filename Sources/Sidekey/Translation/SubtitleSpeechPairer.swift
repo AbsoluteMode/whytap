@@ -48,6 +48,32 @@ struct SubtitleSpeechPairer {
 
     /// `liveOriginalAsHeard` for this pairer (tests compare both).
     var originalAsHeard = SubtitleSpeechPairer.liveOriginalAsHeard
+    /// The provider streams the original before it is final (Soniox,
+    /// `init(streamingPreview:)`): the live row's original runs on as heard,
+    /// past sentence ends still waiting for their translation.
+    private(set) var streamsPreview = false
+    /// Characters of the translation known to end on a whole word: a whole
+    /// piece (`addTranslation(whole:)`) shows at once instead of waiting
+    /// `wordHold`, and survives a broken session. Deltas after it (a
+    /// target-language original mirrored subword by subword) still go by
+    /// word boundaries.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+    private var wholeThrough = 0
+    /// The original heard after the last final words, still revised by the
+    /// provider (`setPreview`). It follows the live row's original as heard
+    /// and never goes into a pair: its words reach the pairs once final.
+    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md
+    private(set) var preview = ""
+
+    /// A session whose provider streams the original before it is final
+    /// (`SpeechTranslationSession.streamsOriginalPreview`): the original
+    /// shows as heard.
+    init(streamingPreview: Bool = false) {
+        if streamingPreview {
+            originalAsHeard = true
+            streamsPreview = true
+        }
+    }
     private var source: [(character: Character, elapsed: Int)] = []
     private var translation: [(character: Character, elapsed: Int)] = []
     private var lastElapsed = 0
@@ -77,6 +103,12 @@ struct SubtitleSpeechPairer {
     /// may have to give away when it settles.
     // WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
     var liveSourceHead: String {
+        // Everything heard: a translation running late never holds the
+        // original back. Words past the pair's cut continue in the next row
+        // when it settles, the as-heard trade the user chose (REV 3).
+        if streamsPreview {
+            return (String(source.map(\.character)) + preview).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         if originalAsHeard { return text(source.prefix(headCount)) }
         return text(source.prefix(max(min(headCount, translatedCount), shownSource)))
     }
@@ -136,11 +168,13 @@ struct SubtitleSpeechPairer {
 
     /// Characters of the translation up to its last whole word.
     private var wholeWordCount: Int {
+        let known = min(wholeThrough, translation.count)
+        guard known < translation.count else { return known }
         let text = String(translation.map(\.character))
         guard let last = text.last, !last.isWhitespace, !SubtitleSegmenter.clauseMarks.contains(last),
               !SubtitleSegmenter.endsSentence(text) else { return translation.count }
-        guard let space = text.lastIndex(where: \.isWhitespace) else { return 0 }
-        return text.distance(from: text.startIndex, to: space)
+        guard let space = text.lastIndex(where: \.isWhitespace) else { return known }
+        return max(known, text.distance(from: text.startIndex, to: space))
     }
 
     private func text(_ characters: ArraySlice<(character: Character, elapsed: Int)>) -> String {
@@ -162,10 +196,16 @@ struct SubtitleSpeechPairer {
         source += text.map { ($0, elapsed) }
     }
 
-    mutating func addTranslation(_ text: String, elapsedMs: Int?, now: TimeInterval) {
+    mutating func setPreview(_ text: String) {
+        preview = text
+    }
+
+    /// `whole`: the text ends on a whole word (a provider's complete piece).
+    mutating func addTranslation(_ text: String, elapsedMs: Int?, now: TimeInterval, whole: Bool = false) {
         let elapsed = elapsedMs ?? lastElapsed
         lastElapsed = max(lastElapsed, elapsed)
         translation += text.map { ($0, elapsed) }
+        if whole { wholeThrough = translation.count }
         lastTranslationAt = now
     }
 
@@ -178,7 +218,7 @@ struct SubtitleSpeechPairer {
         // Never below what the live row showed in whole words (a clause mark
         // the next fragment followed without a space). A last word shown
         // only after `wordHold` may be a fragment and goes.
-        let keep = max(shownWholeTranslation,
+        let keep = max(shownWholeTranslation, min(wholeThrough, translation.count),
                        text.lastIndex(where: \.isWhitespace).map { text.distance(from: text.startIndex, to: $0) } ?? 0)
         translation.removeLast(translation.count - keep)
         shownTranslation = min(shownTranslation, translation.count)
@@ -227,6 +267,7 @@ struct SubtitleSpeechPairer {
         let translationCount = min(translation.count, max(translationCount, shownTranslation))
         let piece = translation.prefix(translationCount)
         translation.removeFirst(translationCount)
+        wholeThrough = max(0, wholeThrough - translationCount)
         let elapsed = piece.last?.elapsed ?? lastElapsed
         let translated = String(piece.map(\.character)).trimmingCharacters(in: .whitespacesAndNewlines)
         let (cutCount, sentenceEnd) = sourceCut(at: elapsed, cut: cut, translationLength: translated.count)

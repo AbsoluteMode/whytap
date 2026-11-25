@@ -419,12 +419,11 @@ enum FeatureCatalog {
                 activation: .islandTools([.translate, .subtitles]), place: .screen,
                 about: "Two tools in the island. Translate turns text you type or paste into another language "
                     + "with your text model. Subtitles listens to your Mac’s sound and shows a live translation on screen.",
-                clipCaption: "Paste a phrase, get the translation, copy it.",
+                clipCaption: "Type a reply, get the translation, click it to copy.",
                 clipName: "Translate",
-                // The Subtitles clip is made in ORCH-104: its key is
-                // `FeatureVideo.subtitles`, its file Resources/FeatureVideos/subtitles.mp4.
-                moreClips: [FeatureClip(name: "Subtitles", video: nil,
-                                        caption: "A video plays, and translated lines appear on screen.")])
+                // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+                moreClips: [FeatureClip(name: "Subtitles", video: .subtitles,
+                                        caption: "A lecture plays, and each line appears with its translation.")])
         case .screenshots:
             return FeatureInfo(
                 feature: feature, name: "Screenshots", kind: "Island tool Shot",
@@ -433,7 +432,7 @@ enum FeatureCatalog {
                 activation: .islandTools([.screenshot]), place: .screen,
                 about: "Pick an area of the screen, draw arrows and text on it, blur anything private, "
                     + "then copy or save it. In the island it is called Shot.",
-                clipCaption: "Shot, drag over an area, add an arrow, blur a number, copy.")
+                clipCaption: "Shot, drag over an area, blur the private details, add an arrow, copy.")
         case .todo:
             return FeatureInfo(
                 feature: feature, name: "To-do", kind: "Island tool",

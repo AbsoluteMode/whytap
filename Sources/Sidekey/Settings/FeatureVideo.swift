@@ -17,6 +17,7 @@ enum FeatureVideo: String, CaseIterable {
     case dropFast = "drop-fast"
     case screenshot
     case translate
+    case subtitles
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -34,6 +35,7 @@ enum FeatureVideo: String, CaseIterable {
         case .dropFast: return "Drop"
         case .screenshot: return "Shot"
         case .translate: return "Translate"
+        case .subtitles: return "Subtitles"
         }
     }
 

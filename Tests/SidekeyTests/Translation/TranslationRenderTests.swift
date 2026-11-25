@@ -190,7 +190,7 @@ final class SubtitlePairRenderTests: XCTestCase {
         for _ in 0..<400 where all.model.phase != .idle { try await Task.sleep(for: .milliseconds(5)) }
         try renderOverlay(all, name: "subtitles-pairs-stopped.png")
         await all.model.cancel().value
-        // No OpenAI key: Start names the fix instead of refusing quietly.
+        // No Soniox or OpenAI key: Start names the fix instead of refusing quietly.
         let noKey = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
                                       openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
         await noKey.start()?.value

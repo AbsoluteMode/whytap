@@ -87,7 +87,7 @@ Voice flow (Drop / dictation):
        On this Mac (provider kind onDevice, account thisMac, Apple Silicon):
             the same route mechanism, for every speech feature (Drop Fast,
             Drop Smart, Agent voice, Voice search, Meetings; no text feature;
-            Subtitles run only on OpenAI Audio translate). The API
+            Subtitles run on Soniox or OpenAI live translation). The API
             keys tab has an On this Mac card above the key tiles
             (OnDeviceSpeechCard, not a tile: its Download, Cancel or Remove
             button is in the card, with an animated progress bar and symbol
@@ -546,13 +546,18 @@ Translation tools:
   (SubtitleOverlayHitTargets, below), since FirstClickHostingView's
   acceptsFirstMouse does not reach SwiftUI on an inactive app. The box blurs what is under it (behind-window HUD material, 45 %
   black tint). WHY: .project-docs/decisions/2026-11-23-subtitle-steady-overlay.md
-  Subtitles run only on OpenAI gpt-realtime-translate. Keys & models -> Models
-  -> Subtitles is an ordinary row (SubtitleAudioTranslate) whose model menu
-  holds only "OpenAI · gpt-realtime-translate": no switch, Speech or LLM
-  choice. It runs exactly when the OpenAI key from API keys can be read;
-  without one the card has the usual setup contour, its menu adds "Add an
-  OpenAI key…", it counts as a feature without a model, and Start names the
-  missing key and opens Keys & models (no system audio is captured). A session
+  Subtitles run on Soniox stt-rt-v6 one-way live translation
+  (SonioxRealtimeTranslateAdapter: original and translation in one WebSocket,
+  final tokens only, a translation placed at its original's end_ms) whenever
+  the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
+  only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
+  -> Subtitles is an ordinary row whose model is preselected by the key:
+  "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate"; no switch,
+  engine, Speech or LLM choice. Without either key the card has the usual
+  setup contour, its menu adds "Add a Soniox key…", it counts as a feature
+  without a model, and Start names the missing key and opens Keys & models
+  (no system audio is captured). WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md A session
   stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
   no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
   like Decision: their IDs stay for Costs and history, saved routes are

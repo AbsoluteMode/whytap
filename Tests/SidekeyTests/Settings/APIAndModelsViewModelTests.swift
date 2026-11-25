@@ -730,16 +730,16 @@ final class APIAndModelsViewModelTests: XCTestCase {
         XCTAssertNil(env.makeViewModel().unsetBanner)
 
         env.addKey(.soniox)
-        // Nine routes plus Subtitles, which waits for an OpenAI key.
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "10 features have no model")
+        // Nine routes; Subtitles run on the Soniox key itself.
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "9 features have no model")
 
         for feature in AIFeature.allCases where feature != .dropFast {
             env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: feature)
         }
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "2 features have no model")
+        XCTAssertEqual(env.makeViewModel().unsetBanner, "1 feature has no model")
 
         env.routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v6"), for: .dropFast)
-        XCTAssertEqual(env.makeViewModel().unsetBanner, "1 feature has no model")
+        XCTAssertNil(env.makeViewModel().unsetBanner)
 
         env.addKey(.openAI)
         XCTAssertNil(env.makeViewModel().unsetBanner)

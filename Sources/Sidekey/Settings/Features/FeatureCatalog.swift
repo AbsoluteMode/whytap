@@ -165,7 +165,7 @@ struct FeatureRequirement: Equatable, Identifiable {
     enum Kind: Equatable {
         /// A model route of `AIRoutingStore`.
         case model(AIFeature)
-        /// Subtitles run only on the OpenAI key (`SubtitleAudioTranslate`).
+        /// Subtitles run on the Soniox key, or the OpenAI key without it (`SubtitleAudioTranslate`).
         case subtitlesKey
         case permission(FeaturePermission)
         /// Drop's shortcut is installed and macOS delivers it.
@@ -214,7 +214,7 @@ enum FeatureSetupAction: Equatable {
         case .chooseModel: return "Choose a model"
         case .addKey: return "Add a key"
         case .fixKey: return "Fix the key"
-        case .addOpenAIKey: return "Add an OpenAI key"
+        case .addOpenAIKey: return "Add a Soniox key"
         case .allow(let permission): return "Allow \(permission.title)"
         case .openInputMonitoring: return "Open Input Monitoring"
         case .restartWhytap: return "Restart Whytap"
@@ -598,8 +598,8 @@ enum FeatureCatalog {
                 FeatureRequirement(kind: .model(.translation), title: "Text model for Translate",
                                    detail: "Translates the text you type or paste. Subtitles work without it.",
                                    optional: true),
-                FeatureRequirement(kind: .subtitlesKey, title: "OpenAI key for Subtitles",
-                                   detail: "Live subtitles run only on OpenAI's live translation model. Translate works without it.",
+                FeatureRequirement(kind: .subtitlesKey, title: "Soniox or OpenAI key for Subtitles",
+                                   detail: "Live subtitles run on Soniox live translation, or on OpenAI's without a Soniox key. Translate works without it.",
                                    optional: true),
                 FeatureRequirement(kind: .permission(.systemAudio), title: FeaturePermission.systemAudio.title,
                                    detail: "Subtitles listen to your Mac's sound.", optional: true),
@@ -627,7 +627,7 @@ enum FeatureCatalog {
         case .model(let feature):
             return modelState(feature, snapshot: snapshot)
         case .subtitlesKey:
-            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No OpenAI key", action: .addOpenAIKey)
+            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No Soniox or OpenAI key", action: .addOpenAIKey)
         case .permission(let permission):
             return permissionState(permission, snapshot: snapshot)
         case .dropShortcut:
@@ -837,7 +837,7 @@ enum FeatureCatalog {
         case .model:
             return "\(subject) can’t work until it has a model."
         case .subtitlesKey:
-            return "Subtitles can’t start until Whytap has an OpenAI key. Translate doesn’t need it."
+            return "Subtitles can’t start until Whytap has a Soniox or OpenAI key. Translate doesn’t need it."
         case .permission(.keyboard):
             switch check.state {
             case .unmet(_, .restartWhytap):

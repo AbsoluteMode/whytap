@@ -41,7 +41,7 @@ final class SettingsWindowTabTests: XCTestCase {
     }
 
     /// The Notifications tab repeated Notify's list; it became Notify's screen
-    /// in Features. Its link, a What's new button or Lil Bro still land there.
+    /// in Features. Its link or a What's new button still land there.
     @MainActor
     func test_notifications_tab_opens_the_notify_screen() throws {
         XCTAssertEqual(SettingsWindowTab.notifications.resolved, .features)

@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers,
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1486,7 +1486,7 @@ Hover; Backup and Integrations from General's More group
 sidebarHome row stays selected, and SettingsBackBar above it leads back
 (SettingsWindowSelection.backLink). The former Notifications tab repeated
 Notify's list and is gone: like agentMode, the notifications id stays only
-for links, What's new and Lil Bro, and opens the Notify screen
+for links and What's new, and opens the Notify screen
 (SettingsWindowTab.featureScreen). WHY:
 .project-docs/decisions/2026-11-26-notifications-in-notify.md
 
@@ -1552,68 +1552,6 @@ Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
 CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
-
-Lil Bro is a guide drawn over the whole Settings window (Settings/LilBro): a
-pixel boy ("Hood", 14x16 cells at 2 pt per pixel) who lives on the "Lil Bro ·
-ask anything" entry at the bottom of the sidebar. The window is his map:
-views report themselves with lilBroSpot (sidebar rows, his entry, each
-Features row, the pane) and every MacCard with lilBroBlock, in the
-"lilBro.window" coordinate space. LilBroPlanner turns that map into runs along
-a block, arc jumps (up to 90 pt) and his amber ladder for higher blocks;
-LilBroMascot samples LilBroSegment every display refresh while he moves and
-stops its clock at rest (his frames have their own slower clock), Reduce
-Motion makes him appear at the place. SettingsWindowView holds the controller
-without observing it, so his steps redraw only his layer and sidebar entry,
-never the window. A click catches him and opens his balloon (variant C) with
-the reply field at his feet; LilBroBalloonStage (a Layout) measures both and
-places them with the tail in one pass through LilBroBalloonLayout, inside the
-window at every edge. Opened before any question, only a one-line greeting in
-his slang (`LilBroCopy.greetings`, in turn) and the reply field show
-(`showsBalloon`); the balloon comes with the first answer and shows a short
-answer, the rest behind More (`showMore`). No scripted scenarios (REV 10,
-2026-11-26): every question goes to whytap.ai and the model decides whether
-to answer in the balloon or open a place; there is no keyword guide on this
-Mac, no ready-made questions and no setup step he presses. When the answer
-names a row of a tab (LilBroRow, REV 12: e.g. Hotkeys → Meeting record), he
-opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
-(HotkeysSettingsView tags its rows with lilBroRow), and he stands on that row
-and outlines it; without the little guy only the outline shows. The outline
-is the led row's current place (`leadRow`): gone while it is scrolled away,
-back when it returns, ended with the focus (another tab, Clear, a new
-question, closing). With the little guy he waits at home while
-it is away and is back on it when it returns. A row he cannot show (the
-person left the tab meanwhile, even while it was still laying out, or it
-never reports) outlines nothing, leaves their tab and is not said to be
-opened; the guide never selects the tab again after its sidebar stop.
-Before every press he checks that the window is still where his last press
-left it; a click of the person's own during his run or punch ends the guide
-with nothing pressed or claimed. When the
-answer names another place, he runs to the sidebar row and then the
-Features row a person would click, punches each and opens it through the same
-SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
-never a synthetic click. While the balloon is open he stands still; he goes
-home only after it is closed. The ⋯ menu hides the little guy
-(LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Every question goes to whytap.ai: there is no switch to turn
-answers off and no "What is sent" item (REV 13, the maintainer's decision of
-2026-11-26: Lil Bro works only through Sonnet; a `lilBro.answersFromWhytap`
-saved by builds 1770–1772 is ignored). Clear ends a pending question and any
-guiding (the reply is ignored, nothing opens), and closing drops one that has
-no reply yet. A question under the server's
-three characters is not sent (`tooShort`). LilBroRemoteBrain posts the
-question (cut to the server's 300 Unicode scalars), the screen (`tab` or
-`tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered, with redirects refused, to
-`https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-sonnet-5-5), which returns sentences, points and,
-only when the person asked to go or set something up, one place (a feature,
-tab, row `{row, tab}` from LilBroRows.swift, or API keys); an id the app does
-not have is dropped, and an unknown row falls back to its tab. No internet or a timeout is offline, 429 or a
-spent budget is the daily limit, any other error is unavailable; each is a
-short message (offline and unavailable with Try again) and changes nothing.
-The sprite sheet is Resources/LilBro, embedded
-into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
-.project-docs/decisions/2026-11-24-lil-bro.md
 
 Island tool reorder: in the hover drawer's tool grid, a tile pressed and moved
 IslandHoverHitBridge.dragThreshold (4 pt) lifts at once, with no hold delay
@@ -2722,16 +2660,11 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
 
 ## Invariants
 
-1. **No Whytap-owned services, except Lil Bro's answers.** The app never
-   contacts a Whytap backend, has no account and sends no telemetry. The one
-   exception is Lil Bro in Settings: each question the person asks him, the
-   Settings screen they are on and up to three earlier exchanges go to
-   `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`). There is no switch to turn this
-   off (REV 13, the maintainer's decision of 2026-11-26: Lil Bro works only
-   through Sonnet); nothing is sent before a question. WHY:
-   .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-   Other network traffic is limited to
+1. **No Whytap-owned services.** The app never contacts a Whytap backend,
+   has no account and sends no telemetry. Lil Bro, the Settings guide that
+   asked whytap.ai, was removed. WHY:
+   .project-docs/decisions/2026-11-26-lil-bro-removed.md
+   Network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this
    Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),

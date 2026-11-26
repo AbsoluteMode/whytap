@@ -1,8 +1,7 @@
 # Security policy
 
-Whytap runs entirely on your Mac. It has no accounts and no telemetry. The
-only Whytap server it can talk to is whytap.ai, for Lil Bro's answers in
-Settings, and only after you turn them on. Every way data can leave the Mac is listed in the
+Whytap runs entirely on your Mac. It has no accounts, no Whytap servers and
+no telemetry. Every way data can leave the Mac is listed in the
 [network routes table](docs/privacy.md#what-can-leave-the-device-and-only-when-you-choose-it)
 of the privacy document, which is kept current with each release.
 

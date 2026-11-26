@@ -2,30 +2,23 @@ import AppKit
 import SwiftUI
 
 /// Whether the little guy runs around Settings (off leaves only the "Lil Bro"
-/// entry in the sidebar, which opens the same balloon), and whether his
-/// answers come from whytap.ai. Answers are on by default (the maintainer's
-/// decision, 2026-11-26); ⋯ turns them off, and then nothing is sent and a
-/// question gets only the card that turns them on. A choice the person saved
-/// is kept.
+/// entry in the sidebar, which opens the same balloon). His answers always
+/// come from whytap.ai (Claude Sonnet 5.5): there is no switch to turn them
+/// off (the maintainer's decision, REV 13).
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
-    static let answersKey = "lilBro.answersFromWhytap"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
-    @Published var answersFromWhytap: Bool {
-        didSet { defaults.set(answersFromWhytap, forKey: Self.answersKey) }
-    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? true
     }
 }
 
@@ -51,10 +44,6 @@ final class LilBroController: ObservableObject {
     struct Turn: Equatable, Identifiable {
         let id = UUID()
         let question: String
-        /// Asked with answers from whytap.ai on, so whytap.ai already has it.
-        /// Only such turns go back as earlier exchanges; a question asked on
-        /// this Mac never leaves it later.
-        var sentToWhytap = false
         var reply: LilBroReply?
         /// The place he opened for this answer, said under it.
         var opened: String?
@@ -85,18 +74,12 @@ final class LilBroController: ObservableObject {
     /// follow-up questions): hidden until asked for.
     @Published var showMore = false
     @Published var menuOpen = false
-    /// The disclosure before answers from whytap.ai, asked for from ⋯.
-    @Published private(set) var consentShown = false
-    /// What goes to whytap.ai and what it keeps, asked for from ⋯ while
-    /// answers are on (also before the first question). Only words and OK:
-    /// answers stay on (builder review of #493, ticket 625).
-    @Published private(set) var detailsShown = false
 
     private(set) var map = LilBroMap()
     /// The row he led to (REV 12) while its tab shows it as focused: the
     /// outline is that row's current place, gone while it is scrolled away
     /// and back when it returns. Cleared with the focus (another tab, Clear,
-    /// Turn off answers, a new question, closing).
+    /// a new question, closing).
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder review of #493, ticket 627)
     private(set) var leadRow: LilBroRow?
     private(set) var busy = false
@@ -108,7 +91,7 @@ final class LilBroController: ObservableObject {
 
     let selection: SettingsWindowSelection
     let preferences: LilBroPreferences
-    /// whytap.ai; asked only while answers are on.
+    /// whytap.ai, which answers every question.
     let remote: LilBroBrain
     private let reduceMotion: () -> Bool
     private let sleep: (TimeInterval) async -> Void
@@ -129,12 +112,10 @@ final class LilBroController: ObservableObject {
     }
 
     var mascotVisible: Bool { preferences.mascotVisible }
-    var answersFromWhytap: Bool { preferences.answersFromWhytap }
     var isOpen: Bool { bubble != .closed }
-    /// Opened before any question, only the reply field shows: no greeting,
-    /// no suggestions, no disclosure. The balloon appears with the first
-    /// answer (or when ⋯ asked for the disclosure).
-    var showsBalloon: Bool { !turns.isEmpty || consentShown || detailsShown }
+    /// Opened before any question, only the greeting and the reply field
+    /// show; the balloon appears with the first answer.
+    var showsBalloon: Bool { !turns.isEmpty }
     /// The line he greets with over the field, a different one each opening.
     private(set) var greeting = LilBroCopy.greetings[0]
     private var opened = 0
@@ -298,7 +279,6 @@ final class LilBroController: ObservableObject {
         cancelJob()
         selection.focusedRow = nil
         leadRow = nil
-        detailsShown = false
         // A question closed before its reply came is dropped, not left empty.
         if let last = turns.last, last.reply == nil { turns.removeLast() }
         bubble = .closed
@@ -325,7 +305,6 @@ final class LilBroController: ObservableObject {
         menuOpen = false
         showEarlier = false
         showMore = false
-        detailsShown = false
     }
 
     /// Ends the question on its way and any guiding: no late reply, no
@@ -342,66 +321,6 @@ final class LilBroController: ObservableObject {
         if mascotVisible { setPose(.idle) }
     }
 
-    /// ⋯ → What is sent to whytap.ai, while answers are on.
-    func showDetails() {
-        menuOpen = false
-        detailsShown = true
-    }
-
-    func hideDetails() {
-        detailsShown = false
-    }
-
-    /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-    func askToTurnOnAnswers() {
-        menuOpen = false
-        guard !answersFromWhytap else { return }
-        consentShown = true
-    }
-
-    /// The disclosure's Turn on answers button — the only way answers from
-    /// whytap.ai are turned on. Nothing is sent before it.
-    func turnOnAnswers() {
-        let askAgain = turnOnAsks
-        preferences.answersFromWhytap = true
-        consentShown = false
-        menuOpen = false
-        objectWillChange.send()
-        // "Turn on and ask": the question asked while answers were off goes
-        // to whytap.ai now, by this press; earlier ones stay here.
-        if askAgain { retry() }
-    }
-
-    /// The disclosure's button also asks the last question, asked while
-    /// answers were off and so never sent.
-    var turnOnAsks: Bool {
-        guard !busy, let last = turns.last, last.reply?.isAnswersOff == true else { return false }
-        return LilBroRemoteBrain.sends(last.question)
-    }
-
-    /// The disclosure's Not now.
-    func dismissConsent() {
-        consentShown = false
-    }
-
-    /// ⋯ → Turn off answers from whytap.ai.
-    /// Takes effect at once: a question still on its way is stopped and its
-    /// reply, if it comes, is ignored, and nothing opens; that question gets
-    /// the card that turns answers on and asks it again (builder review of
-    /// #493, ticket 625).
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-    func turnOffAnswers() {
-        preferences.answersFromWhytap = false
-        let pending = turns.indices.last.flatMap { turns[$0].reply == nil ? $0 : nil }
-        stopPending()
-        if let pending { turns[pending].reply = .answersOff }
-        consentShown = false
-        detailsShown = false
-        menuOpen = false
-        objectWillChange.send()
-    }
-
     func setMascotVisible(_ visible: Bool) {
         cancelJob()
         preferences.mascotVisible = visible
@@ -412,9 +331,9 @@ final class LilBroController: ObservableObject {
         setPose(.idle)
     }
 
-    /// Sends the typed question to whytap.ai. With answers off, or under the
-    /// three characters it takes, nothing is sent and the reply says so.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 10)
+    /// Sends the typed question to whytap.ai. Under the three characters it
+    /// takes, nothing is sent and the reply says so.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 10, REV 13)
     func ask(_ raw: String) {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
@@ -425,18 +344,15 @@ final class LilBroController: ObservableObject {
         target = nil
         selection.focusedRow = nil
         leadRow = nil
-        detailsShown = false
-        let local: LilBroReply? = !answersFromWhytap ? .answersOff
-            : !LilBroRemoteBrain.sends(question) ? .tooShort : nil
-        if let local {
-            turns.append(Turn(question: question, reply: local))
+        guard LilBroRemoteBrain.sends(question) else {
+            turns.append(Turn(question: question, reply: .tooShort))
             if mascotVisible { setPose(.idle) }
             bubble = .full
             announce(turns[turns.count - 1])
             return
         }
         let asked = LilBroQuestion(text: question, screen: screen, history: history)
-        turns.append(Turn(question: question, sentToWhytap: true))
+        turns.append(Turn(question: question))
         let index = turns.count - 1
         bubble = .thinking
         busy = true
@@ -444,12 +360,12 @@ final class LilBroController: ObservableObject {
         let brain = remote
         job = Task { [weak self] in
             guard let self else { return }
-            // Checked again right before it leaves: answers turned off or
-            // the question cleared meanwhile send nothing.
-            guard !Task.isCancelled, answersFromWhytap, index < turns.count else { return }
+            // Checked again right before it leaves: a question cleared
+            // meanwhile sends nothing.
+            guard !Task.isCancelled, index < turns.count else { return }
             let reply = await brain.reply(to: asked)
-            // A reply after opt-out, Clear or a new question is ignored.
-            guard !Task.isCancelled, answersFromWhytap, index < turns.count else { return }
+            // A reply after Clear or a new question is ignored.
+            guard !Task.isCancelled, index < turns.count else { return }
             turns[index].reply = reply
             switch reply {
             case .answer(let answer):
@@ -463,7 +379,7 @@ final class LilBroController: ObservableObject {
                     // Answered in words: he stays where he is.
                     setPose(.idle)
                 }
-            case .offline, .unavailable, .limit, .answersOff, .tooShort:
+            case .offline, .unavailable, .limit, .tooShort:
                 if mascotVisible { setPose(.sad) }
             }
             guard !Task.isCancelled else { return }
@@ -491,10 +407,9 @@ final class LilBroController: ObservableObject {
     }
 
     /// Up to three earlier exchanges answered by whytap.ai, oldest first.
-    /// Questions asked while answers were off stay on this Mac.
     var history: [LilBroQuestion.Exchange] {
         turns.compactMap { turn in
-            guard turn.sentToWhytap, case .answer(let answer) = turn.reply else { return nil }
+            guard case .answer(let answer) = turn.reply else { return nil }
             return LilBroQuestion.Exchange(question: turn.question,
                                            answer: (answer.paragraphs + answer.bullets).joined(separator: "\n"))
         }.suffix(3).map { $0 }
@@ -820,7 +735,6 @@ final class LilBroController: ObservableObject {
         let text: String
         switch reply {
         case .answer(let answer): text = answer.paragraphs.first ?? ""
-        case .answersOff: text = LilBroCopy.offerLineOff
         case .tooShort: text = LilBroCopy.tooShort
         case .offline: text = LilBroCopy.offline
         case .unavailable: text = LilBroCopy.unavailable
@@ -844,20 +758,6 @@ enum LilBroCopy {
         "Sup bro, where we headed?",
         "Hey hey. What's the move?",
     ]
-    /// The disclosure folded to one line; the full text is under Details.
-    static let offerLine = "Real answers come from whytap.ai (Claude Sonnet 5.5)."
-    /// After a question asked while answers were off: it was not sent.
-    static let offerLineOff = "Answers from whytap.ai are off, so this wasn’t sent."
-    static let turnOnAndAsk = "Turn on and ask"
-    /// Under a question asked while answers were off, once they are on.
-    static let askAgain = "Answers are on now — ask again."
-    /// Said once, before anything is sent, with the button that turns answers on.
-    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
-    static let turnOn = "Turn on answers"
-    /// Read from ⋯ while answers are on.
-    static let dataUse = "Each question you ask here goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac. ⋯ → Turn off answers stops it."
-    static let ok = "OK"
-    static let notNow = "Not now"
     static let offline = "I can’t reach whytap.ai — no internet, so answers aren’t available right now."
     static let unavailable = "whytap.ai can’t answer right now."
     static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow."

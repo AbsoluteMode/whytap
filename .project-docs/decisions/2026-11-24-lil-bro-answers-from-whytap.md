@@ -1,8 +1,8 @@
 ---
 id: lil-bro-answers-from-whytap-2026-11-24
 type: decision
-title: Lil Bro asks whytap.ai, the first Whytap server the app talks to, unless the person turns it off
-summary: The "no Whytap servers" invariant gets one exception. Unless the person turned answers off in Lil Bro's ⋯ menu (on by default since 2026-11-26, the maintainer's decision), each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5 while it is tried out (claude-haiku-5-5 before). On by default since REV 8, turned off from ⋯; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
+title: Lil Bro always asks whytap.ai (Claude Sonnet 5.5), the first Whytap server the app talks to
+summary: The "no Whytap servers" invariant gets one exception. Each question a person asks Lil Bro, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5. Since REV 13 (2026-11-26, the maintainer's decision) there is no switch to turn answers off and no "What is sent" item; Lil Bro works only through Sonnet. No keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
 status: confirmed
 tags: [settings, lil-bro, privacy, network, invariant, ask]
 canonical_for: [lil-bro-answers]
@@ -11,6 +11,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-24 the maintainer, after the first outside tester's feedback, asked to bring whytap.ai's answers into Settings "so people can ask right there and get answers", on Haiku ("Sonnet we can't afford for every user, Haiku is fine"), with a guide that leads people through Settings. The orchestrator task (107) asked for answers from Ask on whytap.ai, an honest privacy text, an explicit opt-in, an offline state, and a decision because the no-servers invariant changes.
     confirmed_at: 2026-11-24
+  - type: user-confirmed
+    reference: On 2026-11-26, looking at build 1772's ⋯ menu with "What is sent to whytap.ai" and "Turn off answers from whytap.ai", the maintainer said to remove them because Lil Bro works only through Sonnet (orchestrator task 107, REV 13).
+    confirmed_at: 2026-11-26
   - type: repository
     reference: Sources/Sidekey/Settings/LilBro/LilBroRemoteBrain.swift
     confirmed_at: 2026-11-24
@@ -37,6 +40,17 @@ invariant said so.
   `https://whytap.ai/api/ask/lilbro` (server: AbsoluteMode/whytap-landing,
   `ask/lilbro.py`). It is the only place in `Sources/` that calls a whytap.ai
   API; a test fails if another file does.
+- **Only Sonnet, no switch (REV 13, 2026-11-26, the maintainer's product
+  decision).** On build 1772 the maintainer pointed at ⋯ → "What is sent to
+  whytap.ai" and "Turn off answers from whytap.ai" and said to remove them:
+  Lil Bro works only through Sonnet. Every question of three characters or
+  more goes to whytap.ai (claude-sonnet-5-5); there is no off state, no
+  "Turn on and ask" card and no "What is sent" card. ⋯ keeps Hide the little
+  guy, Clear and Close. Offline he says briefly that answers are not
+  available, with Try again. A saved `lilBro.answersFromWhytap` from builds
+  1770–1772 is ignored. What is sent and kept stays documented in
+  docs/privacy.md. The opt-out, disclosure and data-use bullets below are
+  history.
 - **On by default (REV 8, 2026-11-26, the maintainer's product decision).**
   Asked "Turn on whytap.ai answers by default, without the consent button?",
   the maintainer answered "Yes, by default". This replaces the builder's

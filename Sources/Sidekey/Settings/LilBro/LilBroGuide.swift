@@ -29,9 +29,6 @@ struct LilBroAnswer: Equatable {
 /// What came back for one question.
 enum LilBroReply: Equatable {
     case answer(LilBroAnswer)
-    /// Answers from whytap.ai are turned off: nothing was sent; the card
-    /// that turns them on and asks this question.
-    case answersOff
     /// Under the three characters whytap.ai takes; nothing was sent.
     case tooShort
     /// whytap.ai could not be reached: no internet or it did not answer in time.
@@ -40,8 +37,6 @@ enum LilBroReply: Equatable {
     case unavailable
     /// Today's questions are used up, for this Mac or for everyone.
     case limit
-
-    var isAnswersOff: Bool { self == .answersOff }
 }
 
 /// One question with what he knows around it: the screen the person is on

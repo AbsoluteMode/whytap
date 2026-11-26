@@ -122,6 +122,8 @@ final class LiveSubtitleModel: ObservableObject {
     private var audioTask: Task<Void, Never>?
     private var timer: Task<Void, Never>?
     private var stopWatchdog: Task<Void, Never>?
+    /// How long Stop waits for the provider's close before it gives up.
+    private let stopDeadline: Duration
     /// Subtitles cost up to about $3 per hour of audio on the user's own key
     /// (OpenAI; Soniox about $0.12): a
     /// session stops by itself after an hour of listening, quietly, exactly
@@ -150,6 +152,7 @@ final class LiveSubtitleModel: ObservableObject {
         connectionTimeout: Duration = .seconds(15),
         maxSessionDuration: Duration = LiveSubtitleModel.maxSessionDuration,
         accessHintDelay: Duration = .seconds(5),
+        stopDeadline: Duration = .seconds(10),
         systemAudioHeard: @escaping () -> Bool = { SystemAudioAccess.heard() },
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
             CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
@@ -168,6 +171,7 @@ final class LiveSubtitleModel: ObservableObject {
         self.flushInterval = flushInterval
         self.makeAudio = makeAudio
         self.accessHintDelay = accessHintDelay
+        self.stopDeadline = stopDeadline
         self.systemAudioHeard = systemAudioHeard
         accessObserver = NotificationCenter.default.addObserver(
             forName: SystemAudioAccess.didChange, object: nil, queue: .main
@@ -277,8 +281,9 @@ final class LiveSubtitleModel: ObservableObject {
         let source = self.source
         Task { await source?.stopAndFinishStreams() }
         let token = generation
+        let stopDeadline = self.stopDeadline
         stopWatchdog = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(10))
+            try? await Task.sleep(for: stopDeadline)
             guard !Task.isCancelled else { return }
             self?.fail(.init(message: "The speech provider did not finish in time. The completed subtitles are still here."), token: token)
         }

@@ -8,9 +8,12 @@ import XCTest
 /// may be a refusal, never for a granted Mac that is quiet.
 @MainActor
 final class SubtitleAudioAccessHintTests: XCTestCase {
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 10) async throws {
+    /// A deadline that runs out fails the test instead of passing late.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 10,
+                      file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(condition(), "condition never became true", file: file, line: line)
     }
 
     private func model(heard: @escaping () -> Bool, audio: FixtureSubtitleAudio,

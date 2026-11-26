@@ -696,6 +696,9 @@ final class LiveTextTickerTests: XCTestCase {
         let renderer = ImageRenderer(content: view)
         renderer.scale = 2
         guard let image = renderer.cgImage else { return (0, 0) }
+        // An in-between frame only advances the model's motion; its pixels are
+        // never read, and counting them was most of this file's run time.
+        if name == "skip" { return (0, 0) }
         let bitmap = NSBitmapImageRep(cgImage: image)
         if let directory = ProcessInfo.processInfo.environment["LIVE_TEXT_RENDER_DIR"],
            let png = bitmap.representation(using: .png, properties: [:]) {

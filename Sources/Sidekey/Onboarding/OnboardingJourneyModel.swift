@@ -290,6 +290,8 @@ final class OnboardingJourneyModel: ObservableObject {
     private var tryCheck: Task<Void, Never>?
     /// The quiet after a take ends before Try Drop says nothing arrived.
     static let tryQuiet: TimeInterval = 1.2
+    /// `tryQuiet` for this model; the preview's tests shorten it with its other delays.
+    private let tryQuietSeconds: TimeInterval
 
     /// The latest speech and language model actions (a source picked, a key
     /// used, the download started). An answer that arrives after a newer
@@ -334,8 +336,10 @@ final class OnboardingJourneyModel: ObservableObject {
         offersOpenAISpeech: Bool? = nil,
         resumeDefaults: UserDefaults? = nil,
         systemAudioProbe: (() async -> Void)? = nil,
-        asksSystemAudio: Bool = PermissionsHelper.screenPaneNamesSystemAudio
+        asksSystemAudio: Bool = PermissionsHelper.screenPaneNamesSystemAudio,
+        tryQuiet: TimeInterval = OnboardingJourneyModel.tryQuiet
     ) {
+        tryQuietSeconds = tryQuiet
         self.systemAudioProbe = systemAudioProbe ?? { await SystemAudioPermissionProbe.ask() }
         self.asksSystemAudio = asksSystemAudio
         _systemAudioAsked = Published(initialValue: resumeDefaults?.bool(forKey: Self.systemAudioAskedKey) ?? false)
@@ -1427,8 +1431,9 @@ final class OnboardingJourneyModel: ObservableObject {
             return
         }
         let voice = self.voice
+        let quiet = tryQuietSeconds
         tryCheck = Task { @MainActor [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(Self.tryQuiet * 1_000_000_000))
+            try? await Task.sleep(nanoseconds: UInt64(quiet * 1_000_000_000))
             guard let self, !Task.isCancelled, self.step == .tryDrop, !voice.working,
                   !self.latest(.tryDrop).isDone else { return }
             if case .failed = self.latest(.tryDrop) { return }

@@ -117,10 +117,11 @@ final class NotifyScriptSupervisorTests: XCTestCase {
         let script = NotifyScript(id: "flaky", name: "Flaky", command: ["/bin/sh", "-c", "echo \"{\\\"id\\\":\\\"run-$$\\\",\\\"title\\\":\\\"Run\\\"}\"; exit 1"], intervalSeconds: 30)
         try JSONEncoder().encode(script).write(to: registry.appendingPathComponent("flaky.json"))
         let hub = LocalNotificationHub(directory: root)
-        let supervisor = NotifyScriptSupervisor(directory: root, hub: hub)
+        // A tenth of a second per backoff step: the first failure waits 0.2 s
+        // (2^1 steps; 2 s in the app) before the relaunch.
+        let supervisor = NotifyScriptSupervisor(directory: root, hub: hub, backoffUnit: 0.1)
         supervisor.start()
         defer { supervisor.stop() }
-        // First failure waits 2 s (2^1) before the relaunch.
         for _ in 0..<800 where hub.history.count < 2 { try await Task.sleep(nanoseconds: 10_000_000) }
         XCTAssertEqual(hub.history.count, 2)
         XCTAssertEqual(Set(hub.history.map(\.id)).count, 2, "each run is a separate script process")

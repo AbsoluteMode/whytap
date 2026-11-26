@@ -2698,6 +2698,14 @@ derive from `HotkeyConfiguration` (single source of truth for every surface).
 `HotkeyTapCombo` uses uppercase US English physical-key labels regardless of
 input layout, including live recording and previously saved non-English titles.
 
+While another app holds Secure Event Input, macOS drops event-tap keys and
+Option/Shift-only Carbon combos. `SecureInputGuard` (Hotkeys/) notices a
+blocked chord from `flagsChanged` and shakes the holder's logo in
+`SecureInputHolderPanel` to the right of the island; it reads only modifier
+state and the frontmost app's focused-element role, never keys, and never
+works around the protection. Details: `docs/hotkey.md` (Secure Input) and
+`.project-docs/decisions/2026-11-26-secure-input-holder.md`.
+
 ## Invariants
 
 1. **No Whytap-owned services, except Lil Bro's opt-in answers.** The app

@@ -247,6 +247,36 @@ and `PermissionsSettingsViewModel`. The source correction and remaining
 installed-app checks are recorded in the
 [permission stability audit](../.project-docs/bugs/2026-10-19-permission-stability-audit.md).
 
+### Secure Input: the holder's logo shakes
+
+While another app holds Secure Event Input (a focused password field, or a
+browser that kept it after Cmd-Tab), macOS drops the keys Whytap would see:
+`SpaceHoldMonitor` (hold-Space and hold-combo Drop) gets nothing, and Carbon
+combos whose modifiers are only ⌥ and/or ⇧ (⌥F Shot, ⌥M Meeting, ⌥H Help) do
+not fire. Carbon combos with ⌘ or ⌃ and modifier-only shortcuts (R⌘ Agent,
+R⌥ Google) keep working. Whytap does not work around the protection.
+
+`SecureInputGuard` watches modifier changes, which still arrive. While a
+background app keeps secure input on, its logo stays dimmed in a black pill
+just right of the island and shakes when a blocked shortcut's chord is pressed
+(held up to 3 s) and no Whytap shortcut arrives; hovering reads "Dia holds
+secure input — close its password field". The key itself is never seen, so a
+bare ⌥ tap also shakes it; that approximation is limited to this stuck state.
+When the frontmost app holds secure input (its password field), nothing
+shakes. A chord is judged 0.3 s after its release, so a Right ⌥ Google tap or
+any other shortcut that did arrive is never blamed. The background holder is
+the app the person left while secure input was on, read on the ⌘ that starts
+Cmd-Tab (switch within 0.5 s of releasing ⌘, no click since it went down); a
+click or Dock switch gives no such reading and the badge shows a lock instead
+of a name. With Google on Right ⌥, Right ⌥+F looks like a Google tap and
+nothing shakes; left ⌥+F is noticed. macOS's
+`kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
+own password fields show nothing. Once secure input is seen off, every badge
+leaves at once. The badge window is exactly the pill, follows the island's
+display and honours screenshot protection while it is up. A bare key or Space
+leaves no event at all.
+[Decision](../.project-docs/decisions/2026-11-26-secure-input-holder.md).
+
 ## Tool hotkeys
 
 Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a

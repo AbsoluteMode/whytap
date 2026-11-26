@@ -287,44 +287,6 @@ struct NativeAgentFinalAnswer {
             + (actionsAttempted ? actionWarning : " Try again."))
     }
 
-    /// Text a Claude turn ended with after its own search: an answer only
-    /// when, with its citation tags and every link (inline, reference,
-    /// autolink, bare URL, HTML anchor) removed, a line says more than a short
-    /// sources heading ("Sources", "References", "Источники информации").
-    static func answersAfterSearch(_ text: String) -> Bool {
-        let prose = withoutCitationTags(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prose.isEmpty, prose.count <= 32_000 else { return false }
-        // Every Markdown and HTML link form is removed with its text; what is
-        // left must say something besides a sources heading.
-        var rest = prose
-        for pattern in [#"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*\S+.*$"#,          // [id]: url "title"
-                        #"(?is)<a\b[^>]*>.*?</a\s*>"#,                         // <a href>text</a>
-                        #"!?\[[^\]\n]*\]\((?:<[^>\n]*>|[^)\n]*)\)"#,          // [text](url "title"), [text](<url>)
-                        #"!?\[[^\]\n]*\]\[[^\]\n]*\]"#,                       // [text][id], [text][]
-                        #"(?i)<(?:https?|mailto):[^>\s]+>"#,                   // <https://...>
-                        #"(?i)\b(?:https?://|www\.)\S+"#] {                    // bare URLs
-            rest = rest.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
-        }
-        // A heading: no digits, at most four words, led by a heading word
-        // ("Sources", "Links for verification", "Источники информации",
-        // "Список литературы"); "Linked to ...", "Источник: ..., −2°" are answers.
-        let headingWords: Set<String> = ["source", "sources", "reference", "references", "link", "links", "bibliography",
-                                         "citation", "citations", "further", "see", "list",
-                                         "источник", "источники", "ссылка", "ссылки", "литература", "библиография",
-                                         "список", "см", "смотри", "подробнее"]
-        return rest.components(separatedBy: .newlines).contains { line in
-            let content = line.replacingOccurrences(of: #"^\s*(?:[-*+#>]+\s*|\d+[.)]\s*)*"#, with: "", options: .regularExpression)
-                .replacingOccurrences(of: #"[*_`~]"#, with: "", options: .regularExpression)
-                .trimmingCharacters(in: CharacterSet.whitespaces.union(.punctuationCharacters).union(.symbols))
-            guard content.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) })
-            else { return false }
-            let words = content.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
-            let heading = words.count <= 4 && !content.contains(where: { $0.isNumber || $0 == "°" })
-                && headingWords.contains(String(words.first ?? ""))
-            return !heading
-        }
-    }
-
     /// A conservative format check, not a semantic verifier. Rejects URL lists
     /// and common source-only headings; factual correctness still needs evidence.
     private static func hasAnswerContent(_ text: String, hasSources: Bool) -> Bool {

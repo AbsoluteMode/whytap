@@ -57,13 +57,10 @@ model, Claude Sonnet 5.5, and Anthropic's own web search (the default).
   `</cite>` are removed from the answer prose, keeping the cited words,
   outside code and quotes. Insert and Copy payloads, an ordinary HTML
   `<cite>` and Markdown-escaped tags (`\<cite ...>`) stay literal.
-- **Text after the search is the answer.** When a response ran its search,
-  holds the results and ends (end_turn) with text and no tool call, the text
-  after the last result (without the preamble before the search) is the
-  answer. Before, a second request asked for `finish_answer`; in a live pair it
-  took 3.2 s more. Text that is only a sources heading or links is not an
-  answer: that response still gets the completion request. A result deferred from an earlier response still gets that
-  request. The system prompt asks for `finish_answer` in the same response.
+- **`finish_answer` in the same response as the search.** The system prompt
+  asks for it. When the model still ends (end_turn) with text after its
+  search, the Agent sends the completion request as before (about 3 s more;
+  1 of 5 live runs). The text is not read as the answer: see Rejected.
 - **A simple factual question gets 1-3 sentences**, without a table, list or
   callout (system prompt and the `answer` description). Answers to the weather
   question had grown to 530-830 output tokens with tables and NOTE callouts,
@@ -120,11 +117,11 @@ The new tests fail on the previous head (11 assertions). After the builder's rev
 ticket 653: escaped tags kept literal; a sources heading, a translated heading
 or links alone after the search continue to `finish_answer`, prose with a link
 is still one request (16 new assertions fail on the previous head). After ticket 657: an escaped opener
-is literal and never takes a real closing tag; every Markdown and HTML link
-form (titles, angle destinations, reference links and definitions, anchors)
-is removed before the check, and a heading is a short digit-free line led by
-a heading word, so "Linked to Arctic air" or a short Russian answer with a temperature stay
-answers. The builder's fixture inputs and controls are tests. `NativeAgentLowEffortTests` and
+is literal and never takes a real closing tag; the builder's citation fixture
+inputs are tests. The "text after the search is the answer" shortcut tried in
+these rounds was removed after ticket 660 (see Rejected); every text after a
+search now gets the completion request, in a test with prose, a short
+answer, a sources heading, a link list and an HTML anchor list. `NativeAgentLowEffortTests` and
 `NativeAgentWebSearchTests` updated for the system block.
 
 After the maintainer asked for the cause of the remaining gap, pairs of the
@@ -136,6 +133,14 @@ app.
 
 ## Rejected
 
+- Reading the text Claude ends with after its search as the answer, to save
+  the completion request (about 3 s, 1 of 5 live runs): the builder blocked
+  it in four rounds in a row (queue tickets 643, 653, 657, 660), each time
+  with new source-only forms read as answers (reference and nested links,
+  parenthesised URLs, HTML anchor lists) or short answers read as headings
+  ("See a doctor immediately."). The same race as reading provider error
+  text in 2026-11-24-agent-minimal-reasoning.md; the orchestrator chose to
+  drop it (option A).
 - Keeping Sonnet 5.5 without a thinking field beside the search: about 9 s
   before the first byte on every search question.
 - Turning the provider's search off for simple questions: a weather answer

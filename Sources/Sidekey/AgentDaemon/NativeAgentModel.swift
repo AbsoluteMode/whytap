@@ -383,12 +383,7 @@ struct NativeAgentModel {
             // provider rejects a continuation that changes them.
             messages.append(["role": "assistant", "content": content])
             var requested = Set<String>(), answered = Set<String>()
-            // Text written after the last search result: the answer when the
-            // model finished (end_turn) without calling finish_answer.
-            var textAfterSearch = "", unknownBlock = false
             for block in content {
-                if block["type"] as? String == "web_search_tool_result" { textAfterSearch = "" }
-                if block["type"] as? String == "text" { textAfterSearch += block["text"] as? String ?? "" }
                 switch block["type"] as? String {
                 case "tool_use":
                     calls.append(try call(id: block["id"], name: block["name"], arguments: block["input"]))
@@ -421,7 +416,7 @@ struct NativeAgentModel {
                     break
                 default:
                     // An unknown block is never read as answer text.
-                    onlyText = false; unknownBlock = true
+                    onlyText = false
                 }
                 if ["server_tool_use", "web_search_tool_result", "tool_use"].contains(block["type"] as? String ?? "") {
                     onlyText = false
@@ -429,21 +424,6 @@ struct NativeAgentModel {
             }
             plainTextReply = onlyText && calls.isEmpty
             pendingSearch = !requested.subtracting(answered).isEmpty
-            // After its search the model may finish with plain text instead of
-            // finish_answer. When this response ran its searches and holds
-            // their results (a result deferred from an earlier response still
-            // gets a completion request) and no tool call, that text (after
-            // the last result, without the preamble before the search) is the
-            // answer: no second request asking for
-            // finish_answer (about 3 s). A sources heading or links alone are
-            // not an answer: that response still gets the completion request. WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
-            if response["stop_reason"] as? String == "end_turn", calls.isEmpty, !unknownBlock,
-               !requested.isEmpty, requested == answered,
-               NativeAgentFinalAnswer.answersAfterSearch(textAfterSearch) {
-                text = textAfterSearch
-                plainTextReply = true
-                webWork = false
-            }
         case .openRouter:
             guard let choice = (response["choices"] as? [[String: Any]])?.first,
                   ["stop", "tool_calls"].contains(choice["finish_reason"] as? String ?? ""),

@@ -38,8 +38,7 @@ a longer one says it reached the model's output limit.
 
 A simple factual question with a web search, such as the weather in a city,
 is meant to take one request: the provider searches once and the model writes
-1-3 sentences, without a table or callout; when Claude ends with text after its
-search, that text is the answer, without a second request. After a search,
+1-3 sentences, without a table or callout. After a search,
 citation tags Claude copies into its answer text are removed; Insert and Copy
 cards keep their text as written. Once a step of a task was answered, direct
 Anthropic requests mark the tools and instructions for Anthropic's prompt

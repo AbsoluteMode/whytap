@@ -367,8 +367,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   level of its saved catalog entry). In a turn with the provider's own web
   search OpenAI minimal becomes low; Claude Sonnet 5.5 keeps between_tools
   there too (since 2026-11-26), and several finish_answer calls alone in one
-  response give the first valid one; an end_turn whose own search results
-  are followed by text answers with that text (no completion request);
+  response give the first valid one; text after a search is never read as
+  the answer (an end_turn without finish_answer gets the completion request);
   on a turn that ran the search, Claude's indexed citation tags (<cite
   index="1-9"> and then </cite>) are removed from the answer prose outside
   code, never from Insert or Copy; a malformed finish_answer beside a valid

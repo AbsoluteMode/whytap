@@ -412,12 +412,19 @@ final class LilBroControllerTests: XCTestCase {
     @MainActor
     private final class Steps {
         private(set) var performed: [FeatureSetupAction] = []
-        func report(to controller: LilBroController, optionalFirst: Bool = false) {
-            let perform: @MainActor (FeatureSetupAction) -> Void = { [weak self] in self?.performed.append($0) }
-            let model = LilBroPressable(id: "model.dropFast", action: .downloadOnDeviceModel(.dropFast),
-                                        optional: false, perform: perform)
-            let extra = LilBroPressable(id: "permission.microphone", action: .allow(.microphone),
-                                        optional: true, perform: perform)
+        /// Which registration ran: a re-registered row's new closure, not the old one.
+        private(set) var by: [String] = []
+        func report(to controller: LilBroController, optionalFirst: Bool = false, tag: String = "first",
+                    feature: AppFeature = .drop, action: FeatureSetupAction = .downloadOnDeviceModel(.dropFast),
+                    hasButton: Bool = true) {
+            let perform: @MainActor (FeatureSetupAction) -> Void = { [weak self] in
+                self?.performed.append($0)
+                self?.by.append(tag)
+            }
+            let model = LilBroPressable(feature: feature, id: "model.dropFast", action: action,
+                                        optional: false, hasButton: hasButton, perform: perform)
+            let extra = LilBroPressable(feature: feature, id: "permission.microphone", action: .allow(.microphone),
+                                        optional: true, hasButton: true, perform: perform)
             controller.update(pressables: optionalFirst ? [extra, model] : [model, extra])
             var spots = map().spots
             spots[.need("model.dropFast")] = CGRect(x: 245, y: 300, width: 690, height: 50)
@@ -516,10 +523,151 @@ final class LilBroControllerTests: XCTestCase {
     }
 
     func test_each_step_says_what_pressing_it_does() {
-        XCTAssertEqual(LilBroCopy.ask(.downloadOnDeviceModel(.dropFast)),
+        XCTAssertEqual(LilBroCopy.ask(.downloadOnDeviceModel(.dropFast), steps: 1),
                        "One step left: Download free model. It downloads about 470 MB to this Mac. Press it?")
-        XCTAssertEqual(LilBroCopy.consequence(of: .allow(.keyboard)), "macOS will ask you to allow it.")
+        XCTAssertEqual(LilBroCopy.ask(.allow(.keyboard), steps: 3),
+                       "3 steps left. First: \(FeatureSetupAction.allow(.keyboard).title). "
+                       + "macOS asks you to allow it, or System Settings opens where you turn it on. Press it?")
         XCTAssertEqual(LilBroCopy.consequence(of: .restartWhytap), "Whytap quits and opens again; Settings closes.")
+    }
+
+    // MARK: Stale or wrong presses (builder review of #468, ticket 609)
+
+    /// Drop's screen open, the offer made.
+    private func offered(_ steps: Steps, mascot: Bool = true,
+                         sleep: ((TimeInterval) async -> Void)? = nil) async -> (LilBroController, SettingsWindowSelection) {
+        let selection = SettingsWindowSelection(selectedTab: .features)
+        let controller = make(selection: selection, mascot: mascot, sleep: sleep)
+        steps.report(to: controller)
+        selection.open(.drop)  // already there: no punches on the way
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        return (controller, selection)
+    }
+
+    func test_with_several_required_steps_he_says_how_many() async {
+        let steps = Steps()
+        let selection = SettingsWindowSelection(selectedTab: .features)
+        let controller = make(selection: selection)
+        let perform: @MainActor (FeatureSetupAction) -> Void = { _ in }
+        controller.update(pressables: [
+            LilBroPressable(feature: .drop, id: "model.dropFast", action: .downloadOnDeviceModel(.dropFast),
+                            optional: false, hasButton: true, perform: perform),
+            LilBroPressable(feature: .drop, id: "permission.keyboard", action: .allow(.keyboard),
+                            optional: false, hasButton: true, perform: perform),
+            LilBroPressable(feature: .drop, id: "permission.microphone", action: .allow(.microphone),
+                            optional: false, hasButton: true, perform: perform),
+        ])
+        _ = steps
+        controller.ask("Set up dictation")
+        await until { controller.proposal != nil && !controller.isBusy }
+        XCTAssertEqual(controller.proposalSteps, 3)
+        XCTAssertTrue(LilBroCopy.ask(controller.proposal!.action, steps: controller.proposalSteps).hasPrefix("3 steps left. First:"))
+    }
+
+    func test_a_row_whose_action_changed_before_yes_is_not_pressed() async {
+        let steps = Steps()
+        let (controller, _) = await offered(steps)
+        steps.report(to: controller, tag: "changed", action: .useOnDeviceModel(.dropFast))
+        XCTAssertNil(controller.proposal, "a different action is not the one asked about")
+        controller.confirmProposal()
+        await settleDown()
+        XCTAssertTrue(steps.performed.isEmpty)
+    }
+
+    func test_a_step_done_while_he_runs_to_it_is_not_pressed() async {
+        let gate = Gate { $0 == 0.43 }
+        let steps = Steps()
+        let (controller, _) = await offered(steps, sleep: { await gate.sleep($0) })
+        controller.confirmProposal()
+        await until { controller.flash != nil && gate.waiting == 1 }
+        controller.update(pressables: [])  // the person pressed it meanwhile
+        gate.release()
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertTrue(steps.performed.isEmpty, "checked again right before pressing")
+        XCTAssertNil(controller.turns.last?.pressed)
+    }
+
+    func test_a_step_done_right_after_yes_is_not_pressed_without_the_mascot_either() async {
+        let steps = Steps()
+        let (controller, _) = await offered(steps, mascot: false)
+        controller.confirmProposal()
+        controller.update(pressables: [])
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertTrue(steps.performed.isEmpty)
+    }
+
+    func test_leaving_the_feature_withdraws_the_offer_even_for_the_same_row_elsewhere() async {
+        let steps = Steps()
+        let (controller, selection) = await offered(steps)
+        selection.open(.agent)
+        steps.report(to: controller, tag: "agent", feature: .agent)  // Agent has an identical row
+        XCTAssertNil(controller.proposal)
+        controller.confirmProposal()
+        await settleDown()
+        XCTAssertTrue(steps.performed.isEmpty)
+    }
+
+    func test_after_leaving_mid_run_nothing_is_pressed_on_the_new_screen() async {
+        let gate = Gate { $0 == 0.43 }
+        let steps = Steps()
+        let (controller, selection) = await offered(steps, sleep: { await gate.sleep($0) })
+        controller.confirmProposal()
+        await until { controller.flash != nil && gate.waiting == 1 }
+        selection.open(.agent)
+        steps.report(to: controller, tag: "agent", feature: .agent)
+        gate.release()
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertTrue(steps.performed.isEmpty)
+    }
+
+    func test_an_unchanged_step_runs_once_through_its_current_registration() async {
+        let steps = Steps()
+        let (controller, _) = await offered(steps, mascot: false)
+        steps.report(to: controller, tag: "redrawn")  // same step, new closure after a redraw
+        XCTAssertNotNil(controller.proposal)
+        controller.confirmProposal()
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertEqual(steps.performed, [.downloadOnDeviceModel(.dropFast)])
+        XCTAssertEqual(steps.by, ["redrawn"])
+    }
+
+    func test_rows_still_from_the_last_screen_are_never_offered_and_the_new_ones_are() async {
+        let steps = Steps()
+        let selection = SettingsWindowSelection(selectedTab: .features)
+        let controller = make(selection: selection)
+        steps.report(to: controller, tag: "screenshots", feature: .screenshots)
+        controller.ask("Set up dictation")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertNil(controller.proposal, "Screenshots' rows are not Drop's")
+        steps.report(to: controller, tag: "drop")  // Drop's rows report a moment later
+        XCTAssertEqual(controller.proposal?.feature, .drop)
+        controller.confirmProposal()
+        await until { !controller.isBusy && controller.bubble == .full }
+        XCTAssertEqual(steps.by, ["drop"])
+    }
+
+    func test_a_model_row_that_shows_a_picker_is_left_to_the_person() async {
+        let steps = Steps()
+        let selection = SettingsWindowSelection(selectedTab: .features)
+        let controller = make(selection: selection)
+        steps.report(to: controller, action: .chooseModel(.dropFast), hasButton: false)
+        controller.ask("Set up dictation")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertNil(controller.proposal, "Choose a model is the row's picker, not a button he presses")
+
+        let model = FeatureRequirement(kind: .model(.dropFast), title: "Speech-to-text model", detail: "")
+        let check = { (action: FeatureSetupAction) in
+            FeatureCheck(requirement: model, state: .unmet(reason: "", action: action))
+        }
+        XCTAssertFalse(LilBroPressable.rowHasButton(check(.chooseModel(.dropFast)), action: .chooseModel(.dropFast)))
+        for action in [FeatureSetupAction.downloadOnDeviceModel(.dropFast), .useOnDeviceModel(.dropFast),
+                       .addKey(.dropFast), .fixKey(.dropFast), .addOpenAIKey] {
+            XCTAssertTrue(LilBroPressable.rowHasButton(check(action), action: action), "\(action)")
+        }
+        let keyboard = FeatureCheck(requirement: FeatureRequirement(kind: .permission(.keyboard), title: "", detail: ""),
+                                    state: .unmet(reason: "", action: .allow(.keyboard)))
+        XCTAssertTrue(LilBroPressable.rowHasButton(keyboard, action: .allow(.keyboard)))
     }
 
     // MARK: Cancellation and stopping (builder review of #464)

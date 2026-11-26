@@ -106,7 +106,8 @@ struct LilBroBalloonView: View {
                     .foregroundStyle(MacSettingsTheme.text2)
             }
             if let step = controller.proposal {
-                LilBroPressPrompt(action: step.action, confirm: controller.confirmProposal,
+                LilBroPressPrompt(action: step.action, steps: controller.proposalSteps,
+                                  confirm: controller.confirmProposal,
                                   decline: controller.declineProposal)
             }
             offer(after: reply)
@@ -304,12 +305,13 @@ struct LilBroOffer: View {
 // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
 struct LilBroPressPrompt: View {
     let action: FeatureSetupAction
+    var steps = 1
     let confirm: () -> Void
     let decline: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            (Text("One step left: ") + Text(action.title).fontWeight(.semibold) + Text(". ")
+            (Text(LilBroCopy.lead(steps) + " ") + Text(action.title).fontWeight(.semibold) + Text(". ")
                 + Text(LilBroCopy.consequence(of: action)) + Text(" Press it?"))
                 .font(.system(size: 12.5))
                 .foregroundStyle(MacSettingsTheme.text)

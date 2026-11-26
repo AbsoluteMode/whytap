@@ -1572,12 +1572,15 @@ an id the app does not have is dropped. No internet or a timeout is offline,
 offers Try again (offline, unavailable) and the closest pages the local guide
 finds, and changes nothing. ⋯ turns answers off again. On a feature's screen
 the "What it needs" rows report themselves with lilBroNeed (FeatureNeedsGroup):
-their spot and, while unmet, the step they offer (LilBroPressable). After
-guiding to a feature he offers the first required step — "One step left:
-Download free model. It downloads about 470 MB to this Mac. Press it?" — and
-presses it only after "Yes, press it": he runs to the row, punches it and
-calls the same FeatureScreenContext.perform as the row's button. "I'll do it",
-closing, a new question or the step being done meanwhile withdraw the offer.
+their feature, spot and, while unmet, the step they offer (LilBroPressable;
+a model row showing its picker is not a button and is never pressed). After
+guiding to a feature he offers that feature's first required step — "One step
+left: Download free model. It downloads about 470 MB to this Mac. Press it?"
+(or "3 steps left. First: …") — and presses it only after "Yes, press it": he
+runs to the row, punches it, checks that the same feature's screen still
+offers the very step, and calls the row's current FeatureScreenContext.perform.
+"I'll do it", closing, a new question, leaving the feature or the step being
+done or changed meanwhile withdraw the offer or press nothing.
 Tabs and API keys never offer a press. The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md

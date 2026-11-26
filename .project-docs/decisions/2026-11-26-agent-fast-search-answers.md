@@ -49,6 +49,12 @@ model, Claude Sonnet 5.5, and Anthropic's own web search (the default).
   The system prompt now asks for plain prose with the pages in `sources`, and
   `<cite ...>` / `</cite>` are removed on Claude turns (direct or `anthropic/`
   on OpenRouter), keeping the cited words, outside code and quotes.
+- **Text after the search is the answer.** When a response ran its search,
+  holds the results and ends (end_turn) with text and no tool call, the text
+  after the last result (without the preamble before the search) is the
+  answer. Before, a second request asked for `finish_answer`; in a live pair it
+  took 3.2 s more. A result deferred from an earlier response still gets that
+  request. The system prompt asks for `finish_answer` in the same response.
 - **A simple factual question gets 1-3 sentences**, without a table, list or
   callout (system prompt and the `answer` description). Answers to the weather
   question had grown to 530-830 output tokens with tables and NOTE callouts,
@@ -96,6 +102,13 @@ call, a mixed batch and only invalid calls fail; citation tags removed on a
 Claude turn and kept in code and on OpenAI; the system block is marked for the
 cache only from the turn's second request. `NativeAgentLowEffortTests` and
 `NativeAgentWebSearchTests` updated for the system block.
+
+After the maintainer asked for the cause of the remaining gap, pairs of the
+native loop and curl on the exact body the loop had just sent gave 10.7 s
+(plus a 3.2 s second request) against 4.3 s, and 5.3 s against 6.0 s; outside
+the HTTP request a turn spent about 0.1 s. The gap is Anthropic's own response
+time for a search turn, which varied from 4.3 to 10.7 s for one body, not the
+app.
 
 ## Rejected
 

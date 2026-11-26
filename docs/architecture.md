@@ -367,7 +367,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   level of its saved catalog entry). In a turn with the provider's own web
   search OpenAI minimal becomes low; Claude Sonnet 5.5 keeps between_tools
   there too (since 2026-11-26), and several finish_answer calls alone in one
-  response give the first valid one; Claude citation tags (<cite ...>,
+  response give the first valid one; an end_turn whose own search results
+  are followed by text answers with that text (no completion request);
+  Claude citation tags (<cite ...>,
   </cite>) are removed from the answer outside code; direct Anthropic
   requests after the turn's first carry a cache_control breakpoint on the
   system block (tools and instructions). WHY:

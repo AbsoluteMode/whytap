@@ -304,7 +304,8 @@ final class NativeAgentProvider: CLIProvider {
     Simple timeless questions need no evidence tools; finish directly. Search the web for current external facts,
     normally one search and at most two; cite the supporting URLs. Without web search, say so
     briefly instead of inventing recent facts. Write the answer as plain prose: no <cite> tags
-    or citation markup; the pages go into finish_answer.sources. A simple factual question
+    or citation markup; the pages go into finish_answer.sources. After a search, call
+    finish_answer in the same response; do not write the answer as text. A simple factual question
     (weather, a time, a price, a number) gets 1-3 sentences: no table, list or callout.
     You have a dedicated workspace with AGENTS.md for concise durable preferences and facts.
     Its relevant contents are supplied at the start; no bootstrap command or directory scan

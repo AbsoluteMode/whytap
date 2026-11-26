@@ -610,4 +610,41 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         let direct = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("Hello."))])
         XCTAssertTrue(direct.bodies.first?["instructions"] is String)
     }
+
+    /// 2026-11-26: after its search the model may finish (end_turn) with
+    /// plain text instead of finish_answer. That text, after the last search
+    /// result and without the preamble, is the answer: one request, no
+    /// "Continue" request. A search still pending, or no text after the
+    /// result, still asks for finish_answer.
+    func testTextAfterTheSearchIsTheAnswerWithoutASecondRequest() async throws {
+        let search: [String: Any] = ["type": "server_tool_use", "id": "s1", "name": "web_search", "input": ["query": "погода спб"]]
+        let result: [String: Any] = ["type": "web_search_tool_result", "tool_use_id": "s1",
+                                     "content": [["type": "web_search_result", "title": "Погода", "url": "https://example.com/spb",
+                                                  "encrypted_content": "x"]]]
+        let answered = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "end_turn", "content": [
+                ["type": "text", "text": "Нужны свежие данные, ищу."], search, result,
+                ["type": "text", "text": "Около −2°, ясно, без осадков.",
+                 "citations": [["type": "web_search_result_location", "title": "Погода", "url": "https://example.com/spb"]]],
+            ]]),
+            json(anthropicFinal("never")),
+        ])
+        XCTAssertEqual(answered.store.status, .ready, answered.store.errorMessage ?? "")
+        XCTAssertEqual(answered.store.streamingText, "Около −2°, ясно, без осадков.")
+        XCTAssertEqual(answered.bodies.count, 1, "no Continue request")
+
+        let empty = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "end_turn", "content": [["type": "text", "text": "Ищу."], search, result]]),
+            json(anthropicFinal("Около −2°.")),
+        ])
+        XCTAssertEqual(empty.store.streamingText, "Около −2°.")
+        XCTAssertEqual(empty.bodies.count, 2, "no text after the result: finish_answer is asked for")
+
+        let pending = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "end_turn", "content": [search, ["type": "text", "text": "Жду результатов."]]]),
+            json(anthropicFinal("Около −2°.")),
+        ])
+        XCTAssertEqual(pending.store.streamingText, "Около −2°.")
+        XCTAssertEqual(pending.bodies.count, 2, "a search without its result is not answered by text")
+    }
 }

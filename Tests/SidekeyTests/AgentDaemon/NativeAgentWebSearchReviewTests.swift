@@ -152,8 +152,9 @@ extension NativeAgentWebSearchTests {
                 return self.serve(["stop_reason": "end_turn", "content": [
                     ["type": "server_tool_use", "id": "srv", "name": "web_search", "input": ["query": "q"]],
                     ["type": "web_search_tool_result", "tool_use_id": "srv", "content": [
-                        ["type": "web_search_result", "url": "https://fact.example", "title": "Fact", "encrypted_content": "ENC-1"]]],
-                    ["type": "text", "text": "It is cold."]
+                        ["type": "web_search_result", "url": "https://fact.example", "title": "Fact", "encrypted_content": "ENC-1"]]]
+                    // No text after the result: text there is the answer
+                    // since 2026-11-26 (testTextAfterTheSearchIsTheAnswerWithoutASecondRequest).
                 ]])
             }
             return self.serve(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "f", "name": "finish_answer",

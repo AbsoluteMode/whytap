@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-preview-before-validation.md]
 ---
 
 # Parallel development, one working Whytap
@@ -252,15 +252,20 @@ six hours.
 
 The LaunchAgent runs only in the logged-in graphical session: signing needs
 the unlocked login keychain, and the engine needs its own signed-in CLI. A
-sleeping, logged-out or locked Mac processes nothing; the queue survives.
+sleeping or logged-out Mac processes nothing; the queue survives.
 Before starting a session for open work, including a deferred install, the
-watcher checks the environment without a model: a locked screen (or another
-user at the console) and a five-minute load average above
-`load_limit_per_cpu` (default 2) times the CPU count only wait, logged as
-`waiting: …`. A wait counts no backoff and blames no PR; the next tick starts
-the session once the screen is unlocked and the load has fallen. Unknown
-values never block. `build-queue-watcher.py environment` prints the same check
-(exit 0 clear, 3 not clear) for the builder.
+watcher checks the environment without a model: a five-minute load average
+above `load_limit_per_cpu` (default 2) times the CPU count only waits, logged
+as `waiting: …`. A locked screen (or another user at the console) waits only
+for installs, preview sessions and, with `validate_while_locked: false`,
+everything; otherwise review, tests and merges go on behind it (only two
+protected-data tests, signing and the install need an unlocked screen). A wait
+counts no backoff and blames no PR; the next tick starts the session once the
+condition is gone. Unknown values never block. `build-queue-watcher.py
+environment` prints the same check (exit 0 clear, 3 not clear) for the
+builder; `environment --for suite` ignores the lock. On each tick the watcher
+also returns, without a model, a queued ticket whose `--depends-on` PR has been
+blocked or cancelled for over `stale_dependency_minutes` (120).
 
 Each session reads the builder prompt from `origin/main`, so a merged rule
 change reaches the next session without reinstalling. Only a successful fetch
@@ -302,6 +307,54 @@ The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this
 process and the builder prompt, never queue contents.
 
+### Preview lane: the owner checks the feature first
+
+On 2026-11-26 the owner set the order: he checks the feature itself in his
+running app first; code review, the full suite and the merge follow his
+approval (see the
+[preview before validation decision](../decisions/2026-11-26-preview-before-validation.md)).
+A worker that has built its branch and run its targeted tests submits with
+`enqueue ... --preview`. The flow:
+
+1. **Preview.** A second LaunchAgent (`build-queue-watcher.py run-preview`,
+   loaded by `activate --preview-lane`) starts a preview session beside any
+   running validation session: own session lock, state and warm worktree
+   (the `preview_worktree` beside the integration worktree), prompt scripts/build-queue-preview-prompt.md
+   from `origin/main`. It never reviews, runs the full suite, merges or pushes.
+   `preview-claim` returns the ticket and the **train** (PRs installed for the
+   owner and awaiting approval). The session builds a local commit of
+   `origin/main` + train + ticket as a local arm64 app (incremental), runs the
+   safety checks, installs it under the meeting gate and `whytap-app.lock`,
+   and sets `awaiting_approval`. A conflict with main or a compile failure
+   returns the ticket to its author.
+2. **Safety checks that never skip:** compile; strict signature, Developer ID
+   team, the installed app's designated requirement and bundle ID; `arm64`
+   app and helper; higher `CFBundleVersion`, no lower display version; native
+   `--installation-check`; the meeting/activity gate from a pristine
+   `origin/main` copy before a normal Quit (never force-quit); one running
+   instance with the new identity and a smoke check; a known-good main-based
+   bundle in a `known-good` folder beside the builder's worktrees for rollback. A PR touching
+   stored data, migrations, permissions, Keychain, signing, entitlements,
+   packaging, updates or the queue (the helper's `PREVIEW_UNSAFE` path guard)
+   gets no preview: `preview-claim` moves it to the validation lane and tells
+   its author why.
+3. **The owner's decision**, relayed by the orchestrator (never by the PR's
+   session or the builder): `approve --ticket <id> --by "<owner's words>"
+   --note <context> --actor <orchestrator>` moves the ticket to validation
+   (`lane: approved`) at its original place; `reject --ticket <id> --note
+   "<what to change>" --actor <orchestrator>` returns it to its author and
+   marks the train for a rebuild without it. A fix is enqueued again with
+   `--preview` and keeps the preview's place.
+4. **Validation** of approved PRs and of PRs submitted without `--preview`
+   follows the builder turn below; its install builds main plus the current
+   train so the owner's previews stay in the app.
+
+the local build/CURRENT_BUILD.md receipt shows previews only under **Preview, not merged**
+(build, source commit, main base, each PR's head and acceptance steps,
+rollback path), never as merged or as verified running main. `status` lists
+`preview_train` and `preview_rebuild`; the orchestrator reports
+`awaiting_approval` tickets to the owner as "ready to check".
+
 A worker uses the shared helper even from a worktree that predates this change:
 
 ```bash
@@ -315,7 +368,9 @@ python3 "$queue_git_dir/exodia-build-queue.py" enqueue \
 ```
 
 Use actual values, not literal placeholders. Repeat `--acceptance` for up to
-three concrete checks. When the PR must not merge before another PR, add
+three concrete checks. A resubmission after a block keeps the PR's earlier
+place at most twice; later ones go to the end. `status --open` lists open work
+and the earlier tickets of the same PRs instead of the whole archive. When the PR must not merge before another PR, add
 `--depends-on <that PR's URL>` (repeatable) besides describing it in
 `--dependencies`: the ticket keeps its place but is not claimed, and starts no
 builder session, until the latest ticket of that PR is `done` or
@@ -424,9 +479,16 @@ queue survives downtime.
    common directory and names it as a follow-up in the ticket note when it is
    already listed within the last seven days; if it fails again, it is a
    finding. A test skipped with "Protected data is unavailable" ran while the
-   screen was locked; it runs again once the environment is clear, before the
-   merge, and a failure there is a finding (see the
-   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)).
+   screen was locked; the merge may proceed with those tests recorded as
+   pending, and they run on main once the screen is unlocked, before
+   packaging: a failure there is a finding and stops the install (see the
+   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)
+   and the [preview decision](../decisions/2026-11-26-preview-before-validation.md)).
+   Cheapest checks first: review, probes, documentation checks and `swift test
+   --filter` of the touched classes; a blocking finding blocks without the
+   full suite and names a reproducing check for its whole class that the
+   author adds to the PR. A stacked PR waits for its parent (`set --status
+   queued`). The full suite is the acceptance gate of a merge candidate.
    Block a PR once with everything. Before setting `blocked`, finish the whole
    inspection: every probe and check across all paths the PR touches. Write
    **all** problems found into the ticket note as one numbered list. When a
@@ -561,9 +623,10 @@ Under the lock:
    installs; until then each runtime PR installs as before (see the
    [group install decision](../decisions/2026-11-23-builder-queue-group-install.md)).
    Otherwise, and for that install,
-   prepare a signed production candidate from clean,
-   committed main using the current local build-only packaging procedure in
-   `docs/build-and-release.md`. Building must leave the installed app running.
+   prepare a signed local candidate from clean, committed main (plus the
+   current preview train, if any) with the local install procedure in
+   `docs/build-and-release.md` (`EXODIA_LOCAL_INSTALL=1`: arm64 only, no DMG),
+   under `whytap-app.lock`. Building must leave the installed app running.
    Verify the candidate's strict code signature and compare its signing
    identity/designated requirement with the installed app before replacement.
    A mismatch means pending until reconciled, not a silent ad-hoc fallback or
@@ -584,9 +647,9 @@ Under the lock:
    branches. Do not run a publish/upload command for a local refresh.
 
    On Apple Silicon, run the candidate's `--installation-check` in native
-   arm64 only. Launching its x86_64 slice through Rosetta can trigger the macOS
-   compatibility notification. Check both slices of the universal executable
-   and CLI helper with `lipo -archs` and verify the bundle with
+   arm64 only. A local candidate has only the `arm64` slice in the executable
+   and the CLI helper (`lipo -archs`); a public release candidate keeps both
+   slices. Verify the bundle with
    `codesign --verify --deep --strict --all-architectures`.
 5. Preserve the last known working signed bundle privately before replacement.
    A data migration also needs a consistent private backup using the store's

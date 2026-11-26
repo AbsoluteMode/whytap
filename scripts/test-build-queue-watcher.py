@@ -41,6 +41,20 @@ with open(control / "sessions.log", "a") as output:
                              "cwd": os.getcwd()}) + "\n")
 if (control / "noop").exists():
     sys.exit(0)
+if '"lane": "preview"' in prompt:
+    with open(control / "previews.log", "a") as output:
+        output.write(json.dumps({"cwd": os.getcwd(), "lease": lease}) + "\n")
+    while True:
+        claim = queue("preview-claim")
+        ticket = claim.get("ticket") or claim.get("active")
+        if ticket:
+            queue("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "fake preview installed")
+        elif claim.get("rebuild"):
+            queue("preview-rebuilt")
+        else:
+            break
+    sys.exit(0)
 for ticket in queue("status")["tickets"]:
     if ticket["status"] == "pending_install" and ticket["retry"] in ("meeting", "first"):
         queue("set", "--ticket", str(ticket["id"]), "--status", "done", "--note", "installed")
@@ -426,7 +440,18 @@ class WatcherTests(unittest.TestCase):
     def state(self):
         return json.loads((self.root / "whytap-build-queue-watcher-state.json").read_text())
 
-    def test_locked_screen_waits_without_backoff_and_starts_after_unlock(self):
+    def test_locked_screen_still_runs_validation_but_not_installs(self):
+        # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        result = self.watcher("run")
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertIn("screen locked: validation and merge only", result.stdout + result.stderr)
+        self.assertEqual(self.statuses(), {1: "done"})
+        self.assertEqual(self.watcher("environment", "--for", "suite").returncode, 0)
+
+    def test_locked_screen_waits_without_backoff_when_validation_must_wait_too(self):
+        self.configure_watcher(validate_while_locked=False)
         self.enqueue(1)
         self.set_environment(screen_locked=True)
         self.watcher("run")
@@ -478,14 +503,14 @@ class WatcherTests(unittest.TestCase):
         mirror = self.base / "orchestrator" / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.watcher("run")
         raised = [a for a in self.alerts() if a["state"] == "raised"]
         self.assertEqual([a["condition"] for a in raised], ["environment_wait"])
-        self.assertIn("screen locked", raised[0]["detail"])
-        self.set_environment(screen_locked=False)
+        self.assertIn("load 317", raised[0]["detail"])
+        self.set_environment(load=1)
         self.watcher("run")
         self.assertEqual([(a["state"], a["condition"]) for a in self.alerts()],
                          [("raised", "environment_wait"), ("cleared", "environment_wait")])
@@ -550,7 +575,7 @@ class WatcherTests(unittest.TestCase):
         mirror = blocker / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.assertEqual([a["state"] for a in self.alerts()], ["raised"])
@@ -626,7 +651,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.watchdog_state()["undelivered_since"],
                          "2026-01-01T00:00:00.700000+00:00")
         self.configure_watcher(undelivered_minutes=-1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         before, after = self.enqueue(1), self.enqueue(2)
         db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
         for ticket, stamp in ((before, "00:00:00.400000"), (after, "00:00:00.800000")):
@@ -638,6 +663,73 @@ class WatcherTests(unittest.TestCase):
         conditions = [a["condition"] for a in self.alerts()]
         self.assertIn(f"undelivered:{after}", conditions)
         self.assertNotIn(f"undelivered:{before}", conditions)
+
+    # Preview lane (.project-docs/decisions/2026-11-26-preview-before-validation.md)
+
+    def preview_ticket(self, pr, name="Sources/App/Window.swift"):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        self.git("checkout", "-q", "--detach", self.head)
+        (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / name).write_text("ui " + str(pr))
+        self.git("add", "-A")
+        self.git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "ui")
+        head = self.git("rev-parse", "HEAD").strip()
+        return self.queue("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
+                          "--head", head, "--title", "Preview", "--checks", "branch build",
+                          "--acceptance", "No lag", "--source", "claude", "--session", WORKER,
+                          "--preview")["ticket"]["id"]
+
+    def test_validation_watcher_starts_no_session_for_preview_tickets(self):
+        self.preview_ticket(1)
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+        self.assertEqual(self.watcher("run-preview").returncode, 0)  # lane not enabled
+        self.assertFalse((self.control / "previews.log").exists())
+
+    def test_a_preview_is_installed_while_a_validation_session_runs(self):
+        self.configure_watcher(preview_lane=True,
+                               preview_worktree=str(self.base / "preview"))
+        (self.control / "hold").touch()
+        self.enqueue(9)
+        running = self.start_watcher()
+        self.wait_for((self.control / "holding").exists, "the validation session to hold")
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        self.assertEqual(self.statuses()[preview], "awaiting_approval")
+        sessions = self.lines("previews.log")
+        self.assertEqual(json.loads(sessions[0])["cwd"], str(self.base / "preview"))
+        self.assertTrue((self.root / "whytap-build-queue-preview-state.json").exists())
+        (self.control / "holding").unlink()
+        self.assertEqual(running.wait(timeout=30), 0)
+        self.assertEqual(self.statuses(), {1: "done", preview: "awaiting_approval"})
+        # The owner sends it back: the preview lane rebuilds the train without it.
+        self.queue("reject", "--ticket", str(preview), "--note", "lags", actor="orchestrator")
+        self.watcher("run-preview")
+        self.assertEqual(len(self.lines("previews.log")), 2)
+        self.assertFalse(self.queue("status")["preview_rebuild"])
+
+    def test_a_ticket_whose_dependency_stays_blocked_is_returned_without_a_session(self):
+        self.configure_watcher(stale_dependency_minutes=0)
+        (self.control / "noop").touch()
+        parent = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        self.watcher("run")
+        self.assertEqual(self.statuses()[child], "blocked")
+        self.assertEqual(self.sessions(), [])
+
+    def test_activation_loads_the_preview_agent_only_when_asked(self):
+        self.watcher("activate", "--allow-local", "--preview-lane")
+        agents = self.base / "LaunchAgents"
+        preview = agents / "ai.whytap.build-queue-preview.plist"
+        self.assertIn("<string>run-preview</string>", preview.read_text())
+        self.assertIn("<string>run</string>", (agents / "ai.whytap.build-queue-watcher.plist")
+                      .read_text())
+        self.assertTrue(json.loads((self.root / "whytap-build-queue-builder.json").read_text())
+                        ["preview_lane"])
+        self.watcher("deactivate")
+        self.assertEqual(list(agents.glob("*.plist")), [])
 
     def test_a_moved_pr_head_goes_back_to_its_author_without_a_session(self):
         ticket = self.enqueue(1)
@@ -897,7 +989,7 @@ class ActivationTests(WatcherTests):
 
     def merged_scripts(self, **changed):
         names = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
-                 "build-queue-watcher.plist.template")
+                 "build-queue-preview-prompt.md", "build-queue-watcher.plist.template")
         return {"scripts/" + n: changed.get(n, (SCRIPTS / n).read_bytes()) for n in names}
 
     def test_activation_refuses_scripts_that_differ_from_origin_main(self):

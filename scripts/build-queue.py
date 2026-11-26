@@ -21,9 +21,15 @@ import tempfile
 
 
 STATES = ("queued", "in_progress", "pending_install", "done", "blocked",
-          "cancelled", "superseded")
+          "cancelled", "superseded", "previewing", "awaiting_approval")
+# WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+# A preview ticket (lane 'preview') is built and installed for the owner before any
+# review or full suite: previewing -> awaiting_approval. `approve` moves it to the
+# validation lane ('approved', queued, keeping its place); `reject` returns it.
 TRANSITIONS = {
     "queued": {"cancelled"},
+    # previewing -> queued: the environment stopped the preview (keeps its place).
+    "previewing": {"awaiting_approval", "blocked", "queued"},
     # in_progress -> queued returns a ticket without blaming the PR (the environment
     # stopped it, an undeclared dependency is not merged yet); it keeps its place.
     "in_progress": {"pending_install", "done", "blocked", "queued"},
@@ -106,16 +112,84 @@ def pr_number(url):
     return int(url.rsplit("/", 1)[-1])
 
 
-def unmet_dependencies(db, ticket):
+def unmet_dependencies(db, ticket, preview=False):
     """Dependency PRs of this ticket that are not merged through the queue yet: the
-    latest ticket of each must be done or pending_install."""
+    latest ticket of each must be done or pending_install. A preview also accepts a
+    dependency that is itself in the preview train (awaiting_approval)."""
+    accepted = MERGED + (("awaiting_approval",) if preview else ())
     waiting = []
     for pr in json.loads(ticket["depends_on"] or "[]"):
         latest = db.execute("SELECT status FROM tickets WHERE pr=? ORDER BY id DESC LIMIT 1",
                             (pr,)).fetchone()
-        if not latest or latest["status"] not in MERGED:
+        if not latest or latest["status"] not in accepted:
             waiting.append(pr)
     return waiting
+
+
+# WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+STALE_DEPENDENCY_MINUTES = 120
+RESUBMIT_PRIORITY_LIMIT = 2  # resubmissions after a block that keep the PR's place
+
+
+def age_minutes(stamp, at=None):
+    try:
+        then = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return 0.0
+    return ((at or datetime.now(timezone.utc)) - then).total_seconds() / 60
+
+
+def return_stale_dependencies(db, minutes=STALE_DEPENDENCY_MINUTES):
+    """Model-free: a queued ticket whose dependency PR has been blocked or cancelled
+    for longer than `minutes` goes back to its author instead of waiting for days.
+    Returns the returned ticket IDs."""
+    returned = []
+    for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
+                           "ORDER BY queued_at, id").fetchall():
+        for pr in json.loads(item["depends_on"] or "[]"):
+            latest = db.execute("SELECT id, status, updated_at FROM tickets WHERE pr=? "
+                                "ORDER BY id DESC LIMIT 1", (pr,)).fetchone()
+            if (latest and latest["status"] in ("blocked", "cancelled")
+                    and age_minutes(latest["updated_at"]) > minutes):
+                note = (f"Returned without review: dependency {pr} has been {latest['status']} "
+                        f"(ticket #{latest['id']}) for over {minutes // 60} h. Resubmit once it "
+                        f"is merged through the queue, or drop --depends-on if it is no "
+                        f"longer needed.")
+                db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
+                           (note, now(), item["id"]))
+                event(db, item["id"], "blocked", note,
+                      deliver=item["source"] in ("codex", "claude"))
+                returned.append(item["id"])
+                break
+    return returned
+
+
+# Paths whose change can alter stored user data, permissions, signing or updates. A
+# preview that touches one is not installed before validation: it goes to the normal
+# lane (review, full suite, merge, then install). Conservative on purpose.
+PREVIEW_UNSAFE = re.compile(
+    r"(^Package\.(swift|resolved)$|^Resources/[^/]*\.entitlements$|^Resources/Info\.plist"
+    r"|^scripts/(build-dmg\.sh|release-provenance\.py|user-release\.sh|upload-release\.sh"
+    r"|build-queue)|^Sources/.*(?i:migrat|keychain|permission|tcc|entitlement|updat|sparkle"
+    r"|schema|persist|database|sqlite|backup|signing|store))")
+
+
+def preview_unsafe_paths(head):
+    """Changed paths of this commit against its merge base with origin/main that a
+    preview must not install unchecked; None when unknown (treated as unsafe)."""
+    try:
+        base = git("merge-base", "origin/main", head)
+        paths = git("diff", "--name-only", "--no-renames", base, head).splitlines()
+    except (subprocess.CalledProcessError, OSError):
+        return None
+    return [path for path in paths if path and PREVIEW_UNSAFE.search(path)]
+
+
+def preview_train(db, exclude_pr=None):
+    """PRs installed for the owner's check and still waiting for approval, in order."""
+    return [{"ticket": t["id"], "pr": t["pr"], "head": t["head"], "title": t["title"]}
+            for t in db.execute("SELECT * FROM tickets WHERE status='awaiting_approval' "
+                                "ORDER BY queued_at, id").fetchall() if t["pr"] != exclude_pr]
 
 
 def block_moved_head(db, ticket, snapshot):
@@ -279,6 +353,19 @@ def database():
             # 1 = the PR changes what reaches the app (counted at submission); older
             # tickets count as runtime.
             db.execute("ALTER TABLE tickets ADD COLUMN runtime INTEGER NOT NULL DEFAULT 1")
+        columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+        if "lane" not in columns:
+            # '' normal validation; 'preview' built for the owner's check first;
+            # 'approved' the owner accepted the preview, validation follows.
+            db.execute("ALTER TABLE tickets ADD COLUMN lane TEXT NOT NULL DEFAULT ''")
+        if "resubmits" not in columns:
+            # Resubmissions after a block that kept the PR's place (at most two).
+            db.execute("ALTER TABLE tickets ADD COLUMN resubmits INTEGER NOT NULL DEFAULT 0")
+        if "approval" not in columns:
+            # JSON: who relayed the owner's approval, when, and the quoted words.
+            db.execute("ALTER TABLE tickets ADD COLUMN approval TEXT NOT NULL DEFAULT ''")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_preview "
+                   "ON tickets(status) WHERE status = 'previewing'")
         yield db
         db.commit()
     finally:
@@ -392,8 +479,8 @@ def run(args):
                 return {"created": False, "builder": config(db),
                         "ticket": ticket_json(db, existing["id"])}
             old = db.execute("SELECT * FROM tickets WHERE pr=? AND "
-                             "status IN ('queued', 'blocked', 'in_progress', 'pending_install')",
-                             (args.pr,)).fetchall()
+                             "status IN ('queued', 'blocked', 'in_progress', 'pending_install', "
+                             "'awaiting_approval')", (args.pr,)).fetchall()
             if any(t["status"] in ("in_progress", "pending_install") for t in old):
                 raise ValueError("Builder must reconcile the active/candidate head before resubmission")
             for t in old:
@@ -404,20 +491,44 @@ def run(args):
                                     "('queued', 'blocked', 'in_progress')", (dependency,)):
                     if args.pr in json.loads(t["depends_on"]):
                         raise ValueError(dependency + " already depends on this PR")
+            # Read before the supersede below changes its status.
+            previous = db.execute("SELECT * FROM tickets WHERE pr=? ORDER BY id DESC LIMIT 1",
+                                  (args.pr,)).fetchone()
             for t in old:
                 db.execute("UPDATE tickets SET status='superseded', updated_at=? WHERE id=?",
                            (now(), t["id"]))
                 event(db, t["id"], "superseded", "Replaced by a newly reviewed commit")
             stamp = now()
+            # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+            # A resubmission after a block keeps the PR's earlier place, at most
+            # RESUBMIT_PRIORITY_LIMIT times; a fix to a preview the owner is checking
+            # keeps it always (that loop is the owner's own).
+            queued_at, resubmits, place = stamp, 0, ""
+            if previous and previous["queued_at"] < stamp:
+                fix = previous["status"] == "awaiting_approval" or (
+                    previous["status"] == "blocked" and previous["lane"] == "preview")
+                if fix:
+                    queued_at, resubmits = previous["queued_at"], previous["resubmits"]
+                    place = "; keeps the place of preview #%d" % previous["id"]
+                elif (previous["status"] == "blocked"
+                        and previous["resubmits"] < RESUBMIT_PRIORITY_LIMIT):
+                    queued_at, resubmits = previous["queued_at"], previous["resubmits"] + 1
+                    place = "; resubmission %d of %d keeps the place of #%d" % (
+                        resubmits, RESUBMIT_PRIORITY_LIMIT, previous["id"])
+                else:
+                    resubmits = previous["resubmits"]
+            lane = "preview" if args.preview else ""
             cursor = db.execute(
                 "INSERT INTO tickets(pr,head,title,source,session,host,checks,acceptance,"
-                "dependencies,depends_on,runtime,queued_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "dependencies,depends_on,runtime,lane,resubmits,queued_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
                  args.checks, json.dumps(args.acceptance), args.dependencies,
-                 json.dumps(args.depends_on), int(args.runtime), stamp, stamp))
-            event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
-                  "checks at submission: " + args.documentation_checks)
+                 json.dumps(args.depends_on), int(args.runtime), lane, resubmits,
+                 queued_at, stamp))
+            event(db, cursor.lastrowid, "queued", ("Accepted for a preview build before "
+                  "validation" if lane else "Accepted into the build queue") +
+                  "; documentation checks at submission: " + args.documentation_checks + place)
             return {"created": True, "builder": config(db),
                     "documentation_checks": args.documentation_checks,
                     "delivery": "inbox_only" if args.source == "other" else "harness_link",
@@ -429,10 +540,24 @@ def run(args):
             if args.ticket:
                 query += " WHERE id=?"
                 params = (args.ticket,)
+            elif args.open:
+                # Open work, plus every earlier ticket of the same PRs (the history a
+                # re-block needs), instead of the whole archive.
+                query += (" WHERE pr IN (SELECT pr FROM tickets WHERE status IN ('queued', "
+                          "'in_progress', 'pending_install', 'previewing', "
+                          "'awaiting_approval'))")
             query += " ORDER BY queued_at, id"
-            return {"builder": config(db), "install_boundary": install_boundary(db),
-                    "tickets": [ticket_json(db, t[0])
-                    for t in db.execute(query, params).fetchall()]}
+            result = {"builder": config(db), "install_boundary": install_boundary(db),
+                      "preview_train": preview_train(db),
+                      "preview_rebuild": config(db).get("preview_rebuild") == "1",
+                      "tickets": [ticket_json(db, t[0])
+                                  for t in db.execute(query, params).fetchall()]}
+            if args.open and not args.ticket:
+                for t in result["tickets"]:
+                    if t["status"] in ("done", "superseded", "cancelled", "blocked") \
+                            and len(t["note"]) > 600:
+                        t["note"] = t["note"][:600] + " [...] (status --ticket %d)" % t["id"]
+            return result
 
         if args.command == "claim":
             require_builder(db, args.actor)
@@ -444,8 +569,8 @@ def run(args):
             # keeps its place; one whose PR head moved goes back to its author.
             returned, waiting, held = [], [], []
             boundary = install_boundary(db)
-            for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
-                                   "ORDER BY queued_at, id").fetchall():
+            for item in db.execute("SELECT * FROM tickets WHERE status='queued' AND "
+                                   "lane != 'preview' ORDER BY queued_at, id").fetchall():
                 if unmet_dependencies(db, item):
                     waiting.append(item["id"])
                 elif boundary and item["runtime"]:
@@ -462,6 +587,46 @@ def run(args):
                             "held_for_install": held}
             return {"claimed": False, "active": None, "returned_moved_heads": returned,
                     "waiting_for_dependencies": waiting, "held_for_install": held}
+
+        if args.command == "preview-claim":
+            require_builder(db, args.actor)
+            return preview_claim(db, args)
+
+        if args.command in ("approve", "reject"):
+            item = row(db, args.ticket)
+            if item["status"] != "awaiting_approval":
+                raise ValueError("Only a preview awaiting the owner's approval can be "
+                                 + args.command + "d; #%d is %s" % (item["id"], item["status"]))
+            if not args.actor or args.actor in (item["session"], config(db).get("builder_thread")):
+                raise ValueError("The owner's decision is relayed by the orchestrator (--actor), "
+                                 "never by the PR's own session or the builder")
+            stamp = now()
+            if args.command == "approve":
+                approval = json.dumps({"by": args.by, "relayed_by": args.actor, "at": stamp,
+                                       "note": args.note})
+                # Keeps its queued_at: approved work comes before newer validation.
+                db.execute("UPDATE tickets SET status='queued', lane='approved', approval=?, "
+                           "note=?, updated_at=? WHERE id=?",
+                           (approval, "Owner approved the preview: " + args.by, stamp, item["id"]))
+                event(db, item["id"], "queued", "The owner approved the preview (" + args.by +
+                      "). Review, full suite and merge follow.", deliver=True)
+            else:
+                db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
+                           ("Owner's changes to the preview: " + args.note, stamp, item["id"]))
+                # The installed preview still contains this PR: rebuild the train.
+                db.execute("INSERT OR REPLACE INTO config VALUES ('preview_rebuild', '1')")
+                event(db, item["id"], "blocked", "The owner sent the preview back: " + args.note +
+                      " Push the fix and enqueue it again with --preview.", deliver=True)
+            return ticket_json(db, item["id"])
+
+        if args.command == "preview-rebuilt":
+            require_builder(db, args.actor)
+            db.execute("DELETE FROM config WHERE key='preview_rebuild'")
+            return {"preview_rebuild": False, "preview_train": preview_train(db)}
+
+        if args.command == "return-stale-dependencies":
+            require_builder(db, args.actor)
+            return {"returned": return_stale_dependencies(db, args.minutes)}
 
         if args.command == "check-heads":
             require_builder(db, args.actor)
@@ -492,9 +657,19 @@ def run(args):
                 # first; anything else waits for a person.
                 retry = "first" if retry == "meeting" else "hold"
             stamp = now()
+            status = args.status
+            newer = db.execute("SELECT id FROM tickets WHERE pr=? AND id>? LIMIT 1",
+                               (item["pr"], item["id"])).fetchone()
+            if item["status"] == "previewing" and status == "awaiting_approval" and newer:
+                # A fix arrived while this preview was built: the newer ticket replaces it.
+                status = "superseded"
+            if status == "awaiting_approval":
+                db.execute("DELETE FROM config WHERE key='preview_rebuild'")
+            args.status = status
             # A ticket requeued after a block goes to the end; one returned from
-            # in_progress without a block keeps its place (its queued_at).
-            requeued = args.status == "queued" and item["status"] != "in_progress"
+            # in_progress or previewing without a block keeps its place (its queued_at).
+            requeued = args.status == "queued" and item["status"] not in ("in_progress",
+                                                                          "previewing")
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
             db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
                        "queued_at=CASE WHEN ? THEN ? ELSE queued_at END WHERE id=?",
@@ -522,6 +697,48 @@ def run(args):
             return {"acknowledged": args.event}
 
 
+def preview_claim(db, args):
+    """The preview lane's next step, model-free: the ticket to preview (oldest queued
+    preview whose dependencies are merged or in the train), with the train it joins.
+    A preview that touches stored data, permissions, signing or updates goes to the
+    normal lane instead; one whose PR head moved goes back to its author."""
+    active = db.execute("SELECT id, pr FROM tickets WHERE status='previewing'").fetchone()
+    if active:
+        return {"claimed": False, "active": ticket_json(db, active["id"]),
+                "train": preview_train(db, active["pr"])}
+    returned, waiting, normal_lane = [], [], []
+    for item in db.execute("SELECT * FROM tickets WHERE status='queued' AND lane='preview' "
+                           "ORDER BY queued_at, id").fetchall():
+        if unmet_dependencies(db, item, preview=True):
+            waiting.append(item["id"])
+            continue
+        if block_moved_head(db, item, args.remote_heads):
+            returned.append(item["id"])
+            continue
+        unsafe = preview_unsafe_paths(item["head"])
+        if unsafe is None or unsafe:
+            listed = ", ".join(unsafe[:8]) if unsafe else "the changed paths could not be read"
+            note = ("No preview before validation: this PR touches stored data, permissions, "
+                    "signing or updates (" + listed + "). It stays queued for the normal "
+                    "review, full suite and merge before any install.")
+            db.execute("UPDATE tickets SET lane='', note=?, updated_at=? WHERE id=?",
+                       (note, now(), item["id"]))
+            event(db, item["id"], "queued", note, deliver=item["source"] in ("codex", "claude"))
+            normal_lane.append(item["id"])
+            continue
+        db.execute("UPDATE tickets SET status='previewing', owner=?, updated_at=? WHERE id=?",
+                   (args.actor, now(), item["id"]))
+        event(db, item["id"], "previewing", "Preview build started (no review or full suite "
+              "before the owner's check)")
+        return {"claimed": True, "ticket": ticket_json(db, item["id"]),
+                "train": preview_train(db, item["pr"]), "returned_moved_heads": returned,
+                "waiting_for_dependencies": waiting, "moved_to_normal_lane": normal_lane}
+    return {"claimed": False, "active": None,
+            "rebuild": config(db).get("preview_rebuild") == "1", "train": preview_train(db),
+            "returned_moved_heads": returned, "waiting_for_dependencies": waiting,
+            "moved_to_normal_lane": normal_lane}
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--actor", default=os.environ.get("WHYTAP_BUILD_QUEUE_ACTOR")
@@ -544,9 +761,26 @@ def main():
     enqueue.add_argument("--session", default="",
                          help="default: that harness's session ID from the environment")
     enqueue.add_argument("--host", default="local")
+    enqueue.add_argument("--preview", action="store_true",
+                         help="build and install it for the owner's check first; review, "
+                              "full suite and merge follow only after `approve`")
     status = commands.add_parser("status")
     status.add_argument("--ticket", type=int)
+    status.add_argument("--open", action="store_true",
+                        help="only open work and the earlier tickets of the same PRs")
     commands.add_parser("claim")
+    commands.add_parser("preview-claim", help="Next preview to build (preview lane)")
+    commands.add_parser("preview-rebuilt", help="The installed preview matches the train")
+    stale = commands.add_parser("return-stale-dependencies",
+                                help="Return queued tickets whose dependency stays blocked")
+    stale.add_argument("--minutes", type=int, default=STALE_DEPENDENCY_MINUTES)
+    for name in ("approve", "reject"):
+        decision = commands.add_parser(name, help="Relay the owner's decision on a preview")
+        decision.add_argument("--ticket", type=int, required=True)
+        decision.add_argument("--note", required=True)
+        if name == "approve":
+            decision.add_argument("--by", required=True,
+                                  help="who approved and their words, e.g. 'owner: feature OK'")
     commands.add_parser("check-heads", help="Return queued tickets whose PR head moved")
     update = commands.add_parser("set")
     update.add_argument("--ticket", type=int, required=True)
@@ -586,8 +820,8 @@ def main():
                                              else documentation_preflight(args.head))
                 args.runtime = changes_runtime(args.head)
             # Outside the queue transaction too: one network read, before any lock.
-            args.remote_heads = (remote_heads() if args.command in ("claim", "check-heads")
-                                 else None)
+            args.remote_heads = (remote_heads() if args.command in (
+                "claim", "check-heads", "preview-claim") else None)
             result = run(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, sqlite3.Error, subprocess.CalledProcessError, OSError) as error:

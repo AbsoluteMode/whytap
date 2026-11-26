@@ -34,6 +34,11 @@
 #                  Whytap Case project whytap (never in the environment)
 #   EXODIA_CASE_HELPER  Case command (default: the installed Whytap's
 #                  Contents/Helpers/whytap)
+#   EXODIA_LOCAL_INSTALL  0|1 (default: 0) the builder's local refresh and preview
+#                  of the owner's working app only: arm64, no x86_64 slice, no DMG,
+#                  no notarization; a local manifest instead of a release one. Such
+#                  a bundle can never be uploaded (no archive, no release manifest).
+#                  WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
 #
 # Community requirements: local Swift/Xcode macOS 26 SDK and build resources;
 # team signing also needs the Developer ID certificate and network access for
@@ -68,6 +73,16 @@ fi
 NOTARY_CASE_PROJECT="whytap"
 NOTARY_KEYS="ASC_API_KEY_ID,ASC_API_KEY_ISSUER_ID,ASC_API_KEY_P8"
 CASE_HELPER="${EXODIA_CASE_HELPER:-/Applications/Whytap.app/Contents/Helpers/whytap}"
+LOCAL_INSTALL="${EXODIA_LOCAL_INSTALL:-0}"
+case "${LOCAL_INSTALL}" in
+    0) RELEASE_ARCHITECTURES='["arm64", "x86_64"]' ;;
+    1) RELEASE_ARCHITECTURES='["arm64"]' ;;
+    *) echo "ERROR: EXODIA_LOCAL_INSTALL must be 0 or 1" >&2; exit 2 ;;
+esac
+if [ "${LOCAL_INSTALL}" = "1" ] && { [ "${NOTARIZE}" = "1" ] || [ "${LEGACY_SIGNED_RELEASE}" = "1" ]; }; then
+    echo "ERROR: EXODIA_LOCAL_INSTALL builds the local app only; it is never notarized or released" >&2
+    exit 2
+fi
 DMG_HEADLESS="${EXODIA_DMG_HEADLESS:-0}"
 case "${DMG_HEADLESS}" in
     0|1) ;;
@@ -403,13 +418,14 @@ if [ "${PREFLIGHT_ONLY}" -eq 1 ]; then
     fi
     /usr/bin/python3 - "${DISTRIBUTION_MODE}" "${BUNDLE_ID}" "${SHORT_VERSION}" "${BUILD_VERSION}" \
         "${CODE_SIGNING}" "${SIGNING_KEY_CONFIGURED}" "${NOTARIZATION}" "${NOTARY_SOURCE}" \
-        "${NOTARY_KEYS}" <<'PYJSON'
+        "${NOTARY_KEYS}" "${RELEASE_ARCHITECTURES}" <<'PYJSON'
 import json, sys
-mode, bundle_id, version, build, code_signing, key_configured, notarization, notary_source, notary_keys = sys.argv[1:]
+mode, bundle_id, version, build, code_signing, key_configured, notarization, notary_source, notary_keys, architectures = sys.argv[1:]
 certificate = code_signing.split(":", 1)[1] if code_signing.startswith("certificate:") else None
 team = code_signing.split(":", 1)[1] if code_signing.startswith("team:") else None
 print(json.dumps({"distribution": mode, "bundle_id": bundle_id,
-    "version": version, "build": int(build), "architectures": ["arm64", "x86_64"],
+    "version": version, "build": int(build), "architectures": json.loads(architectures),
+    "local_install": json.loads(architectures) == ["arm64"],
     "code_signing": code_signing, "signing_certificate_sha1": certificate,
     "signing_team_id": team,
     "signing_key_configured": key_configured == "1",
@@ -596,19 +612,28 @@ cd "${PROJECT_DIR}"
 # has its own build path and must never ride along into a user release.
 # shellcheck disable=SC2086 # SWIFT_FLAGS expands to multi-token "-Xswiftc -DBETA" intentionally.
 swift build --build-system native -c release --arch arm64 --product Sidekey ${SWIFT_FLAGS}
+if [ "${LOCAL_INSTALL}" != "1" ]; then
 # shellcheck disable=SC2086 # SWIFT_FLAGS expands to multi-token "-Xswiftc -DBETA" intentionally.
 swift build --build-system native -c release --arch x86_64 --product Sidekey ${SWIFT_FLAGS}
+fi
 # Case secrets helper (Contents/Helpers/whytap): same flags and both arches.
 # shellcheck disable=SC2086
 swift build --build-system native -c release --arch arm64 --product whytap ${SWIFT_FLAGS}
+if [ "${LOCAL_INSTALL}" != "1" ]; then
 # shellcheck disable=SC2086
 swift build --build-system native -c release --arch x86_64 --product whytap ${SWIFT_FLAGS}
+fi
 
 echo "▶ Resolving native products dirs..."
 # shellcheck disable=SC2086 # SWIFT_FLAGS expands to multi-token intentionally.
 ARM64_BUILD_DIR="$(swift build --build-system native -c release --arch arm64 ${SWIFT_FLAGS} --show-bin-path)"
+if [ "${LOCAL_INSTALL}" = "1" ]; then
+    # The local app has no x86_64 slice: the arm64 products stand in for both.
+    X86_64_BUILD_DIR="${ARM64_BUILD_DIR}"
+else
 # shellcheck disable=SC2086 # SWIFT_FLAGS expands to multi-token intentionally.
 X86_64_BUILD_DIR="$(swift build --build-system native -c release --arch x86_64 ${SWIFT_FLAGS} --show-bin-path)"
+fi
 if [ -z "${ARM64_BUILD_DIR}" ] || [ ! -d "${ARM64_BUILD_DIR}" ]; then
     echo "ERROR: arm64 swift build --show-bin-path returned an unusable path: '${ARM64_BUILD_DIR}'" >&2
     exit 1
@@ -632,6 +657,17 @@ fi
 BUILD_DIR="${PROJECT_DIR}/build/release-universal"
 rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
+if [ "${LOCAL_INSTALL}" = "1" ]; then
+echo "▶ Local install: arm64 executable and helper, no x86_64 slice..."
+cp "${ARM64_BUILD_DIR}/${EXECUTABLE_NAME}" "${BUILD_DIR}/${EXECUTABLE_NAME}"
+cp "${ARM64_BUILD_DIR}/whytap" "${BUILD_DIR}/whytap"
+for binary in "${BUILD_DIR}/${EXECUTABLE_NAME}" "${BUILD_DIR}/whytap"; do
+    if [ "$(lipo -archs "${binary}")" != "arm64" ]; then
+        echo "ERROR: local install expects arm64 only: $(lipo -archs "${binary}")" >&2
+        exit 1
+    fi
+done
+else
 echo "▶ Creating universal executable with lipo..."
 lipo -create \
     "${ARM64_BUILD_DIR}/${EXECUTABLE_NAME}" \
@@ -650,6 +686,7 @@ case "${HELPER_LIPO_INFO}" in
         exit 1
         ;;
 esac
+fi
 echo "  products dir: ${BUILD_DIR}"
 
 if [ ! -f "${BUILD_DIR}/${EXECUTABLE_NAME}" ]; then
@@ -668,11 +705,11 @@ fi
 # arm64 slices. If lipo reports only one, the multi-arch build silently
 # fell through to a single-arch slice (e.g. an SDK that did not link both
 # targets) — fail before code-signing rather than ship a non-universal DMG.
-echo "▶ Verifying executable is universal (x86_64 + arm64)..."
+echo "▶ Verifying executable architectures (${RELEASE_ARCHITECTURES})..."
 EXEC_LIPO_INFO="$(lipo -info "${BUILD_DIR}/${EXECUTABLE_NAME}")"
 echo "  ${EXEC_LIPO_INFO}"
-if ! echo "${EXEC_LIPO_INFO}" | grep -q 'x86_64' \
-   || ! echo "${EXEC_LIPO_INFO}" | grep -q 'arm64'; then
+if [ "${LOCAL_INSTALL}" != "1" ] && { ! echo "${EXEC_LIPO_INFO}" | grep -q 'x86_64' \
+   || ! echo "${EXEC_LIPO_INFO}" | grep -q 'arm64'; }; then
     echo "ERROR: ${EXECUTABLE_NAME} is not a universal binary." >&2
     echo "  lipo -info: ${EXEC_LIPO_INFO}" >&2
     echo "  expected: both x86_64 and arm64 architectures present." >&2
@@ -739,6 +776,11 @@ python3 "${PROJECT_DIR}/scripts/configure-calendar-clients.py" "${APP_BUNDLE}/Co
     "${APP_BUNDLE}/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :ExodiaInstanceLeaseVersion integer 1" \
     "${APP_BUNDLE}/Contents/Info.plist"
+if [ "${LOCAL_INSTALL}" = "1" ]; then
+    # Marks a bundle that exists only on this Mac: arm64, never in an archive.
+    /usr/libexec/PlistBuddy -c "Add :ExodiaLocalBuild string arm64" \
+        "${APP_BUNDLE}/Contents/Info.plist"
+fi
 
 if [ -f "${PROJECT_DIR}/Resources/AppIcon.icns" ]; then
     cp "${PROJECT_DIR}/Resources/AppIcon.icns" "${APP_BUNDLE}/Contents/Resources/AppIcon.icns"
@@ -1158,6 +1200,41 @@ fi
 # Load the shipped executable and frameworks without initializing user state.
 # This catches missing runtime dependencies before anyone downloads the DMG.
 "${APP_BUNDLE}/Contents/MacOS/${EXECUTABLE_NAME}" --installation-check
+
+if [ "${LOCAL_INSTALL}" = "1" ]; then
+    # --- Local install: no DMG, a local manifest -------------------------
+    # The same signing, identity and installation checks as a release ran above;
+    # what is skipped is the x86_64 slice and the archive. The installer still
+    # verifies signature, designated requirement, a higher CFBundleVersion and
+    # keeps a signed rollback bundle before it replaces the working app.
+    LOCAL_MANIFEST="${PROJECT_DIR}/build/${APP_BUNDLE_NAME}-${SHORT_VERSION}-build${BUILD_VERSION}-local-arm64.json"
+    if [ "$(/usr/bin/python3 "${PROJECT_DIR}/scripts/release-provenance.py" capture \
+            --project-root "${PROJECT_DIR}")" != "${BUILD_SOURCE_SHA}" ]; then
+        echo "ERROR: source commit changed during the local build; rebuild" >&2
+        exit 1
+    fi
+    CDHASH="$(codesign -d --verbose=4 "${APP_BUNDLE}" 2>&1 | sed -n 's/^CDHash=//p' | head -1)"
+    /usr/bin/python3 - "${LOCAL_MANIFEST}" "${BUILD_SOURCE_SHA}" "${SHORT_VERSION}" \
+        "${BUILD_VERSION}" "${FLAVOR}" "${BUNDLE_ID}" "${CODE_SIGNING}" "${CDHASH}" \
+        "${APP_BUNDLE}" <<'PYLOCAL'
+import json, os, sys, tempfile
+from datetime import datetime, timezone
+path, source, version, build, flavor, bundle_id, code_signing, cdhash, app = sys.argv[1:]
+value = {"schema": "local-arm64-1", "local_only": True, "source_revision": source,
+         "version": version, "build": int(build), "flavor": flavor, "bundle_id": bundle_id,
+         "architectures": ["arm64"], "code_signing": code_signing, "cdhash": cdhash,
+         "app": app, "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}
+descriptor, temporary = tempfile.mkstemp(prefix=".local-manifest-", dir=os.path.dirname(path))
+with os.fdopen(descriptor, "w") as handle:
+    json.dump(value, handle, indent=2, sort_keys=True)
+    handle.write("\n")
+os.replace(temporary, path)
+PYLOCAL
+    echo ""
+    echo "✓ Local arm64 app for this Mac only (no DMG, not distributable): ${APP_BUNDLE}"
+    echo "  manifest: ${LOCAL_MANIFEST}"
+    exit 0
+fi
 
 # --- DMG packaging ------------------------------------------------------
 #

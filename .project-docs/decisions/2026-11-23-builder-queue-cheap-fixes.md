@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-watcher.py
     confirmed_at: 2026-11-23
-related: [2026-11-19-on-demand-build-queue-builder.md, 2026-11-23-builder-queue-watchdog.md, 2026-11-23-builder-queue-flaky-tests.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-group-install.md]
+related: [2026-11-19-on-demand-build-queue-builder.md, 2026-11-23-builder-queue-watchdog.md, 2026-11-23-builder-queue-flaky-tests.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-group-install.md, 2026-11-26-preview-before-validation.md]
 ---
 
 # Cheap queue fixes: moved heads, dependencies, returns without a block

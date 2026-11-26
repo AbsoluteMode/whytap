@@ -52,8 +52,19 @@ holds it, leave the tickets queued and end your turn.
 
 ## Start of every run
 
-1. Read `status`. Read `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"`
-   if it exists: earlier builder sessions leave operational facts there.
+1. Read `status --open` (open work and the earlier tickets of the same PRs; use
+   `status --ticket <id>` for one full note, never the whole archive; an
+   installed helper older than that flag refuses it: then use `status`). Read
+   `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"` if it exists: earlier
+   builder sessions leave operational facts there.
+   Two lanes share this queue (WHY:
+   `.project-docs/decisions/2026-11-26-preview-before-validation.md`). Preview
+   tickets (`lane: preview`, `previewing`, `awaiting_approval`) belong to the
+   preview lane, which installs them for the owner's check before any review;
+   `claim` never gives you one. A ticket with `lane: approved` is a feature the
+   owner already checked in the running app (its `approval` names who relayed
+   it): do not re-litigate how it looks or feels; every correctness, data,
+   permission and test gate below still applies.
 2. If a ticket is `in_progress`, a previous session of this same builder was
    interrupted. The watcher guarantees that session and its process group are
    gone. Before anything else establish what it reached: is its PR merged, does
@@ -104,6 +115,17 @@ holds it, leave the tickets queued and end your turn.
    or the maintainer, when tests fail because of the feature itself, when
    review evidence is missing, or when a destructive migration or access
    decision is involved. Say exactly what is needed.
+   A stacked PR (its base is another open PR's branch, or it needs an
+   unmerged PR) waits for its parent: `set --status queued` with the parent
+   named, never a review of the stack. Ask its author to add `--depends-on`.
+   Order of the work, cheapest first (the full suite is the acceptance gate
+   of a merge candidate, not an item of the findings list): review the diff
+   and both features' contracts, run the probes, the documentation checks
+   and `swift test --filter` for the test classes of the touched code. If
+   anything blocks, block now, without the full suite. For every finding give
+   the author a reproducing check (a command, fixture or test, with its
+   inputs) that covers the whole class of the problem, and ask them to add it
+   to the PR's tests before resubmitting.
    Block once with everything: before `blocked`, finish every probe and
    check across all paths the PR touches and put all problems into the note
    as one numbered list; when a probe exposes a class of error, name the
@@ -113,11 +135,12 @@ holds it, leave the tickets queued and end your turn.
    that was already there but missing from the previous list is yours to fix
    when mechanical and safe; otherwise record it as a follow-up in the note
    and continue.
-4. Validate the final combined candidate: documentation checks, and for
-   runtime changes the build and the full `swift test`. Right before the full
-   suite run, in the integration worktree,
-   `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`.
-   While it reports a locked screen or a load above its limit, wait and check
+4. Validate the final combined candidate only when step 3 found nothing that
+   blocks: for runtime changes the build and the full `swift test`. Right
+   before the full suite run, in the integration worktree,
+   `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment --for suite`.
+   A locked screen does not stop the suite, the review or the merge. While
+   it reports a load above its limit, wait and check
    again (up to 15 minutes) instead of running the suite; if it stays not
    clear, return the ticket with `set --status queued` and a note that the
    environment, not the PR, stopped it. Do not treat failures from a suite run under such load as PR
@@ -129,8 +152,11 @@ holds it, leave the tickets queued and end your turn.
    as a follow-up in the ticket note when the file already lists it within
    the last seven days. If a rerun fails again, it is a finding as before. A
    test skipped with "Protected data is unavailable" ran while the screen was
-   locked: run it again once `environment` is clear, before merging; a
-   failure there is a finding. Commands that run
+   locked. You may still merge: record "protected-data tests pending" with
+   the exact test names in the ticket note, and run them (`swift test
+   --filter`) on main before packaging, once `environment` (without
+   `--for suite`) is clear; a failure there is a finding and stops the
+   install. Signing and the install always wait for an unlocked screen. Commands that run
    longer than a few minutes go to the background with output in a file.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree.
@@ -156,12 +182,21 @@ holds it, leave the tickets queued and end your turn.
    installs the whole group; after the verified install set each ticket
    `done` with the running build and its own acceptance steps, and empty that
    section.
-   Otherwise build the signed production candidate per
-   `docs/build-and-release.md` (local build-only, no notarization, no upload),
-   verify strict signature, Developer ID team from
+   Otherwise build the signed local candidate per `docs/build-and-release.md`
+   ("Local install of the working app"): `EXODIA_LOCAL_INSTALL=1 FLAVOR=prod
+   BUILD_VERSION=<n> ./scripts/build-dmg.sh` from current main (arm64 only, no
+   x86_64 slice, no DMG, no notarization, no upload; never through
+   `user-release.sh`). When `status` lists a `preview_train`, the owner is
+   checking those unmerged PRs in the running app: build from a local commit
+   of main plus the train heads, as the preview lane does, so the install
+   does not silently remove them, and list them under **Preview, not merged**.
+   Verify strict signature, Developer ID team from
    `Resources/developer-id-team.txt`, designated requirement against the
-   installed app, both architectures, native `--installation-check`, and a
-   higher `CFBundleVersion`.
+   installed app, `lipo -archs` = `arm64` for the app and helper, native
+   `--installation-check`, the local manifest's source and build, and a
+   higher `CFBundleVersion`. Take `whytap-app.lock` in the Git common
+   directory (owner.json like the integration lock) around packaging, the
+   install and the receipt: the preview lane replaces the app only under it.
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. Otherwise record

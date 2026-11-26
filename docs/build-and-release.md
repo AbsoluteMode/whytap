@@ -76,6 +76,28 @@ PR. GitHub hosts source and finished release assets; GitHub Actions stays disabl
 Scripts support the Bash 3.2 shipped with macOS; avoid empty-array expansion under
 `set -u`.
 
+## Local install of the working app
+
+The builder's local refresh and the preview lane install the maintainer's one
+working app without a release archive
+([preview decision](../.project-docs/decisions/2026-11-26-preview-before-validation.md)):
+
+```bash
+EXODIA_LOCAL_INSTALL=1 FLAVOR=prod BUILD_VERSION=<installed build + 1> ./scripts/build-dmg.sh
+```
+
+It compiles the `arm64` slice only (the vendored Sparkle and MediaRemote
+frameworks keep their prebuilt slices), signs with the same identity, runs the
+same signature, designated-requirement and native `--installation-check`
+checks, adds `ExodiaLocalBuild` to `Info.plist` and writes
+`build/Whytap-<version>-build<n>-local-arm64.json` (source commit, version,
+build, flavor, signing, CDHash) instead of a DMG and its release manifest. It
+refuses notarization and the legacy mode; `user-release.sh` refuses it for any
+upload. The installer still requires a higher `CFBundleVersion`, the installed
+app's designated requirement, a fresh meeting gate before a normal Quit and a
+retained signed rollback bundle. Public and community releases below stay
+universal with a DMG and full provenance.
+
 ## Publish a community release
 
 Bump `VERSION` and commit the release inputs before building. `Sources/`,

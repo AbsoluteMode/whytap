@@ -642,5 +642,154 @@ class QueueTests(unittest.TestCase):
         self.update(ticket, "done")
         self.assertFalse(self.call("status")["install_boundary"])
 
+    # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+    def preview(self, pr, head, ok=True, session="worker", depends_on=()):
+        extra = [a for url in depends_on for a in ("--depends-on", url)]
+        return self.call("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
+                         "--head", head, "--title", f"Preview {pr}", "--checks", "branch build",
+                         "--acceptance", "Open the window; it does not lag", "--session", session,
+                         "--preview", *extra, ok=ok)
+
+    def ui_change(self, name="Sources/App/Window.swift", content="ui"):
+        self.git("checkout", "-q", "--detach", self.head)
+        return self.commit({name: content})
+
+    def test_a_preview_is_built_before_review_and_validated_only_after_approval(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        normal = self.enqueue(9)["ticket"]["id"]
+        first = self.preview(1, self.ui_change())["ticket"]["id"]
+        # The validation lane never takes a preview; the preview lane takes it at once.
+        self.assertEqual(self.call("claim")["ticket"]["id"], normal)
+        claimed = self.call("preview-claim")
+        self.assertEqual((claimed["ticket"]["id"], claimed["train"]), (first, []))
+        self.assertEqual(self.ticket(first)["status"], "previewing")
+        self.call("set", "--ticket", str(first), "--status", "awaiting_approval",
+                  "--note", "installed preview 1801")
+        second = self.preview(2, self.ui_change("Sources/App/Other.swift"))["ticket"]["id"]
+        joined = self.call("preview-claim")
+        self.assertEqual([t["ticket"] for t in joined["train"]], [first])
+        self.call("set", "--ticket", str(second), "--status", "awaiting_approval", "--note", "x")
+        self.assertEqual([t["ticket"] for t in self.call("status")["preview_train"]],
+                         [first, second])
+        # Only the orchestrator relays the owner's decision; not the author, not the builder.
+        for actor in ("worker", "builder", ""):
+            self.call("approve", "--ticket", str(first), "--by", "owner: OK", "--note", "x",
+                      actor=actor, ok=False)
+        self.call("approve", "--ticket", str(first), "--by", "owner: feature OK",
+                  "--note", "relayed", actor="orchestrator")
+        approved = self.ticket(first)
+        self.assertEqual((approved["status"], approved["lane"]), ("queued", "approved"))
+        self.assertEqual(json.loads(approved["approval"])["relayed_by"], "orchestrator")
+        self.update(normal, "done")
+        newer = self.enqueue(10)["ticket"]["id"]
+        # Approved work keeps its original place, ahead of newer validation work.
+        self.assertEqual(self.call("claim")["ticket"]["id"], first)
+        self.assertNotEqual(newer, first)
+        self.assertTrue(any("owner approved" in e["note"] for e in
+                            self.call("events", "--pending", "--ticket", str(first))))
+
+    def test_a_rejected_preview_returns_to_its_author_and_the_train_is_rebuilt(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        first = self.preview(1, self.ui_change())["ticket"]["id"]
+        self.call("preview-claim")
+        self.call("set", "--ticket", str(first), "--status", "awaiting_approval", "--note", "x")
+        self.call("reject", "--ticket", str(first), "--note", "the window lags",
+                  actor="orchestrator")
+        rejected = self.ticket(first)
+        self.assertEqual(rejected["status"], "blocked")
+        self.assertIn("the window lags", rejected["note"])
+        claim = self.call("preview-claim")
+        self.assertEqual((claim["claimed"], claim["rebuild"], claim["train"]), (False, True, []))
+        # The fix keeps the preview's place and goes straight to the preview lane.
+        fix = self.preview(1, self.ui_change(content="faster"))["ticket"]
+        self.assertEqual(fix["queued_at"], rejected["queued_at"])
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+        self.call("set", "--ticket", str(fix["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        self.assertFalse(self.call("status")["preview_rebuild"])
+
+    def test_a_fix_pushed_while_its_preview_builds_replaces_it(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        first = self.preview(1, self.ui_change())["ticket"]["id"]
+        self.call("preview-claim")
+        fix = self.preview(1, self.ui_change(content="second"))["ticket"]["id"]
+        self.call("set", "--ticket", str(first), "--status", "awaiting_approval", "--note", "x")
+        self.assertEqual(self.ticket(first)["status"], "superseded")
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix)
+
+    def test_a_preview_touching_data_or_permissions_goes_to_the_normal_lane(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        for pr, path in enumerate(("Sources/App/HistoryStore.swift", "Package.resolved",
+                                   "Resources/Sidekey.entitlements",
+                                   "Sources/App/SettingsMigration.swift"), start=1):
+            ticket = self.preview(pr, self.ui_change(path))["ticket"]["id"]
+            claim = self.call("preview-claim")
+            self.assertEqual((claim["claimed"], claim["moved_to_normal_lane"]), (False, [ticket]))
+            moved = self.ticket(ticket)
+            self.assertEqual((moved["status"], moved["lane"]), ("queued", ""))
+            self.assertIn(path, moved["note"])
+            self.assertEqual(self.call("claim")["ticket"]["id"], ticket)
+            self.update(ticket, "done")
+
+    def test_a_stacked_preview_waits_for_its_parent_in_the_train(self):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        parent_url = "https://github.com/example/app/pull/1"
+        child = self.preview(2, self.ui_change("Sources/App/Child.swift"),
+                             depends_on=[parent_url])["ticket"]["id"]
+        self.assertEqual(self.call("preview-claim")["waiting_for_dependencies"], [child])
+        parent = self.preview(1, self.ui_change())["ticket"]["id"]
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], parent)
+        self.call("set", "--ticket", str(parent), "--status", "awaiting_approval", "--note", "x")
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], child)
+        self.call("set", "--ticket", str(child), "--status", "awaiting_approval", "--note", "x")
+        # Validation of the child still waits until the parent is merged.
+        self.call("approve", "--ticket", str(child), "--by", "owner", "--note", "x",
+                  actor="orchestrator")
+        self.assertEqual(self.call("claim")["waiting_for_dependencies"], [child])
+
+    def test_resubmission_after_a_block_keeps_its_place_twice(self):
+        places = []
+        ticket = self.enqueue(1)["ticket"]
+        other = self.enqueue(2)["ticket"]["id"]
+        for round_ in range(3):
+            self.assertEqual(self.call("claim")["ticket"]["id"], ticket["id"])
+            self.update(ticket["id"], "blocked")
+            head = self.ui_change(f"Sources/App/Fix{round_}.swift")
+            ticket = self.enqueue(1, head=head)["ticket"]
+            places.append(ticket["position"])
+        self.assertEqual(places, [1, 1, 2])  # the third resubmission goes behind #2
+        self.assertEqual(self.call("claim")["ticket"]["id"], other)
+
+    def test_a_ticket_whose_dependency_stays_blocked_goes_back_to_its_author(self):
+        parent = self.enqueue(1)["ticket"]["id"]
+        child = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                          "--head", self.head, "--title", "Child", "--checks", "x",
+                          "--acceptance", "x", "--session", "worker",
+                          "--depends-on", "https://github.com/example/app/pull/1")["ticket"]["id"]
+        self.call("claim")
+        self.update(parent, "blocked")
+        self.assertEqual(self.call("return-stale-dependencies")["returned"], [])
+        self.assertEqual(self.call("return-stale-dependencies", "--minutes", "0")["returned"],
+                         [child])
+        returned = self.ticket(child)
+        self.assertEqual(returned["status"], "blocked")
+        self.assertIn("dependency", returned["note"])
+        self.assertEqual(self.call("events", "--pending", "--ticket", str(child))[-1]["status"],
+                         "blocked")
+        self.call("return-stale-dependencies", actor="worker", ok=False)
+
+    def test_open_status_lists_open_work_and_its_history_only(self):
+        old = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(old), "--status", "done", "--note", "n" * 2000)
+        history = self.enqueue(2)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(history), "--status", "blocked", "--note", "b" * 2000)
+        current = self.enqueue(2, head=self.ui_change())["ticket"]["id"]
+        listed = self.call("status", "--open")["tickets"]
+        self.assertEqual([t["id"] for t in listed], [history, current])
+        self.assertLess(len(listed[0]["note"]), 700)
+        self.assertEqual(len(self.call("status")["tickets"]), 3)
+
 if __name__ == "__main__":
     unittest.main()

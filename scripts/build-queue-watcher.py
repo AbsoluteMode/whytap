@@ -46,7 +46,16 @@ WATCHDOG = "whytap-build-queue-watchdog.json"
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
 ACTIVATED_SOURCES = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
-                     "build-queue-watcher.plist.template")
+                     "build-queue-preview-prompt.md", "build-queue-watcher.plist.template")
+# WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+# The preview lane: a second LaunchAgent runs `run-preview`, which starts preview
+# sessions (build + safety checks + install for the owner's check, no review) beside a
+# running validation session. Each lane has its own session lock, state and worktree;
+# both replace the app only under APP_LOCK.
+APP_LOCK = "whytap-app.lock"
+LEASE_LOCKS = (INTEGRATION_LOCK, APP_LOCK)  # locks a dead session of this lane may leave
+LANE = "builder"
+PREVIEW_LABEL = "ai.whytap.build-queue-preview"
 DEFAULTS = {
     "engine": "codex",             # "codex", "claude" or "custom" (uses "command")
     "model": "",                   # empty: the engine's own configured default
@@ -64,6 +73,11 @@ DEFAULTS = {
     "install_alert_minutes": 120,  # a deferred install still waiting
     "undelivered_minutes": 20,     # an author event still unacknowledged
     "alerts_mirror": "",           # optional second JSONL path, e.g. the orchestrator's folder
+    "validate_while_locked": True,  # review, tests and merge go on behind a locked screen;
+                                    # packaging and installs still wait for the unlock
+    "stale_dependency_minutes": 120,  # return a ticket whose dependency stays blocked
+    "preview_lane": False,         # set by `activate --preview-lane`
+    "preview_worktree": "",        # empty: ~/.whytap-builder/preview
 }
 BACKOFF_SECONDS = (300, 900, 3600)
 KEPT_LOGS = 40
@@ -102,8 +116,62 @@ def load_config(root):
 
 
 def worktree_path(config):
+    if LANE == "preview":
+        return Path(config["preview_worktree"]).expanduser() if config.get(
+            "preview_worktree") else Path.home() / ".whytap-builder" / "preview"
     return Path(config["worktree"]).expanduser() if config["worktree"] else (
         Path.home() / ".whytap-builder" / "integration")
+
+
+def use_preview_lane():
+    """Switch this process to the preview lane: its own lock, state, logs label,
+    worktree and prompt. The validation lane's files are never touched by it."""
+    global LANE, STATE, SESSION_LOCK, PROMPT_SOURCE, INSTALLED_PROMPT, LEASE_LOCKS
+    LANE = "preview"
+    STATE = "whytap-build-queue-preview-state.json"
+    SESSION_LOCK = "whytap-build-queue-preview.lock"
+    PROMPT_SOURCE = "scripts/build-queue-preview-prompt.md"
+    INSTALLED_PROMPT = "whytap-build-queue-preview-prompt.md"
+    LEASE_LOCKS = (APP_LOCK,)
+
+
+def open_preview_work(root):
+    """Read-only view of the preview lane: queued preview tickets whose dependencies are
+    merged or in the train, a preview being built, or a train to rebuild after the owner
+    sent a preview back. Shaped like `open_work` so `decide` applies unchanged."""
+    work = {"queued": [], "in_progress": [], "retry_install": [], "waiting_install": [],
+            "waiting_dependency": [], "install_first": [], "held_for_install": []}
+    path = root / QUEUE
+    if not path.is_file():
+        return {**work, "fingerprint": ""}
+    db = sqlite3.connect(path.resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    try:
+        if "lane" not in {c[1] for c in db.execute("PRAGMA table_info(tickets)")}:
+            return {**work, "fingerprint": ""}
+        latest = dict(db.execute("SELECT pr, status FROM tickets WHERE id IN "
+                                 "(SELECT MAX(id) FROM tickets GROUP BY pr)").fetchall())
+        rows = db.execute("SELECT id, status, updated_at, queued_at, depends_on FROM tickets "
+                          "WHERE (status='queued' AND lane='preview') OR status='previewing' "
+                          "ORDER BY queued_at, id").fetchall()
+        rebuild = db.execute("SELECT value FROM config WHERE key='preview_rebuild'").fetchone()
+    finally:
+        db.close()
+    seen = []
+    for ticket, status, updated, queued, needs in rows:
+        if status == "previewing":
+            work["in_progress"].append(ticket)
+            seen.append([ticket, status, updated])
+        elif any(latest.get(pr) not in ("done", "pending_install", "awaiting_approval")
+                 for pr in json.loads(needs or "[]")):
+            work["waiting_dependency"].append(ticket)
+        else:
+            work["queued"].append(ticket)
+            seen.append([ticket, status, queued])
+    if rebuild and rebuild[0] == "1" and not work["queued"] and not work["in_progress"]:
+        work["queued"].append("rebuild")
+        seen.append(["rebuild"])
+    work["fingerprint"] = hashlib.sha256(json.dumps(seen).encode()).hexdigest() if seen else ""
+    return work
 
 
 def open_work(root):
@@ -121,6 +189,8 @@ def open_work(root):
             retry = "retry" if "retry" in columns else "''"
             depends = "depends_on" if "depends_on" in columns else "'[]'"
             runtime = "runtime" if "runtime" in columns else "1"
+            # Preview-lane tickets belong to the preview watcher, never to a builder session.
+            lane = "AND lane != 'preview' " if "lane" in columns else ""
             # The latest ticket of each PR: a dependency is met once it is merged.
             merged = {pr for pr, status in db.execute(
                 "SELECT pr, status FROM tickets WHERE id IN (SELECT MAX(id) FROM tickets "
@@ -128,7 +198,8 @@ def open_work(root):
             rows = db.execute(
                 "SELECT id, status, updated_at, queued_at, " + retry + ", " + depends + ", " +
                 runtime + " FROM tickets WHERE status IN "
-                "('queued', 'in_progress', 'pending_install') ORDER BY queued_at, id").fetchall()
+                "('queued', 'in_progress', 'pending_install') " + lane +
+                "ORDER BY queued_at, id").fetchall()
             return [(ticket, status, updated, queued, retry_value,
                      any(pr not in merged for pr in json.loads(needs or "[]")), changes_app)
                     for ticket, status, updated, queued, retry_value, needs, changes_app
@@ -251,12 +322,17 @@ def environment(config):
         per_cpu = DEFAULTS["load_limit_per_cpu"]
     limit = per_cpu * cpus
     reason = ""
+    overloaded = load is not None and load > limit
     if locked:
         reason = "screen locked"
-    elif load is not None and load > limit:
+    elif overloaded:
         reason = f"load {load:.0f} on {cpus} CPUs (limit {limit:.0f})"
+    # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+    # Only the two protected-data tests, signing and the install need an unlocked
+    # screen: validation work may run behind a lock when nothing else stops it.
     return {"clear": not reason, "reason": reason, "screen_locked": locked,
-            "load": load, "cpus": cpus, "load_limit": limit}
+            "load": load, "cpus": cpus, "load_limit": limit,
+            "clear_for_validation": not overloaded}
 
 
 def waiting_kind(reason):
@@ -291,9 +367,14 @@ def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}
                 return False, f"backoff: {failures} session(s) changed nothing, next try in " \
                               f"{int(wait - (now - state.get('last_exit', 0)))}s"
         check = ready(config)
-        if not check["clear"]:
+        if not check["clear"] and not (
+                LANE == "builder" and config.get("validate_while_locked", True)
+                and check.get("clear_for_validation")):
             return False, "waiting: " + check["reason"]
-        return True, "recover_in_progress" if work["in_progress"] else "queued"
+        reason = "recover_in_progress" if work["in_progress"] else "queued"
+        if not check["clear"]:
+            reason += " (screen locked: validation and merge only, installs wait)"
+        return True, reason
     if work["retry_install"]:
         return install(work, state, config, now, gate, ready)
     return False, "idle"
@@ -436,12 +517,14 @@ def stop_group(pgid, grace, reap=lambda: None, known=None):
 
 def release_integration_lock(root, lease_pid):
     """A lock naming an ended watcher's PID after that watcher's session and its
-    process group ended has no live owner and no protected operation."""
-    lock = root / INTEGRATION_LOCK
-    owner = read_json(lock / "owner.json", {})
-    if lock.is_dir() and owner.get("pid") == lease_pid and owner.get("session") == ACTOR:
-        shutil.rmtree(lock)
-        log("released the integration lock left by the ended session")
+    process group ended has no live owner and no protected operation. The same holds
+    for the app lock this lane's sessions take around an install."""
+    for name in LEASE_LOCKS:
+        lock = root / name
+        owner = read_json(lock / "owner.json", {})
+        if lock.is_dir() and owner.get("pid") == lease_pid and owner.get("session") == ACTOR:
+            shutil.rmtree(lock)
+            log(f"released the {name} lock left by the ended session")
 
 
 def reap_orphan(root, state):
@@ -621,6 +704,8 @@ def watchdog(root, config, context):
     cleared episodes for the alerts file(s) and keep a heartbeat. Delivery is the file
     only; it never notifies, changes the queue, the lock or the session, and never
     raises into the caller."""
+    if LANE != "builder":
+        return  # one watchdog: the validation lane's already sees every ticket
     try:
         now = time.time()
         path = root / WATCHDOG
@@ -662,9 +747,10 @@ def watchdog(root, config, context):
 
 
 def prune_logs(directory):
-    sessions = sorted(directory.glob("session-*.log"))
-    for old in sessions[:-KEPT_LOGS]:
-        old.unlink(missing_ok=True)
+    for pattern in ("session-*.log", "preview-*.log"):
+        sessions = sorted(directory.glob(pattern))
+        for old in sessions[:-KEPT_LOGS]:
+            old.unlink(missing_ok=True)
 
 
 def run_session(root, config, reason, work):
@@ -676,9 +762,11 @@ def run_session(root, config, reason, work):
     logs = root / LOGS
     logs.mkdir(mode=0o700, exist_ok=True)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    session_log = logs / f"session-{stamp}-{config['engine']}.log"
+    session_log = logs / (f"session-{stamp}-{config['engine']}.log" if LANE == "builder"
+                          else f"preview-{stamp}-{config['engine']}.log")
     context = {
-        "reason": reason, "actor": ACTOR, "lease_pid": os.getpid(), "git_dir": str(root),
+        "reason": reason, "lane": LANE, "actor": ACTOR, "lease_pid": os.getpid(),
+        "git_dir": str(root), "app_lock": str(root / APP_LOCK),
         "queue_helper": str(root / HELPER), "worktree": str(worktree),
         "open_tickets": {k: work[k] for k in ("queued", "in_progress", "retry_install")},
         "session_log": str(session_log),
@@ -831,10 +919,13 @@ def watch(root):
         if not reap_orphan(root, read_json(root / STATE, {})):
             return 0
         state = read_json(root / STATE, {})
-        work = open_work(root)
+        if LANE == "builder" and open_work(root)["waiting_dependency"]:
+            returned_stale_dependencies(root, config)
+        work = current_work(root)
         before = json.dumps(state, sort_keys=True)
         start, reason = decide(work, state, config, time.time(), meeting_gate_clear, environment)
-        if start and reason == "queued" and returned_moved_heads(root):
+        if start and LANE == "builder" and reason.startswith("queued") \
+                and returned_moved_heads(root):
             work = open_work(root)  # a returned ticket needs no builder
             start, reason = decide(work, state, config, time.time(), meeting_gate_clear,
                                    environment)
@@ -851,7 +942,7 @@ def watch(root):
         state.update(last_reason=reason, last_start=time.time())
         write_json(root / STATE, state)
         code = run_session(root, config, reason, work)
-        after = open_work(root)
+        after = current_work(root)
         state = read_json(root / STATE, {})
         unchanged = after["fingerprint"] == work["fingerprint"]
         if reason == "retry_install":
@@ -863,6 +954,26 @@ def watch(root):
         state.update(last_exit=time.time(), last_exit_code=code,
                      fingerprint=after["fingerprint"])
         write_json(root / STATE, state)
+
+
+def current_work(root):
+    return open_preview_work(root) if LANE == "preview" else open_work(root)
+
+
+def returned_stale_dependencies(root, config):
+    """Model-free: queued tickets whose dependency has stayed blocked go back to their
+    authors (as the builder, like check-heads). Failures only log."""
+    try:
+        result = helper(root, ACTOR, "return-stale-dependencies", "--minutes",
+                        str(int(config.get("stale_dependency_minutes", 120))), check=False) or {}
+    except (OSError, ValueError) as error:
+        log(f"stale dependency check failed: {error}")
+        return []
+    returned = result.get("returned", [])
+    if returned:
+        log("returned to their authors, dependency still blocked: "
+            + ", ".join(f"#{ticket}" for ticket in returned))
+    return returned
 
 
 def summary(root):
@@ -915,10 +1026,10 @@ def launchctl(*arguments, check=True):
     return result
 
 
-def agent_plist():
+def agent_plist(label=LABEL):
     directory = Path(os.environ.get("WHYTAP_WATCHER_LAUNCH_AGENTS")
                      or Path.home() / "Library" / "LaunchAgents")
-    return directory / (LABEL + ".plist")
+    return directory / (label + ".plist")
 
 
 def command_activate(root, arguments):
@@ -970,6 +1081,11 @@ def activate(root, arguments):
     ensure_watchdog_scope(root)
     shutil.copyfile(Path(__file__).resolve(), root / INSTALLED_WATCHER)
     shutil.copyfile(SOURCES / "build-queue-builder-prompt.md", root / INSTALLED_PROMPT)
+    if (SOURCES / "build-queue-preview-prompt.md").is_file():
+        shutil.copyfile(SOURCES / "build-queue-preview-prompt.md",
+                        root / "whytap-build-queue-preview-prompt.md")
+    if arguments.preview_lane is not None:
+        config["preview_lane"] = arguments.preview_lane
     write_json(root / CONFIG, config)
     (root / LOGS).mkdir(mode=0o700, exist_ok=True)
     values = {"LABEL": LABEL, "PYTHON": sys.executable,
@@ -979,17 +1095,29 @@ def activate(root, arguments):
     for key, value in values.items():
         template = template.replace("@" + key + "@", value.replace("&", "&amp;")
                                     .replace("<", "&lt;").replace(">", "&gt;"))
-    plist = agent_plist()
-    plist.parent.mkdir(parents=True, exist_ok=True)
-    plist.write_text(template)
     domain = f"gui/{os.getuid()}"
-    launchctl("bootout", f"{domain}/{LABEL}", check=False)
-    deadline = time.monotonic() + 120  # an earlier agent may still be unloading
-    while launchctl("print", f"{domain}/{LABEL}", check=False).returncode == 0:
-        if time.monotonic() > deadline:
-            raise ValueError("The previous LaunchAgent is still unloading; try again")
-        time.sleep(1)
-    launchctl("bootstrap", domain, str(plist))
+    agents = [(LABEL, template)]
+    if config.get("preview_lane"):
+        # The same agent shape with its own label and command: it runs beside a
+        # validation session, so a preview never waits behind a full suite.
+        agents.append((PREVIEW_LABEL, template.replace(
+            "<string>" + LABEL + "</string>", "<string>" + PREVIEW_LABEL + "</string>").replace(
+            "<string>run</string>", "<string>run-preview</string>")))
+    else:
+        launchctl("bootout", f"{domain}/{PREVIEW_LABEL}", check=False)
+        agent_plist(PREVIEW_LABEL).unlink(missing_ok=True)
+    for label, text in agents:
+        plist = agent_plist(label)
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_text(text)
+        launchctl("bootout", f"{domain}/{label}", check=False)
+        deadline = time.monotonic() + 120  # an earlier agent may still be unloading
+        while launchctl("print", f"{domain}/{label}", check=False).returncode == 0:
+            if time.monotonic() > deadline:
+                raise ValueError("The previous LaunchAgent is still unloading; try again")
+            time.sleep(1)
+        launchctl("bootstrap", domain, str(plist))
+    plist = agent_plist()
     # Only now: a failed load must not leave the queue pointing at a builder nobody runs.
     state = read_json(root / STATE, {})
     if previous != ACTOR:
@@ -998,6 +1126,7 @@ def activate(root, arguments):
         helper(root, previous, "configure", "--builder-thread", ACTOR)
     return {"activated": True, "builder": ACTOR, "previous_builder": state.get("previous_builder"),
             "engine": config["engine"], "launch_agent": str(plist),
+            "preview_lane": bool(config.get("preview_lane")),
             "next": "Keep the old builder chat's automation paused; it must not claim work."}
 
 
@@ -1006,8 +1135,9 @@ def command_deactivate(root):
     if probe is None:
         raise ValueError("A builder session is running; deactivate after it finishes")
     try:
-        launchctl("bootout", f"gui/{os.getuid()}/{LABEL}", check=False)
-        agent_plist().unlink(missing_ok=True)
+        for label in (LABEL, PREVIEW_LABEL):
+            launchctl("bootout", f"gui/{os.getuid()}/{label}", check=False)
+            agent_plist(label).unlink(missing_ok=True)
         state = read_json(root / STATE, {})
         status = helper(root, "", "status")
         result = {"deactivated": True, "builder": status["builder"].get("builder_thread")}
@@ -1032,13 +1162,22 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run", help="What launchd calls: start a session if work is open")
     commands.add_parser("status", help="Show the decision without starting anything")
-    commands.add_parser("environment", help="Can a build run now (screen and load)? "
-                        "Exit 0 when clear, 3 when not")
+    environment_command = commands.add_parser(
+        "environment", help="Can a build run now (screen and load)? Exit 0 when clear, 3 when not")
+    environment_command.add_argument(
+        "--for", dest="purpose", choices=("install", "suite"), default="install",
+        help="suite: a locked screen does not stop the full suite (protected-data tests "
+             "skip and run again before the install); install: it does")
+    commands.add_parser("run-preview", help="What the preview LaunchAgent calls")
     activate = commands.add_parser("activate", help="Install and load the LaunchAgent")
     activate.add_argument("--allow-local", action="store_true",
                           help="Install this checkout's scripts even if they differ from main")
     activate.add_argument("--engine", choices=("claude", "codex"))
     activate.add_argument("--model")
+    activate.add_argument("--preview-lane", dest="preview_lane", action="store_true",
+                          default=None, help="also load the preview LaunchAgent")
+    activate.add_argument("--no-preview-lane", dest="preview_lane", action="store_false",
+                          help="unload the preview LaunchAgent")
     commands.add_parser("deactivate", help="Unload the LaunchAgent, restore the builder")
     arguments = parser.parse_args()
     try:
@@ -1047,8 +1186,17 @@ def main():
             return command_run(root)
         if arguments.command == "environment":
             result = environment(load_config(root))
+            if arguments.purpose == "suite":
+                # The suite may run behind a locked screen: the protected-data tests
+                # skip and run again before the install.
+                result["clear"] = result["clear_for_validation"]
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["clear"] else 3
+        if arguments.command == "run-preview":
+            use_preview_lane()
+            if not load_config(root).get("preview_lane"):
+                return 0  # not enabled: `activate --preview-lane`
+            return command_run(root)
         if arguments.command == "status":
             result = summary(root)
         elif arguments.command == "activate":

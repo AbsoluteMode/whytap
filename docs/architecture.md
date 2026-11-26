@@ -369,10 +369,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   there too (since 2026-11-26), and several finish_answer calls alone in one
   response give the first valid one; an end_turn whose own search results
   are followed by text answers with that text (no completion request);
-  Claude citation tags (<cite ...>,
-  </cite>) are removed from the answer outside code; direct Anthropic
-  requests after the turn's first carry a cache_control breakpoint on the
-  system block (tools and instructions). WHY:
+  on a turn that ran the search, Claude's indexed citation tags (<cite
+  index="1-9"> and then </cite>) are removed from the answer prose outside
+  code, never from Insert or Copy; a malformed finish_answer beside a valid
+  one does not fail the batch; finish_answer calls beside a pending search
+  all wait for it; a direct Anthropic request carries a cache_control
+  breakpoint on the system block only after an accepted request of the
+  turn with the same system, tools and search tool. WHY:
   .project-docs/decisions/2026-11-26-agent-fast-search-answers.md The setting follows the request that starts the turn (after a
   refused provider search, the one without it) and is kept after the first
   accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no

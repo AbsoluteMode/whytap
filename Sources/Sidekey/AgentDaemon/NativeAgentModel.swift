@@ -61,6 +61,9 @@ struct NativeAgentModel {
     /// may repeat on a refusal, once, also when the provider search fallback
     /// sends the turn's next request.
     private var requestSentInTurn = false
+    /// The tools and system prompt of this turn's last accepted request:
+    /// a later request with the same ones marks them for the prompt cache.
+    private var cachedPrefix: String?
 
     init(options: AgentRunOptions, key: String, system: String, history: [NativeAgentConversation.Pair], prompt: String,
          http: NativeAgentHTTP = NativeAgentHTTP(), usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
@@ -121,7 +124,6 @@ struct NativeAgentModel {
         // A repeat must change what was sent.
         let mayRepeat = reasoning != nil && !turnRefused && !requestSentInTurn
             && !NSDictionary(dictionary: reasoning?.fields ?? [:]).isEqual(to: fallback?.fields ?? [:])
-        let laterRequest = requestSentInTurn
         requestSentInTurn = true
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
@@ -130,6 +132,9 @@ struct NativeAgentModel {
             - (options.openCodeProvider == .anthropic ? providerTurnBase : searchesUsed)
         let search = builtInSearch && !tools.isEmpty && remaining > 0
         let searchTool = NativeAgentWebSearch.providerTool(for: options.openCodeProvider, limit: remaining, model: model)
+        // What a cache breakpoint after the system block would cover.
+        let prefix = String(decoding: (try? JSONSerialization.data(withJSONObject: ["system": system, "tools": tools, "search": search ? searchTool : [:]],
+                                                                    options: [.sortedKeys])) ?? Data(), as: UTF8.self)
         func makeRequest(_ effort: [String: Any]?) throws -> URLRequest {
             var request: URLRequest
             switch options.openCodeProvider {
@@ -148,15 +153,17 @@ struct NativeAgentModel {
                 request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body,
                                                       timeout: Self.directTimeout)
             case .anthropic:
-                // From the turn's second request on, the tools and the system
-                // prompt (about 15k tokens with Anthropic's search tool) are
-                // repeated input: a cache breakpoint after them lets the next
-                // requests read them. A turn's first request gets none: a
-                // single question would pay the cache write (1.25x) and the
-                // 5-minute cache rarely meets the next question.
+                // After an accepted request of this turn with the same tools
+                // and system prompt (about 15k tokens with Anthropic's search
+                // tool), they are repeated input: a cache breakpoint after them
+                // lets the next steps read them. The turn's first accepted
+                // request gets none (also when an earlier attempt was refused
+                // and changed them): a single question would pay the cache
+                // write (1.25x) and the 5-minute cache rarely meets the next
+                // question.
                 // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
                 var systemBlock: [String: Any] = ["type": "text", "text": system]
-                if laterRequest { systemBlock["cache_control"] = ["type": "ephemeral"] }
+                if cachedPrefix == prefix { systemBlock["cache_control"] = ["type": "ephemeral"] }
                 var body: [String: Any] = [
                     "model": model, "system": [systemBlock],
                     "messages": messages, "max_tokens": outputLimit,
@@ -208,6 +215,7 @@ struct NativeAgentModel {
         do {
             let result = try await send(makeRequest(reasoning?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: reasoning, repeatsOnRefusal: mayRepeat)
+            cachedPrefix = prefix
             reasoningSearch = turnSearch
             reasoningRefused = turnRefused
             return result
@@ -221,6 +229,7 @@ struct NativeAgentModel {
             reasoningRefused = true
             let result = try await send(makeRequest(fallback?.fields), model: model, toolsCount: tools.count, outputLimit: outputLimit,
                                         reasoning: fallback, effortRetry: true)
+            cachedPrefix = prefix
             reasoningRefusals.record(refusalAPI, model: refusalKey)
             reasoningSearch = turnSearch
             return result
@@ -507,7 +516,14 @@ struct NativeAgentModel {
         if let string = arguments as? String, string.utf8.count <= 128_000 {
             object = (try? JSONSerialization.jsonObject(with: Data(string.utf8))) as? [String: Any]
         } else { object = arguments as? [String: Any] }
-        guard let object else { throw NativeAgentError.message("The model returned invalid tool arguments.") }
+        guard let object else {
+            // A malformed finish_answer is an invalid answer, not a broken
+            // batch: a valid sibling finish_answer can still be the answer
+            // (NativeAgentProvider). Any other malformed call fails the turn.
+            // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+            if name == NativeAgentFinalAnswer.toolName { return NativeAgentToolCall(id: id, name: name, arguments: [:]) }
+            throw NativeAgentError.message("The model returned invalid tool arguments.")
+        }
         return NativeAgentToolCall(id: id, name: name, arguments: object)
     }
 

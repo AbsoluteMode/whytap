@@ -186,13 +186,14 @@ final class NativeAgentProvider: CLIProvider {
                 guard options.openCodeProvider == .anthropic, model.plainTextReply,
                       let plain = try? NativeAgentFinalAnswer(arguments: ["status": "answered", "answer": text,
                                                                          "sources": [], "actions": []],
-                                                              openAICitations: false, anthropicCitations: true)
+                                                              openAICitations: false, anthropicCitations: model.searchesUsed > 0)
                 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 completion = plain
-            } else if calls.count == 1, calls[0].name == NativeAgentFinalAnswer.toolName, model.pendingSearch {
+            } else if calls.allSatisfy({ $0.name == NativeAgentFinalAnswer.toolName }), model.pendingSearch {
                 // Anthropic runs a search requested beside a function call only
-                // in the next request; an answer written now has not seen it.
-                model.append(results: [(calls[0], .init(text: "Your web search has not returned yet. Call finish_answer again after its results."))])
+                // in the next request; an answer written now has not seen it,
+                // however many finish_answer calls came with it.
+                model.append(results: calls.map { ($0, .init(text: "Your web search has not returned yet. Call finish_answer again after its results.")) })
                 continue
             } else if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
                 // Reject a mixed batch before executing it: a final response
@@ -206,7 +207,9 @@ final class NativeAgentProvider: CLIProvider {
                 }
                 let modelID = options.model?.lowercased() ?? ""
                 let openAI = options.openCodeProvider == .openAI || (options.openCodeProvider == .openRouter && modelID.hasPrefix("openai/"))
-                let claude = options.openCodeProvider == .anthropic || (options.openCodeProvider == .openRouter && modelID.hasPrefix("anthropic/"))
+                // Citation tags come only from a turn that ran the search.
+                let claude = model.searchesUsed > 0 && (options.openCodeProvider == .anthropic
+                    || (options.openCodeProvider == .openRouter && modelID.hasPrefix("anthropic/")))
                 guard let first = calls.lazy.compactMap({
                     try? NativeAgentFinalAnswer(arguments: $0.arguments, openAICitations: openAI, anthropicCitations: claude)
                 }).first else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }

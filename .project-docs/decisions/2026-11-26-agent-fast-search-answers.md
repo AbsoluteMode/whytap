@@ -41,14 +41,22 @@ model, Claude Sonnet 5.5, and Anthropic's own web search (the default).
   removed and a 5k-token prompt, so neither the search nor the prompt size
   caused it); with `between_tools` the first byte came at 2.0-3.6 s.
 - **Several `finish_answer` calls alone in one response give the first valid
-  one**, and the turn ends there. A batch mixing `finish_answer` with another
-  tool still fails before anything runs.
+  one**, and the turn ends there. A malformed `finish_answer` (bad JSON or a
+  non-object input) counts as an invalid answer, not a broken batch, so it
+  does not hide a valid sibling. A batch mixing `finish_answer` with another
+  tool, or a malformed call of another tool, still fails before anything
+  runs. When the response also requested a search whose result has not
+  arrived, every `finish_answer` call gets the wait result and the answer
+  comes after the search.
 - **Claude citation tags are removed from the answer.** After a search Claude
   copied Anthropic's citation markup (`<cite index="1-9">`) into
   `finish_answer`, and in 3 of 4 answers the text stopped right after the tag.
-  The system prompt now asks for plain prose with the pages in `sources`, and
-  `<cite ...>` / `</cite>` are removed on Claude turns (direct or `anthropic/`
-  on OpenRouter), keeping the cited words, outside code and quotes.
+  The system prompt now asks for plain prose with the pages in `sources`. On a
+  Claude turn that ran the search (direct or `anthropic/` on OpenRouter), an
+  opening tag with Anthropic's result index (`index="1-9"`) and then
+  `</cite>` are removed from the answer prose, keeping the cited words,
+  outside code and quotes. Insert and Copy payloads and an ordinary HTML
+  `<cite>` stay literal.
 - **Text after the search is the answer.** When a response ran its search,
   holds the results and ends (end_turn) with text and no tool call, the text
   after the last result (without the preamble before the search) is the
@@ -59,11 +67,12 @@ model, Claude Sonnet 5.5, and Anthropic's own web search (the default).
   callout (system prompt and the `answer` description). Answers to the weather
   question had grown to 530-830 output tokens with tables and NOTE callouts,
   1.5-3.5 s of writing.
-- **Prompt cache from a turn's second request.** Direct Anthropic requests
-  after the turn's first mark the system block (after the tools) with
-  `cache_control: ephemeral`, so later steps of a multi-step task read the
-  ~15k tokens of tools and instructions. A turn's first request has no
-  breakpoint.
+- **Prompt cache after an accepted step.** A direct Anthropic request marks
+  the system block (after the tools) with `cache_control: ephemeral` only
+  when an earlier request of the same turn was accepted with the same system
+  prompt, tools and search tool. The first such request writes the cache and
+  the next matching step reads it. The turn's first accepted request has no
+  breakpoint, also after a refused search attempt that changed the tools.
 - No hard output cap below 16,384 tokens: the Agent cannot tell a weather
   question from a request for a long text before the model answers, and the
   2026-11-23 decision raised the cap for those.
@@ -100,7 +109,13 @@ from the maintainer's own store, about $1.5 in all:
 search sends `between_tools`; repeated `finish_answer` takes the first valid
 call, a mixed batch and only invalid calls fail; citation tags removed on a
 Claude turn and kept in code and on OpenAI; the system block is marked for the
-cache only from the turn's second request. `NativeAgentLowEffortTests` and
+cache only after an accepted request with the same tools and system (not
+after a refused search). After the builder's review of queue ticket 643
+(stubbed probes on the real loop): several `finish_answer` calls beside a
+pending search waited for it; a malformed `finish_answer` beside a valid one
+on OpenAI (either order), OpenRouter and Anthropic; HTML `<cite>` in Insert and
+Copy kept; no breakpoint on the first accepted request after a refused search.
+The new tests fail on the previous head (11 assertions). `NativeAgentLowEffortTests` and
 `NativeAgentWebSearchTests` updated for the system block.
 
 After the maintainer asked for the cause of the remaining gap, pairs of the

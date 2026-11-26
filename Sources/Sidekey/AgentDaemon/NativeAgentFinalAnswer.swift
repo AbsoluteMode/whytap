@@ -53,17 +53,17 @@ struct NativeAgentFinalAnswer {
     /// model, which after its web search can copy its citation tags
     /// (`<cite index="1-9">`) into finish_answer. Other output is never touched.
     init(arguments: [String: Any], openAICitations: Bool = true, anthropicCitations: Bool = false) throws {
-        let clean: (String) -> String = {
-            let text = openAICitations ? Self.withoutProviderCitationMarks($0) : $0
-            return anthropicCitations ? Self.withoutCitationTags(text) : text
-        }
+        let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
-        let text = clean(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Claude's citation tags are cleaned from the prose only: Insert and
+        // Copy payloads are literal (they may be HTML with a <cite> of its own).
+        let prose = anthropicCitations ? Self.withoutCitationTags(answer) : answer
+        let text = clean(prose).trimmingCharacters(in: .whitespacesAndNewlines)
         let insertField = (arguments[Self.insertField] as? String).map(clean) ?? arguments[Self.insertField]
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
         let insert: String
@@ -138,7 +138,10 @@ struct NativeAgentFinalAnswer {
         return result as String
     }
 
-    /// Claude's web search citation tags copied into an answer:
+    /// Claude's web search citation tags copied into an answer: an opening
+    /// tag with Anthropic's result index (`<cite index="1-9">`, `"1-2,4-5"`)
+    /// and, only when such a tag was found, `</cite>`. A plain HTML `<cite>`
+    /// stays.
     /// `<cite index="1-9">` and `</cite>` are removed and the cited words
     /// kept, outside literal spans (code, quotes) as for OpenAI's marks.
     /// WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
@@ -146,21 +149,31 @@ struct NativeAgentFinalAnswer {
         guard text.contains("cite"), let regex = citationTag else { return text }
         let string = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: string.length))
+        guard matches.contains(where: { $0.range(at: 1).location != NSNotFound }) else { return text }
         // The tag's own quotes are not literal text: spans are found with
         // each tag replaced by letters (spaces could make indented code).
         let masked = NSMutableString(string: text)
         for match in matches { masked.replaceCharacters(in: match.range, with: String(repeating: "x", count: match.range.length)) }
         let literal = literalRanges(in: masked as String)
+        // Tags pair in order: a `</cite>` is removed only when it closes an
+        // indexed tag that was removed; a plain HTML `<cite>` keeps its own.
+        var open: [Bool] = [], removed: [NSRange] = []
+        for match in matches where !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+            if match.range(at: 1).location != NSNotFound { open.append(true); removed.append(match.range) }
+            else if match.range(at: 2).location != NSNotFound { open.append(false) }
+            else if let indexed = open.popLast(), indexed { removed.append(match.range) }
+        }
         var result = text as NSString
-        for match in matches.reversed() {
-            guard !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else { continue }
-            result = result.replacingCharacters(in: match.range, with: "") as NSString
+        for range in removed.sorted(by: { $0.location > $1.location }) {
+            result = result.replacingCharacters(in: range, with: "") as NSString
         }
         return result as String
     }
 
+    /// Group 1: an indexed tag; group 2: any other opening `<cite>`; else `</cite>`.
     private static let citationTag = try? NSRegularExpression(
-        pattern: #"</cite>|<cite(?:\s+index="[0-9,\- ]*")?\s*>"#)
+        pattern: #"(<cite\s+index="[0-9]+-[0-9]+(?:\s*,\s*[0-9]+-[0-9]+)*"\s*>)|(<cite(?:\s[^<>]*)?>)|</cite>"#,
+        options: [.caseInsensitive])
 
     private static let citationMarkup = try? NSRegularExpression(
         pattern: "(?:^|[ \\t]+)(\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201})(?=$|[\\s.,;:!?)\\]])",

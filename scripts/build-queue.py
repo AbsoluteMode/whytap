@@ -186,6 +186,27 @@ def protected_tests(value):
     return sorted(set(tests))
 
 
+def check_dependencies(db, pr, depends_on):
+    """The one check of every write that changes the dependency graph (a new head, or
+    a returned head that comes back with its dependencies): refuse a dependency that
+    already waits on this PR, directly or through other open tickets."""
+    open_graph = {}
+    for t in db.execute("SELECT pr, depends_on FROM tickets WHERE status IN "
+                        "('queued', 'blocked', 'in_progress', 'previewing', 'awaiting_approval', "
+                        "'approved', 'releasing') AND pr != ?", (pr,)):
+        open_graph.setdefault(t["pr"], set()).update(json.loads(t["depends_on"] or "[]"))
+    for dependency in depends_on:
+        seen, stack = set(), [dependency]
+        while stack:
+            current = stack.pop()
+            if current == pr:
+                raise ValueError(dependency + " already depends on this PR"
+                                 + ("" if current == dependency else " (through other PRs)"))
+            if current not in seen:
+                seen.add(current)
+                stack.extend(open_graph.get(current, ()))
+
+
 def reenter_review(db, ticket_id, keep_place, note, deliver=False):
     """The one way an existing ticket's head re-enters review (`set --status queued`,
     or the author resubmitting a head returned without review). Its FIFO place
@@ -1095,6 +1116,7 @@ def run(args):
                     # untouched head goes back to its place without spending the PR's
                     # resubmission priority. A head a builder reviewed and blocked stays
                     # blocked: its fix is a new head.
+                    check_dependencies(db, args.pr, args.depends_on)
                     db.execute("UPDATE tickets SET depends_on=?, dependencies=? WHERE id=?",
                                (json.dumps(args.depends_on), args.dependencies,
                                 existing["id"]))
@@ -1113,11 +1135,7 @@ def run(args):
             for t in old:
                 if (t["source"], t["session"], t["host"]) != (args.source, args.session, args.host):
                     raise ValueError("A previous request for this PR belongs to another session")
-            for dependency in args.depends_on:
-                for t in db.execute("SELECT depends_on FROM tickets WHERE pr=? AND status IN "
-                                    "('queued', 'blocked', 'in_progress')", (dependency,)):
-                    if args.pr in json.loads(t["depends_on"]):
-                        raise ValueError(dependency + " already depends on this PR")
+            check_dependencies(db, args.pr, args.depends_on)
             # Read before the supersede below changes its status.
             previous = db.execute("SELECT * FROM tickets WHERE pr=? ORDER BY id DESC LIMIT 1",
                                   (args.pr,)).fetchone()

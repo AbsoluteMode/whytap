@@ -9,6 +9,48 @@ enum LilBroSpot: Hashable {
     case pane
     case tab(SettingsWindowTab)
     case feature(AppFeature)
+    /// A row of a feature's "What it needs", by requirement id ("model.drop").
+    case need(String)
+}
+
+/// A setup step a feature screen offers in its "What it needs" rows. Lil Bro
+/// may press it only after the person says yes; pressing runs the same
+/// `FeatureScreenContext.perform` as the row's own button.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+struct LilBroPressable: Equatable {
+    /// The feature whose screen shows the row; an offer belongs to it alone.
+    let feature: AppFeature
+    /// The requirement id, also the row's `LilBroSpot.need` name.
+    let id: String
+    let action: FeatureSetupAction
+    /// An optional step is never offered unasked.
+    let optional: Bool
+    /// The row shows a button for `action`. A model row that shows its
+    /// picker instead ("Choose a model") is never pressed for the person.
+    let hasButton: Bool
+    let perform: @MainActor (FeatureSetupAction) -> Void
+
+    static func == (lhs: LilBroPressable, rhs: LilBroPressable) -> Bool {
+        lhs.feature == rhs.feature && lhs.id == rhs.id && lhs.action == rhs.action
+            && lhs.optional == rhs.optional && lhs.hasButton == rhs.hasButton
+    }
+
+    /// Whether this is still the step the person said yes to.
+    func isSameStep(as other: LilBroPressable) -> Bool {
+        feature == other.feature && id == other.id && action == other.action
+    }
+
+    /// The rule `FeatureRequirementRow` uses for its button: every row but a
+    /// model row, where only the on-device and key steps are buttons next to
+    /// the model picker.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    static func rowHasButton(_ check: FeatureCheck, action: FeatureSetupAction) -> Bool {
+        guard case .model = check.requirement.kind else { return true }
+        switch action {
+        case .downloadOnDeviceModel, .useOnDeviceModel, .addKey, .fixKey, .addOpenAIKey: return true
+        default: return false
+        }
+    }
 }
 
 /// The window as Lil Bro sees it: named spots and the blocks (cards) he can
@@ -83,7 +125,29 @@ struct LilBroBlocksKey: PreferenceKey {
     }
 }
 
+struct LilBroPressablesKey: PreferenceKey {
+    static let defaultValue: [LilBroPressable] = []
+    static func reduce(value: inout [LilBroPressable], nextValue: () -> [LilBroPressable]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
 extension View {
+    /// A "What it needs" row of `feature`'s screen: where it is, and the step
+    /// it offers while unmet.
+    func lilBroNeed(_ check: FeatureCheck, of feature: AppFeature,
+                    perform: @escaping @MainActor (FeatureSetupAction) -> Void) -> some View {
+        var offered: [LilBroPressable] = []
+        if case .unmet(_, let action?) = check.state {
+            offered = [LilBroPressable(feature: feature, id: check.id, action: action,
+                                       optional: check.requirement.optional,
+                                       hasButton: LilBroPressable.rowHasButton(check, action: action),
+                                       perform: perform)]
+        }
+        return lilBroSpot(.need(check.id))
+            .preference(key: LilBroPressablesKey.self, value: offered)
+    }
+
     /// Tells Lil Bro where this view is, by name.
     func lilBroSpot(_ spot: LilBroSpot) -> some View {
         background(GeometryReader { proxy in

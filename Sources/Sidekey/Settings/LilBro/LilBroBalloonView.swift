@@ -99,6 +99,17 @@ struct LilBroBalloonView: View {
             LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
                             mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
                             actions: actions, current: true)
+            if let pressed = turn.pressed {
+                (Text(controller.mascotVisible ? "I pressed " : "Pressed ") + Text(pressed).fontWeight(.semibold)
+                    + Text("."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text2)
+            }
+            if let step = controller.proposal {
+                LilBroPressPrompt(action: step.action, steps: controller.proposalSteps,
+                                  confirm: controller.confirmProposal,
+                                  decline: controller.declineProposal)
+            }
             offer(after: reply)
         } else if controller.answersFromWhytap {
             paragraph(LilBroCopy.greetingAnswers)
@@ -286,6 +297,32 @@ struct LilBroOffer: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Answers from whytap.ai")
+    }
+}
+
+/// "One step left: … Press it?" He presses only after Yes; the step runs the
+/// same action as the row's own button.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+struct LilBroPressPrompt: View {
+    let action: FeatureSetupAction
+    var steps = 1
+    let confirm: () -> Void
+    let decline: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            (Text(LilBroCopy.lead(steps) + " ") + Text(action.title).fontWeight(.semibold) + Text(". ")
+                + Text(LilBroCopy.consequence(of: action)) + Text(" Press it?"))
+                .font(.system(size: 12.5))
+                .foregroundStyle(MacSettingsTheme.text)
+                .fixedSize(horizontal: false, vertical: true)
+            LilBroChips(items: [(LilBroCopy.yes, true, confirm), (LilBroCopy.no, false, decline)])
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Press it?")
     }
 }
 

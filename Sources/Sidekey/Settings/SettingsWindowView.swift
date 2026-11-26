@@ -128,6 +128,7 @@ struct SettingsWindowView: View {
         .coordinateSpace(name: LilBroSpace.name)
         .onPreferenceChange(LilBroSpotsKey.self) { lilBro.update(spots: $0) }
         .onPreferenceChange(LilBroBlocksKey.self) { lilBro.update(blocks: $0) }
+        .onPreferenceChange(LilBroPressablesKey.self) { lilBro.update(pressables: $0) }
         .onAppear { lilBro.startWandering() }
         .onDisappear { lilBro.stopWandering() }
     }

@@ -2,7 +2,7 @@ import Foundation
 
 /// Answers from whytap.ai: the question, the screen the person is on and up to
 /// three earlier exchanges go to Ask's Lil Bro endpoint, which answers with
-/// claude-haiku-5-5 and names one place from the app's own catalog.
+/// claude-sonnet-5-5 and names one place from the app's own catalog.
 ///
 /// Used only after the person turns answers on in his balloon. Nothing else is
 /// sent: no keys, no dictated text, no settings, no identifier of this Mac.

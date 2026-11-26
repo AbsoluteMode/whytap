@@ -11,19 +11,33 @@ final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
     static let answersKey = "lilBro.answersFromWhytap"
+    static let answersEverOnKey = "lilBro.answersEverOn"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
     @Published var answersFromWhytap: Bool {
-        didSet { defaults.set(answersFromWhytap, forKey: Self.answersKey) }
+        didSet {
+            defaults.set(answersFromWhytap, forKey: Self.answersKey)
+            if answersFromWhytap { answersEverOn = true }
+        }
+    }
+    /// Answers were turned on at least once: after that the balloon no longer
+    /// offers them by itself (⋯ still does).
+    private(set) var answersEverOn: Bool {
+        didSet { defaults.set(answersEverOn, forKey: Self.answersEverOnKey) }
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? false
+        let on = defaults.object(forKey: Self.answersKey) as? Bool ?? false
+        answersFromWhytap = on
+        answersEverOn = on || defaults.bool(forKey: Self.answersEverOnKey)
+        // Saved right away: an opt-in from before this marker existed stays
+        // known after turning answers off and relaunching.
+        if answersEverOn { defaults.set(true, forKey: Self.answersEverOnKey) }
     }
 }
 
@@ -87,10 +101,12 @@ final class LilBroController: ObservableObject {
     static let stepsWait: TimeInterval = 2
     @Published var hovering = false
     @Published var showEarlier = false
+    /// The current answer's details (more words, the place he opened,
+    /// follow-up questions): hidden until asked for.
+    @Published var showMore = false
     @Published var menuOpen = false
     /// The disclosure before answers from whytap.ai, asked for from ⋯.
     @Published private(set) var consentShown = false
-    @Published var draft = ""
 
     private(set) var map = LilBroMap()
     /// The setup steps the screen now in the pane offers, in screen order.
@@ -131,6 +147,18 @@ final class LilBroController: ObservableObject {
     var mascotVisible: Bool { preferences.mascotVisible }
     var answersFromWhytap: Bool { preferences.answersFromWhytap }
     var isOpen: Bool { bubble != .closed }
+    /// Opened before any question, only the reply field shows: no greeting,
+    /// no suggestions, no disclosure. The balloon appears with the first
+    /// answer (or when ⋯ asked for the disclosure).
+    var showsBalloon: Bool { !turns.isEmpty || consentShown }
+    /// The line he greets with over the field, a different one each opening.
+    private(set) var greeting = LilBroCopy.greetings[0]
+    private var opened = 0
+
+    private func nextGreeting() {
+        greeting = LilBroCopy.greetings[opened % LilBroCopy.greetings.count]
+        opened += 1
+    }
     var isBusy: Bool { busy }
 
     /// The pose to draw: a wave while the pointer is over him at rest.
@@ -168,7 +196,9 @@ final class LilBroController: ObservableObject {
         guard let proposal else { return }
         if currentFeature == proposal.feature,
            pressables.contains(where: { $0.isSameStep(as: proposal) && $0.hasButton }) {
-            proposalSteps = requiredSteps(on: proposal.feature).count
+            let steps = requiredSteps(on: proposal.feature).count
+            // Unchanged steps publish nothing: the rows report on every layout.
+            if proposalSteps != steps { proposalSteps = steps }
         } else {
             dropProposal()
         }
@@ -249,6 +279,7 @@ final class LilBroController: ObservableObject {
             await sleep(reduceMotion() ? 0 : 0.44)
             guard !Task.isCancelled else { return }
             setPose(.idle)
+            nextGreeting()
             bubble = .full
             job = nil
         }
@@ -264,6 +295,7 @@ final class LilBroController: ObservableObject {
     private func openBalloon() {
         cancelJob()
         setPose(.idle)
+        nextGreeting()
         bubble = .full
     }
 
@@ -273,6 +305,7 @@ final class LilBroController: ObservableObject {
         bubble = .closed
         menuOpen = false
         showEarlier = false
+        showMore = false
         target = nil
         holding = false
         guard mascotVisible else { return }
@@ -289,6 +322,7 @@ final class LilBroController: ObservableObject {
         turns = []
         menuOpen = false
         showEarlier = false
+        showMore = false
     }
 
     /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
@@ -302,10 +336,22 @@ final class LilBroController: ObservableObject {
     /// The disclosure's Turn on answers button — the only way answers from
     /// whytap.ai are turned on. Nothing is sent before it.
     func turnOnAnswers() {
+        let askAgain = turnOnAsks
         preferences.answersFromWhytap = true
         consentShown = false
         menuOpen = false
         objectWillChange.send()
+        // "Turn on and ask": the question this Mac could not read goes to
+        // whytap.ai now, by this press; earlier ones stay here.
+        if askAgain { retry() }
+    }
+
+    /// The disclosure's button also asks the last question again: this Mac
+    /// did not understand it, and whytap.ai reads any language.
+    var turnOnAsks: Bool {
+        guard !busy, let last = turns.last, last.reply?.isUnknown == true else { return false }
+        // Too short for whytap.ai to take: the plain Turn on answers instead.
+        return LilBroRemoteBrain.sends(last.question)
     }
 
     /// The disclosure's Not now.
@@ -335,9 +381,9 @@ final class LilBroController: ObservableObject {
     func ask(_ raw: String) {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
-        draft = ""
         menuOpen = false
         showEarlier = false
+        showMore = false
         dropProposal()
         cancelJob()
         let remoteOn = answersFromWhytap
@@ -361,7 +407,11 @@ final class LilBroController: ObservableObject {
                     // Said only once the place is really open.
                     guard !Task.isCancelled else { return }
                     turns[index].opened = destination.title
-                    if case .feature(let feature) = destination { offerNextStep(on: feature) }
+                    if case .feature(let feature) = destination {
+                        offerNextStep(on: feature)
+                        await stepsReported()
+                        guard !Task.isCancelled else { return }
+                    }
                 }
             case .offline, .unavailable, .limit, .unknown:
                 if mascotVisible { setPose(.sad) }
@@ -393,7 +443,11 @@ final class LilBroController: ObservableObject {
             await guide(to: destination)
             guard !Task.isCancelled else { return }
             if let index, index < turns.count { turns[index].opened = destination.title }
-            if case .feature(let feature) = destination { offerNextStep(on: feature) }
+            if case .feature(let feature) = destination {
+                offerNextStep(on: feature)
+                await stepsReported()
+                guard !Task.isCancelled else { return }
+            }
             busy = false
             bubble = .full
             job = nil
@@ -438,6 +492,16 @@ final class LilBroController: ObservableObject {
         guard let first = steps.first, first.hasButton else { return }
         proposal = first
         proposalSteps = steps.count
+    }
+
+    /// Waits briefly for a new screen's setup steps, so the balloon opens
+    /// with its "Press it?" already in place instead of growing under the
+    /// person's eyes a moment later.
+    private func stepsReported() async {
+        for _ in 0..<12 where awaitingSteps != nil {
+            await sleep(0.05)
+            if Task.isCancelled { return }
+        }
     }
 
     /// The person said yes: he runs to the row, punches it, and the row's own
@@ -723,7 +787,7 @@ final class LilBroController: ObservableObject {
         guard let reply = turn.reply else { return }
         var text: String
         switch reply {
-        case .answer(let answer): text = answer.paragraphs.joined(separator: " ")
+        case .answer(let answer): text = answer.paragraphs.first ?? ""
         case .unknown: text = LilBroCopy.unknown
         case .offline: text = LilBroCopy.offline
         case .unavailable: text = LilBroCopy.unavailable
@@ -741,18 +805,26 @@ final class LilBroController: ObservableObject {
 
 /// Lil Bro's fixed words, in one place for the view and the tests.
 enum LilBroCopy {
-    static let greeting = "Hi, I’m Lil Bro. Ask me where anything is in Settings — I’ll run there and open it for you."
-    static let greetingAnswers = "Hi, I’m Lil Bro. Ask me anything about Whytap — I’ll open the right setting for you."
-    static let localNote = "Answers come from this Mac: I find settings by name."
+    /// His greeting over the field, one per opening, in turn.
+    static let greetings = [
+        "Wassup bro? What we setting up?",
+        "Yo! What you looking for?",
+        "Sup bro, where we headed?",
+        "Hey hey. What's the move?",
+    ]
+    /// The disclosure folded to one line; the full text is under Details.
+    static let offerLine = "Real answers come from whytap.ai (Claude Sonnet 5.5)."
+    /// After a question this Mac did not understand.
+    static let offerLineUnknown = "whytap.ai (Claude Sonnet 5.5) understands questions in any language."
+    static let turnOnAndAsk = "Turn on and ask"
     /// Said once, before anything is sent, with the button that turns answers on.
-    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
+    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
-    static let answersNote = "Questions go to whytap.ai (Claude Haiku 5.5) with the screen you’re on and up to three earlier whytap.ai questions and answers; it keeps them 90 days. Keys and dictated text stay on your Mac."
     static let notNow = "Not now"
     static let unknown = "I only know Settings by name. Try one of these:"
     static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"
     static let unavailable = "whytap.ai can’t answer right now. Settings still work; this is the closest page:"
-    static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow. Settings still work — closest pages:"
+    static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow. Settings still work — closest page:"
     static let catchMe = "Catch me"
     static let yes = "Yes, press it"
     static let no = "I’ll do it"

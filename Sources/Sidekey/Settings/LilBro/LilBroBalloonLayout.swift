@@ -6,13 +6,33 @@ import CoreGraphics
 /// the window is tested without drawing.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
 struct LilBroBalloonLayout: Equatable {
-    enum Tail: Equatable { case down, up, left, right }
+    enum Tail: Equatable, CaseIterable { case down, up, left, right }
 
     var balloon: CGRect
     var tail: Tail
     /// Along the balloon's edge: x for down/up, y for left/right.
     var tailOffset: CGFloat
     var field: CGRect
+
+    static let tailSize: CGFloat = 7
+    /// How far the tail reaches into the balloon, over its border.
+    static let tailOverlap: CGFloat = 1.5
+
+    /// The tail's own frame: its base inside the balloon's edge, its point
+    /// `tailSize` beyond it toward him.
+    var tailFrame: CGRect {
+        let t = Self.tailSize, o = Self.tailOverlap
+        switch tail {
+        case .down:
+            return CGRect(x: balloon.minX + tailOffset - t - 1, y: balloon.maxY - o, width: 2 * t + 2, height: t + o + 1)
+        case .up:
+            return CGRect(x: balloon.minX + tailOffset - t - 1, y: balloon.minY - t - 1, width: 2 * t + 2, height: t + o + 1)
+        case .left:
+            return CGRect(x: balloon.minX - t - 1, y: balloon.minY + tailOffset - t - 1, width: t + o + 1, height: 2 * t + 2)
+        case .right:
+            return CGRect(x: balloon.maxX - o, y: balloon.minY + tailOffset - t - 1, width: t + o + 1, height: 2 * t + 2)
+        }
+    }
 
     static let boySize = CGSize(width: 28, height: 32)
     static let pad: CGFloat = 10

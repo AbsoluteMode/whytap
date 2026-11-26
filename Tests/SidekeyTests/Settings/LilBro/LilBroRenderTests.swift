@@ -98,6 +98,28 @@ final class LilBroRenderTests: XCTestCase {
         }
         XCTAssertEqual(selection.shownFeature, .drop)
         XCTAssertEqual(lilBro.turns.last?.opened, "Drop")
+        // Details on request: the place he opened and what to ask next.
+        try await render(fixture, selection, lilBro, name: "answer-more-light") {
+            lilBro.showMore = true
+        }
+        XCTAssertEqual(lilBro.bubble, .full)
+    }
+
+    /// Answers already on: the greeting has ⋯, so they can be turned off
+    /// before a question is sent.
+    func test_with_answers_on_the_greeting_offers_turning_them_off() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        lilBro.turnOnAnswers()
+        try await render(fixture, selection, lilBro, name: "greeting-answers-on-light") {
+            lilBro.toggleFromSidebar()
+        }
+        XCTAssertFalse(lilBro.showsBalloon)
+        XCTAssertTrue(lilBro.answersFromWhytap)
+        lilBro.turnOffAnswers()
+        XCTAssertFalse(lilBro.answersFromWhytap)
     }
 
     func test_hidden_he_answers_from_the_sidebar_entry() async throws {
@@ -118,7 +140,11 @@ final class LilBroRenderTests: XCTestCase {
         let lilBro = controller(fixture, selection)
         try await render(fixture, selection, lilBro, name: "offer-light") {
             lilBro.toggleFromSidebar()
+            // The greeting's small link: the whole disclosure, on request.
+            lilBro.askToTurnOnAnswers()
         }
+        XCTAssertTrue(lilBro.consentShown)
+        XCTAssertFalse(lilBro.answersFromWhytap, "the link only shows the disclosure")
         lilBro.turnOnAnswers()
         try await render(fixture, selection, lilBro, name: "offline-light") {
             lilBro.ask("how do I dictate")

@@ -27,9 +27,10 @@ struct SettingsWindowView: View {
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
-    /// Lil Bro, the guide drawn over the window.
+    /// Lil Bro, the guide drawn over the window. Held, not observed: only
+    /// his layer and sidebar entry redraw when he moves, never the window.
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-    @StateObject private var lilBro: LilBroController
+    @State private var lilBro: LilBroController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedSidebarControl: String?
 
@@ -69,7 +70,7 @@ struct SettingsWindowView: View {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
-        _lilBro = StateObject(wrappedValue: lilBro ?? LilBroController(selection: selection))
+        _lilBro = State(initialValue: lilBro ?? LilBroController(selection: selection))
     }
 
     /// The live environment: this window's own switches and Drop mode.
@@ -105,8 +106,17 @@ struct SettingsWindowView: View {
         .frame(minWidth: 960, minHeight: 560)
     }
 
+    #if DEBUG
+    /// How many times the shell was evaluated; tests read it to prove Lil
+    /// Bro's steps leave the rest of the window alone.
+    nonisolated(unsafe) static var shellEvaluations = 0
+    #endif
+
     private var settingsShell: some View {
-        HStack(spacing: 0) {
+        #if DEBUG
+        Self.shellEvaluations += 1
+        #endif
+        return HStack(spacing: 0) {
             sidebar
 
             Rectangle()

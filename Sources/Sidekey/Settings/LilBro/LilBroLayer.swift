@@ -9,15 +9,22 @@ struct LilBroLayer: View {
     @ObservedObject var controller: LilBroController
     @ObservedObject var preferences: LilBroPreferences
     @Environment(\.colorScheme) private var colorScheme
-    @State private var balloonSize = CGSize(width: LilBroBalloonView.width, height: 120)
-    @State private var fieldSize = CGSize(width: LilBroReplyField.width, height: 28)
 
     init(controller: LilBroController) {
         self.controller = controller
         preferences = controller.preferences
     }
 
+    #if DEBUG
+    /// How many times the layer was evaluated; tests read it to prove typing
+    /// redraws only the reply field.
+    nonisolated(unsafe) static var evaluations = 0
+    #endif
+
     var body: some View {
+        #if DEBUG
+        let _ = Self.evaluations += 1
+        #endif
         GeometryReader { proxy in
             let bounds = proxy.frame(in: .named(LilBroSpace.name))
             ZStack(alignment: .topLeading) {
@@ -64,78 +71,159 @@ struct LilBroLayer: View {
         }
     }
 
-    @ViewBuilder
-    private func balloon(bounds: CGRect) -> some View {
-        let layout = layout(bounds: bounds)
-        LilBroBalloonView(controller: controller, tail: layout.tail, tailOffset: layout.tailOffset,
-                          maxHeight: LilBroBalloonLayout.maxHeight(feet: controller.feet, bounds: bounds,
-                                                                    fieldHeight: fieldSize.height))
-            .fixedSize(horizontal: false, vertical: true)
-            .background(GeometryReader { p in
-                Color.clear.onAppear { balloonSize = p.size }.onChange(of: p.size) { _, s in balloonSize = s }
-            })
-            .offset(x: layout.balloon.minX - bounds.minX, y: layout.balloon.minY - bounds.minY)
-        LilBroReplyField(controller: controller)
-            .fixedSize()
-            .background(GeometryReader { p in
-                Color.clear.onAppear { fieldSize = p.size }.onChange(of: p.size) { _, s in fieldSize = s }
-            })
-            .offset(x: layout.field.minX - bounds.minX, y: layout.field.minY - bounds.minY)
-    }
+    #if DEBUG
+    /// Every balloon place drawn, in order; tests read it to see jumps.
+    nonisolated(unsafe) static var balloonPlaces: [CGRect] = []
+    #endif
 
-    private func layout(bounds: CGRect) -> LilBroBalloonLayout {
+    /// The balloon, its tail and the reply field, measured and placed in one
+    /// pass: never drawn first at an old size and then moved.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    private func balloon(bounds: CGRect) -> some View {
+        let anchor: LilBroBalloonStage.Anchor
         if !preferences.mascotVisible || !controller.placed, let entry = controller.map.home {
-            return .above(entry: entry, balloon: balloonSize, field: fieldSize, bounds: bounds)
+            anchor = .entry(entry)
+        } else {
+            anchor = .feet(controller.feet, target: controller.target)
         }
-        return .around(feet: controller.feet, balloon: balloonSize, field: fieldSize,
-                       bounds: bounds, target: controller.target)
+        let maxHeight = LilBroBalloonLayout.maxHeight(feet: controller.feet, bounds: bounds,
+                                                      fieldHeight: LilBroReplyField.height)
+        return LilBroBalloonStage(anchor: anchor, bounds: bounds) {
+            VStack(alignment: .leading, spacing: 6) {
+                // Before the first question: one line of greeting over the field.
+                if !controller.showsBalloon {
+                    HStack(spacing: 8) {
+                        LilBroGreetingLine(text: controller.greeting)
+                        // Answers on: turning them off must not wait for a question.
+                        if controller.answersFromWhytap { LilBroOptionsMenu(controller: controller, standalone: true) }
+                    }
+                }
+                LilBroReplyField(controller: controller)
+            }
+            // Before the first question only the greeting and the field show.
+            if controller.showsBalloon {
+                LilBroBalloonView(controller: controller, maxHeight: maxHeight)
+                // Over the balloon, so its edge does not cross the tail.
+                ForEach(LilBroBalloonLayout.Tail.allCases, id: \.self) { tail in
+                    LilBroBalloonTail(tail: tail)
+                }
+            }
+        }
     }
 }
 
-/// The little guy himself, sampled every frame from his current move.
+/// Places the balloon, its tail and the reply field from their real sizes in
+/// the same layout pass that draws them.
+struct LilBroBalloonStage: Layout {
+    enum Anchor: Equatable {
+        case feet(CGPoint, target: CGRect?)
+        case entry(CGRect)
+    }
+
+    let anchor: Anchor
+    /// The layer's frame in the window's coordinates.
+    let bounds: CGRect
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions(by: bounds.size)
+    }
+
+    /// Subviews: the field, then the balloon and four tails (down, up, left,
+    /// right) once there is a balloon.
+    func placeSubviews(in rect: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let tails = LilBroBalloonLayout.Tail.allCases.count
+        guard subviews.count == 1 || subviews.count == tails + 2 else { return }
+        let fieldView = subviews[0]
+        let balloonView = subviews.count > 1 ? subviews[1] : nil
+        let size = balloonView?.sizeThatFits(ProposedViewSize(width: LilBroBalloonView.width, height: nil)) ?? .zero
+        let fieldSize = fieldView.sizeThatFits(.unspecified)
+        let layout: LilBroBalloonLayout
+        switch anchor {
+        case .feet(let feet, let target):
+            layout = .around(feet: feet, balloon: size, field: fieldSize, bounds: bounds, target: target)
+        case .entry(let entry):
+            layout = .above(entry: entry, balloon: size, field: fieldSize, bounds: bounds)
+        }
+        func place(_ view: LayoutSubview, _ frame: CGRect) {
+            view.place(at: CGPoint(x: rect.minX + frame.minX - bounds.minX, y: rect.minY + frame.minY - bounds.minY),
+                       proposal: ProposedViewSize(frame.size))
+        }
+        place(fieldView, layout.field)
+        guard let balloonView else { return }
+        #if DEBUG
+        LilBroLayer.balloonPlaces.append(layout.balloon)
+        #endif
+        place(balloonView, layout.balloon)
+        for (index, tail) in LilBroBalloonLayout.Tail.allCases.enumerated() {
+            place(subviews[2 + index], tail == layout.tail ? layout.tailFrame : .zero)
+        }
+    }
+}
+
+/// The little guy himself. While he moves, only his place is sampled, at
+/// the display's own rate; the control, its focus and hover stay put, and
+/// his frames change on their own slower clock.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
 @MainActor
 struct LilBroMascot: View {
+    #if DEBUG
+    /// Frames drawn while he moves; tests read it as his frame rate.
+    nonisolated(unsafe) static var movingFrames = 0
+    static func frameDrawn(moving: Bool) { if moving { movingFrames += 1 } }
+    #endif
+
     @ObservedObject var controller: LilBroController
     let origin: CGPoint
+    let dark: Bool
+
+    var body: some View {
+        let moving = controller.segment != nil
+        // No minimum interval: every display refresh while he moves; none at rest.
+        TimelineView(.animation(minimumInterval: nil, paused: !moving)) { context in
+            let feet = moving ? controller.position(at: context.date) : controller.feet
+            #if DEBUG
+            let _ = LilBroMascot.frameDrawn(moving: moving)
+            #endif
+            LilBroFigure(controller: controller, dark: dark)
+                .offset(x: feet.x - 14 - origin.x, y: feet.y - 31 - origin.y)
+        }
+    }
+}
+
+/// Him as a control: a click catches him while the balloon is closed.
+@MainActor
+struct LilBroFigure: View {
+    @ObservedObject var controller: LilBroController
     let dark: Bool
     @FocusState private var focused: Bool
 
     var body: some View {
-        // Smooth while he moves; at rest his frames change every ~80-500 ms.
-        // With Reduce Motion he holds each pose's first frame: no timeline runs.
-        let still = controller.reducesMotion && controller.segment == nil
-        TimelineView(.animation(minimumInterval: controller.segment == nil ? 0.05 : 1.0 / 30, paused: still)) { context in
-            let feet = controller.position(at: context.date)
-            let pose = controller.shownPose
-            let elapsed = still ? 0 : max(0, context.date.timeIntervalSince(controller.poseStart))
-            ZStack(alignment: .bottom) {
-                // Hover and focus show wherever a click catches him.
-                Ellipse()
-                    .fill(MacSettingsTheme.accent.opacity(0.22))
-                    .frame(width: 26, height: 6)
-                    .offset(y: 3)
-                    .opacity(controller.canCatch && controller.hovering ? 1 : 0)
-                Button { controller.catchHim() } label: {
-                    LilBroSprite(pose: pose, elapsed: elapsed, dark: dark, facingRight: controller.facingRight)
-                }
-                .buttonStyle(LilBroPressStyle())
-                // Only while a click catches him (the balloon is closed): with
-                // it open he is not a control, so no press, focus or ring.
-                .disabled(!controller.canCatch)
-                // His own ring follows the sprite; the default one is square and offset.
-                .focusEffectDisabled()
-                .focused($focused)
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MacSettingsTheme.accent, lineWidth: 2)
-                    .padding(-3).opacity(focused && controller.canCatch ? 1 : 0))
-                .onHover { controller.hovering = $0 }
-                .help("Lil Bro")
-                .accessibilityLabel("Lil Bro")
-                .accessibilityHint("Opens a balloon to ask where something is in Settings")
+        ZStack(alignment: .bottom) {
+            // Hover and focus show wherever a click catches him.
+            Ellipse()
+                .fill(MacSettingsTheme.accent.opacity(0.22))
+                .frame(width: 26, height: 6)
+                .offset(y: 3)
+                .opacity(controller.canCatch && controller.hovering ? 1 : 0)
+            Button { controller.catchHim() } label: {
+                LilBroAnimatedSprite(controller: controller, dark: dark)
             }
-            .frame(width: 28, height: 32)
-            .overlay(alignment: .top) { tag }
-            .offset(x: feet.x - 14 - origin.x, y: feet.y - 31 - origin.y)
+            .buttonStyle(LilBroPressStyle())
+            // Only while a click catches him (the balloon is closed): with
+            // it open he is not a control, so no press, focus or ring.
+            .disabled(!controller.canCatch)
+            // His own ring follows the sprite; the default one is square and offset.
+            .focusEffectDisabled()
+            .focused($focused)
+            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(MacSettingsTheme.accent, lineWidth: 2)
+                .padding(-3).opacity(focused && controller.canCatch ? 1 : 0))
+            .onHover { controller.hovering = $0 }
+            .help("Lil Bro")
+            .accessibilityLabel("Lil Bro")
+            .accessibilityHint("Opens a balloon to ask where something is in Settings")
         }
+        .frame(width: 28, height: 32)
+        .overlay(alignment: .top) { tag }
     }
 
     @ViewBuilder private var tag: some View {
@@ -148,6 +236,23 @@ struct LilBroMascot: View {
             LilBroTag(text: LilBroCopy.catchMe).fixedSize().offset(y: -30)
         default:
             EmptyView()
+        }
+    }
+}
+
+/// His frames: about every 80-500 ms by pose. With Reduce Motion he holds
+/// each pose's first frame and no clock runs.
+@MainActor
+struct LilBroAnimatedSprite: View {
+    @ObservedObject var controller: LilBroController
+    let dark: Bool
+
+    var body: some View {
+        let still = controller.reducesMotion && controller.segment == nil
+        TimelineView(.animation(minimumInterval: controller.segment == nil ? 0.05 : 1.0 / 30, paused: still)) { context in
+            LilBroSprite(pose: controller.shownPose,
+                         elapsed: still ? 0 : max(0, context.date.timeIntervalSince(controller.poseStart)),
+                         dark: dark, facingRight: controller.facingRight)
         }
     }
 }
@@ -192,6 +297,26 @@ struct LilBroLadderView: View {
         }
         .frame(width: 12, height: max(0, height))
         .accessibilityHidden(true)
+    }
+}
+
+/// His one-line greeting over the reply field when the balloon opens.
+struct LilBroGreetingLine: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(MacSettingsTheme.text)
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(MacSettingsTheme.bgCard))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            .fixedSize()
+            .accessibilityLabel("Lil Bro: \(text)")
     }
 }
 

@@ -301,14 +301,19 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertFalse(controller.answersFromWhytap)
     }
 
-    /// Where the disclosure shows and with which buttons: after the greeting
-    /// and an unknown reply it offers Turn on answers; asked for from ⋯ it
-    /// shows after any reply, the unknown one too, with Not now.
+    /// Where the disclosure shows and with which buttons: never by itself
+    /// before a question; after an unknown reply it offers Turn on answers
+    /// (one line, full text under Details) until answers were first turned
+    /// on; asked for from ⋯ it shows after any reply, with Not now.
     func test_the_disclosure_always_has_not_now_when_the_menu_asked_for_it() {
         let answer = LilBroReply.answer(LilBroAnswer(paragraphs: ["Hi"]))
         let unknown = LilBroReply.unknown(suggestions: [])
-        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .none)
         XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: false), .none,
+                       "turned on once, the balloon does not offer it again by itself")
+        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: true),
+                       .turnOnOrNotNow)
         XCTAssertEqual(LilBroOffer.placement(after: answer, answersOn: false, consentShown: false), .none)
         for reply in [nil, answer, unknown, .offline] as [LilBroReply?] {
             XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: false, consentShown: true), .turnOnOrNotNow)
@@ -316,10 +321,13 @@ final class LilBroControllerTests: XCTestCase {
         }
         XCTAssertEqual(LilBroOffer(turnOn: {}, notNow: {}).choices, ["Turn on answers", "Not now"])
         XCTAssertEqual(LilBroOffer(turnOn: {}).choices, ["Turn on answers"])
+        XCTAssertEqual(LilBroOffer(asks: true, turnOn: {}).choices, ["Turn on and ask"])
+        // Folded to one line, the full text is kept for Details.
+        XCTAssertTrue(LilBroCopy.offerLine.contains("whytap.ai"))
+        XCTAssertTrue(LilBroCopy.offer.contains("Claude Sonnet 5.5"))
         // The disclosure says what is sent again and kept.
         XCTAssertTrue(LilBroCopy.offer.contains("earlier whytap.ai questions with its answers, sent again"))
         XCTAssertTrue(LilBroCopy.offer.contains("90 days"))
-        XCTAssertTrue(LilBroCopy.answersNote.contains("earlier whytap.ai questions and answers"))
     }
 
     func test_after_an_unknown_reply_the_menu_shows_the_disclosure_with_not_now() async {
@@ -814,5 +822,110 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertTrue(controller.canCatch, "walking home after closing")
         controller.catchHim()
         await until { controller.bubble == .full }
+    }
+
+    /// A short answer and one action: the details (the place he opened,
+    /// examples, what to ask next) wait behind More, and every new question
+    /// starts short again.
+    func test_an_answer_is_short_until_more_is_asked_for() async {
+        let controller = make(reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        guard case .answer(let answer) = controller.turns.last?.reply else { return XCTFail("an answer") }
+        XCTAssertFalse(controller.showMore)
+        XCTAssertTrue(LilBroReplyView.hasDetails(answer, opened: controller.turns.last?.opened))
+        controller.showMore = true
+        controller.ask("where are my keys")
+        XCTAssertFalse(controller.showMore, "a new question starts short")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.showMore = true
+        controller.close()
+        XCTAssertFalse(controller.showMore)
+        XCTAssertFalse(LilBroReplyView.hasDetails(LilBroAnswer(paragraphs: ["Here it is."]), opened: nil))
+    }
+
+    /// A question this Mac did not understand (another language): "Turn on
+    /// and ask" turns answers on and sends that one question to whytap.ai;
+    /// the earlier local question never goes.
+    func test_turn_on_and_ask_sends_only_the_question_this_mac_did_not_understand() async {
+        let remote = Remote(.answer(LilBroAnswer(paragraphs: ["Meeting Notes takes notes."],
+                                                 destination: .feature(.meetings))))
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.ask("как мне использовать митинги")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(controller.turns.last?.reply?.isUnknown, true)
+        XCTAssertTrue(controller.turnOnAsks)
+        XCTAssertTrue(remote.asked.isEmpty, "nothing is sent before the press")
+        controller.turnOnAnswers()
+        await until { controller.bubble == .full && !controller.isBusy && controller.turns.last?.reply?.isUnknown == false }
+        XCTAssertEqual(remote.asked.map(\.text), ["как мне использовать митинги"])
+        XCTAssertEqual(remote.asked.first?.history, [], "the local question stays on this Mac")
+        XCTAssertEqual(controller.turns.count, 2, "the question is asked again in its place")
+        XCTAssertEqual(controller.turns.last?.opened, "Meeting Notes")
+    }
+
+    /// Turned on from ⋯ after an answer, nothing is sent by the press itself.
+    func test_turning_answers_on_after_an_answer_sends_nothing() async {
+        let remote = Remote(.unavailable)
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertFalse(controller.turnOnAsks)
+        controller.turnOnAnswers()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(remote.asked.isEmpty)
+    }
+
+    /// Opened before any question: only the reply field, no balloon; the
+    /// balloon comes with the first answer. Turned on once, answers are
+    /// remembered as offered, also after turning them off.
+    func test_first_open_is_only_the_field_and_the_offer_waits_for_an_unknown_question() async {
+        let controller = make(reduceMotion: true)
+        controller.toggleFromSidebar()
+        XCTAssertTrue(controller.isOpen)
+        XCTAssertFalse(controller.showsBalloon, "only the greeting line and the field")
+        XCTAssertEqual(controller.greeting, LilBroCopy.greetings[0])
+        controller.toggleFromSidebar()
+        controller.toggleFromSidebar()
+        XCTAssertEqual(controller.greeting, LilBroCopy.greetings[1], "a different line each opening")
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertTrue(controller.showsBalloon)
+        XCTAssertFalse(controller.preferences.answersEverOn)
+        controller.turnOnAnswers()
+        controller.turnOffAnswers()
+        XCTAssertTrue(controller.preferences.answersEverOn)
+        XCTAssertTrue(LilBroPreferences(defaults: defaults).answersEverOn, "remembered")
+    }
+
+    /// Upgrading with answers already on, then turning them off and
+    /// relaunching: the earlier opt-in is still known, so the balloon does not
+    /// offer answers again by itself.
+    func test_an_opt_in_from_before_the_marker_survives_turning_off_and_relaunch() {
+        defaults.set(true, forKey: LilBroPreferences.answersKey)
+        let upgraded = LilBroPreferences(defaults: defaults)
+        XCTAssertTrue(upgraded.answersEverOn)
+        upgraded.answersFromWhytap = false
+        let relaunched = LilBroPreferences(defaults: defaults)
+        XCTAssertFalse(relaunched.answersFromWhytap)
+        XCTAssertTrue(relaunched.answersEverOn, "remembered across relaunch")
+        XCTAssertFalse(LilBroPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!).answersEverOn)
+    }
+
+    /// A question too short for whytap.ai never gets "Turn on and ask".
+    func test_a_too_short_unknown_question_gets_the_plain_turn_on() async {
+        let remote = Remote(.unavailable)
+        let controller = make(remote: remote, reduceMotion: true)
+        for question in ["x", "Я", "🦊", "x?", "x  "] {
+            controller.ask(question)
+            await until { controller.bubble == .full && !controller.isBusy }
+            XCTAssertEqual(controller.turns.last?.reply?.isUnknown, true, question)
+            XCTAssertFalse(controller.turnOnAsks, question)
+        }
+        controller.turnOnAnswers()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(remote.asked.isEmpty)
     }
 }

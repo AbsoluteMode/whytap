@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md]
 ---
 
 # Parallel development, one working Whytap
@@ -431,6 +431,16 @@ queue survives downtime.
    with `set --status queued` and a note that the environment, not the PR,
    stopped it. Failures in a
    suite that ran while the check was not clear are not findings against the PR.
+   The full suite runs as `python3 scripts/test-shards.py --shards 2`: two
+   class shards of the built test bundle at once, a split fixed by the
+   committed class times and checked against `swift test --list-tests`, every
+   failed test rerun alone, and the serial `swift test` as the fallback when
+   sharding cannot run. Every run must account for itself: the named final
+   XCTest summary, every expected test with one result, an exit consistent
+   with the failures; otherwise it never passes (exit 2). A rerun counts only
+   when exactly that test ran alone and passed, and an isolated pass ends in
+   exit 3, never 0, so the rule below decides (see the
+   [test shards decision](../decisions/2026-11-26-builder-test-shards.md)).
    A failed test whose file and code under test the candidate does not change
    is rerun alone (`swift test --filter <Class>/<test>`), not with a second
    full suite. If it passes, it is not a finding: the builder continues,

@@ -1,8 +1,8 @@
 ---
 id: lil-bro-answers-from-whytap-2026-11-24
 type: decision
-title: Lil Bro may ask whytap.ai, the first Whytap server the app talks to, only after the person turns it on
-summary: The "no Whytap servers" invariant gets one exception. After the person presses Turn on answers in Lil Bro's balloon, each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5 while it is tried out (claude-haiku-5-5 before). Off by default, turned off from the same balloon; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
+title: Lil Bro always asks whytap.ai (Claude Sonnet 5.5), the first Whytap server the app talks to
+summary: The "no Whytap servers" invariant gets one exception. Each question a person asks Lil Bro, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5. Since REV 13 (2026-11-26, the maintainer's decision) there is no switch to turn answers off and no "What is sent" item; Lil Bro works only through Sonnet. No keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
 status: confirmed
 tags: [settings, lil-bro, privacy, network, invariant, ask]
 canonical_for: [lil-bro-answers]
@@ -11,6 +11,9 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-24 the maintainer, after the first outside tester's feedback, asked to bring whytap.ai's answers into Settings "so people can ask right there and get answers", on Haiku ("Sonnet we can't afford for every user, Haiku is fine"), with a guide that leads people through Settings. The orchestrator task (107) asked for answers from Ask on whytap.ai, an honest privacy text, an explicit opt-in, an offline state, and a decision because the no-servers invariant changes.
     confirmed_at: 2026-11-24
+  - type: user-confirmed
+    reference: On 2026-11-26, looking at build 1772's ⋯ menu with "What is sent to whytap.ai" and "Turn off answers from whytap.ai", the maintainer said to remove them because Lil Bro works only through Sonnet (orchestrator task 107, REV 13).
+    confirmed_at: 2026-11-26
   - type: repository
     reference: Sources/Sidekey/Settings/LilBro/LilBroRemoteBrain.swift
     confirmed_at: 2026-11-24
@@ -37,7 +40,41 @@ invariant said so.
   `https://whytap.ai/api/ask/lilbro` (server: AbsoluteMode/whytap-landing,
   `ask/lilbro.py`). It is the only place in `Sources/` that calls a whytap.ai
   API; a test fails if another file does.
-- **Off by default.** Nothing is sent until the person presses **Turn on
+- **Only Sonnet, no switch (REV 13, 2026-11-26, the maintainer's product
+  decision).** On build 1772 the maintainer pointed at ⋯ → "What is sent to
+  whytap.ai" and "Turn off answers from whytap.ai" and said to remove them:
+  Lil Bro works only through Sonnet. Every question of three characters or
+  more goes to whytap.ai (claude-sonnet-5-5); there is no off state, no
+  "Turn on and ask" card and no "What is sent" card. ⋯ keeps Hide the little
+  guy, Clear and Close. Offline he says briefly that answers are not
+  available, with Try again. A saved `lilBro.answersFromWhytap` from builds
+  1770–1772 is ignored. What is sent and kept stays documented in
+  docs/privacy.md. The opt-out, disclosure and data-use bullets below are
+  history.
+- **On by default (REV 8, 2026-11-26, the maintainer's product decision).**
+  Asked "Turn on whytap.ai answers by default, without the consent button?",
+  the maintainer answered "Yes, by default". This replaces the builder's
+  ticket-606 requirement that the disclosure precede any sending. Each
+  question the person asks Lil Bro goes to whytap.ai unless they turned
+  answers off; nothing is sent before a question or by opening Settings.
+  ⋯ → Turn off answers from whytap.ai (also next to the greeting, before the
+  first question) stops it, and the saved choice is kept. What is sent and
+  kept stays readable in docs/privacy.md and, while answers are off, under
+  Details of the card. No card, "I only know…" or suggested questions on the
+  default path: a question goes to the model, with the thinking dots while
+  it answers.
+- **Off means off at once; what is sent stays readable (ticket 625).** The
+  builder's review of #493: ⋯ → Turn off answers cancels a question still on
+  its way, the preference is checked again right before sending, and a late
+  reply or its navigation is ignored. While answers are on, ⋯ → What is sent
+  to whytap.ai shows the full text with OK (no confirmation; default-on is
+  the maintainer's decision).
+- **No local fallback (REV 10, 2026-11-26).** The maintainer asked for no
+  scripted scenarios. With answers off or whytap.ai unreachable there is no
+  keyword guide and no closest page any more: answers off gives only the
+  card (Turn on and ask), offline a short message with Try again. The
+  bullets below about the keyword guide and closest pages are history.
+- **Before REV 8: off by default.** Nothing was sent until the person pressed **Turn on
   answers** on the disclosure in his balloon, under the text: each question
   then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen and up to
   three earlier whytap.ai questions with its answers, sent again; whytap.ai
@@ -60,14 +97,16 @@ invariant said so.
   question this Mac did not understand, the line says whytap.ai understands
   any language and the button is **Turn on and ask**: that press turns answers
   on and sends that one question; earlier questions stay on this Mac.
-- **Offered only when it helps (REV 5).** The balloon opens with only the
-  reply field; the one-line disclosure shows by itself only after a question
-  this Mac could not answer, and only until answers were first turned on
-  (`lilBro.answersEverOn`). ⋯ → Turn on answers still shows it any time.
+- **Offered only when it helps (REV 5, REV 7).** The balloon opens with
+  only the greeting and the reply field; the one-line disclosure shows by
+  itself only after a question this Mac could not answer. There it is the
+  whole reply: no "I only know Settings by name", no suggested questions
+  (REV 7, the maintainer on 1769: "why isn't this fixed yet?"). It shows also
+  after answers were turned on and off, since otherwise such a question would
+  get no reply at all; the REV 5 marker `lilBro.answersEverOn` is gone.
+  ⋯ → Turn on answers still shows it any time.
   With answers on, ⋯ sits next to the greeting, so they can be turned off
-  before a question is sent (builder ticket 616). An opt-in saved before the
-  marker existed is written to it at launch, so turning answers off and
-  relaunching does not bring the offer back. A question too short for
+  before a question is sent (builder ticket 616). A question too short for
   whytap.ai gets the plain Turn on answers, never Turn on and ask. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
 - **What is sent:** the question normalised as the server's
@@ -148,3 +187,6 @@ invariant said so.
 
 2026-11-24 · step 2 PR: feature/lil-bro-answers
 2026-11-26 · REV 4 (one-line disclosure, Sonnet): feature/lil-bro-smooth
+2026-11-26 · REV 7 (only the card when not understood): feature/lil-bro-unknown
+2026-11-26 · REV 8 (on by default): feature/lil-bro-unknown
+2026-11-26 · REV 10 (no local fallback): feature/lil-bro-unknown

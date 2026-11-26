@@ -30,8 +30,9 @@ final class LilBroSmoothnessTests: XCTestCase {
     }
 
     private func moving(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection) -> LilBroController {
-        LilBroController(selection: selection, preferences: LilBroPreferences(defaults: fixture.defaults),
-                         remote: nil, reduceMotion: { false })
+        let preferences = LilBroPreferences(defaults: fixture.defaults)
+        return LilBroController(selection: selection, preferences: preferences,
+                                remote: LilBroFixedBrain(), reduceMotion: { false })
     }
 
     func test_his_steps_do_not_redraw_the_settings_window() async throws {
@@ -115,16 +116,14 @@ final class LilBroSmoothnessTests: XCTestCase {
         var distinct: [CGRect] = []
         for p in places where distinct.last != p { distinct.append(p) }
         let jumps = zip(distinct, distinct.dropFirst()).map { max(abs($0.minX - $1.minX), abs($0.minY - $1.minY)) }
-        let line = String(format: "LILBRO-GUIDE moving_s=%.2f moving_frames=%d fps=%.0f shell_renders=%d balloon_evals=%d balloon_places=%d jumps_pt=%@ proposal=%@",
+        let line = String(format: "LILBRO-GUIDE moving_s=%.2f moving_frames=%d fps=%.0f shell_renders=%d balloon_evals=%d balloon_places=%d jumps_pt=%@",
                           movingTime, LilBroMascot.movingFrames, Double(LilBroMascot.movingFrames) / max(0.01, movingTime),
                           SettingsWindowView.shellEvaluations, places.count, distinct.count,
-                          jumps.map { String(format: "%.0f", $0) }.joined(separator: ","),
-                          lilBro.proposal == nil ? "none" : "yes")
+                          jumps.map { String(format: "%.0f", $0) }.joined(separator: ","))
         print(line)
         XCTAssertEqual(distinct.count, 1, "the balloon is drawn once where it belongs, never moved: \(jumps)")
         XCTAssertLessThanOrEqual(SettingsWindowView.shellEvaluations, 4,
                                  "only the two screen changes on his way redraw the window")
-        XCTAssertNotNil(lilBro.proposal, "the one action is in place when the balloon opens")
         try? line.write(toFile: (ProcessInfo.processInfo.environment["LILBRO_GUIDE_OUT"] ?? "/dev/null"),
                         atomically: true, encoding: .utf8)
     }

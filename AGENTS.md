@@ -18,8 +18,8 @@ this file and the documents it links.
 
 A native macOS 14.2+ app (Swift, SwiftUI, AppKit, SwiftPM; Apple Silicon and
 Intel) that lives in the notch. MIT, free, no account, no telemetry and no
-Whytap servers, except Lil Bro's answers from whytap.ai once the person turns
-them on in Settings. It runs on the user's own provider keys or self-hosted
+Whytap servers, except Lil Bro's answers from whytap.ai to questions the
+person asks him in Settings (always on, answered by Claude Sonnet 5.5). It runs on the user's own provider keys or self-hosted
 OpenAI-compatible servers; dictation can also run on the Mac (Apple Silicon,
 one downloaded speech model; there is no on-device LLM). The product is named
 **Whytap**; the Swift module and most internal identifiers are still
@@ -88,8 +88,8 @@ the installed app before testing a dev build. Release and fork details:
 ## Rules for changes
 
 - Keep the invariants in `docs/architecture.md`. In short: the app never
-  contacts a Whytap backend, except Lil Bro's questions to whytap.ai after the
-  person turns his answers on; provider keys stay in Keychain and never reach
+  contacts a Whytap backend, except the questions a person asks Lil Bro, which
+  go to whytap.ai (no switch, REV 13); provider keys stay in Keychain and never reach
   logs, argv or files; each feature's audio or text goes only to the provider
   its user chose; nothing switches provider or model on its own.
 - After a change, update the matching document (architecture and hotkeys:

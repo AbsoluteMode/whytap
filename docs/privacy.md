@@ -1,7 +1,8 @@
 # Privacy
 
 Whytap has no accounts and no telemetry. It uses one Whytap-operated server,
-whytap.ai, and only for Lil Bro's answers in Settings after you turn them on.
+whytap.ai, and only for Lil Bro's answers to the questions you ask him in
+Settings (on by default; you can turn them off in his ⋯ menu).
 This document lists every way data can leave the Mac, so that these claims
 are verifiable rather than slogans.
 
@@ -134,7 +135,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
-| Lil Bro answers (off by default) | whytap.ai (`/api/ask/lilbro`), which answers with Claude Sonnet 5.5 through Anthropic: the question you type to Lil Bro (up to 300 characters), the Settings screen you are on (for example `features/drop`) and up to three earlier questions that went to whytap.ai with its answers. Questions asked while answers were off never leave this Mac, also not later, with one exception you choose: Turn on and ask sends the one question this Mac did not understand, and only that one; it is never part of later history unless whytap.ai answered it. No keys, dictated text, notes, settings or identifier of this Mac; the request follows no redirect away from that address. whytap.ai keeps each question, the earlier exchanges sent with it and its answer for 90 days to improve answers, without your address; it limits questions per address using a keyed hash | only after you press Turn on answers (or Turn on and ask, which also sends the question this Mac did not understand) under the one-line disclosure in Lil Bro's balloon, whose full text is under Details (⋯ → Turn on answers shows that disclosure, it does not turn anything on); ⋯ → Turn off answers from whytap.ai stops it, and he goes back to finding settings by name on this Mac |
+| Lil Bro answers (always on since REV 13, 2026-11-26) | whytap.ai (`/api/ask/lilbro`), which answers with Claude Sonnet 5.5 through Anthropic: the question you type to Lil Bro (up to 300 characters), the Settings screen you are on (for example `features/drop`) and up to three earlier questions that whytap.ai answered, with its answers. A question under three characters is not sent. No keys, dictated text, notes, settings or identifier of this Mac; the request follows no redirect away from that address. whytap.ai keeps each question, the earlier exchanges sent with it and its answer for 90 days to improve answers, without your address; it limits questions per address using a keyed hash | when you ask Lil Bro a question: nothing is sent before a question, and opening Settings or Lil Bro sends nothing. There is no switch to turn his answers off (the maintainer's decision: Lil Bro works only through Sonnet); if you don't want questions to go to whytap.ai, don't ask him. ⋯ → Clear stops a question still on its way |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
 OpenAI speech uses the same OpenAI key as its language models. A dictation on

@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai, on by default),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai),
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1569,8 +1569,8 @@ opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
 (HotkeysSettingsView tags its rows with lilBroRow), and he stands on that row
 and outlines it; without the little guy only the outline shows. The outline
 is the led row's current place (`leadRow`): gone while it is scrolled away,
-back when it returns, ended with the focus (another tab, Clear, Turn off
-answers, a new question, closing). With the little guy he waits at home while
+back when it returns, ended with the focus (another tab, Clear, a new
+question, closing). With the little guy he waits at home while
 it is away and is back on it when it returns. A row he cannot show (the
 person left the tab meanwhile, even while it was still laying out, or it
 never reports) outlines nothing, leaves their tab and is not said to be

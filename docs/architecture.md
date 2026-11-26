@@ -365,8 +365,18 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   plus thinking disabled on Claude Haiku 5.5 and Claude Sonnet 5 and
   between_tools on Claude Sonnet 5.5; OpenRouter reasoning off or the lowest
   level of its saved catalog entry). In a turn with the provider's own web
-  search OpenAI minimal becomes low and Claude Sonnet 5.5 gets no thinking
-  field. The setting follows the request that starts the turn (after a
+  search OpenAI minimal becomes low; Claude Sonnet 5.5 keeps between_tools
+  there too (since 2026-11-26), and several finish_answer calls alone in one
+  response give the first valid one; text after a search is never read as
+  the answer (an end_turn without finish_answer gets the completion request);
+  on a turn that ran the search, Claude's indexed citation tags (<cite
+  index="1-9"> and then </cite>) are removed from the answer prose outside
+  code, never from Insert or Copy; a malformed finish_answer beside a valid
+  one does not fail the batch; finish_answer calls beside a pending search
+  all wait for it; a direct Anthropic request carries a cache_control
+  breakpoint on the system block only after an accepted request of the
+  turn with the same system, tools and search tool. WHY:
+  .project-docs/decisions/2026-11-26-agent-fast-search-answers.md The setting follows the request that starts the turn (after a
   refused provider search, the one without it) and is kept after the first
   accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no
   endpoints ... requested parameters") to a request that carried a reasoning

@@ -100,7 +100,8 @@ final class NativeAgentLowEffortTests: XCTestCase {
         XCTAssertEqual(result.bodies.count, 1, "no repair request")
         let body = result.bodies[0]
         XCTAssertEqual(effort(body), "low")
-        XCTAssertNil(body["thinking"], "the turn has the provider's search: Sonnet 5.5 keeps its own thinking")
+        XCTAssertEqual((body["thinking"] as? [String: Any])?["type"] as? String, "between_tools",
+                       "Sonnet 5.5 gets its lowest thinking also beside the provider's search")
         XCTAssertEqual(body["max_tokens"] as? Int, 16_384)
         XCTAssertEqual(result.requests.first?.timeoutInterval, 180)
         XCTAssertNotNil(result.sessionID, "the answer is kept for a follow-up")

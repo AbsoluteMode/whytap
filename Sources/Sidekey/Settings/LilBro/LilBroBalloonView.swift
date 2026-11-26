@@ -7,31 +7,34 @@ import SwiftUI
 struct LilBroBalloonView: View {
     static let width: CGFloat = 296
     @ObservedObject var controller: LilBroController
-    let tail: LilBroBalloonLayout.Tail
-    let tailOffset: CGFloat
     let maxHeight: CGFloat
-    @State private var menuHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            ScrollView(.vertical, showsIndicators: true) {
-                VStack(alignment: .leading, spacing: 8) {
-                    if controller.showEarlier { earlier }
-                    content
+            ScrollViewReader { scroll in
+                ScrollView(.vertical, showsIndicators: true) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if controller.showEarlier { earlier }
+                        content
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+                .frame(maxHeight: max(80, maxHeight - 44))
+                .fixedSize(horizontal: false, vertical: true)
+                // Asked for, the disclosure's buttons come into view.
+                .onChange(of: controller.consentShown) { _, shown in
+                    if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
+                }
             }
-            .frame(maxHeight: max(80, maxHeight - 44))
-            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 13)
         .padding(.top, 10)
         .padding(.bottom, 12)
         .frame(width: Self.width, alignment: .leading)
-        .background(LilBroBalloonShape(tail: tail, tailOffset: tailOffset).fill(MacSettingsTheme.bgCard))
-        .overlay(LilBroBalloonShape(tail: tail, tailOffset: tailOffset)
-            .stroke(MacSettingsTheme.sepStrong, lineWidth: 0.75))
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(MacSettingsTheme.bgCard))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.75))
         .shadow(color: .black.opacity(0.16), radius: 12, y: 4)
         .onExitCommand { controller.close() }
         .accessibilityElement(children: .contain)
@@ -64,31 +67,7 @@ struct LilBroBalloonView: View {
                     controller.showEarlier.toggle()
                 }
             }
-            Menu {
-                Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
-                    controller.setMascotVisible(!controller.mascotVisible)
-                }
-                if controller.answersFromWhytap {
-                    Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
-                } else {
-                    // Opens the disclosure; only its button turns answers on.
-                    Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
-                }
-                if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
-                Button("Close") { controller.close() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 22, height: 22)
-            .background(LilBroHoverCircle(hovered: menuHovered))
-            .contentShape(Circle())
-            .onHover { menuHovered = $0 }
-            .accessibilityLabel("Options")
+            LilBroOptionsMenu(controller: controller)
             LilBroIconButton(systemName: "xmark", label: "Close", action: controller.close)
                 .keyboardShortcut(.cancelAction)
         }
@@ -98,7 +77,7 @@ struct LilBroBalloonView: View {
         if let turn = lastTurn, let reply = turn.reply {
             LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
                             mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
-                            actions: actions, current: true)
+                            actions: actions, current: true, more: controller.showMore)
             if let pressed = turn.pressed {
                 (Text(controller.mascotVisible ? "I pressed " : "Pressed ") + Text(pressed).fontWeight(.semibold)
                     + Text("."))
@@ -111,41 +90,37 @@ struct LilBroBalloonView: View {
                                   decline: controller.declineProposal)
             }
             offer(after: reply)
-        } else if controller.answersFromWhytap {
-            paragraph(LilBroCopy.greetingAnswers)
-            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
-            note(LilBroCopy.answersNote)
         } else {
-            paragraph(LilBroCopy.greeting)
-            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
+            // No question yet: the balloon shows only when ⋯ asked for the
+            // disclosure; otherwise there is just the reply field.
             offer(after: nil)
         }
     }
 
-    /// The disclosure where it belongs: after the greeting or an unknown
-    /// reply, or anywhere once ⋯ asked for it — then with Not now.
+    /// The disclosure where it belongs: after a question this Mac could not
+    /// answer, until answers were first turned on, or anywhere once ⋯ asked
+    /// for it — then with Not now. One line and its button; the full text
+    /// under Details.
     @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
+        let asks = controller.turnOnAsks
         switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                     everOn: controller.preferences.answersEverOn,
                                      consentShown: controller.consentShown) {
         case .none:
             EmptyView()
         case .turnOn:
-            LilBroOffer(turnOn: { controller.turnOnAnswers() })
+            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() })
+                .id(LilBroOffer.id)
         case .turnOnOrNotNow:
-            LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
+            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
+                .id(LilBroOffer.id)
         }
     }
 
     private var actions: LilBroReplyView.Actions {
         LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
-                                turnOn: { controller.turnOnAnswers() })
-    }
-
-    private func note(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 11))
-            .foregroundStyle(MacSettingsTheme.text2)
-            .fixedSize(horizontal: false, vertical: true)
+                                turnOn: { controller.turnOnAnswers() },
+                                toggleMore: { controller.showMore.toggle() })
     }
 
     private var earlier: some View {
@@ -183,6 +158,7 @@ struct LilBroReplyView: View {
         var retry: () -> Void
         var open: (LilBroDestination) -> Void
         var turnOn: () -> Void
+        var toggleMore: () -> Void = {}
 
         static let none = Actions(ask: { _ in }, retry: {}, open: { _ in }, turnOn: {})
     }
@@ -194,31 +170,24 @@ struct LilBroReplyView: View {
     let answersOn: Bool
     let actions: Actions
     let current: Bool
+    /// The current answer's details are shown.
+    var more = false
 
     private var ask: (String) -> Void { actions.ask }
 
+    /// A short answer first; the rest only on request. Earlier replies keep
+    /// their first words only.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
             switch reply {
             case .answer(let answer):
-                ForEach(Array(answer.paragraphs.enumerated()), id: \.offset) { _, line in paragraph(line) }
-                if !answer.bullets.isEmpty {
-                    VStack(alignment: .leading, spacing: 3) {
-                        ForEach(Array(answer.bullets.enumerated()), id: \.offset) { _, line in
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Text("•").foregroundStyle(MacSettingsTheme.text2)
-                                paragraph(line)
-                            }
-                        }
-                    }
-                }
-                if let opened {
-                    (Text(mascot ? "I opened " : "Opened ") + Text(opened).fontWeight(.semibold) + Text("."))
-                        .font(.system(size: 12))
-                        .foregroundStyle(MacSettingsTheme.text2)
-                }
-                if current, !answer.followUps.isEmpty {
-                    LilBroChips(items: answer.followUps.map { q in (q, false, { ask(q) }) })
+                if let lead = answer.paragraphs.first { paragraph(lead) }
+                if current, Self.hasDetails(answer, opened: opened) {
+                    LilBroTextButton(title: more ? "Less ⌃" : "More ⌄",
+                                     label: more ? "Hide details" : "Show details", action: actions.toggleMore)
+                        .padding(.leading, -6)
+                    if more { details(answer) }
                 }
             case .unknown(let suggestions):
                 paragraph(LilBroCopy.unknown)
@@ -234,11 +203,38 @@ struct LilBroReplyView: View {
                 if current { LilBroChips(items: closest) }
             }
             if let opened, !isAnswer {
-                (Text(mascot ? "I opened " : "Opened ") + Text(opened).fontWeight(.semibold) + Text("."))
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.text2)
+                openedLine(opened)
             }
         }
+    }
+
+    /// Whether an answer has more than its first paragraph to show.
+    static func hasDetails(_ answer: LilBroAnswer, opened: String?) -> Bool {
+        answer.paragraphs.count > 1 || !answer.bullets.isEmpty || opened != nil || !answer.followUps.isEmpty
+    }
+
+    @ViewBuilder private func details(_ answer: LilBroAnswer) -> some View {
+        ForEach(Array(answer.paragraphs.dropFirst().enumerated()), id: \.offset) { _, line in paragraph(line) }
+        if !answer.bullets.isEmpty {
+            VStack(alignment: .leading, spacing: 3) {
+                ForEach(Array(answer.bullets.enumerated()), id: \.offset) { _, line in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("•").foregroundStyle(MacSettingsTheme.text2)
+                        paragraph(line)
+                    }
+                }
+            }
+        }
+        if let opened { openedLine(opened) }
+        if !answer.followUps.isEmpty {
+            LilBroChips(items: answer.followUps.map { q in (q, false, { ask(q) }) })
+        }
+    }
+
+    private func openedLine(_ opened: String) -> some View {
+        (Text(mascot ? "I opened " : "Opened ") + Text(opened).fontWeight(.semibold) + Text("."))
+            .font(.system(size: 12))
+            .foregroundStyle(MacSettingsTheme.text2)
     }
 
     private var isAnswer: Bool {
@@ -246,10 +242,10 @@ struct LilBroReplyView: View {
         return false
     }
 
-    /// "Open <page>" buttons when whytap.ai cannot answer.
+    /// The closest page when whytap.ai cannot answer: one button, not a list.
     private var closest: [(String, Bool, () -> Void)] {
         let open = actions.open
-        return LilBroLocalGuide.closestPlaces(for: question).map { place in
+        return LilBroLocalGuide.closestPlaces(for: question).prefix(1).map { place in
             ("Open \(place.title)", false, { open(place) })
         }
     }
@@ -262,34 +258,55 @@ struct LilBroReplyView: View {
     }
 }
 
-/// The one place answers from whytap.ai are turned on: what goes there, what
-/// stays on this Mac, and the button. Nothing is sent before it is pressed.
+/// The one place answers from whytap.ai are turned on: one line and the
+/// button, the full text of what goes there and what stays on this Mac under
+/// Details, readable before the button is pressed. Nothing is sent before it.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 struct LilBroOffer: View {
+    /// After a question this Mac did not understand: the button also asks it.
+    var asks = false
     let turnOn: () -> Void
     var notNow: (() -> Void)? = nil
+    @State private var details = false
 
     enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
+    static let id = "lilBro.offer"
 
-    /// Answers off: after the greeting (nil) or an unknown reply it offers
-    /// Turn on answers; once ⋯ asked for it, it shows after any reply, with
-    /// Not now.
-    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
+    /// Answers off: after a question this Mac could not answer it offers
+    /// Turn on answers, only until answers were first turned on; once ⋯
+    /// asked for it, it shows after any reply, with Not now. Never before a
+    /// question by itself.
+    static func placement(after reply: LilBroReply?, answersOn: Bool, everOn: Bool = false,
+                          consentShown: Bool) -> Placement {
         guard !answersOn else { return .none }
         if consentShown { return .turnOnOrNotNow }
-        return reply == nil || reply?.isUnknown == true ? .turnOn : .none
+        return reply?.isUnknown == true && !everOn ? .turnOn : .none
     }
 
     /// The buttons it shows, in order.
-    var choices: [String] { [LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow]) }
+    var choices: [String] {
+        [asks ? LilBroCopy.turnOnAndAsk : LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow])
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(LilBroCopy.offer)
+            Text(asks ? LilBroCopy.offerLineUnknown : LilBroCopy.offerLine)
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
-            LilBroChips(items: [(LilBroCopy.turnOn, true, turnOn)]
+            // On its own line, so the buttons never squeeze it.
+            LilBroTextButton(title: details ? "Hide details ⌃" : "Details ⌄",
+                             label: details ? "Hide what is sent" : "What is sent and kept") {
+                details.toggle()
+            }
+            .padding(.leading, -6)
+            if details {
+                Text(LilBroCopy.offer)
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(MacSettingsTheme.text2)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            LilBroChips(items: [(choices[0], true, turnOn)]
                         + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
         }
         .padding(9)
@@ -489,36 +506,41 @@ struct LilBroFlow: Layout {
 @MainActor
 struct LilBroReplyField: View {
     static let width: CGFloat = 210
+    static let height: CGFloat = 30
     @ObservedObject var controller: LilBroController
     @FocusState private var focused: Bool
-    @State private var info = false
+    /// What is typed lives here: a key press redraws this field only, not
+    /// Lil Bro, his balloon or the window.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
+    @State private var draft = ""
+
+    private func send() {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        controller.ask(draft)
+        draft = ""
+    }
 
     var body: some View {
         HStack(spacing: 4) {
-            TextField(LilBroCopy.placeholder, text: $controller.draft)
+            TextField(LilBroCopy.placeholder, text: $draft)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12.5))
                 .focused($focused)
-                .onSubmit { controller.ask(controller.draft) }
+                .onSubmit { send() }
                 .accessibilityLabel("Ask Lil Bro")
-            let canSend = !controller.draft.trimmingCharacters(in: .whitespaces).isEmpty && !controller.isBusy
+            let typed = !draft.trimmingCharacters(in: .whitespaces).isEmpty
+            let canSend = typed && !controller.isBusy
+            // Nothing but the field until something is typed; the space stays
+            // so the field does not change size.
             LilBroIconButton(systemName: "arrow.up", label: "Send", size: 20, glyph: 10,
-                             style: canSend ? .accent : .off) { controller.ask(controller.draft) }
+                             style: canSend ? .accent : .off) { send() }
                 .disabled(!canSend)
-            LilBroIconButton(systemName: "info", label: "Where questions go", size: 18, glyph: 9, style: .filled) {
-                info.toggle()
-            }
-            .popover(isPresented: $info, arrowEdge: .top) {
-                Text(controller.answersFromWhytap ? LilBroCopy.answersNote : LilBroCopy.localNote)
-                    .font(.system(size: 12))
-                    .frame(width: 220, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(10)
-            }
+                .opacity(typed ? 1 : 0)
+                .accessibilityHidden(!typed)
         }
         .padding(.leading, 12)
         .padding(.trailing, 5)
-        .frame(width: Self.width, height: 30)
+        .frame(width: Self.width, height: Self.height)
         .background(Capsule().fill(MacSettingsTheme.fieldBg))
         .overlay(Capsule().strokeBorder(focused ? MacSettingsTheme.accent : MacSettingsTheme.sepStrong,
                                         lineWidth: focused ? 1.5 : 0.75))
@@ -528,40 +550,91 @@ struct LilBroReplyField: View {
     }
 }
 
-/// A rounded balloon with a small tail toward Lil Bro.
-struct LilBroBalloonShape: Shape {
-    let tail: LilBroBalloonLayout.Tail
-    let tailOffset: CGFloat
-    var radius: CGFloat = 14
-    var tailSize: CGFloat = 7
+/// ⋯: hide the little guy, answers from whytap.ai on or off, clear, close.
+/// In the balloon's header, and next to the greeting once answers are on, so
+/// they can be turned off before a question is sent.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+@MainActor
+struct LilBroOptionsMenu: View {
+    @ObservedObject var controller: LilBroController
+    /// Outside the balloon (next to the greeting) it carries its own card.
+    var standalone = false
+    @State private var hovered = false
 
-    func path(in rect: CGRect) -> Path {
-        var path = Path(roundedRect: rect, cornerRadius: radius, style: .continuous)
-        var tailPath = Path()
+    var body: some View {
+        menu
+            .background {
+                if standalone {
+                    Circle().fill(MacSettingsTheme.bgCard)
+                        .overlay(Circle().strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                        .padding(-3)
+                }
+            }
+    }
+
+    private var menu: some View {
+        Menu {
+            Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
+                controller.setMascotVisible(!controller.mascotVisible)
+            }
+            if controller.answersFromWhytap {
+                Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
+            } else {
+                // Opens the disclosure; only its button turns answers on.
+                Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
+            }
+            if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
+            Button("Close") { controller.close() }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text2)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: 22, height: 22)
+        .background(LilBroHoverCircle(hovered: hovered))
+        .contentShape(Circle())
+        .onHover { hovered = $0 }
+        .accessibilityLabel("Options")
+    }
+}
+
+/// The balloon's small tail toward Lil Bro, drawn over the balloon's edge
+/// so no border line crosses its base. Placed with the balloon; a tail that
+/// is not used gets no size.
+struct LilBroBalloonTail: View {
+    let tail: LilBroBalloonLayout.Tail
+
+    var body: some View {
+        Canvas { context, size in
+            guard size.width > 0, size.height > 0 else { return }
+            let edges = points(in: size)
+            var fill = Path()
+            fill.move(to: edges.0); fill.addLine(to: edges.1); fill.addLine(to: edges.2); fill.closeSubpath()
+            context.fill(fill, with: .color(MacSettingsTheme.bgCard))
+            var outline = Path()
+            outline.move(to: edges.0); outline.addLine(to: edges.1); outline.addLine(to: edges.2)
+            context.stroke(outline, with: .color(MacSettingsTheme.sepStrong), lineWidth: 0.75)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    /// Base start, point, base end.
+    private func points(in size: CGSize) -> (CGPoint, CGPoint, CGPoint) {
+        let t = LilBroBalloonLayout.tailSize, o = LilBroBalloonLayout.tailOverlap
         switch tail {
         case .down:
-            let x = rect.minX + tailOffset
-            tailPath.move(to: CGPoint(x: x - tailSize, y: rect.maxY - 0.5))
-            tailPath.addLine(to: CGPoint(x: x, y: rect.maxY + tailSize))
-            tailPath.addLine(to: CGPoint(x: x + tailSize, y: rect.maxY - 0.5))
+            return (CGPoint(x: 1, y: 0), CGPoint(x: t + 1, y: o + t), CGPoint(x: 2 * t + 1, y: 0))
         case .up:
-            let x = rect.minX + tailOffset
-            tailPath.move(to: CGPoint(x: x - tailSize, y: rect.minY + 0.5))
-            tailPath.addLine(to: CGPoint(x: x, y: rect.minY - tailSize))
-            tailPath.addLine(to: CGPoint(x: x + tailSize, y: rect.minY + 0.5))
+            return (CGPoint(x: 1, y: size.height), CGPoint(x: t + 1, y: 1), CGPoint(x: 2 * t + 1, y: size.height))
         case .left:
-            let y = rect.minY + tailOffset
-            tailPath.move(to: CGPoint(x: rect.minX + 0.5, y: y - tailSize))
-            tailPath.addLine(to: CGPoint(x: rect.minX - tailSize, y: y))
-            tailPath.addLine(to: CGPoint(x: rect.minX + 0.5, y: y + tailSize))
+            return (CGPoint(x: size.width, y: 1), CGPoint(x: 1, y: t + 1), CGPoint(x: size.width, y: 2 * t + 1))
         case .right:
-            let y = rect.minY + tailOffset
-            tailPath.move(to: CGPoint(x: rect.maxX - 0.5, y: y - tailSize))
-            tailPath.addLine(to: CGPoint(x: rect.maxX + tailSize, y: y))
-            tailPath.addLine(to: CGPoint(x: rect.maxX - 0.5, y: y + tailSize))
+            return (CGPoint(x: 0, y: 1), CGPoint(x: o + t, y: t + 1), CGPoint(x: 0, y: 2 * t + 1))
         }
-        tailPath.closeSubpath()
-        path.addPath(tailPath)
-        return path
     }
 }

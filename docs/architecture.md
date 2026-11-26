@@ -1549,11 +1549,18 @@ ask anything" entry at the bottom of the sidebar. The window is his map:
 views report themselves with lilBroSpot (sidebar rows, his entry, each
 Features row, the pane) and every MacCard with lilBroBlock, in the
 "lilBro.window" coordinate space. LilBroPlanner turns that map into runs along
-a block, arc jumps (up to 90 pt) and his amber ladder for higher blocks; the
-layer samples LilBroSegment every frame, Reduce Motion makes him appear at
-the place. A click catches him and opens his balloon (variant C) with the
-reply field at his feet; LilBroBalloonLayout keeps both inside the window at
-every edge. Asked where something is, he runs to the sidebar row and then the
+a block, arc jumps (up to 90 pt) and his amber ladder for higher blocks;
+LilBroMascot samples LilBroSegment every display refresh while he moves and
+stops its clock at rest (his frames have their own slower clock), Reduce
+Motion makes him appear at the place. SettingsWindowView holds the controller
+without observing it, so his steps redraw only his layer and sidebar entry,
+never the window. A click catches him and opens his balloon (variant C) with
+the reply field at his feet; LilBroBalloonStage (a Layout) measures both and
+places them with the tail in one pass through LilBroBalloonLayout, inside the
+window at every edge. Opened before any question, only a one-line greeting in
+his slang (`LilBroCopy.greetings`, in turn) and the reply field show
+(`showsBalloon`); the balloon comes with the first answer and shows a short
+answer and one action, the rest behind More (`showMore`). Asked where something is, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
@@ -1563,14 +1570,19 @@ same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
 names, on this Mac, no network; a keyword guide, not an English parser, whose
 contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
 there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon's disclosure (LilBroOffer; ⋯ → Turn on answers only shows it;
+the balloon's one-line disclosure, full text under Details (LilBroOffer). It
+shows by itself only after a question this Mac did not understand and only
+until answers were first turned on (`lilBro.answersEverOn`); there the
+button is "Turn on and ask" and also sends that question; ⋯ → Turn on
+answers only shows it;
 `lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered (questions asked while answers were off never leave the Mac), with
+answered (questions asked while answers were off never leave the Mac, except
+the one question a person sends with Turn on and ask), with
 redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-haiku-5-5), which returns sentences, points, follow-ups and one place;
+claude-sonnet-5-5 while it is tried out), which returns sentences, points, follow-ups and one place;
 an id the app does not have is dropped. No internet or a timeout is offline,
 429 or a spent budget is the daily limit, any other error is unavailable; each
 offers Try again (offline, unavailable) and the closest pages the local guide
@@ -2694,8 +2706,9 @@ input layout, including live recording and previously saved non-English titles.
    answers" in his balloon, each question they ask him, the Settings screen
    they are on and up to three earlier exchanges go to
    `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`); nothing is sent before that or after
-   they turn answers off. WHY:
+   checked by `LilBroRemoteBrainTests`); "Turn on and ask" turns answers on
+   and sends the one question this Mac did not understand; nothing is sent
+   before that or after they turn answers off. WHY:
    .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
    Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this

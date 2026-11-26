@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-preview-before-validation.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-preview-before-validation.md, ../decisions/2026-11-26-release-batches.md]
 ---
 
 # Parallel development, one working Whytap
@@ -335,25 +335,47 @@ A worker that has built its branch and run its targeted tests submits with
    instance with the new identity and a smoke check; a known-good main-based
    bundle in a `known-good` folder beside the builder's worktrees for rollback. A PR touching
    stored data, migrations, permissions, Keychain, signing, entitlements,
-   packaging, updates or the queue (the helper's `PREVIEW_UNSAFE` path guard)
-   gets no preview: `preview-claim` moves it to the validation lane and tells
-   its author why.
-3. **The owner's decision**, relayed by the orchestrator (never by the PR's
-   session or the builder): `approve --ticket <id> --by "<owner's words>"
-   --note <context> --actor <orchestrator>` moves the ticket to validation
-   (`lane: approved`) at its original place; `reject --ticket <id> --note
-   "<what to change>" --actor <orchestrator>` returns it to its author and
-   marks the train for a rebuild without it. A fix is enqueued again with
-   `--preview` and keeps the preview's place.
-4. **Validation** of approved PRs and of PRs submitted without `--preview`
-   follows the builder turn below; its install builds main plus the current
-   train so the owner's previews stay in the app.
+   packaging, updates or the queue gets no preview: admission fails closed on
+   paths outside the preview scope (app sources, ordinary resources, tests,
+   documentation), on the helper's `PREVIEW_UNSAFE` paths and on changed
+   lines that touch defaults, Keychain, coding formats, SQLite, files in
+   Application Support, permissions or updates. `preview-claim` checks the
+   PR, and `preview-admit` the whole composition before it is built; such a
+   PR goes to normal validation and its author is told why. Previews wait
+   while any merged work waits for its install (a group, `--install-first`,
+   `--hold`, protected-data checks pending). A declined Quit or a permission
+   prompt blocks the preview for a person; it is never retried automatically.
+3. **The owner's decision**, relayed only by the configured orchestrator (set
+   by `activate --orchestrator <id> --orchestrator-token-file <path>`; it
+   proves itself with that token, never the PR's session or the builder) and
+   bound to what the owner saw: `approve --ticket <id> --head <sha> --build
+   <n> --by "<owner's words>" --note <context>` marks the feature
+   `approved`: it stays in his app and waits for the next release batch.
+   `reject --ticket <id> --head <sha> --build <n> --note "<what to change>"`
+   returns it (and the train members stacked on it) to its author. A fix is
+   enqueued again with `--preview` and keeps the preview's place.
+4. **Release batch** ([release batches](../decisions/2026-11-26-release-batches.md)):
+   `release --by "<owner's words>"` from the orchestrator, or the watcher's
+   optional count trigger (`release_after_approved`), puts every approved
+   feature into one batch. The builder composes main plus all of them, runs
+   one review (findings attributed to the member that introduced them), one
+   full suite (a failure is bisected over the ordered members with only the
+   failing tests; the culprit is blocked and the rest tested once more),
+   merges the members one by one, verifies main equals the tested tree and
+   installs once. PRs submitted without `--preview` follow the builder turn
+   below as before. Every install carries the current train so the owner's
+   previews stay in the app.
 
 the local build/CURRENT_BUILD.md receipt shows previews only under **Preview, not merged**
 (build, source commit, main base, each PR's head and acceptance steps,
 rollback path), never as merged or as verified running main. `status` lists
-`preview_train` and `preview_rebuild`; the orchestrator reports
-`awaiting_approval` tickets to the owner as "ready to check".
+`preview_train`, `installed_preview` and `preview_rebuild` (derived from the
+recorded installed composition, so a decision taken while a rebuild runs is
+never lost). The watchdog raises `ready_to_check:<ticket>` in the alerts file
+and its mirror for each `awaiting_approval` ticket; the orchestrator reports it
+to the owner as "ready to check". Activation and deactivation refuse while
+either lane's session, the app lock or an interrupted preview is live;
+switching the lane off sends queued previews to normal validation.
 
 A worker uses the shared helper even from a worktree that predates this change:
 
@@ -465,9 +487,10 @@ queue survives downtime.
    tests failing because of the feature itself, missing review evidence, or a
    destructive migration or access decision. Preserve every other session's
    work. Do not automatically merge unrelated open PRs. Before the full suite
-   run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`
-   from the integration worktree (main's copy, also before reactivation);
-   while it is not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
+   run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment --for suite`
+   from the integration worktree (main's copy, also before reactivation): a
+   locked screen does not stop the suite, the review or the merge; while the
+   load keeps it not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
    running the suite. If it stays not clear, do not run it: return the ticket
    with `set --status queued` and a note that the environment, not the PR,
    stopped it. Failures in a
@@ -481,7 +504,9 @@ queue survives downtime.
    finding. A test skipped with "Protected data is unavailable" ran while the
    screen was locked; the merge may proceed with those tests recorded as
    pending, and they run on main once the screen is unlocked, before
-   packaging: a failure there is a finding and stops the install (see the
+   packaging, also when an interrupted session is recovered; packaging and
+   every install wait for an unlocked screen and for those tests: a failure
+   there is a finding and stops the install (see the
    [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)
    and the [preview decision](../decisions/2026-11-26-preview-before-validation.md)).
    Cheapest checks first: review, probes, documentation checks and `swift test

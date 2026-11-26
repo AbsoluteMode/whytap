@@ -47,11 +47,15 @@ if '"lane": "preview"' in prompt:
     while True:
         claim = queue("preview-claim")
         ticket = claim.get("ticket") or claim.get("active")
+        train = [{"ticket": t["ticket"], "head": t["head"]}
+                 for t in queue("status")["preview_train"]]
         if ticket:
+            train.append({"ticket": ticket["id"], "head": ticket["head"]})
             queue("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
-                  "--note", "fake preview installed")
+                  "--note", "fake preview installed", "--preview-build", "1801",
+                  "--installed-train", json.dumps(train))
         elif claim.get("rebuild"):
-            queue("preview-rebuilt")
+            queue("preview-rebuilt", "--installed-train", json.dumps(train))
         else:
             break
     sys.exit(0)
@@ -680,11 +684,79 @@ class WatcherTests(unittest.TestCase):
                           "--preview")["ticket"]["id"]
 
     def test_validation_watcher_starts_no_session_for_preview_tickets(self):
+        self.configure_watcher(preview_lane=True, preview_worktree=str(self.base / "preview"))
+        (self.control / "noop").touch()
         self.preview_ticket(1)
         self.watcher("run")
         self.assertEqual(self.sessions(), [])
-        self.assertEqual(self.watcher("run-preview").returncode, 0)  # lane not enabled
+
+    def test_disabled_lane_does_not_strand_a_submission(self):
+        ticket = self.preview_ticket(1)  # the lane is off: normal validation
+        self.watcher("run")
+        self.assertEqual(self.watcher("run-preview").returncode, 0)
         self.assertFalse((self.control / "previews.log").exists())
+        self.assertEqual(self.statuses()[ticket], "done")
+
+    def orchestrator(self):
+        token = self.base / "orchestrator-token"
+        token.write_text("t" * 40)
+        self.queue("configure-orchestrator", "--orchestrator", "orchestrator",
+                   "--token-file", str(token))
+        return token
+
+    def test_activation_does_not_interrupt_active_preview(self):
+        import fcntl
+        self.configure_watcher(preview_lane=True)
+        with (self.root / "whytap-build-queue-preview.lock").open("w") as lease:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.watcher("activate", "--allow-local", "--no-preview-lane", ok=False)
+            self.watcher("deactivate", ok=False)
+        (self.root / "whytap-app.lock").mkdir()
+        error = self.watcher("activate", "--allow-local", ok=False).stderr
+        self.assertIn("app install", error)
+        self.assertFalse((self.control / "launchctl.log").exists())
+
+    def test_preview_only_stale_dependency_gets_returned(self):
+        self.configure_watcher(preview_lane=True, stale_dependency_minutes=0,
+                               preview_worktree=str(self.base / "preview"))
+        (self.control / "noop").touch()
+        parent = self.enqueue(9)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.preview_ticket(1)
+        with sqlite3.connect(self.root / "exodia-build-queue.sqlite3") as db:
+            db.execute("UPDATE tickets SET depends_on=? WHERE id=?",
+                       (json.dumps(["https://github.com/example/app/pull/9"]), child))
+        self.watcher("run-preview")
+        self.assertEqual(self.statuses()[child], "blocked")
+
+    def test_a_ready_preview_alerts_the_orchestrator_and_notes_stay_small(self):
+        mirror = self.base / "orchestrator" / "alerts.jsonl"
+        self.configure_watcher(preview_lane=True, alerts_mirror=str(mirror),
+                               preview_worktree=str(self.base / "preview"), notes_max_bytes=100)
+        (self.root / "whytap-builder-notes").write_text("".join(f"line {n}\n" for n in range(500)))
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        notes = (self.root / "whytap-builder-notes").read_text().splitlines()
+        self.assertEqual((len(notes), notes[-1]), (120, "line 499"))
+        self.assertIn("line 0", (self.root / "whytap-builder-notes.old").read_text())
+        self.watcher("run")
+        ready = [a for a in self.alerts(mirror) if a["condition"] == f"ready_to_check:{preview}"]
+        self.assertEqual([a["state"] for a in ready], ["raised"])
+
+    def test_the_count_trigger_starts_one_release_batch(self):
+        self.configure_watcher(preview_lane=True, release_after_approved=1,
+                               preview_worktree=str(self.base / "preview"))
+        token = self.orchestrator()
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        head = self.queue("status", "--ticket", str(preview))["tickets"][0]["head"]
+        self.queue("approve", "--ticket", str(preview), "--head", head, "--build", "1801",
+                   "--by", "owner: OK", "--note", "x", "--token-file", str(token),
+                   actor="orchestrator")
+        self.watcher("run")
+        ticket = self.queue("status", "--ticket", str(preview))["tickets"][0]
+        self.assertEqual(ticket["batch"], 1)
 
     def test_a_preview_is_installed_while_a_validation_session_runs(self):
         self.configure_watcher(preview_lane=True,
@@ -703,7 +775,10 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(running.wait(timeout=30), 0)
         self.assertEqual(self.statuses(), {1: "done", preview: "awaiting_approval"})
         # The owner sends it back: the preview lane rebuilds the train without it.
-        self.queue("reject", "--ticket", str(preview), "--note", "lags", actor="orchestrator")
+        token = self.orchestrator()
+        head = self.queue("status", "--ticket", str(preview))["tickets"][0]["head"]
+        self.queue("reject", "--ticket", str(preview), "--note", "lags", "--head", head,
+                   "--build", "1801", "--token-file", str(token), actor="orchestrator")
         self.watcher("run-preview")
         self.assertEqual(len(self.lines("previews.log")), 2)
         self.assertFalse(self.queue("status")["preview_rebuild"])

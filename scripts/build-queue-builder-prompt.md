@@ -55,16 +55,17 @@ holds it, leave the tickets queued and end your turn.
 1. Read `status --open` (open work and the earlier tickets of the same PRs; use
    `status --ticket <id>` for one full note, never the whole archive; an
    installed helper older than that flag refuses it: then use `status`). Read
-   `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"` if it exists: earlier
-   builder sessions leave operational facts there.
+   the last 80 lines of `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"`
+   (`tail -n 80`) if it exists: earlier builder sessions leave operational
+   facts there; the watcher moves older lines to `whytap-builder-notes.old`.
    Two lanes share this queue (WHY:
    `.project-docs/decisions/2026-11-26-preview-before-validation.md`). Preview
    tickets (`lane: preview`, `previewing`, `awaiting_approval`) belong to the
    preview lane, which installs them for the owner's check before any review;
-   `claim` never gives you one. A ticket with `lane: approved` is a feature the
-   owner already checked in the running app (its `approval` names who relayed
-   it): do not re-litigate how it looks or feels; every correctness, data,
-   permission and test gate below still applies.
+   `claim` never gives you one. Features the owner approved (`approved`) wait
+   for a release batch and reach you only through one (see "Release batch"):
+   do not re-litigate how an approved feature looks or feels; every
+   correctness, data, permission and test gate below still applies.
 2. If a ticket is `in_progress`, a previous session of this same builder was
    interrupted. The watcher guarantees that session and its process group are
    gone. Before anything else establish what it reached: is its PR merged, does
@@ -215,6 +216,54 @@ holds it, leave the tickets queued and end your turn.
    group until a person has acted and it is set `--install-first` again.
 8. `set` the result with evidence and message the author: event ID, what is
    actually running, acceptance steps, what is pending.
+
+## Release batch
+
+WHY: `.project-docs/decisions/2026-11-26-release-batches.md`. When the
+orchestrator relays the owner's "release" (or the watcher's count trigger
+fires), `claim` returns `batch` with every approved feature in merge order (a
+PR after the batch members it depends on), all `releasing`; while it is open
+`claim` returns it as `active_batch`. Handle the batch as one ticket, under
+the integration lock:
+
+1. Compose `origin/main` + every member head, in that order, in the
+   integration worktree. Conflicts are yours as in step 3 of "Each ticket";
+   one that needs a product choice blocks only the members involved.
+2. One review of the combined diff and of each member's contracts, cheapest
+   checks first (probes, documentation checks, `swift test --filter` of the
+   touched classes). Attribute each finding to the member that introduced the
+   lines (its own diff against the composition before it) and block only that
+   member, with a reproducing check for the whole class of the problem; drop
+   it from the composition and go on with the rest.
+3. One full suite on the final composition (`environment --for suite` first;
+   the flaky-test rule is unchanged). A real failure: find the member that
+   causes it by bisecting the ordered members with only the failing tests
+   (`swift test --filter`): main plus the first half, then narrow down. Block
+   the first member whose addition makes them fail, drop it (the helper also
+   returns the train members that depend on it) and run the full suite once
+   more on what is left.
+4. Merge the members one by one through their PRs in batch order with the
+   exact heads checked; after the last one verify that main's tree equals the
+   tested composition, otherwise stop and investigate before any install.
+5. One install: the local arm64 candidate from main plus the remaining train
+   (previews still awaiting the owner), with every gate of step 6 and 7 of
+   "Each ticket" under `whytap-app.lock`; then `preview-rebuilt
+   --installed-train <json>` for that train, and each merged member `done`
+   with the running build and its acceptance steps (`pending_install` while
+   the gate defers). The environment stopping the whole batch before a merge
+   sets every member back to `approved`, without blame.
+
+Any install you make while `status` shows a `preview_train` carries that train
+and ends with `preview-rebuilt --installed-train <json>`.
+
+## One-time cleanup
+
+Tickets #188 and #204 are the public releases 2.2.22 and 2.2.23, left
+`pending_install` since the separate-Mac install check was dropped on
+2026-11-26. While they are still `pending_install`, set each `superseded` with
+the note "Public <version> published; the local app runs a newer build; the
+second-Mac install check was dropped on 2026-11-26". Afterwards this section
+has no effect.
 
 ## Messages
 

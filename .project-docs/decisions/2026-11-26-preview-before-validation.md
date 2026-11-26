@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: scripts/build-dmg.sh
     confirmed_at: 2026-11-26
-related: [../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md]
+related: [../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md, 2026-11-26-release-batches.md]
 ---
 
 # Preview before validation
@@ -60,15 +60,15 @@ Two lanes share the queue.
   the train heads plus the ticket's head, builds a local arm64 app
   incrementally, runs the safety checks below, installs it under the meeting
   gate and `whytap-app.lock`, and records `awaiting_approval`.
-- **Approval.** The orchestrator relays the owner's words: `approve --ticket
-  <id> --by "<owner's words>" --actor <orchestrator>` moves the ticket to the
-  validation lane (`lane: approved`) at its original place. `reject --ticket
-  <id> --note "<what to change>"` returns it to its author and marks the
-  train for a rebuild without it. The PR's own session and the builder cannot
-  relay a decision. A fix to a preview (`enqueue --preview` with the new head)
-  replaces it and keeps its place, also while the old preview is still being
-  built.
-- **Validation lane** (after approval, and for PRs submitted without
+- **Approval.** Only the configured orchestrator relays the owner's words,
+  with its token, bound to the head and build he saw: `approve` marks the
+  feature `approved` (it stays in his app and goes out with the next release
+  batch, see [release batches](2026-11-26-release-batches.md)); `reject`
+  returns it and the previews stacked on it to their authors. A fix to a
+  preview (`enqueue --preview` with the new head) replaces it and keeps its
+  place, also while the old preview is still being built: that build's
+  outcome is then recorded as superseded.
+- **Validation lane** (release batches, and PRs submitted without
   `--preview`). Cheapest first: review, probes, documentation checks and
   `swift test --filter` of the touched classes; a blocking finding blocks
   without the full suite and comes with a reproducing check for its whole

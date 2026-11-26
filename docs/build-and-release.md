@@ -83,10 +83,11 @@ working app without a release archive
 ([preview decision](../.project-docs/decisions/2026-11-26-preview-before-validation.md)):
 
 ```bash
-EXODIA_LOCAL_INSTALL=1 FLAVOR=prod BUILD_VERSION=<installed build + 1> ./scripts/build-dmg.sh
+EXODIA_LOCAL_INSTALL=1 FLAVOR=prod BUILD_VERSION=<n> ./scripts/build-dmg.sh
 ```
 
-It compiles the `arm64` slice only (the vendored Sparkle and MediaRemote
+`<n>` follows feed ordering, as in `user-release.sh`: one more than the larger
+of the live appcast build and the installed `CFBundleVersion`. It compiles the `arm64` slice only (the vendored Sparkle and MediaRemote
 frameworks keep their prebuilt slices), signs with the same identity, runs the
 same signature, designated-requirement and native `--installation-check`
 checks, adds `ExodiaLocalBuild` to `Info.plist` and writes

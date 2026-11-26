@@ -35,6 +35,9 @@ final class LilBroPreferences: ObservableObject {
         let on = defaults.object(forKey: Self.answersKey) as? Bool ?? false
         answersFromWhytap = on
         answersEverOn = on || defaults.bool(forKey: Self.answersEverOnKey)
+        // Saved right away: an opt-in from before this marker existed stays
+        // known after turning answers off and relaunching.
+        if answersEverOn { defaults.set(true, forKey: Self.answersEverOnKey) }
     }
 }
 
@@ -346,7 +349,9 @@ final class LilBroController: ObservableObject {
     /// The disclosure's button also asks the last question again: this Mac
     /// did not understand it, and whytap.ai reads any language.
     var turnOnAsks: Bool {
-        !busy && turns.last?.reply?.isUnknown == true
+        guard !busy, let last = turns.last, last.reply?.isUnknown == true else { return false }
+        // Too short for whytap.ai to take: the plain Turn on answers instead.
+        return LilBroRemoteBrain.sends(last.question)
     }
 
     /// The disclosure's Not now.

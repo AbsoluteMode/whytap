@@ -2706,8 +2706,9 @@ input layout, including live recording and previously saved non-English titles.
    answers" in his balloon, each question they ask him, the Settings screen
    they are on and up to three earlier exchanges go to
    `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`); nothing is sent before that or after
-   they turn answers off. WHY:
+   checked by `LilBroRemoteBrainTests`); "Turn on and ask" turns answers on
+   and sends the one question this Mac did not understand; nothing is sent
+   before that or after they turn answers off. WHY:
    .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
    Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this

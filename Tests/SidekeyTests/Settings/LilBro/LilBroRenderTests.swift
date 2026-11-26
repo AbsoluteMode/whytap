@@ -105,6 +105,23 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertEqual(lilBro.bubble, .full)
     }
 
+    /// Answers already on: the greeting has ⋯, so they can be turned off
+    /// before a question is sent.
+    func test_with_answers_on_the_greeting_offers_turning_them_off() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        lilBro.turnOnAnswers()
+        try await render(fixture, selection, lilBro, name: "greeting-answers-on-light") {
+            lilBro.toggleFromSidebar()
+        }
+        XCTAssertFalse(lilBro.showsBalloon)
+        XCTAssertTrue(lilBro.answersFromWhytap)
+        lilBro.turnOffAnswers()
+        XCTAssertFalse(lilBro.answersFromWhytap)
+    }
+
     func test_hidden_he_answers_from_the_sidebar_entry() async throws {
         let fixture = try await FeaturesFixture(.usual)
         defer { fixture.cleanUp() }

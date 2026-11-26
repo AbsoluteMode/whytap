@@ -899,4 +899,33 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertTrue(controller.preferences.answersEverOn)
         XCTAssertTrue(LilBroPreferences(defaults: defaults).answersEverOn, "remembered")
     }
+
+    /// Upgrading with answers already on, then turning them off and
+    /// relaunching: the earlier opt-in is still known, so the balloon does not
+    /// offer answers again by itself.
+    func test_an_opt_in_from_before_the_marker_survives_turning_off_and_relaunch() {
+        defaults.set(true, forKey: LilBroPreferences.answersKey)
+        let upgraded = LilBroPreferences(defaults: defaults)
+        XCTAssertTrue(upgraded.answersEverOn)
+        upgraded.answersFromWhytap = false
+        let relaunched = LilBroPreferences(defaults: defaults)
+        XCTAssertFalse(relaunched.answersFromWhytap)
+        XCTAssertTrue(relaunched.answersEverOn, "remembered across relaunch")
+        XCTAssertFalse(LilBroPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!).answersEverOn)
+    }
+
+    /// A question too short for whytap.ai never gets "Turn on and ask".
+    func test_a_too_short_unknown_question_gets_the_plain_turn_on() async {
+        let remote = Remote(.unavailable)
+        let controller = make(remote: remote, reduceMotion: true)
+        for question in ["x", "Я", "🦊", "x?", "x  "] {
+            controller.ask(question)
+            await until { controller.bubble == .full && !controller.isBusy }
+            XCTAssertEqual(controller.turns.last?.reply?.isUnknown, true, question)
+            XCTAssertFalse(controller.turnOnAsks, question)
+        }
+        controller.turnOnAnswers()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(remote.asked.isEmpty)
+    }
 }

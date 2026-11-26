@@ -63,7 +63,12 @@ invariant said so.
 - **Offered only when it helps (REV 5).** The balloon opens with only the
   reply field; the one-line disclosure shows by itself only after a question
   this Mac could not answer, and only until answers were first turned on
-  (`lilBro.answersEverOn`). ⋯ → Turn on answers still shows it any time. ⋯ → Turn off answers from
+  (`lilBro.answersEverOn`). ⋯ → Turn on answers still shows it any time.
+  With answers on, ⋯ sits next to the greeting, so they can be turned off
+  before a question is sent (builder ticket 616). An opt-in saved before the
+  marker existed is written to it at launch, so turning answers off and
+  relaunching does not bring the offer back. A question too short for
+  whytap.ai gets the plain Turn on answers, never Turn on and ask. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
 - **What is sent:** the question normalised as the server's
   `clean_question` does — split by Unicode scalar on Python's whitespace set

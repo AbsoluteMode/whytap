@@ -91,7 +91,13 @@ struct LilBroLayer: View {
         return LilBroBalloonStage(anchor: anchor, bounds: bounds) {
             VStack(alignment: .leading, spacing: 6) {
                 // Before the first question: one line of greeting over the field.
-                if !controller.showsBalloon { LilBroGreetingLine(text: controller.greeting) }
+                if !controller.showsBalloon {
+                    HStack(spacing: 8) {
+                        LilBroGreetingLine(text: controller.greeting)
+                        // Answers on: turning them off must not wait for a question.
+                        if controller.answersFromWhytap { LilBroOptionsMenu(controller: controller, standalone: true) }
+                    }
+                }
                 LilBroReplyField(controller: controller)
             }
             // Before the first question only the greeting and the field show.

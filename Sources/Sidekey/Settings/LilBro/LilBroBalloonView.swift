@@ -8,7 +8,6 @@ struct LilBroBalloonView: View {
     static let width: CGFloat = 296
     @ObservedObject var controller: LilBroController
     let maxHeight: CGFloat
-    @State private var menuHovered = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -68,31 +67,7 @@ struct LilBroBalloonView: View {
                     controller.showEarlier.toggle()
                 }
             }
-            Menu {
-                Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
-                    controller.setMascotVisible(!controller.mascotVisible)
-                }
-                if controller.answersFromWhytap {
-                    Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
-                } else {
-                    // Opens the disclosure; only its button turns answers on.
-                    Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
-                }
-                if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
-                Button("Close") { controller.close() }
-            } label: {
-                Image(systemName: "ellipsis")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .fixedSize()
-            .frame(width: 22, height: 22)
-            .background(LilBroHoverCircle(hovered: menuHovered))
-            .contentShape(Circle())
-            .onHover { menuHovered = $0 }
-            .accessibilityLabel("Options")
+            LilBroOptionsMenu(controller: controller)
             LilBroIconButton(systemName: "xmark", label: "Close", action: controller.close)
                 .keyboardShortcut(.cancelAction)
         }
@@ -319,21 +294,20 @@ struct LilBroOffer: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
+            // On its own line, so the buttons never squeeze it.
+            LilBroTextButton(title: details ? "Hide details ⌃" : "Details ⌄",
+                             label: details ? "Hide what is sent" : "What is sent and kept") {
+                details.toggle()
+            }
+            .padding(.leading, -6)
             if details {
                 Text(LilBroCopy.offer)
                     .font(.system(size: 11.5))
                     .foregroundStyle(MacSettingsTheme.text2)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            HStack(spacing: 6) {
-                LilBroChips(items: [(choices[0], true, turnOn)]
-                            + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
-                    .fixedSize()
-                LilBroTextButton(title: details ? "Hide ⌃" : "Details ⌄",
-                                 label: details ? "Hide what is sent" : "What is sent and kept") {
-                    details.toggle()
-                }
-            }
+            LilBroChips(items: [(choices[0], true, turnOn)]
+                        + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -554,10 +528,15 @@ struct LilBroReplyField: View {
                 .focused($focused)
                 .onSubmit { send() }
                 .accessibilityLabel("Ask Lil Bro")
-            let canSend = !draft.trimmingCharacters(in: .whitespaces).isEmpty && !controller.isBusy
+            let typed = !draft.trimmingCharacters(in: .whitespaces).isEmpty
+            let canSend = typed && !controller.isBusy
+            // Nothing but the field until something is typed; the space stays
+            // so the field does not change size.
             LilBroIconButton(systemName: "arrow.up", label: "Send", size: 20, glyph: 10,
                              style: canSend ? .accent : .off) { send() }
                 .disabled(!canSend)
+                .opacity(typed ? 1 : 0)
+                .accessibilityHidden(!typed)
         }
         .padding(.leading, 12)
         .padding(.trailing, 5)
@@ -568,6 +547,58 @@ struct LilBroReplyField: View {
         .shadow(color: .black.opacity(0.10), radius: 6, y: 2)
         .onExitCommand { controller.close() }
         .onAppear { focused = true }
+    }
+}
+
+/// ⋯: hide the little guy, answers from whytap.ai on or off, clear, close.
+/// In the balloon's header, and next to the greeting once answers are on, so
+/// they can be turned off before a question is sent.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+@MainActor
+struct LilBroOptionsMenu: View {
+    @ObservedObject var controller: LilBroController
+    /// Outside the balloon (next to the greeting) it carries its own card.
+    var standalone = false
+    @State private var hovered = false
+
+    var body: some View {
+        menu
+            .background {
+                if standalone {
+                    Circle().fill(MacSettingsTheme.bgCard)
+                        .overlay(Circle().strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.75))
+                        .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+                        .padding(-3)
+                }
+            }
+    }
+
+    private var menu: some View {
+        Menu {
+            Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
+                controller.setMascotVisible(!controller.mascotVisible)
+            }
+            if controller.answersFromWhytap {
+                Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
+            } else {
+                // Opens the disclosure; only its button turns answers on.
+                Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
+            }
+            if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
+            Button("Close") { controller.close() }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MacSettingsTheme.text2)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .frame(width: 22, height: 22)
+        .background(LilBroHoverCircle(hovered: hovered))
+        .contentShape(Circle())
+        .onHover { hovered = $0 }
+        .accessibilityLabel("Options")
     }
 }
 

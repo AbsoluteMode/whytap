@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/PlannerExternalChangesTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-23-builder-queue-watchdog.md, 2026-11-22-builder-blocks-once.md, 2026-11-04-todo-locked-screen.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md, 2026-11-26-test-suite-speed.md]
+related: [2026-11-23-builder-queue-watchdog.md, 2026-11-22-builder-blocks-once.md, 2026-11-04-todo-locked-screen.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md, 2026-11-26-builder-test-shards.md, 2026-11-26-test-suite-speed.md]
 ---
 
 # Flaky and locked-screen tests in the build queue

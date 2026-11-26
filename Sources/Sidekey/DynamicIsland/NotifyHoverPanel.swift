@@ -66,6 +66,9 @@ struct NotifyHoverPanel: View {
                                 .labelsHidden().toggleStyle(.switch).controlSize(.mini)
                         }
                         .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
+                        // The island's copy of Features → Notify → Meeting notes, where Lil Bro
+                        // leads (notify.meetingNotes); in Toolbox's preview it is not listed again.
+                        .lilBroItems()
                         if supervisor.sources.isEmpty {
                             empty("No other sources yet", detail: "Ask your agent to connect more notifications.")
                         }
@@ -163,5 +166,7 @@ struct NotifyHoverPanel: View {
         }
         .padding(8).background(RoundedRectangle(cornerRadius: 10).fill(IslandInk.row))
         .contextMenu { Button("Remove source…", role: .destructive) { pendingRemoval = source.id } }
+        // One per source: data, not a setting Lil Bro lists.
+        .lilBroItems()
     }
 }

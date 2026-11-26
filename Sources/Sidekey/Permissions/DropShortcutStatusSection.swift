@@ -21,6 +21,9 @@ struct DropShortcutStatusSection: View {
                     trailing: { EmptyView() }
                 )
             }
+            // The status line names itself; the section is the row Lil Bro leads to.
+            .lilBroItems()
+
             if viewModel.dropHotkeyStatus != .ready {
                 HStack(spacing: 10) {
                     MacButton(title: "Retry shortcut", style: .default, action: viewModel.retryDropShortcut)
@@ -34,5 +37,6 @@ struct DropShortcutStatusSection: View {
                 }
             }
         }
+        .lilBroCatalogRow("Drop shortcut")
     }
 }

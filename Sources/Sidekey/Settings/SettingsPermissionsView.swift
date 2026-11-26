@@ -47,6 +47,7 @@ struct SettingsPermissionsView: View {
 
                 DropShortcutStatusSection(viewModel: viewModel)
                 MacButton(title: "Refresh", style: .default) { viewModel.refresh() }
+                    .lilBroCatalogRow("Refresh")
             }
             .padding(.horizontal, 24)
             .padding(.vertical, 22)

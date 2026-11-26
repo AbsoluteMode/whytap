@@ -188,8 +188,8 @@ final class LilBroBalloonLayoutTests: XCTestCase {
     }
 }
 
-/// The rows Lil Bro can lead to exist where they say (REV 12): every id is
-/// tagged in its tab's view, and whytap.ai can parse the list.
+/// whytap.ai can parse the list of rows Lil Bro leads to (REV 12, REV 14).
+/// That every row exists where it says is LilBroRowCoverageTests.
 final class LilBroRowCatalogTests: XCTestCase {
     private func source(_ path: String) throws -> String {
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
@@ -197,23 +197,16 @@ final class LilBroRowCatalogTests: XCTestCase {
         return try String(contentsOf: root.appendingPathComponent(path), encoding: .utf8)
     }
 
-    func test_every_row_is_tagged_in_its_tab_and_ids_are_unique() throws {
-        let hotkeys = try source("Sources/Sidekey/Hotkeys/HotkeysSettingsView.swift")
-        XCTAssertEqual(Set(LilBroRow.catalog.map(\.id)).count, LilBroRow.catalog.count)
-        for row in LilBroRow.catalog {
-            XCTAssertEqual(row.tab, .hotkeys)
-            XCTAssertTrue(hotkeys.contains("lilBroRow(\"\(row.id)\""), "\(row.id) is not tagged")
-        }
-        XCTAssertNotNil(LilBroRow.named("hotkeys.meetingRecord"))
-    }
-
-    /// One `row("id", .tab, "Title", "About")` per line, as the server reads it.
+    /// One `row("id", .tab | .feature | tool: .tool, "Title", "About")` per
+    /// line, as the server reads it.
     func test_the_list_is_in_the_form_the_server_parses() throws {
         let text = try source("Sources/Sidekey/Settings/LilBro/LilBroRows.swift")
-        let regex = try NSRegularExpression(pattern: #"row\("([\w.]+)", \.(\w+), "([^"]+)", "([^"]+)"\)"#)
+        let regex = try NSRegularExpression(pattern: #"row\("([\w.]+)", (?:tool: )?\.(\w+), "([^"]+)", "((?:[^"\\]|\\.)+)"\)"#)
         let ids = regex.matches(in: text, range: NSRange(text.startIndex..., in: text)).compactMap {
             Range($0.range(at: 1), in: text).map { String(text[$0]) }
         }
         XCTAssertEqual(ids, LilBroRow.catalog.map(\.id))
+        XCTAssertNotNil(LilBroRow.named("hotkeys.meetingRecord"))
+        XCTAssertEqual(LilBroRow.named("drop.lowerOtherAudio")?.screen, "features/drop")
     }
 }

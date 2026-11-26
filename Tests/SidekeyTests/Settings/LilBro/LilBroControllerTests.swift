@@ -243,6 +243,14 @@ final class LilBroControllerTests: XCTestCase {
         selection.select(.hotkeys)
         XCTAssertTrue(controller.stops(for: .row(record)).isEmpty, "already on the tab: only the scroll")
         XCTAssertEqual(controller.stops(for: .tab(.agentMode)).map(\.spot), [.tab(SettingsWindowTab.agentMode.resolved)])
+        // REV 14: a row on a feature's screen goes the feature's way.
+        let duck = LilBroRow.named("drop.lowerOtherAudio")!
+        selection.select(.hotkeys)
+        XCTAssertEqual(controller.stops(for: .row(duck)).map(\.spot), [.tab(.features), .feature(.drop)])
+        selection.open(.drop)
+        XCTAssertTrue(controller.stops(for: .row(duck)).isEmpty, "already on Drop: only the scroll")
+        let hold = LilBroRow.named("toolbox.holdBrightness")!
+        XCTAssertEqual(controller.stops(for: .row(hold)).map(\.spot), [.tab(.features)], "Toolbox opens with its tool")
     }
 
     // MARK: Answers from whytap.ai

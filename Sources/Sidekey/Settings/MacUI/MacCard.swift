@@ -69,6 +69,8 @@ struct MacRow<Leading: View, Trailing: View>: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(minHeight: 42)
+        // Lil Bro can lead to every Settings row by its title (REV 14).
+        .lilBroCatalogRow(title)
     }
 }
 

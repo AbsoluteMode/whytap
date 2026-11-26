@@ -212,9 +212,9 @@ final class LilBroController: ObservableObject {
         }
     }
 
-    /// The row is still the focused one on its own tab.
+    /// The row is still the focused one on its own tab or feature screen.
     private func leadIsActive(_ row: LilBroRow) -> Bool {
-        selection.focusedRow == row.id && selection.selectedTab == row.tab.resolved
+        selection.focusedRow == row.id && selection.lilBroScreen == row.screen
     }
 
     /// Ends a row lead: no outline; with the little guy he goes back home.
@@ -398,13 +398,7 @@ final class LilBroController: ObservableObject {
     }
 
     /// The screen he is asked from, as the server reads it: `tab` or `tab/feature`.
-    var screen: String {
-        let tab = selection.selectedTab.resolved.rawValue
-        if selection.selectedTab.resolved == .features, let feature = selection.shownFeature {
-            return "\(tab)/\(feature.rawValue)"
-        }
-        return tab
-    }
+    var screen: String { selection.lilBroScreen }
 
     /// Up to three earlier exchanges answered by whytap.ai, oldest first.
     var history: [LilBroQuestion.Exchange] {
@@ -440,8 +434,14 @@ final class LilBroController: ObservableObject {
         case .apiKeys:
             return [Stop(spot: .tab(.apiAndModels)) { selection.showAPIKeys() }]
         case .row(let row):
-            // The tab's sidebar row, as a person would click it; the row
-            // itself is scrolled to and outlined after it opens.
+            // The tab's sidebar row, or the way to the feature's screen, as a
+            // person would click them; the row itself is scrolled to and
+            // outlined after it opens (REV 14).
+            if let feature = row.feature { return stops(for: .feature(feature)) }
+            // A Toolbox pane opens with its tool, from Features (its home).
+            if let tool = row.tool {
+                return [Stop(spot: .tab(row.tab.sidebarHome)) { selection.focus(tool) }]
+            }
             if selection.selectedTab == row.tab.resolved { return [] }
             return [Stop(spot: .tab(row.tab.resolved)) { selection.select(row.tab) }]
         }
@@ -515,7 +515,7 @@ final class LilBroController: ObservableObject {
         await walk(to: LilBroPlanner.perch(on: block))
         guard !Task.isCancelled else { return false }
         if let row {
-            // Left its tab while he ran there: nothing to outline.
+            // Left its screen while he ran there: nothing to outline.
             guard leadIsActive(row), let now = map.visible(.row(row.id)) else {
                 if selection.focusedRow == row.id { selection.focusedRow = nil }
                 feet = map.homeStand
@@ -556,7 +556,7 @@ final class LilBroController: ObservableObject {
         // The person's tab wins: if they left the row's tab while it opened,
         // the lead ends here and their choice stays (builder review of #493,
         // ticket 630). Only the focus is set, never the tab again.
-        guard selection.selectedTab == row.tab.resolved else { return nil }
+        guard selection.lilBroScreen == row.screen else { return nil }
         selection.focusedRow = row.id
         // The tab scrolls to it (0.3 s); the row counts once it stands still,
         // while it is still the focused row on its own tab. Never another

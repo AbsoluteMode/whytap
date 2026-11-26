@@ -13,6 +13,7 @@ struct IntegrationAction: View {
             .buttonStyle(IntegrationButtonStyle(primary: primary, focused: focused))
             .focused($focused)
             .disabled(!enabled)
+            .lilBroControl(title)
     }
 }
 

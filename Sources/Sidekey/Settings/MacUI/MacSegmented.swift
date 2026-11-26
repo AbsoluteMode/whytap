@@ -42,5 +42,6 @@ struct MacSegmented<Value: Hashable>: View {
         }
         .padding(2)
         .background(MacSettingsTheme.segBg, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+        .lilBroControl(items.map(\.label).joined(separator: " | "))
     }
 }

@@ -85,6 +85,8 @@ struct MonitorFeatureView: View {
             }
             VStack(alignment: .leading, spacing: 0) {
                 MacGroupTitle(title: "Dashboards", trailing: isEmpty ? nil : Self.countText(rows.count))
+                // One row per dashboard (or that there is none): data, not
+                // settings Lil Bro leads to.
                 MacCard {
                     if isEmpty {
                         MacRow(title: "No dashboards yet",
@@ -107,6 +109,7 @@ struct MonitorFeatureView: View {
                         }
                     }
                 }
+                .lilBroItems()
             }
         }
     }

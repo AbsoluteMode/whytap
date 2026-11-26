@@ -96,14 +96,33 @@ extension View {
 
     /// A row Lil Bro can lead to: scrolled to by its id, and while it is the
     /// one he brought the person to, a block he stands on and outlines.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
-    func lilBroRow(_ id: String, focused: String?) -> some View {
-        self.id(id)
-            .lilBroSpot(.row(id))
-            .background(GeometryReader { proxy in
-                Color.clear.preference(key: LilBroBlocksKey.self,
-                                       value: focused == id ? [proxy.frame(in: .named(LilBroSpace.name))] : [])
-            })
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12, REV 14)
+    func lilBroRow(_ id: String) -> some View {
+        modifier(LilBroRowModifier(id: id))
+    }
+
+    /// A Settings row (`MacRow`, `HotkeySettingRow`, `ConcreteSettingPicker`)
+    /// with its title: if the catalog lists it on this screen, Lil Bro can
+    /// lead to it; either way the row says it was drawn, so the coverage
+    /// test sees a row missing from the catalog. Outside Settings it does
+    /// nothing.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14)
+    func lilBroCatalogRow(_ title: String) -> some View {
+        modifier(LilBroCatalogRowModifier(title: title))
+    }
+
+    /// Rows inside are data (one per app, tool, server or dashboard), not
+    /// settings of their own: they are not listed and Lil Bro does not lead
+    /// to them one by one.
+    func lilBroItems() -> some View {
+        environment(\.lilBroItems, true)
+    }
+
+    /// A control (switch, pop-up, segments, menu) says where it was drawn:
+    /// inside a row or loose on a Settings screen. Loose ones fail
+    /// `LilBroRowCoverageTests`.
+    func lilBroControl(_ label: String) -> some View {
+        modifier(LilBroControlModifier(label: label))
     }
 
     /// Tells Lil Bro this view is a block he can stand on.
@@ -112,5 +131,129 @@ extension View {
             Color.clear.preference(key: LilBroBlocksKey.self,
                                    value: [proxy.frame(in: .named(LilBroSpace.name))])
         })
+    }
+}
+
+// MARK: Rows on every Settings screen (REV 14)
+
+/// What the Settings window tells its rows: the screen they are on (`tab` or
+/// `features/feature`, as `LilBroRow.screen`), the row Lil Bro led to and
+/// how to scroll there.
+extension EnvironmentValues {
+    var lilBroScreen: String? {
+        get { self[LilBroScreenKey.self] }
+        set { self[LilBroScreenKey.self] = newValue }
+    }
+    var lilBroFocusedRow: String? {
+        get { self[LilBroFocusedRowKey.self] }
+        set { self[LilBroFocusedRowKey.self] = newValue }
+    }
+    var lilBroScroll: LilBroScroll {
+        get { self[LilBroScrollKey.self] }
+        set { self[LilBroScrollKey.self] = newValue }
+    }
+    var lilBroItems: Bool {
+        get { self[LilBroItemsKey.self] }
+        set { self[LilBroItemsKey.self] = newValue }
+    }
+    var lilBroInRow: Bool {
+        get { self[LilBroInRowKey.self] }
+        set { self[LilBroInRowKey.self] = newValue }
+    }
+}
+
+private struct LilBroScreenKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct LilBroFocusedRowKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct LilBroScrollKey: EnvironmentKey { static let defaultValue = LilBroScroll() }
+private struct LilBroItemsKey: EnvironmentKey { static let defaultValue = false }
+private struct LilBroInRowKey: EnvironmentKey { static let defaultValue = false }
+
+/// Scrolls the Settings pane to a row by its id.
+struct LilBroScroll {
+    var to: @MainActor (String) -> Void = { _ in }
+}
+
+/// A row drawn on a Settings screen, as the coverage test sees it.
+struct LilBroSeenRow: Hashable {
+    let screen: String
+    let title: String
+    /// Its catalog entry; nil when the catalog does not list it.
+    let id: String?
+    /// One of a list of data rows (`lilBroItems`), not a setting.
+    let item: Bool
+}
+
+/// A control drawn on a Settings screen.
+struct LilBroSeenControl: Hashable {
+    let screen: String
+    let label: String
+    let inRow: Bool
+}
+
+struct LilBroSeenRowsKey: PreferenceKey {
+    static let defaultValue: [LilBroSeenRow] = []
+    static func reduce(value: inout [LilBroSeenRow], nextValue: () -> [LilBroSeenRow]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+struct LilBroSeenControlsKey: PreferenceKey {
+    static let defaultValue: [LilBroSeenControl] = []
+    static func reduce(value: inout [LilBroSeenControl], nextValue: () -> [LilBroSeenControl]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+private struct LilBroRowModifier: ViewModifier {
+    let id: String
+    @Environment(\.lilBroFocusedRow) private var focused
+    @Environment(\.lilBroScroll) private var scroll
+
+    func body(content: Content) -> some View {
+        content
+            .id(id)
+            .lilBroSpot(.row(id))
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: LilBroBlocksKey.self,
+                                       value: focused == id ? [proxy.frame(in: .named(LilBroSpace.name))] : [])
+            })
+            // The pane scrolls the row Lil Bro led to into the middle, also
+            // when its screen has just opened.
+            .onAppear { if focused == id { scroll.to(id) } }
+            .onChange(of: focused) { _, now in if now == id { scroll.to(id) } }
+    }
+}
+
+private struct LilBroCatalogRowModifier: ViewModifier {
+    let title: String
+    @Environment(\.lilBroScreen) private var screen
+    @Environment(\.lilBroItems) private var items
+
+    func body(content: Content) -> some View {
+        let row = screen.flatMap { items ? nil : LilBroRow.at(screen: $0, title: title) }
+        Group {
+            if let row {
+                content.lilBroRow(row.id)
+            } else {
+                content
+            }
+        }
+        .environment(\.lilBroInRow, true)
+        .transformPreference(LilBroSeenRowsKey.self) { seen in
+            if let screen { seen.append(LilBroSeenRow(screen: screen, title: title, id: row?.id, item: items)) }
+        }
+    }
+}
+
+private struct LilBroControlModifier: ViewModifier {
+    let label: String
+    @Environment(\.lilBroScreen) private var screen
+    @Environment(\.lilBroInRow) private var inRow
+    @Environment(\.lilBroItems) private var items
+
+    func body(content: Content) -> some View {
+        content.transformPreference(LilBroSeenControlsKey.self) { seen in
+            if let screen { seen.append(LilBroSeenControl(screen: screen, label: label, inRow: inRow || items)) }
+        }
     }
 }

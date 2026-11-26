@@ -33,6 +33,8 @@ struct APIAndModelsView: View {
     /// Bumped by "Show": the scroll reader then finds the features with no model.
     @State private var showUnsetTick = 0
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The row Lil Bro led to: Models opens, and Advanced when the row is there.
+    @Environment(\.lilBroFocusedRow) private var lilBroFocusedRow
 
     init(viewModel: APIAndModelsViewModel, focusedFeature: Binding<AIFeature?>,
          initiallyExpandedGroup: String? = nil, initialSection: APIAndModelsSection = .models,
@@ -107,6 +109,8 @@ struct APIAndModelsView: View {
             .onChange(of: focusedFeature) { _, feature in
                 if let feature { focus(feature, scroller: scroller) }
             }
+            .onChange(of: lilBroFocusedRow) { _, _ in revealLilBroRow() }
+            .onAppear { revealLilBroRow() }
             .onChange(of: showUnsetTick) { _, _ in
                 var unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
                 if !viewModel.audioTranslate.isActive { unset.append(.subtitlesAudio) }
@@ -332,6 +336,7 @@ struct APIAndModelsView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(row.kind.title)
         .accessibilityValue(row.needsSetup ? "\(row.label), Needs setup" : row.label)
+        .lilBroCatalogRow(row.kind.title)
     }
 
     // MARK: - Search
@@ -393,6 +398,7 @@ struct APIAndModelsView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(Self.searchTitle)
         .accessibilityValue(row.needsSetup ? "\(row.current.label), Needs setup" : row.current.label)
+        .lilBroCatalogRow(Self.searchTitle)
     }
 
     static let searchTitle = "Search"
@@ -579,6 +585,7 @@ struct APIAndModelsView: View {
         .background(highlighted.contains(where: group.covers)
                     ? MacSettingsTheme.accent.opacity(0.16) : Color.clear)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: highlighted)
+        .lilBroCatalogRow(group.title)
     }
 
     private static func helpText(_ group: FeatureGroup) -> String {
@@ -767,6 +774,18 @@ struct APIAndModelsView: View {
     // MARK: - Focus
 
     /// Scrolls to the row, lights it for a second and gives the binding back.
+    /// A row Lil Bro leads to must be drawn before it can be scrolled to:
+    /// it is under Models, and a feature's own row under Advanced (REV 14).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14)
+    private func revealLilBroRow() {
+        guard let id = lilBroFocusedRow, let row = LilBroRow.named(id),
+              row.screen == SettingsWindowTab.apiAndModels.rawValue else { return }
+        section = .models
+        if viewModel.groups.contains(where: { $0.audioTranslate == nil && $0.title == row.title }) {
+            showAdvanced = true
+        }
+    }
+
     private func focus(_ feature: AIFeature, scroller: ScrollViewProxy) {
         section = .models
         Task { @MainActor in

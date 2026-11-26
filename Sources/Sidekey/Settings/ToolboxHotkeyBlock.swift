@@ -28,6 +28,8 @@ struct ToolboxHotkeyBlock: View {
             onClear: controller.shortcut == nil ? nil : { controller.remove() }
         )
         .onDisappear { controller.cancel() }
+        // The tool's shortcut again: Lil Bro leads to its row in Hotkeys.
+        .lilBroItems()
     }
 }
 

@@ -41,6 +41,7 @@ struct MacMenu<Content: View>: View {
         .fixedSize(horizontal: true, vertical: false)
         .accessibilityValue(title)
         .help(title)
+        .lilBroControl(title)
     }
 }
 

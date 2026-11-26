@@ -31,5 +31,6 @@ struct MacField: View {
                     lineWidth: focused ? 2 : 0.5
                 )
         )
+        .lilBroControl(placeholder)
     }
 }

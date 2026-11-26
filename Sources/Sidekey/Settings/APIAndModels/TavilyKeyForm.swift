@@ -15,6 +15,7 @@ struct TavilyKeyForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SecureField(settings.configured ? "New API key" : "API key", text: $settings.draftKey)
+                .lilBroControl("API key")
                 .textFieldStyle(.roundedBorder)
                 .focused($keyFocused)
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !settings.saving ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }

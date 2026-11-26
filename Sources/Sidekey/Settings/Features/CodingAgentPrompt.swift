@@ -189,6 +189,7 @@ struct CodingAgentPromptCard: View {
             }
         }
         .onDisappear { copier.cancel() }
+        .lilBroCatalogRow(title)
     }
 }
 

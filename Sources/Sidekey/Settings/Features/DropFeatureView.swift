@@ -269,6 +269,8 @@ struct FeatureNeedsBox: View {
                 .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 1)
         }
         .accessibilityElement(children: .contain)
+        // The first missing step again; Lil Bro leads to that step in What it needs.
+        .lilBroItems()
     }
 }
 
@@ -349,6 +351,8 @@ struct FeatureRequirementRow<Menu: View>: View {
         .padding(.vertical, 11)
         .frame(minHeight: 44)
         .accessibilityElement(children: .contain)
+        // A step of What it needs: Lil Bro leads to it by its title (REV 15).
+        .lilBroCatalogRow(check.requirement.title)
     }
 
     @ViewBuilder private var trailing: some View {

@@ -18,6 +18,7 @@ struct ConcreteSettingPicker: View {
                      selection: $selection, maxWidth: 300)
                 .accessibilityLabel(title)
         }
+        .lilBroCatalogRow(title)
     }
 }
 

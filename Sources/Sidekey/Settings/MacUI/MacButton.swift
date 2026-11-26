@@ -32,6 +32,7 @@ struct MacButton: View {
         .focused($focused)
         .disabled(!isEnabled)
         .opacity(isEnabled && parentEnabled ? 1 : 0.42)
+        .lilBroControl(title)
     }
 
     private var fg: Color {

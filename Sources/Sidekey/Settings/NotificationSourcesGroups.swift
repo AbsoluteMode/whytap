@@ -75,6 +75,7 @@ struct NotificationSourcesGroups: View {
                                 }
                             }
                         }
+                        .lilBroItems()
                     }
                 }
             }

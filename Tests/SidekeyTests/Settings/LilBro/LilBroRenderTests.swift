@@ -194,6 +194,37 @@ final class LilBroRenderTests: XCTestCase {
         }
     }
 
+    /// REV 14, the maintainer's question on 1772: how to keep the sound from
+    /// going quiet while dictating. The setting is a switch on Drop's own
+    /// screen; he opens Drop and outlines "Lower other audio while
+    /// speaking" instead of saying there is no such switch.
+    func test_asked_about_audio_ducking_he_leads_to_the_drop_switch() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let duck = try XCTUnwrap(LilBroRow.named("drop.lowerOtherAudio"))
+        let model = LilBroFixedBrain(reply: .answer(LilBroAnswer(
+            paragraphs: ["Это переключатель «Lower other audio while speaking» на экране Drop: выключите его, и звук не будет приглушаться."],
+            destination: .row(duck))))
+        for (name, mascot) in [("duck-light", true), ("duck-hidden-light", false)] {
+            let selection = SettingsWindowSelection()
+            selection.select(.hotkeys)
+            let lilBro = controller(fixture, selection, mascot: mascot, remote: model)
+            try await render(fixture, selection, lilBro, name: name) {
+                lilBro.toggleFromSidebar()
+                lilBro.ask("а как сделать, чтобы звук не приглушался, когда я диктую?")
+                await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+            }
+            XCTAssertEqual(selection.selectedTab, .features, name)
+            XCTAssertEqual(selection.shownFeature, .drop, name)
+            XCTAssertEqual(selection.focusedRow, duck.id, name)
+            let row = try XCTUnwrap(lilBro.map.visible(.row(duck.id)), "the switch's row is in view: \(name)")
+            XCTAssertEqual(lilBro.target, row, "that row is outlined: \(name)")
+            XCTAssertEqual(lilBro.turns.last?.opened, "Lower other audio while speaking")
+            if mascot { XCTAssertEqual(lilBro.feet.y, row.minY + 1, accuracy: 2, "he stands on it") }
+            lilBro.close()
+        }
+    }
+
     /// A row far down the tab is scrolled to.
     func test_a_row_below_the_fold_is_scrolled_into_view() async throws {
         let fixture = try await FeaturesFixture(.freshInstall)

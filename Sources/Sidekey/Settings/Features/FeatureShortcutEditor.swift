@@ -184,6 +184,7 @@ struct FeatureShortcutRow: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+        .lilBroCatalogRow(editor.hotkey.label)
     }
 }
 

@@ -5,19 +5,15 @@ import SwiftUI
 @MainActor
 struct HotkeysSettingsView: View {
     @ObservedObject var preferences: HotkeyPreferences
-    /// The row Lil Bro led to (`LilBroRow.id`): scrolled into view.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
-    var focusedRow: String?
     @State private var draft: HotkeyConfiguration
     @State private var saveError: String?
     /// Shared with the Toolbox Hotkey block: one recorder, Escape cancels.
     @StateObject private var recording = HotkeyRecordingSession<RecordingTarget>()
     private var recordingTarget: RecordingTarget? { recording.target }
 
-    init(preferences: HotkeyPreferences? = nil, focusedRow: String? = nil) {
+    init(preferences: HotkeyPreferences? = nil) {
         let preferences = preferences ?? HotkeyPreferences.shared
         self.preferences = preferences
-        self.focusedRow = focusedRow
         _draft = State(initialValue: preferences.configuration)
     }
 
@@ -28,7 +24,6 @@ struct HotkeysSettingsView: View {
                 .padding(.top, 22)
                 .padding(.bottom, 12)
 
-            ScrollViewReader { scroll in
             ScrollView {
                 VStack(alignment: .leading, spacing: 8) {
                     HotkeySettingRow(
@@ -49,7 +44,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.agentText) }
                     )
-                    .lilBroRow("hotkeys.agentText", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "waveform",
@@ -70,7 +64,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { draft.agentVoiceGesture = $0 },
                         onRecord: { startRecording(.agentVoice) }
                     )
-                    .lilBroRow("hotkeys.agentVoice", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "magnifyingglass",
@@ -90,7 +83,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.googleText) }
                     )
-                    .lilBroRow("hotkeys.googleText", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "magnifyingglass",
@@ -111,7 +103,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { draft.googleSearchVoiceGesture = $0 },
                         onRecord: { startRecording(.googleVoice) }
                     )
-                    .lilBroRow("hotkeys.googleVoice", focused: focusedRow)
 
                     // Drop is reassignable by recording a new key (bare Space →
                     // `.holdSpace`, B1). The gesture switch is live for combos
@@ -133,7 +124,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { draft.dropVoiceGesture = $0 },
                         onRecord: { startRecording(.dropVoice) }
                     )
-                    .lilBroRow("hotkeys.dropVoice", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "record.circle",
@@ -153,7 +143,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.meetingRecord) }
                     )
-                    .lilBroRow("hotkeys.meetingRecord", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "link",
@@ -173,7 +162,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.usefulLinksInsert) }
                     )
-                    .lilBroRow("hotkeys.linksInsert", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "arrow.up.right.square",
@@ -193,7 +181,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.usefulLinksOpen) }
                     )
-                    .lilBroRow("hotkeys.linksOpen", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "arrow.down",
@@ -213,7 +200,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.usefulLinksNext) }
                     )
-                    .lilBroRow("hotkeys.linksNext", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "arrow.up",
@@ -233,7 +219,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.usefulLinksPrevious) }
                     )
-                    .lilBroRow("hotkeys.linksPrevious", focused: focusedRow)
 
                     HotkeySettingRow(
                         iconName: "xmark.circle",
@@ -253,7 +238,6 @@ struct HotkeysSettingsView: View {
                         onGestureChange: { _ in },
                         onRecord: { startRecording(.agentClose) }
                     )
-                    .lilBroRow("hotkeys.agentClose", focused: focusedRow)
 
                     toolShortcutSection
 
@@ -261,9 +245,6 @@ struct HotkeysSettingsView: View {
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 16)
-            }
-            .onAppear { scrollToFocusedRow(scroll, animated: false) }
-            .onChange(of: focusedRow) { _, _ in scrollToFocusedRow(scroll, animated: true) }
             }
 
             footerBlock
@@ -285,15 +266,6 @@ struct HotkeysSettingsView: View {
         }
         .onDisappear {
             stopRecording()
-        }
-    }
-
-    private func scrollToFocusedRow(_ scroll: ScrollViewProxy, animated: Bool) {
-        guard let focusedRow, LilBroRow.named(focusedRow)?.tab.resolved == .hotkeys else { return }
-        if animated {
-            withAnimation(.easeInOut(duration: 0.3)) { scroll.scrollTo(focusedRow, anchor: .center) }
-        } else {
-            scroll.scrollTo(focusedRow, anchor: .center)
         }
     }
 
@@ -669,6 +641,7 @@ struct HotkeysSettingsView: View {
                 }
             }
         }
+        .lilBroCatalogRow("Save changes")
     }
 
     private var activeConflicts: [HotkeyConflict] {
@@ -764,6 +737,8 @@ struct HotkeySettingRow: View {
                 .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous))
+        // Lil Bro leads to the row by its title (REV 12, REV 14).
+        .lilBroCatalogRow(title)
     }
 
     private var visibleShortcutContents: [KeycapContent?] {

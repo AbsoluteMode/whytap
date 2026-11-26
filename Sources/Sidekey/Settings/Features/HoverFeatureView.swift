@@ -214,6 +214,7 @@ struct HoverToolRow: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(info.title)
         .accessibilityValue(isOn ? "In the island" : "Off")
+        .lilBroCatalogRow(info.title)
         .accessibilityActions {
             if canMoveUp {
                 Button("Move up") { move(-1) }

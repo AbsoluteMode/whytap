@@ -39,6 +39,7 @@ struct SettingsIntegrationsView: View {
                                 .font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
                         } else if showToken {
                             SecureField("GitHub access token", text: $token)
+                                .lilBroControl("GitHub access token")
                                 .textFieldStyle(.roundedBorder).onSubmit { connectToken() }
                             HStack {
                                 IntegrationLink(title: "Create token", destination: URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=Whytap%20Backup")!)
@@ -58,6 +59,8 @@ struct SettingsIntegrationsView: View {
                         }
                     }.padding(14)
                 }
+                // Connecting GitHub for backups: a row Lil Bro leads to (REV 15).
+                .lilBroCatalogRow("GitHub")
                 SettingsCalendarIntegrationsView(connections: calendarConnections)
                 // Coding tools (Claude Code, Codex) moved here from the
                 // removed Agents tab: the plugin cannot grant itself access.

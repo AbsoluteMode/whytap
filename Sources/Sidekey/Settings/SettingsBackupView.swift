@@ -83,6 +83,8 @@ struct SettingsBackupView: View {
                     }
                     .padding(14)
                 }
+                // Back up, restore and the recovery code: a row Lil Bro leads to (REV 15).
+                .lilBroCatalogRow("Back up and restore")
                 if model.showsAutomaticBackup {
                     MacCard {
                         MacRow(title: "Automatic backup", subtitle: automaticBackupSubtitle) {
@@ -105,6 +107,7 @@ struct SettingsBackupView: View {
                     MacCard {
                         VStack(alignment: .leading, spacing: 12) {
                             SecureField("Recovery code", text: $restoreCode)
+                                .lilBroControl("Recovery code")
                                 .textFieldStyle(.roundedBorder)
                                 .focused($isRestoreCodeFocused)
                                 .onSubmit { restore() }
@@ -177,6 +180,7 @@ struct SettingsBackupView: View {
                         }
                     }
                 }
+                .lilBroItems()
             }
             .foregroundStyle(MacSettingsTheme.text)
             .padding(.horizontal, 24).padding(.vertical, 22)

@@ -59,6 +59,7 @@ struct HarnessAccessSettingsSection: View {
                                     }), label: "Let \(grant.name) use Whytap")
                             }
                         }
+                        .lilBroItems()
                     }
                     if let notice = Self.notice(unsaved: store.hasUnsavedAnswers, unverified: store.revocationUnverified) {
                         Text(notice)

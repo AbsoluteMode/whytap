@@ -396,7 +396,9 @@ struct ToolboxSettingsView: View {
                             deps.openHoverPanel(tool == .calendar ? .calendar : .tasks)
                         }
                     }
-                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+                .lilBroCatalogRow("Open " + HoverToolRegistry.info(for: tool).title)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .monitor:
                 MonitorHoverPanel(onBack: { selectedTool = nil })
                     .settingsIslandPreview()

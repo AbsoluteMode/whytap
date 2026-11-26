@@ -21,6 +21,7 @@ struct MacSwitch: View {
         Toggle(label, isOn: $isOn)
             .toggleStyle(GlassSwitchStyle(size: size))
             .disabled(!isEnabled)
+            .lilBroControl(label)
             .fixedSize()
     }
 }

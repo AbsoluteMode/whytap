@@ -46,6 +46,8 @@ struct SettingsCalendarIntegrationsView: View {
                 IntegrationLink(title: "Calendar privacy", destination: URL(string: "https://whytap.ai/calendar-privacy/")!)
             }.font(.system(size: 11))
         }
+        // Calendars Whytap reads: a row Lil Bro leads to (REV 15).
+        .lilBroCatalogRow("Calendars")
         .background(CalendarConnectionWindowClose(onClose: flow.cancel).frame(width: 0, height: 0))
         // Settings shows the live permission, not what Calendar saw last
         // (status only: no prompt, no event read).

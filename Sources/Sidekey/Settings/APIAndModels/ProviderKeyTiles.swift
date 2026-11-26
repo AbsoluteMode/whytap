@@ -237,6 +237,7 @@ struct ProviderKeyForm: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             SecureField(chip == nil ? "API key" : "New API key", text: $key)
+                .lilBroControl("API key")
                 .textFieldStyle(.roundedBorder)
                 .focused($keyFocused)
                 .overlay { RoundedRectangle(cornerRadius: 5).strokeBorder(keyHovered && !busy ? MacSettingsTheme.accent.opacity(0.6) : .clear, lineWidth: 1).allowsHitTesting(false) }

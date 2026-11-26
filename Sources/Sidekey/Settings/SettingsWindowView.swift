@@ -127,7 +127,21 @@ struct SettingsWindowView: View {
                 if let back = selection.backLink {
                     SettingsBackBar(title: back.title, action: { selection.goBack() })
                 }
-                detailPane
+                // Every row on the screen can be led to by Lil Bro: it learns
+                // its screen, the row he led to and how to scroll there.
+                // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14)
+                ScrollViewReader { proxy in
+                    detailPane
+                        .environment(\.lilBroScreen, selection.lilBroScreen)
+                        .environment(\.lilBroFocusedRow, selection.focusedRow)
+                        .environment(\.lilBroScroll, LilBroScroll { id in
+                            if reduceMotion {
+                                proxy.scrollTo(id, anchor: .center)
+                            } else {
+                                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
+                            }
+                        })
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .lilBroSpot(.pane)
@@ -269,7 +283,7 @@ struct SettingsWindowView: View {
                              initialSection: selection.requestedAPISection ?? .models)
                 .onAppear { selection.requestedAPISection = nil }
         case .hotkeys:
-            HotkeysSettingsView(focusedRow: selection.focusedRow)
+            HotkeysSettingsView()
         case .permissions:
             SettingsPermissionsView(viewModel: permissionsViewModel)
         case .notes:
@@ -429,10 +443,27 @@ final class SettingsWindowSelection: ObservableObject {
         selectedTab = availableTab
     }
 
+    /// The screen shown, as Lil Bro and his rows name it: `tab`, or
+    /// `features/feature` while a feature's own screen is open.
+    var lilBroScreen: String {
+        let tab = selectedTab.resolved
+        if tab == .features, let feature = shownFeature,
+           feature == .drop || FeatureCatalog.info(for: feature).place == .screen {
+            return "\(tab.rawValue)/\(feature.rawValue)"
+        }
+        return tab.rawValue
+    }
+
     /// Opens a row's tab scrolled to that row (Lil Bro's lead).
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
     func focus(_ row: LilBroRow) {
-        if selectedTab != row.tab.resolved { select(row.tab) }
+        if let feature = row.feature {
+            if selectedTab != .features || shownFeature != feature { open(feature) }
+        } else if let tool = row.tool {
+            focus(tool)
+        } else if selectedTab != row.tab.resolved {
+            select(row.tab)
+        }
         focusedRow = row.id
     }
 

@@ -2,7 +2,8 @@ import Foundation
 
 /// Answers from whytap.ai: the question, the screen the person is on and up to
 /// three earlier exchanges go to Ask's Lil Bro endpoint, which answers with
-/// claude-sonnet-5-5 and names one place from the app's own catalog.
+/// claude-sonnet-5-5 and names a place from the app's own catalog only when
+/// the person asked to go there or set something up.
 ///
 /// Used for each question unless the person turned answers off in ⋯ (on by
 /// default since 2026-11-26, the maintainer's decision). Nothing else is
@@ -96,10 +97,8 @@ struct LilBroRemoteBrain: LilBroBrain {
     }
 
     func reply(to question: LilBroQuestion) async -> LilBroReply {
-        // Under three characters gets the local guide; the server needs three.
-        guard let text = Self.prepared(question.text) else {
-            return LilBroLocalGuide.match(question.text.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        // The server needs three characters; nothing shorter is sent.
+        guard let text = Self.prepared(question.text) else { return .tooShort }
         let request: URLRequest
         do {
             request = try Self.request(for: LilBroQuestion(text: text, screen: question.screen,
@@ -148,8 +147,7 @@ struct LilBroRemoteBrain: LilBroBrain {
             let offtopic = object["offtopic"] as? Bool == true
             return .answer(LilBroAnswer(paragraphs: paragraphs,
                                         bullets: offtopic ? [] : strings(object["bullets"]),
-                                        destination: offtopic ? nil : destination(object["go"]),
-                                        followUps: offtopic ? [] : Array(strings(object["followUps"]).prefix(2))))
+                                        destination: offtopic ? nil : destination(object["go"])))
         case 429:
             return .limit
         case 503 where object?["error"] as? String == "budget_exhausted":

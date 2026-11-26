@@ -49,6 +49,11 @@ invariant said so.
   Details of the card. No card, "I only know…" or suggested questions on the
   default path: a question goes to the model, with the thinking dots while
   it answers.
+- **No local fallback (REV 10, 2026-11-26).** The maintainer asked for no
+  scripted scenarios. With answers off or whytap.ai unreachable there is no
+  keyword guide and no closest page any more: answers off gives only the
+  card (Turn on and ask), offline a short message with Try again. The
+  bullets below about the keyword guide and closest pages are history.
 - **Before REV 8: off by default.** Nothing was sent until the person pressed **Turn on
   answers** on the disclosure in his balloon, under the text: each question
   then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen and up to
@@ -164,3 +169,4 @@ invariant said so.
 2026-11-26 · REV 4 (one-line disclosure, Sonnet): feature/lil-bro-smooth
 2026-11-26 · REV 7 (only the card when not understood): feature/lil-bro-unknown
 2026-11-26 · REV 8 (on by default): feature/lil-bro-unknown
+2026-11-26 · REV 10 (no local fallback): feature/lil-bro-unknown

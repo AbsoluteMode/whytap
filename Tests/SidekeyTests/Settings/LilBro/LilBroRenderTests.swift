@@ -9,12 +9,12 @@ import XCTest
 @MainActor
 final class LilBroRenderTests: XCTestCase {
     private func controller(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection,
-                            mascot: Bool = true, remote: LilBroBrain? = nil) -> LilBroController {
+                            mascot: Bool = true, remote: LilBroBrain? = nil, answers: Bool = true) -> LilBroController {
         let preferences = LilBroPreferences(defaults: fixture.defaults)
         preferences.mascotVisible = mascot
-        preferences.answersFromWhytap = false
+        preferences.answersFromWhytap = answers
         return LilBroController(selection: selection, preferences: preferences,
-                                remote: remote ?? Offline(), reduceMotion: { true },
+                                remote: remote ?? LilBroFixedBrain(), reduceMotion: { true },
                                 sleep: { _ in await Task.yield() })
     }
 
@@ -99,7 +99,7 @@ final class LilBroRenderTests: XCTestCase {
         }
         XCTAssertEqual(selection.shownFeature, .drop)
         XCTAssertEqual(lilBro.turns.last?.opened, "Drop")
-        // Details on request: the place he opened and what to ask next.
+        // Details on request: the points and the place he opened.
         try await render(fixture, selection, lilBro, name: "answer-more-light") {
             lilBro.showMore = true
         }
@@ -123,19 +123,19 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertFalse(lilBro.answersFromWhytap)
     }
 
-    /// A question this Mac did not understand: only the card that sends it
-    /// to whytap.ai, no "I only know Settings by name", no suggestions.
-    func test_not_understood_he_shows_only_turn_on_and_ask() async throws {
+    /// Answers turned off: a question gets only the card that turns them on
+    /// and sends it; no scripted answer, no suggestions.
+    func test_answers_off_he_shows_only_turn_on_and_ask() async throws {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection)
-        try await render(fixture, selection, lilBro, name: "unknown-light") {
+        let lilBro = controller(fixture, selection, answers: false)
+        try await render(fixture, selection, lilBro, name: "answers-off-light") {
             lilBro.toggleFromSidebar()
             lilBro.ask("как изменить хоткей рекорда")
             await self.until { lilBro.bubble == .full && !lilBro.isBusy }
         }
-        XCTAssertEqual(lilBro.turns.last?.reply?.isUnknown, true)
+        XCTAssertEqual(lilBro.turns.last?.reply, .answersOff)
         XCTAssertTrue(lilBro.turnOnAsks)
         XCTAssertNil(selection.shownFeature, "nothing opened")
     }
@@ -151,11 +151,11 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertEqual(lilBro.bubble, .full)
     }
 
-    func test_answers_on_but_offline_he_offers_try_again_and_the_closest_page() async throws {
+    func test_offline_he_says_answers_are_unavailable_and_offers_try_again() async throws {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection)
+        let lilBro = controller(fixture, selection, remote: Offline(), answers: false)
         try await render(fixture, selection, lilBro, name: "offer-light") {
             lilBro.toggleFromSidebar()
             // The greeting's small link: the whole disclosure, on request.
@@ -172,20 +172,21 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertNil(selection.shownFeature, "offline changes nothing")
     }
 
-    func test_on_drop_the_real_needs_row_reports_its_step_and_he_asks_before_pressing() async throws {
+    /// REV 10: a question answered in words stays in the balloon; nothing
+    /// opens and there is no step to press.
+    func test_a_question_answered_in_words_stays_in_the_balloon() async throws {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection)
-        try await render(fixture, selection, lilBro, name: "press-light") {
+        let words = LilBroFixedBrain(reply: .answer(LilBroAnswer(
+            paragraphs: ["Yes. With the free model on this Mac, Drop works without the internet."])))
+        let lilBro = controller(fixture, selection, remote: words)
+        try await render(fixture, selection, lilBro, name: "words-light") {
             lilBro.toggleFromSidebar()
-            lilBro.ask("Set up dictation")
+            lilBro.ask("does dictation work offline")
             await self.until { lilBro.bubble == .full && !lilBro.isBusy }
         }
-        XCTAssertEqual(selection.shownFeature, .drop)
-        let step = try XCTUnwrap(lilBro.proposal, "a fresh Mac has a required Drop step")
-        XCTAssertFalse(step.optional)
-        XCTAssertNotNil(lilBro.map.spots[.need(step.id)], "the row he would press reports itself")
-        XCTAssertNil(lilBro.turns.last?.pressed, "nothing pressed without a yes")
+        XCTAssertNil(selection.shownFeature, "nothing opened")
+        XCTAssertNil(lilBro.turns.last?.opened)
     }
 }

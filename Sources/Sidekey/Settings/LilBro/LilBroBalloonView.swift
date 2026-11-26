@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The balloon over Lil Bro (variant C): the question, his answer, the place
-/// he opened and what to ask next. Earlier questions fold under "earlier";
+/// The balloon over Lil Bro (variant C): the question, his answer and the
+/// place he opened, if any. Earlier questions fold under "earlier";
 /// the ⋯ menu hides the little guy, clears and closes.
 @MainActor
 struct LilBroBalloonView: View {
@@ -75,20 +75,9 @@ struct LilBroBalloonView: View {
 
     @ViewBuilder private var content: some View {
         if let turn = lastTurn, let reply = turn.reply {
-            LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+            LilBroReplyView(reply: reply, opened: turn.opened,
                             mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
                             actions: actions, current: true, more: controller.showMore)
-            if let pressed = turn.pressed {
-                (Text(controller.mascotVisible ? "I pressed " : "Pressed ") + Text(pressed).fontWeight(.semibold)
-                    + Text("."))
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            if let step = controller.proposal {
-                LilBroPressPrompt(action: step.action, steps: controller.proposalSteps,
-                                  confirm: controller.confirmProposal,
-                                  decline: controller.declineProposal)
-            }
             offer(after: reply)
         } else {
             // No question yet: the balloon shows only when ⋯ asked for the
@@ -97,9 +86,8 @@ struct LilBroBalloonView: View {
         }
     }
 
-    /// The disclosure where it belongs: after a question this Mac could not
-    /// answer, until answers were first turned on, or anywhere once ⋯ asked
-    /// for it — then with Not now. One line and its button; the full text
+    /// The disclosure where it belongs: after a question asked while answers
+    /// were off, or anywhere once ⋯ asked for it — then with Not now. One line and its button; the full text
     /// under Details.
     @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
         let asks = controller.turnOnAsks
@@ -117,9 +105,7 @@ struct LilBroBalloonView: View {
     }
 
     private var actions: LilBroReplyView.Actions {
-        LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
-                                turnOn: { controller.turnOnAnswers() },
-                                toggleMore: { controller.showMore.toggle() })
+        LilBroReplyView.Actions(retry: controller.retry, toggleMore: { controller.showMore.toggle() })
     }
 
     private var earlier: some View {
@@ -130,7 +116,7 @@ struct LilBroBalloonView: View {
                         + Text(turn.question).fontWeight(.semibold).foregroundStyle(MacSettingsTheme.text))
                         .font(.system(size: 11.5))
                     if let reply = turn.reply {
-                        LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+                        LilBroReplyView(reply: reply, opened: turn.opened,
                                         mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
                                         actions: .none, current: false)
                     }
@@ -150,20 +136,18 @@ struct LilBroBalloonView: View {
 }
 
 /// One reply's words: an answer with the place he opened, or why he could
-/// not answer. Earlier replies show the words only.
+/// not answer. Earlier replies show the words only. No ready-made questions
+/// and no "closest page": he opens a place only when the answer says so.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 10)
 struct LilBroReplyView: View {
     struct Actions {
-        var ask: (String) -> Void
         var retry: () -> Void
-        var open: (LilBroDestination) -> Void
-        var turnOn: () -> Void
         var toggleMore: () -> Void = {}
 
-        static let none = Actions(ask: { _ in }, retry: {}, open: { _ in }, turnOn: {})
+        static let none = Actions(retry: {})
     }
 
     let reply: LilBroReply
-    let question: String
     let opened: String?
     let mascot: Bool
     let answersOn: Bool
@@ -171,8 +155,6 @@ struct LilBroReplyView: View {
     let current: Bool
     /// The current answer's details are shown.
     var more = false
-
-    private var ask: (String) -> Void { actions.ask }
 
     /// A short answer first; the rest only on request. Earlier replies keep
     /// their first words only.
@@ -188,22 +170,22 @@ struct LilBroReplyView: View {
                         .padding(.leading, -6)
                     if more { details(answer) }
                 }
-            case .unknown:
-                // Not understood here: only the card that sends it to
-                // whytap.ai (shown under the reply), no "I only know…" and no
-                // suggested questions.
+            case .answersOff:
+                // Not sent: only the card that turns answers on and sends it
+                // (shown under the reply).
                 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
                 // Answers turned on since (no card): ask again.
                 if current, answersOn { paragraph(LilBroCopy.askAgain) }
+            case .tooShort:
+                paragraph(LilBroCopy.tooShort)
             case .offline:
                 paragraph(LilBroCopy.offline)
-                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)]) }
             case .unavailable:
                 paragraph(LilBroCopy.unavailable)
-                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)]) }
             case .limit:
                 paragraph(LilBroCopy.limit)
-                if current { LilBroChips(items: closest) }
             }
             if let opened, !isAnswer {
                 openedLine(opened)
@@ -213,7 +195,7 @@ struct LilBroReplyView: View {
 
     /// Whether an answer has more than its first paragraph to show.
     static func hasDetails(_ answer: LilBroAnswer, opened: String?) -> Bool {
-        answer.paragraphs.count > 1 || !answer.bullets.isEmpty || opened != nil || !answer.followUps.isEmpty
+        answer.paragraphs.count > 1 || !answer.bullets.isEmpty || opened != nil
     }
 
     @ViewBuilder private func details(_ answer: LilBroAnswer) -> some View {
@@ -229,9 +211,6 @@ struct LilBroReplyView: View {
             }
         }
         if let opened { openedLine(opened) }
-        if !answer.followUps.isEmpty {
-            LilBroChips(items: answer.followUps.map { q in (q, false, { ask(q) }) })
-        }
     }
 
     private func openedLine(_ opened: String) -> some View {
@@ -243,14 +222,6 @@ struct LilBroReplyView: View {
     private var isAnswer: Bool {
         if case .answer = reply { return true }
         return false
-    }
-
-    /// The closest page when whytap.ai cannot answer: one button, not a list.
-    private var closest: [(String, Bool, () -> Void)] {
-        let open = actions.open
-        return LilBroLocalGuide.closestPlaces(for: question).prefix(1).map { place in
-            ("Open \(place.title)", false, { open(place) })
-        }
     }
 
     private func paragraph(_ text: String) -> some View {
@@ -266,7 +237,7 @@ struct LilBroReplyView: View {
 /// Details, readable before the button is pressed. Nothing is sent before it.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 struct LilBroOffer: View {
-    /// After a question this Mac did not understand: the button also asks it.
+    /// After a question asked while answers were off: the button also asks it.
     var asks = false
     let turnOn: () -> Void
     var notNow: (() -> Void)? = nil
@@ -275,13 +246,13 @@ struct LilBroOffer: View {
     enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
     static let id = "lilBro.offer"
 
-    /// Answers off: after a question this Mac could not answer it is the
-    /// whole reply; once ⋯ asked for it, it shows after any reply, with Not
-    /// now. Never before a question by itself.
+    /// Answers off: after a question asked meanwhile it is the whole reply;
+    /// once ⋯ asked for it, it shows after any reply, with Not now. Never
+    /// before a question by itself.
     static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
         guard !answersOn else { return .none }
         if consentShown { return .turnOnOrNotNow }
-        return reply?.isUnknown == true ? .turnOn : .none
+        return reply?.isAnswersOff == true ? .turnOn : .none
     }
 
     /// The buttons it shows, in order.
@@ -291,7 +262,7 @@ struct LilBroOffer: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
-            Text(asks ? LilBroCopy.offerLineUnknown : LilBroCopy.offerLine)
+            Text(asks ? LilBroCopy.offerLineOff : LilBroCopy.offerLine)
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
@@ -318,33 +289,7 @@ struct LilBroOffer: View {
     }
 }
 
-/// "One step left: … Press it?" He presses only after Yes; the step runs the
-/// same action as the row's own button.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-struct LilBroPressPrompt: View {
-    let action: FeatureSetupAction
-    var steps = 1
-    let confirm: () -> Void
-    let decline: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            (Text(LilBroCopy.lead(steps) + " ") + Text(action.title).fontWeight(.semibold) + Text(". ")
-                + Text(LilBroCopy.consequence(of: action)) + Text(" Press it?"))
-                .font(.system(size: 12.5))
-                .foregroundStyle(MacSettingsTheme.text)
-                .fixedSize(horizontal: false, vertical: true)
-            LilBroChips(items: [(LilBroCopy.yes, true, confirm), (LilBroCopy.no, false, decline)])
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Press it?")
-    }
-}
-
-/// Rounded suggestion buttons that wrap to the balloon's width.
+/// Rounded buttons (Try again, Turn on and ask) that wrap to the balloon's width.
 struct LilBroChips: View {
     let items: [(String, Bool, () -> Void)]
 

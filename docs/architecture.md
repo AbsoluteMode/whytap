@@ -1560,43 +1560,35 @@ places them with the tail in one pass through LilBroBalloonLayout, inside the
 window at every edge. Opened before any question, only a one-line greeting in
 his slang (`LilBroCopy.greetings`, in turn) and the reply field show
 (`showsBalloon`); the balloon comes with the first answer and shows a short
-answer and one action, the rest behind More (`showMore`). Asked where something is, he runs to the sidebar row and then the
+answer, the rest behind More (`showMore`). No scripted scenarios (REV 10,
+2026-11-26): every question goes to whytap.ai and the model decides whether
+to answer in the balloon or open a place; there is no keyword guide on this
+Mac, no ready-made questions and no setup step he presses. When the answer
+names a place, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers come from whytap.ai by default (`lilBro.answersFromWhytap`,
+same balloon. Answers from whytap.ai are on by default (`lilBro.answersFromWhytap`,
 on unless the person turned it off; the maintainer's decision of 2026-11-26).
-Turned off with ⋯, they come from LilBroLocalGuide (the feature catalog and tab
-names, on this Mac, no network; a keyword guide, not an English parser, whose
-contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
-there as its own task, see the decision's "Contract"); then a question it did
-not understand gets only the one-line disclosure, full text under Details
-(LilBroOffer), with "Turn on and ask", which turns answers on and sends that
-question; ⋯ → Turn on answers shows it with Not now. LilBroRemoteBrain posts the
+Turned off with ⋯, nothing is sent: a question gets only the one-line
+disclosure, full text under Details (LilBroOffer), with "Turn on and ask",
+which turns answers on and sends that question; ⋯ → Turn on answers shows it
+with Not now. A question under the server's three characters is not sent
+(`tooShort`). LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
 answered (questions asked while answers were off never leave the Mac, except
 the one question a person sends with Turn on and ask), with
 redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-sonnet-5-5 while it is tried out), which returns sentences, points, follow-ups and one place;
-an id the app does not have is dropped. No internet or a timeout is offline,
-429 or a spent budget is the daily limit, any other error is unavailable; each
-offers Try again (offline, unavailable) and the closest pages the local guide
-finds, and changes nothing. ⋯ turns answers off again. On a feature's screen
-the "What it needs" rows report themselves with lilBroNeed (FeatureNeedsGroup):
-their feature, spot and, while unmet, the step they offer (LilBroPressable;
-a model row showing its picker is not a button and is never pressed). After
-guiding to a feature he offers that feature's first required step — "One step
-left: Download free model. It downloads about 470 MB to this Mac. Press it?"
-(or "3 steps left. First: …") — and presses it only after "Yes, press it": he
-runs to the row, punches it, checks that the same feature's screen still
-offers the very step, and calls the row's current FeatureScreenContext.perform.
-"I'll do it", closing, a new question, leaving the feature or the step being
-done or changed meanwhile withdraw the offer or press nothing.
-Tabs and API keys never offer a press. The sprite sheet is Resources/LilBro, embedded
+claude-sonnet-5-5 while it is tried out), which returns sentences, points and,
+only when the person asked to go or set something up, one place; an id the
+app does not have is dropped. No internet or a timeout is offline, 429 or a
+spent budget is the daily limit, any other error is unavailable; each is a
+short message (offline and unavailable with Try again) and changes nothing.
+The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md
 

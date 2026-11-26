@@ -849,12 +849,25 @@ final class LilBroControllerTests: XCTestCase {
             tab.y = nil
             tab.report()
             XCTAssertNil(controller.target, "scrolled away: no outline left behind \(mode)")
+            if mode.mascot { XCTAssertEqual(controller.feet, CGPoint(x: 176, y: 471), "waits at home \(mode)") }
             tab.y = 180
             tab.report()
             XCTAssertEqual(controller.target, tab.rect, "back: outlined where it is now \(mode)")
+            if mode.mascot {
+                XCTAssertEqual(controller.feet.y, 181, "and he is back on it \(mode)")
+                XCTAssertEqual(controller.pose, .point, "\(mode)")
+            } else {
+                XCTAssertEqual(controller.feet, CGPoint(x: 176, y: 471), "hidden: nobody moves \(mode)")
+            }
             tab.y = 120
             tab.report()
             XCTAssertEqual(controller.target, tab.rect, "follows its scrolling \(mode)")
+            if mode.mascot { XCTAssertEqual(controller.feet.y, 121, "\(mode)") }
+            // Cleared, the row coming back brings neither back.
+            controller.clear()
+            tab.y = 200
+            tab.report()
+            XCTAssertNil(controller.target, "\(mode)")
         }
     }
 
@@ -909,5 +922,23 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertEqual(selection.selectedTab, .hotkeys)
         XCTAssertNil(controller.target)
         XCTAssertNil(controller.turns.last?.opened)
+    }
+
+    /// Leaving Hotkeys while it is still laying out, before the row is
+    /// focused: the person's tab stays and nothing is claimed (ticket 630).
+    func test_leaving_the_tab_while_it_opens_keeps_the_persons_choice() async {
+        for mode in modes {
+            let (controller, selection, tab) = leading(mascot: mode.mascot, reduceMotion: mode.reduceMotion)
+            selection.select(.permissions)
+            tab.onWait = {
+                if selection.selectedTab == .hotkeys, selection.focusedRow == nil { selection.select(.other) }
+            }
+            controller.ask("how do I set a hotkey to start a meeting")
+            await until { controller.bubble == .full && !controller.isBusy }
+            XCTAssertEqual(selection.selectedTab, .other, "never reselected \(mode)")
+            XCTAssertNil(selection.focusedRow, "\(mode)")
+            XCTAssertNil(controller.target, "\(mode)")
+            XCTAssertNil(controller.turns.last?.opened, "\(mode)")
+        }
     }
 }

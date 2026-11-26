@@ -1570,9 +1570,11 @@ opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
 and outlines it; without the little guy only the outline shows. The outline
 is the led row's current place (`leadRow`): gone while it is scrolled away,
 back when it returns, ended with the focus (another tab, Clear, Turn off
-answers, a new question, closing). A row he cannot show (the person left the
-tab meanwhile, or it never reports) outlines nothing, leaves their tab and is
-not said to be opened. When the
+answers, a new question, closing). With the little guy he waits at home while
+it is away and is back on it when it returns. A row he cannot show (the
+person left the tab meanwhile, even while it was still laying out, or it
+never reports) outlines nothing, leaves their tab and is not said to be
+opened; the guide never selects the tab again after its sidebar stop. When the
 answer names another place, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —

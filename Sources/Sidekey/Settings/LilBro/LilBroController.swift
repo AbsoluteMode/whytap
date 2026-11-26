@@ -209,16 +209,22 @@ final class LilBroController: ObservableObject {
     }
 
     /// The outline is the led row's place now; with the little guy he stands
-    /// on it while it shows and waits at home while it is scrolled away.
+    /// on it while it shows, waits at home while it is scrolled away and is
+    /// back on it when it returns, for as long as the lead lasts (builder
+    /// review of #493, ticket 630).
     private func followLeadRow(_ row: LilBroRow) {
         guard leadIsActive(row) else { return endLead() }
         let rect = map.visible(.row(row.id))
         if target != rect { target = rect }
         guard mascotVisible else { return }
-        if let rect, holding {
+        if let rect {
             let perch = LilBroPlanner.perch(on: rect)
             if abs(perch.y - feet.y) >= 1 || abs(perch.x - feet.x) >= 1 { feet = perch }
-        } else if rect == nil, holding {
+            if !holding {
+                holding = true
+                setPose(.point)
+            }
+        } else if holding {
             holding = false
             feet = map.homeStand
             setPose(.idle)
@@ -605,7 +611,11 @@ final class LilBroController: ObservableObject {
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
     private func landing(for destination: LilBroDestination) async -> CGRect? {
         guard case .row(let row) = destination else { return firstPaneBlock() }
-        selection.focus(row)
+        // The person's tab wins: if they left the row's tab while it opened,
+        // the lead ends here and their choice stays (builder review of #493,
+        // ticket 630). Only the focus is set, never the tab again.
+        guard selection.selectedTab == row.tab.resolved else { return nil }
+        selection.focusedRow = row.id
         // The tab scrolls to it (0.3 s); the row counts once it stands still,
         // while it is still the focused row on its own tab. Never another
         // card instead.

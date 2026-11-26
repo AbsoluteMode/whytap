@@ -52,7 +52,12 @@ final class NotifyScriptSupervisor: ObservableObject {
     private var rate: [String: (Date, Int)] = [:]
     private var sleepObservers: [NSObjectProtocol] = []
 
-    init(directory: URL, hub: LocalNotificationHub) { self.directory = directory; self.hub = hub }
+    /// Seconds per unit of the failure backoff (2, 4, 8 ... capped at 60 units); tests shorten it.
+    private let backoffUnit: TimeInterval
+
+    init(directory: URL, hub: LocalNotificationHub, backoffUnit: TimeInterval = 1) {
+        self.directory = directory; self.hub = hub; self.backoffUnit = backoffUnit
+    }
     func start() {
         guard !running else { return }
         running = true; generation += 1
@@ -187,7 +192,7 @@ final class NotifyScriptSupervisor: ObservableObject {
     private func retry(_ script: NotifyScript, failed: Bool) {
         let count = failed ? min(6, (failures[script.id] ?? 0) + 1) : 0
         failures[script.id] = count
-        let delay = failed ? min(60, pow(2, Double(count))) : (script.intervalSeconds ?? 5)
+        let delay = failed ? min(60, pow(2, Double(count))) * backoffUnit : (script.intervalSeconds ?? 5)
         retries[script.id]?.cancel()
         retries[script.id] = Task { [weak self] in
             do { try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000)) } catch { return }

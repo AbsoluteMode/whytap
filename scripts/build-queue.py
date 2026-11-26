@@ -185,6 +185,20 @@ def protected_tests(value):
     return sorted(set(tests))
 
 
+def reenter_review(db, ticket_id, keep_place, note, deliver=False):
+    """The one way an existing ticket's head re-enters review (`set --status queued`,
+    or the author resubmitting a head returned without review). Its FIFO place
+    (queued_at) is kept or moved to the end; its head-observation stamp
+    (submitted_at) is always now, so a remote snapshot started before the return
+    never judges it. Pending protected-data tests are validated again from the start."""
+    stamp = now()
+    db.execute("UPDATE tickets SET status='queued', note=?, updated_at=?, retry='', "
+               "auto_returned=0, protected_pending='[]', submitted_at=?, "
+               "queued_at=CASE WHEN ? THEN queued_at ELSE ? END WHERE id=?",
+               (note, stamp, stamp, int(keep_place), stamp, ticket_id))
+    event(db, ticket_id, "queued", note, deliver=deliver)
+
+
 # ---------------------------------------------------------------------------
 # Preview lane and release batches.
 # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md,
@@ -425,14 +439,13 @@ def start_release(db, by, note, actor):
         return None
     batch = int(config(db).get("last_batch", "0")) + 1
     db.execute("INSERT OR REPLACE INTO config VALUES ('last_batch', ?)", (str(batch),))
-    stamp = now()
     for order, item in enumerate(members, 1):
-        db.execute("UPDATE tickets SET status='queued', lane='release', batch=?, "
-                   "batch_order=?, note=?, updated_at=? WHERE id=?",
-                   (batch, order, f"Release {batch}: {by}", stamp, item["id"]))
-        event(db, item["id"], "queued", f"In release batch {batch} ({by}; relayed by {actor}). "
-              f"One review, one full suite, merge and one install follow. {note}".strip(),
-              deliver=True)
+        db.execute("UPDATE tickets SET lane='release', batch=?, batch_order=? WHERE id=?",
+                   (batch, order, item["id"]))
+        reenter_review(db, item["id"], True,
+                       f"In release batch {batch} ({by}; relayed by {actor}). One review, one "
+                       f"full suite, merge and one install follow. {note}".strip(),
+                       deliver=True)
     return {"batch": batch, "tickets": [t["id"] for t in members]}
 
 
@@ -479,10 +492,8 @@ def preview_claim(db, args):
     active = db.execute("SELECT * FROM tickets WHERE status='previewing'").fetchone()
     if held:
         if active:  # recovered later from the start; it keeps its place
-            db.execute("UPDATE tickets SET status='queued', updated_at=? WHERE id=?",
-                       (now(), active["id"]))
-            event(db, active["id"], "queued", "Preview paused: merged work waits for its "
-                  "install first")
+            reenter_review(db, active["id"], True, "Preview paused: merged work waits for "
+                           "its install first")
         return {"claimed": False, "active": None, "held_for_install": held,
                 "rebuild": False, "train": preview_train(db)}
     if active:
@@ -858,6 +869,23 @@ def run(args):
                 if (existing["source"], existing["session"], existing["host"]) != (
                         args.source, args.session, args.host):
                     raise ValueError("This PR/head already belongs to another session")
+                newest = db.execute("SELECT MAX(id) FROM tickets WHERE pr=?",
+                                    (args.pr,)).fetchone()[0]
+                if (existing["status"] == "blocked" and existing["auto_returned"]
+                        and existing["id"] == newest):
+                    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+                    # Returned without review (a stale dependency, a moved head): the
+                    # untouched head goes back to its place without spending the PR's
+                    # resubmission priority. A head a builder reviewed and blocked stays
+                    # blocked: its fix is a new head.
+                    db.execute("UPDATE tickets SET depends_on=?, dependencies=? WHERE id=?",
+                               (json.dumps(args.depends_on), args.dependencies,
+                                existing["id"]))
+                    reenter_review(db, existing["id"], True,
+                                   "Resubmitted by its author after a return without "
+                                   "review; keeps its place")
+                    return {"created": False, "requeued": True, "builder": config(db),
+                            "ticket": ticket_json(db, existing["id"])}
                 return {"created": False, "builder": config(db),
                         "ticket": ticket_json(db, existing["id"])}
             old = db.execute("SELECT * FROM tickets WHERE pr=? AND "
@@ -1040,7 +1068,8 @@ def run(args):
                                    "status IN ('queued', 'previewing')").fetchall():
                 to_normal_lane(db, item, "the preview lane was switched off")
                 if item["status"] == "previewing":
-                    db.execute("UPDATE tickets SET status='queued' WHERE id=?", (item["id"],))
+                    reenter_review(db, item["id"], True, "The preview lane was switched off: "
+                                   "normal validation")
                 moved.append(item["id"])
             return {"moved_to_normal_lane": moved}
 
@@ -1186,20 +1215,14 @@ def run(args):
                 raise ValueError("#%d still has protected-data tests pending (%s): run them on "
                                  "main with an unlocked screen and record `protected-pending "
                                  "--passed` first" % (item["id"], ", ".join(pending)))
-            stamp = now()
-            # A ticket returned to the queue is validated again from the start.
-            clear_pending = args.status == "queued"
-            # A ticket requeued after a block goes to the end; one returned from
-            # in_progress without a block keeps its place (its queued_at).
-            requeued = args.status == "queued" and item["status"] not in ("in_progress",
-                                                                          "previewing")
+            if args.status == "queued":
+                # A ticket requeued after a block goes to the end; one returned from
+                # in_progress or previewing without a block keeps its place (its queued_at).
+                reenter_review(db, args.ticket, item["status"] in ("in_progress", "previewing"), args.note)
+                return ticket_json(db, args.ticket)
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
-            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
-                       "queued_at=CASE WHEN ? THEN ? ELSE queued_at END, "
-                       "protected_pending=CASE WHEN ? THEN '[]' ELSE protected_pending END "
-                       "WHERE id=?",
-                       (args.status, args.note, stamp, retry, requeued, stamp, clear_pending,
-                        args.ticket))
+            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=? WHERE id=?",
+                       (args.status, args.note, now(), retry, args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 

@@ -1064,24 +1064,36 @@ def returned_stale_dependencies(root, config):
     return returned
 
 
-def replace_text(path, text):
+def tail_lines(data, limit):
+    """The newest complete lines of `data` (bytes) within `limit` bytes; one line
+    longer than the limit keeps only its newest bytes. Every byte bound of the notes
+    and their archive goes through here, so non-ASCII text cannot exceed it."""
+    if len(data) <= limit:
+        return data
+    tail = data[-limit:]
+    start = tail.find(b"\n") + 1
+    return tail[start:] if 0 < start < len(tail) else tail
+
+
+def replace_bytes(path, data):
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(text)
+    temporary.write_bytes(data)
     temporary.replace(path)
 
 
 def trim_notes(root, config):
-    """Builder notes are read at every session start: above `notes_max_bytes` the file
-    keeps its newest lines (at most NOTES_KEPT_LINES and half the limit) and the older
-    lines are appended to `.old`, which keeps its newest megabyte. The archive is
-    written first, so an interruption duplicates lines instead of losing them. Runs
-    only under the session lock, so no builder session writes the notes meanwhile."""
+    """Builder notes are read at every session start: above `notes_max_bytes` (UTF-8
+    bytes on disk) the file keeps its newest lines (at most NOTES_KEPT_LINES and half
+    the limit) and the older lines are appended to `.old`, which keeps its newest
+    NOTES_ARCHIVE_MAX_BYTES. The archive is written first, so an interruption
+    duplicates lines instead of losing them. Runs only under the session lock, so no
+    builder session writes the notes meanwhile."""
     path = root / NOTES
     try:
         limit = int(config.get("notes_max_bytes") or 0)
         if limit <= 0 or not path.is_file() or path.stat().st_size <= limit:
             return False
-        lines = path.read_text(errors="replace").splitlines(keepends=True)
+        lines = path.read_bytes().splitlines(keepends=True)
         kept, size = [], 0
         for line in reversed(lines):
             if kept and (len(kept) >= NOTES_KEPT_LINES or size + len(line) > limit // 2):
@@ -1092,15 +1104,11 @@ def trim_notes(root, config):
         if not moved:
             return False  # a single line over the limit: nothing older to move
         archive = root / (NOTES + ".old")
-        older = archive.read_text(errors="replace") if archive.is_file() else ""
-        if older and not older.endswith("\n"):
-            older += "\n"
-        combined = older + "".join(moved)
-        if len(combined) > NOTES_ARCHIVE_MAX_BYTES:
-            combined = combined[-NOTES_ARCHIVE_MAX_BYTES:]
-            combined = combined[combined.find("\n") + 1:]
-        replace_text(archive, combined)
-        replace_text(path, "".join(kept))
+        older = archive.read_bytes() if archive.is_file() else b""
+        if older and not older.endswith(b"\n"):
+            older += b"\n"
+        replace_bytes(archive, tail_lines(older + b"".join(moved), NOTES_ARCHIVE_MAX_BYTES))
+        replace_bytes(path, b"".join(kept))
         log(f"builder notes trimmed to their last {len(kept)} lines")
         return True
     except (OSError, ValueError) as error:

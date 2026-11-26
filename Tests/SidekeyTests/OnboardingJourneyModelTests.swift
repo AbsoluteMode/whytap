@@ -194,6 +194,8 @@ final class OnboardingJourneyModelTests: XCTestCase {
         let beat = env.beat
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
+        // Tavily's stand-in answers after 60 ms instead of the preview's 600 ms.
+        OnboardingPreviewURLProtocol.pace = 0.1
         let tavily = TavilySettings(keys: env.keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
         let model = OnboardingJourneyModel(
             models: models, permissions: permissions,

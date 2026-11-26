@@ -10,9 +10,12 @@ import XCTest
 @MainActor
 final class SubtitleSteadyOverlayTests: XCTestCase {
     /// Returns as soon as the condition holds; the deadline only matters on a loaded Mac.
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
+    /// A deadline that runs out fails the test instead of passing late.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30,
+                      file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(condition(), "condition never became true", file: file, line: line)
     }
 
     private func text(_ translation: SubtitleCaption.Row.Translation) -> String {
@@ -26,6 +29,18 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
 
     nonisolated private static var recorded: [Event] {
         OpenAITranslateRecordedSession.events.map { ($0.stream, $0.text, $0.elapsed) }
+    }
+
+    /// The recorded session played once for the whole class: four tests check
+    /// different properties of the same frames, and one replay of its 300
+    /// events takes seconds. Every property must hold on any replay.
+    private static var recordedShots: [[SubtitleCaption.Row]]?
+
+    private func recordedSnapshots() async throws -> [[SubtitleCaption.Row]] {
+        if let shots = Self.recordedShots { return shots }
+        let shots = try await snapshots()
+        Self.recordedShots = shots
+        return shots
     }
 
     /// Plays a session event by event (the recorded OpenAI one by default)
@@ -79,11 +94,11 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
     }
 
     func testRowsOnlyAppearAtTheBottomAndNeverVanishFromTheMiddle() async throws {
-        assertSteady(try await snapshots())
+        assertSteady(try await recordedSnapshots())
     }
 
     func testTheLivePairSettlesInPlaceUnderTheSameIdentity() async throws {
-        let shots = try await snapshots()
+        let shots = try await recordedSnapshots()
         var settled = 0
         for (before, after) in zip(shots, shots.dropFirst()) {
             guard let live = before.last, live.isLive,
@@ -96,7 +111,7 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
     }
 
     func testShownTranslationOnlyGrows() async throws {
-        let shots = try await snapshots()
+        let shots = try await recordedSnapshots()
         for (before, after) in zip(shots, shots.dropFirst()) {
             for row in before {
                 guard let next = after.first(where: { $0.id == row.id }) else { continue }
@@ -192,7 +207,7 @@ final class SubtitleSteadyOverlayTests: XCTestCase {
 
     /// The recorded session: every settled translation keeps an original.
     func testEveryRecordedTranslationKeepsAnOriginal() async throws {
-        let shots = try await snapshots()
+        let shots = try await recordedSnapshots()
         let rows = try XCTUnwrap(shots.last)
         XCTAssertFalse(rows.filter { !$0.isLive }.contains { $0.source.isEmpty && !text($0.translation).isEmpty })
     }

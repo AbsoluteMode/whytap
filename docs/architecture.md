@@ -2049,8 +2049,17 @@ denies after a relaunch; if the seal cannot be written it is removed. Settings s
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
-with no suspension before the action. Settings -> Integrations -> Coding tools has a switch per
-tool; the gate reads the answer before a request and again before its
+with no suspension before the action. Settings -> Integrations -> Coding tools always
+lists Claude Code and Codex (CodingToolsAccess, presence read through
+CaseClientSetup.presence: installed, and a `whytap` MCP entry already there),
+one switch each, grey with "Not installed on this Mac" for a tool that is not
+found. On runs the same client setup as Case -> Connect and the onboarding
+(CaseClientSetup.connect: the `whytap` command and the canonical MCP entry; a
+person's own `whytap` entry is left as it is and counts) and, once the entry is
+there, records Yes in HarnessAccessStore; Connected means entry plus Yes. Off
+records No and leaves the entry. Other apps with an answer (a live dictation
+client) keep a switch per answer below. WHY:
+.project-docs/decisions/2026-11-26-coding-tools-switches.md The gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,

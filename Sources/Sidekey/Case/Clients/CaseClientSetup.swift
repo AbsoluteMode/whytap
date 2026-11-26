@@ -116,6 +116,17 @@ final class CaseClientSetup: CaseClientConfiguring {
         }.value
     }
 
+    /// Whether `client` is on this Mac and already has a `whytap` MCP entry.
+    /// Read only: nothing is written and no client setting changes.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    func presence(of client: CaseKnownClient) async -> (installed: Bool, configured: Bool) {
+        guard let connector = connectors[client] else { return (false, false) }
+        return await Task.detached {
+            let installed = connector.isInstalled()
+            return (installed, installed && connector.isConfigured())
+        }.value
+    }
+
     func connect(_ identity: CaseAppIdentity) async -> CaseClientSetupReport {
         guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
             return CaseClientSetupReport(problems: [Self.helperMissingMessage])

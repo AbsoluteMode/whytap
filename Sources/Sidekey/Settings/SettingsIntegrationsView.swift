@@ -4,6 +4,8 @@ import SwiftUI
 @MainActor
 struct SettingsIntegrationsView: View {
     @ObservedObject var model: BackupViewModel = .shared
+    /// Claude Code and Codex; tests pass fixed answers.
+    let codingTools: CodingToolsAccess
     @State private var showToken = false
     @State private var token = ""
 
@@ -63,9 +65,7 @@ struct SettingsIntegrationsView: View {
                 // Coding tools (Claude Code, Codex) moved here from the
                 // removed Agents tab: the plugin cannot grant itself access.
                 // WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md
-                if let harnessAccess = HarnessAccessStore.active {
-                    HarnessAccessSettingsSection(store: harnessAccess)
-                }
+                HarnessAccessSettingsSection(tools: codingTools)
             }
             .foregroundStyle(MacSettingsTheme.text)
             .padding(.horizontal, 24).padding(.vertical, 22)

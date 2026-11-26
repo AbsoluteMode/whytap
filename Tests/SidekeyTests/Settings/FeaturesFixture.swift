@@ -177,7 +177,8 @@ struct FeaturesFixture {
             selection: selection, agentModeViewModel: agent,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
-            featuresEnvironment: environment)
+            featuresEnvironment: environment,
+            codingTools: .fixed())
     }
 
     /// Draws `view` in a window that never reaches the screen and returns the

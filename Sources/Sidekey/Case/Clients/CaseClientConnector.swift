@@ -14,6 +14,9 @@ protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
+    /// A `whytap` MCP entry is in the client's settings, Whytap's or the
+    /// person's own (read only).
+    func isConfigured() -> Bool
     /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
     /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
     /// read for certain, throws `.configuredManually` or `.unreadableConfig`

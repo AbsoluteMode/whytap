@@ -233,7 +233,7 @@ def responsive(kind, alt, width):
 # (.project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md). The
 # keys line names only the keys this set uses, without plan or free claims.
 # Reviewed monthly together with the offers.
-SETUP_CHECKED = "2026-11-22"
+SETUP_CHECKED = "2026-11-26"
 SPEECH = "Scribe v3 Live"
 MODEL = "Claude Sonnet 5.5"
 SETUP_KEYS = [("elevenlabs", None, "ElevenLabs"), ("claude-code", "#d97757", "Anthropic"),
@@ -304,7 +304,8 @@ def setup_alt():
 # wrap one under the other on a narrow one.
 # WHY: .project-docs/decisions/2026-11-21-free-api-report.md
 PLANS_TITLE = "Already paying for an OpenAI or Anthropic subscription?"
-PLAN_ORDER = ["openai", "claude-code"]  # as the title names them
+PLAN_ORDER = ["model-openai", "claude-code"]  # as the title names them
+PLAN_MARK = {"model-openai": "openai"}  # the app renamed this asset; the card keeps its published mark
 PLAN_LOGO = {"claude-code": "#d97757"}  # Anthropic's mark in its colour, as in My setup
 PLAN_SIZE = {"wide": (410, 76), "phone": (300, 64)}
 
@@ -324,7 +325,7 @@ def plan_card(o, theme, layout):
     color = PLAN_LOGO.get(o["assetName"], c["ink"])
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
   <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="14" fill="{c['bg']}" stroke="{c['border']}"/>
-  {logo(o["assetName"], color, pad, h / 2 - ls / 2, ls)}
+  {logo(PLAN_MARK.get(o["assetName"], o["assetName"]), color, pad, h / 2 - ls / 2, ls)}
   <text x="{pad + ls + 10}" y="{h / 2 + ns * 0.36:.1f}" font-family="{FONT}" font-size="{ns}" font-weight="600" fill="{c['ink']}">{e(o['provider'])}</text>
   <text x="{w - pad}" y="{h / 2 + (4 if wide else 3)}" text-anchor="end" font-family="{FONT}" font-size="{amt}" font-weight="700" fill="{c['ink']}">{e(o['allowance'])}</text>
   <text x="{w - pad}" y="{h / 2 + (22 if wide else 18)}" text-anchor="end" font-family="{FONT}" font-size="{cad}" fill="{c['sub']}">{e(o['cadence'])}</text>

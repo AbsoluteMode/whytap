@@ -31,6 +31,7 @@ final class MeetingDetectorTests: XCTestCase {
     final class VirtualClock: MeetingDetectorClocking, @unchecked Sendable {
         private let lock = NSLock()
         private var current: Date
+        private var reads = 0
 
         init(start: Date = Date(timeIntervalSince1970: 0)) {
             self.current = start
@@ -38,7 +39,13 @@ final class MeetingDetectorTests: XCTestCase {
 
         func now() -> Date {
             lock.lock(); defer { lock.unlock() }
+            reads += 1
             return current
+        }
+
+        var readCount: Int {
+            lock.lock(); defer { lock.unlock() }
+            return reads
         }
 
         func advance(_ seconds: TimeInterval) {
@@ -412,21 +419,30 @@ final class MeetingDetectorTests: XCTestCase {
         let stream = detector.events
         detector.subscribe()
         defer { Task { await detector.stop() } }
-        try? await Task.sleep(nanoseconds: 50_000_000)
 
-        mic.feed(true)
-        await Task.yield()
+        // With the VAD stream idle and no frontmost detector, the virtual
+        // clock is read as the mic consumer handles the edge. Both this
+        // test and the consumer run on the main actor.
+        func deliverMicEdge(_ active: Bool) async -> Bool {
+            let previousReads = clock.readCount
+            mic.feed(active)
+            let deadline = ContinuousClock.now + .seconds(2)
+            while clock.readCount == previousReads && ContinuousClock.now < deadline {
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+            return clock.readCount > previousReads
+        }
+
+        guard await deliverMicEdge(true) else { return XCTFail("Initial mic edge was not consumed") }
         await feedVADChunks(true, count: 20, vad: vad, clock: clock)
         let firstBatch = await collectEvents(from: stream, count: 1, within: 2.0)
         XCTAssertEqual(firstBatch.count, 1)
 
         detector.engageCooldown()
-        mic.feed(false)
-        await Task.yield()
+        guard await deliverMicEdge(false) else { return XCTFail("Mic release was not consumed") }
         clock.advance(0.5)
 
-        mic.feed(true)
-        await Task.yield()
+        guard await deliverMicEdge(true) else { return XCTFail("Reconnect edge was not consumed") }
         await feedVADChunks(true, count: 20, vad: vad, clock: clock)
 
         // Returns at the event; 2 s ran out under a loaded parallel run.

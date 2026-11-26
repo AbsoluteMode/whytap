@@ -106,11 +106,21 @@ final class SecureInputGuardTests: XCTestCase {
     }
 
     /// Cmd-Tab as macOS delivers it: ⌘ goes down while the old app is still
-    /// in front, the new app activates, ⌘ comes up.
+    /// in front, ⌘ comes up, and the switch commits right after the release.
     private func cmdTab(to app: SecureInputApp, newAppTurnsSecureInputOn: Bool = false) {
         guardian.handleFlagsChanged(.command)
         world.now += 0.2
+        guardian.handleFlagsChanged([])
+        world.now += 0.03
         if newAppTurnsSecureInputOn { world.secureOn = true }
+        switchApp(to: app)
+        world.now += 0.1
+    }
+
+    /// ⌘H and the like: the switch happens while ⌘ is still held.
+    private func switchWhileCommandHeld(to app: SecureInputApp) {
+        guardian.handleFlagsChanged(.command)
+        world.now += 0.2
         switchApp(to: app)
         guardian.handleFlagsChanged([])
         world.now += 0.1
@@ -245,10 +255,45 @@ final class SecureInputGuardTests: XCTestCase {
         settle()
         world.secureOn = true
         press(.command, for: 0.1) // ⌘C in Dia, released
+        guardian.handleMouseDown()
         switchApp(to: telegram)   // then a click on Telegram
         settle()
         XCTAssertNil(guardian.persistentBadge, "a finished ⌘ press is not Cmd-Tab")
         XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testSwitchLongAfterAnUnrelatedCommandPressNamesNobody() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command)
+        guardian.handleFlagsChanged([])
+        world.now += SecureInputGuard.commandReleaseWindow + 0.5
+        switchApp(to: telegram) // something else activates it later
+        settle()
+        XCTAssertNil(guardian.persistentBadge)
+    }
+
+    func testSwitchWhileCommandIsHeldCountsAsEvidence() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        switchWhileCommandHeld(to: telegram) // ⌘H on Dia
+        settle()
+        XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
+    }
+
+    func testOneCommandPressGivesEvidenceForOneSwitchOnly() {
+        switchApp(to: telegram)
+        settle()
+        world.secureOn = true
+        cmdTab(to: dia)              // Telegram left with secure input ON: remembered
+        world.secureOn = false
+        settle()                     // ...but it let go: nothing remembered
+        world.secureOn = true        // Dia turns it on in front
+        switchApp(to: onePassword)   // a click shortly after, same ⌘ press
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "the ⌘ reading was spent on the first switch")
     }
 
     func testCmdTabHeldLongWhileChoosingStillCountsAsEvidence() {
@@ -257,8 +302,9 @@ final class SecureInputGuardTests: XCTestCase {
         world.secureOn = true
         guardian.handleFlagsChanged(.command)
         world.now += 6 // browsing the app switcher
-        switchApp(to: telegram)
         guardian.handleFlagsChanged([])
+        world.now += 0.03
+        switchApp(to: telegram)
         settle()
         XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
     }

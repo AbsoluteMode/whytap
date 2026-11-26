@@ -69,10 +69,13 @@ final class SecureInputGuard {
     private var lastFront: SecureInputApp?
     /// The modifiers held right now, from the last `flagsChanged`.
     private var heldChord: ModifierChord = []
-    /// Secure input read when ⌘ went down, and who was in front then.
-    /// Cmd-Tab is the only switch that happens while ⌘ is still held, so this
-    /// reading is evidence about the app left behind, and nothing else is.
-    private var commandDownSample: (on: Bool, frontPID: pid_t?)?
+    /// Secure input read while ⌘ was down, and who was in front when it went
+    /// down. Cmd-Tab commits on ⌘ release, so the activation may come just
+    /// after the release (`releasedAt`) or, for ⌘H, while ⌘ is held. `on`
+    /// is true only if every read while ⌘ was down saw ON.
+    private var commandSample: (on: Bool, frontPID: pid_t?, releasedAt: Date?)?
+    /// How long after ⌘ is released a switch still counts as Cmd-Tab.
+    static let commandReleaseWindow: TimeInterval = 0.5
     /// Bumped by every OFF read; a pending switch that saw one is void.
     private var offGeneration = 0
     private var lastShake: Date?
@@ -133,9 +136,9 @@ final class SecureInputGuard {
         // Every modifier change on the Mac lands here; it costs one flag read.
         let on = system.isSecureInputEnabled()
         if chord.contains(.command), !heldChord.contains(.command) {
-            commandDownSample = (on, lastFront?.pid)
-        } else if !chord.contains(.command) {
-            commandDownSample = nil
+            commandSample = (on, lastFront?.pid, nil)
+        } else if !chord.contains(.command), heldChord.contains(.command), let sample = commandSample {
+            commandSample = (sample.on && on, sample.frontPID, now)
         }
         heldChord = chord
         // A confirmed OFF, on a press or a release, ends every attribution.
@@ -161,19 +164,24 @@ final class SecureInputGuard {
     }
 
     func handleMouseDown() {
-        commandDownSample = nil
+        commandSample = nil
     }
 
     func handleActivation(_ app: SecureInputApp?) {
         let previous = lastFront
         lastFront = app
-        // Only a keyboard switch gives evidence: ⌘ still held, no click since
-        // it went down, read then with `previous` in front. A click or Dock
-        // switch, with or without ⌘ held, names nobody.
+        // Only a keyboard switch gives evidence: ⌘ held, or released at most
+        // `commandReleaseWindow` ago (Cmd-Tab commits on release), no click
+        // since it went down, read with `previous` in front. A click or Dock
+        // switch, with or without ⌘, names nobody.
+        let now = system.now()
         var wasOn: Bool?
-        if heldChord.contains(.command), let sample = commandDownSample, sample.frontPID == previous?.pid {
-            wasOn = sample.on
+        if let sample = commandSample, sample.frontPID == previous?.pid {
+            let held = heldChord.contains(.command) && sample.releasedAt == nil
+            let justReleased = sample.releasedAt.map { now.timeIntervalSince($0) <= Self.commandReleaseWindow } ?? false
+            if held || justReleased { wasOn = sample.on }
         }
+        commandSample = nil // one switch per ⌘
         let generation = offGeneration
         system.afterSwitchSettles { [weak self] in
             guard let self else { return }
@@ -275,7 +283,7 @@ final class SecureInputGuard {
     private func secureInputEnded() {
         offGeneration &+= 1
         // An OFF while ⌘ is still down: the app in front then was not holding.
-        if let sample = commandDownSample { commandDownSample = (false, sample.frontPID) }
+        if let sample = commandSample { commandSample = (false, sample.frontPID, sample.releasedAt) }
         tracker.secureInputObservedOff()
         if persistentBadge != nil || badgeMayBeShowing {
             persistentBadge = nil
@@ -302,7 +310,9 @@ final class SecureInputGuard {
     /// is remembered, so the badge leaves as soon as secure input does.
     private func updatePolling() {
         var needed = persistentBadge != nil || badgeShowing
-        if let candidate = tracker.staleCandidate, system.isRunning(candidate.pid) { needed = true }
+        // A remembered app back in front is checked again on the next switch.
+        if let candidate = tracker.staleCandidate, candidate.pid != lastFront?.pid,
+           system.isRunning(candidate.pid) { needed = true }
         if needed, pollTimer == nil {
             let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh(askAccessibility: false) }

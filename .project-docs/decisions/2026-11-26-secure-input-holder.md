@@ -91,10 +91,14 @@ the app the person switched to.
    app the person left when secure input was on while that app was still in
    front and still on 0.4 s after the switch (time for a well-behaved app to
    release). The only evidence of "while still in front" is a keyboard
-   switch: the reading taken when ⌘ went down with the old app in front, used
-   only if ⌘ is still held at the switch and no click happened since it went
-   down (Cmd-Tab, however long the switcher stays open, or ⌘H). The click
-   monitor notes only that a click happened, never where. A click or Dock
+   switch: secure input read when ⌘ went down with the old app in front and
+   again when it came up, used once, for the next switch, if no click
+   happened since ⌘ went down and the switch comes while ⌘ is held (⌘H) or
+   at most 0.5 s after its release. Cmd-Tab commits on the release, so its
+   activation normally arrives just after ⌘ up; both orders are accepted
+   because the real order was not measured, and a long look at the switcher
+   still counts. The click monitor notes only that a click happened, never
+   where. A click or Dock
    switch, with or without ⌘ held, has no evidence, so nobody is named: an
    attempt shows the lock. Any OFF read (a modifier press or release, the
    settling read, the reads when an attempt is decided and resolved, the 1 s
@@ -105,6 +109,10 @@ the app the person switched to.
    app left behind look guilty. One case stays ambiguous and is accepted:
    Cmd-Tab from an app that holds secure input to one that turns it on at
    once, with no OFF in between that Whytap could read, names the app left.
+   A second accepted limit: with Google on Right ⌥ (the default), Right ⌥+F
+   under secure input looks exactly like a Right ⌥ tap, since the F is never
+   seen; Google answers and nothing shakes. Left ⌥+F is unaffected. A
+   remembered app back in front gets no 1 s check until the next switch.
    The frontmost app is the holder instead when its focused element is a
    password field (Accessibility role `AXSecureTextField`, both calls with a
    0.2 s timeout, asked on an attempt or a switch whenever a remembered or
@@ -182,7 +190,10 @@ cancelled Right ⌥ hid a blocked ⌥⇧ shortcut; in the other observer order a
 real Google tap still shook). Points 2 and 3 now cover these: clicks void
 the evidence, OFF turns the held reading off, arrivals come from accepted
 gestures and are judged 0.3 s after the release with 0.05 s of slack;
-scenarios include the real gesture state machine.
+scenarios include the real gesture state machine. An independent review
+before resubmitting found that Cmd-Tab commits on ⌘ release, so requiring ⌘
+held at the switch would have lost the main case; the release window above
+fixes it, and the test Cmd-Tab now releases ⌘ before the switch.
 
 ## Rejected
 

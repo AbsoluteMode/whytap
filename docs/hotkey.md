@@ -266,8 +266,10 @@ When the frontmost app holds secure input (its password field), nothing
 shakes. A chord is judged 0.3 s after its release, so a Right ⌥ Google tap or
 any other shortcut that did arrive is never blamed. The background holder is
 the app the person left while secure input was on, read on the ⌘ that starts
-Cmd-Tab (⌘ still held, no click since); a click or Dock switch gives no such
-reading and the badge shows a lock instead of a name. macOS's
+Cmd-Tab (switch within 0.5 s of releasing ⌘, no click since it went down); a
+click or Dock switch gives no such reading and the badge shows a lock instead
+of a name. With Google on Right ⌥, Right ⌥+F looks like a Google tap and
+nothing shakes; left ⌥+F is noticed. macOS's
 `kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
 own password fields show nothing. Once secure input is seen off, every badge
 leaves at once. The badge window is exactly the pill, follows the island's

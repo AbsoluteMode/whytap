@@ -119,7 +119,12 @@ Copy kept; no breakpoint on the first accepted request after a refused search.
 The new tests fail on the previous head (11 assertions). After the builder's review of
 ticket 653: escaped tags kept literal; a sources heading, a translated heading
 or links alone after the search continue to `finish_answer`, prose with a link
-is still one request (16 new assertions fail on the previous head). `NativeAgentLowEffortTests` and
+is still one request (16 new assertions fail on the previous head). After ticket 657: an escaped opener
+is literal and never takes a real closing tag; every Markdown and HTML link
+form (titles, angle destinations, reference links and definitions, anchors)
+is removed before the check, and a heading is a short digit-free line led by
+a heading word, so "Linked to Arctic air" or a short Russian answer with a temperature stay
+answers. The builder's fixture inputs and controls are tests. `NativeAgentLowEffortTests` and
 `NativeAgentWebSearchTests` updated for the system block.
 
 After the maintainer asked for the cause of the remaining gap, pairs of the

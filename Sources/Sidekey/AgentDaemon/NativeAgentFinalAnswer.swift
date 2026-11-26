@@ -146,7 +146,7 @@ struct NativeAgentFinalAnswer {
     /// kept, outside literal spans (code, quotes) as for OpenAI's marks.
     /// WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
     static func withoutCitationTags(_ text: String) -> String {
-        guard text.contains("cite"), let regex = citationTag else { return text }
+        guard text.lowercased().contains("cite"), let regex = citationTag else { return text }
         let string = text as NSString
         let matches = regex.matches(in: text, range: NSRange(location: 0, length: string.length))
         guard matches.contains(where: { $0.range(at: 1).location != NSNotFound }) else { return text }
@@ -155,26 +155,33 @@ struct NativeAgentFinalAnswer {
         let masked = NSMutableString(string: text)
         for match in matches { masked.replaceCharacters(in: match.range, with: String(repeating: "x", count: match.range.length)) }
         let literal = literalRanges(in: masked as String)
-        // Tags pair in order: a `</cite>` is removed only when it closes an
-        // indexed tag that was removed; a plain HTML `<cite>` keeps its own.
-        var open: [Bool] = [], removed: [NSRange] = []
-        // A Markdown backslash escape (`\\<cite ...>`) makes a tag literal text.
+        // Tags pair in order. An escaped tag (`\\<cite ...>`) is literal text:
+        // a real `</cite>` never closes it, an escaped `</cite>` closes it
+        // first. A `</cite>` is removed only when it closes an indexed
+        // provider tag; a plain HTML `<cite>` keeps its own.
+        enum Opener { case indexed, plain, escaped }
+        var open: [Opener] = [], removed: [NSRange] = []
         func escaped(_ range: NSRange) -> Bool {
             var count = 0, index = range.location - 1
             while index >= 0, string.character(at: index) == 0x5C { count += 1; index -= 1 }
             return count % 2 == 1
         }
         for match in matches where !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+            let opening = match.range(at: 1).location != NSNotFound || match.range(at: 2).location != NSNotFound
             if escaped(match.range) {
-                if match.range(at: 1).location != NSNotFound || match.range(at: 2).location != NSNotFound { open.append(false) }
+                if opening { open.append(.escaped) }
+                else if open.last == .escaped { open.removeLast() }
                 // A closing tag after an indexed tag comes from the provider:
                 // a backslash before it is the end of the cited text.
-                else if let indexed = open.popLast(), indexed { removed.append(match.range) }
+                else if open.last == .indexed { open.removeLast(); removed.append(match.range) }
                 continue
             }
-            if match.range(at: 1).location != NSNotFound { open.append(true); removed.append(match.range) }
-            else if match.range(at: 2).location != NSNotFound { open.append(false) }
-            else if let indexed = open.popLast(), indexed { removed.append(match.range) }
+            if match.range(at: 1).location != NSNotFound { open.append(.indexed); removed.append(match.range) }
+            else if opening { open.append(.plain) }
+            else {
+                while open.last == .escaped { open.removeLast() }
+                if open.popLast() == .indexed { removed.append(match.range) }
+            }
         }
         var result = text as NSString
         for range in removed.sorted(by: { $0.location > $1.location }) {
@@ -281,13 +288,41 @@ struct NativeAgentFinalAnswer {
     }
 
     /// Text a Claude turn ended with after its own search: an answer only
-    /// when it says more than a sources heading or links (the search's pages
-    /// count as sources; a Markdown autolink `<https://...>` is a link too),
-    /// after its citation tags are removed.
+    /// when, with its citation tags and every link (inline, reference,
+    /// autolink, bare URL, HTML anchor) removed, a line says more than a short
+    /// sources heading ("Sources", "References", "Источники информации").
     static func answersAfterSearch(_ text: String) -> Bool {
         let prose = withoutCitationTags(text).trimmingCharacters(in: .whitespacesAndNewlines)
-        let withoutAutolinks = prose.replacingOccurrences(of: #"<https?://[^\s<>]+>"#, with: "", options: [.regularExpression, .caseInsensitive])
-        return !prose.isEmpty && prose.count <= 32_000 && hasAnswerContent(withoutAutolinks, hasSources: true)
+        guard !prose.isEmpty, prose.count <= 32_000 else { return false }
+        // Every Markdown and HTML link form is removed with its text; what is
+        // left must say something besides a sources heading.
+        var rest = prose
+        for pattern in [#"(?m)^[ \t]{0,3}\[[^\]\n]+\]:[ \t]*\S+.*$"#,          // [id]: url "title"
+                        #"(?is)<a\b[^>]*>.*?</a\s*>"#,                         // <a href>text</a>
+                        #"!?\[[^\]\n]*\]\((?:<[^>\n]*>|[^)\n]*)\)"#,          // [text](url "title"), [text](<url>)
+                        #"!?\[[^\]\n]*\]\[[^\]\n]*\]"#,                       // [text][id], [text][]
+                        #"(?i)<(?:https?|mailto):[^>\s]+>"#,                   // <https://...>
+                        #"(?i)\b(?:https?://|www\.)\S+"#] {                    // bare URLs
+            rest = rest.replacingOccurrences(of: pattern, with: " ", options: .regularExpression)
+        }
+        // A heading: no digits, at most four words, led by a heading word
+        // ("Sources", "Links for verification", "Источники информации",
+        // "Список литературы"); "Linked to ...", "Источник: ..., −2°" are answers.
+        let headingWords: Set<String> = ["source", "sources", "reference", "references", "link", "links", "bibliography",
+                                         "citation", "citations", "further", "see", "list",
+                                         "источник", "источники", "ссылка", "ссылки", "литература", "библиография",
+                                         "список", "см", "смотри", "подробнее"]
+        return rest.components(separatedBy: .newlines).contains { line in
+            let content = line.replacingOccurrences(of: #"^\s*(?:[-*+#>]+\s*|\d+[.)]\s*)*"#, with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"[*_`~]"#, with: "", options: .regularExpression)
+                .trimmingCharacters(in: CharacterSet.whitespaces.union(.punctuationCharacters).union(.symbols))
+            guard content.unicodeScalars.contains(where: { CharacterSet.letters.contains($0) || CharacterSet.decimalDigits.contains($0) })
+            else { return false }
+            let words = content.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber })
+            let heading = words.count <= 4 && !content.contains(where: { $0.isNumber || $0 == "°" })
+                && headingWords.contains(String(words.first ?? ""))
+            return !heading
+        }
     }
 
     /// A conservative format check, not a semantic verifier. Rejects URL lists

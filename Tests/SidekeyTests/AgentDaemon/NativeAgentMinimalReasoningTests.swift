@@ -768,4 +768,65 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(pending.store.streamingText, "Около −2°.")
         XCTAssertEqual(pending.bodies.count, 2, "a search without its result is not answered by text")
     }
+
+    /// Builder review, queue #657: the builder's fixture inputs and controls.
+    func testBuilderFixtureForCitationPairingAndSourceOnlyText() async throws {
+        let citations: [(String, String)] = [
+            (#"Forecast <cite index="1-9">contains the literal \<cite index="2-3"> token</cite>."#,
+             #"Forecast contains the literal \<cite index="2-3"> token."#),
+            (#"Forecast <cite index="1-9">contains the literal \<cite index="2-3">one\</cite> token</cite>."#,
+             #"Forecast contains the literal \<cite index="2-3">one\</cite> token."#),
+            (#"Forecast <cite index="1-9">ends with a backslash \</cite>."#, #"Forecast ends with a backslash \."#),
+            (#"Forecast \\<cite index="1-9">comes from one page</cite>."#, #"Forecast \\comes from one page."#),
+            (#"Syntax \\\<cite index="1-9">literal</cite>."#, #"Syntax \\\<cite index="1-9">literal</cite>."#),
+            (#"Show the escaped literal \<cite index="1-9">Title\</cite>."#, #"Show the escaped literal \<cite index="1-9">Title\</cite>."#),
+            (#"Show \<cite index="1-9">Title</cite> in the example."#, #"Show \<cite index="1-9">Title</cite> in the example."#),
+            (#"Evidence <cite index="1-9">page</cite>; ordinary <cite class="book">title</cite>."#,
+             #"Evidence page; ordinary <cite class="book">title</cite>."#),
+        ]
+        for (raw, expected) in citations {
+            XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags(raw), expected, raw)
+        }
+        let sourceOnly = [
+            "Sources", "# Sources", "Источники", "Links for verification", "<https://fixture.invalid/result>",
+            "Sources\n- [Evidence](https://fixture.invalid/result)",
+            #"Sources: [Evidence](https://fixture.invalid/result "Evidence from the search")"#,
+            "[Evidence](<https://fixture.invalid/result>)",
+            "Sources\n\n[Evidence][1]\n\n[1]: https://fixture.invalid/result",
+            "Sources\n\n[Evidence][evidence]\n\n[evidence]: <https://fixture.invalid/result>",
+            #"<a href="https://fixture.invalid/result">Evidence</a>"#,
+            "References\n- [Evidence](https://fixture.invalid/result)",
+            "Источники информации\n- <https://fixture.invalid/result>",
+            "**Sources:**\n- [Evidence](https://fixture.invalid/result)",
+            "1. <https://fixture.invalid/result>\n2. https://fixture.invalid/extra",
+            "Список литературы:\n1. [Погода](https://fixture.invalid/result)",
+        ]
+        for text in sourceOnly { XCTAssertFalse(NativeAgentFinalAnswer.answersAfterSearch(text), text) }
+        let answers = [
+            "It is raining. <https://fixture.invalid/result>",
+            #"It is raining. [Evidence](https://fixture.invalid/result "Details")"#,
+            "It is raining. [Evidence][1]\n\n[1]: https://fixture.invalid/result",
+            "Около −2°, ясно.", "−2°", "Sources say it is −2° and clear today in the city.",
+            "Ссылка не нужна, −2°", "−2°C (source: weather.com)", "Источник: Гидрометцентр, −2°", "Linked to Arctic air",
+            "Resources are scarce",
+        ]
+        for text in answers { XCTAssertTrue(NativeAgentFinalAnswer.answersAfterSearch(text), text) }
+
+        // On the real loop: a reference-link source list continues, prose with
+        // a link is one request and keeps the source card.
+        let search: [String: Any] = ["type": "server_tool_use", "id": "s1", "name": "web_search", "input": ["query": "q"]]
+        let result: [String: Any] = ["type": "web_search_tool_result", "tool_use_id": "s1",
+                                     "content": [["type": "web_search_result", "title": "E", "url": "https://fixture.invalid/result", "encrypted_content": "x"]]]
+        let listed = try await run("погода", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "end_turn", "content": [search, result, ["type": "text", "text": sourceOnly[8]]]]),
+            json(anthropicFinal("Evidence confirms the weather.")),
+        ])
+        XCTAssertEqual(listed.store.streamingText, "Evidence confirms the weather.")
+        XCTAssertEqual(listed.bodies.count, 2)
+        let prose = try await run("погода", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "end_turn", "content": [search, result, ["type": "text", "text": answers[0]]]]),
+        ])
+        XCTAssertEqual(prose.store.status, .ready, prose.store.errorMessage ?? "")
+        XCTAssertEqual(prose.bodies.count, 1)
+    }
 }

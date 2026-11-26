@@ -254,11 +254,9 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
             permissionsViewModel.refresh()
         case .notes:
             selection.ensureNotesController()?.refreshOnShow()
-        case .agentMode:
+        case .agentMode, .notifications:
             break
         case .toolbox:
-            break
-        case .notifications:
             break
         case .integrations:
             break

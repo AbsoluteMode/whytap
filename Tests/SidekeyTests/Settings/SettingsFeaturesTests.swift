@@ -75,7 +75,7 @@ final class SettingsFeaturesTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.map(\.rawValue),
                        ["features", "apiAndModels", "hotkeys", "permissions", "notes", "agentMode", "toolbox",
                         "notifications", "integrations", "backup", "other"])
-        XCTAssertEqual(SettingsWindowTab.availableCases.count, 10)
+        XCTAssertEqual(SettingsWindowTab.availableCases.count, 9)
     }
 
     func testFeaturesLinkOpensTheFeaturesTab() throws {

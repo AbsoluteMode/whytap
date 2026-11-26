@@ -126,7 +126,9 @@ final class NotifyRenderTests: XCTestCase {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(suite)
         let meetings = MeetingReadyNotifications(defaults: defaults, hub: LocalNotificationHub(directory: directory))
         let sounds = NotificationSoundSettings(defaults: defaults)
-        return SettingsNotificationsView(supervisor: supervisor, meetingNotifications: meetings, soundSettings: sounds)
+        return NotificationSourcesGroups(supervisor: supervisor, meetingNotifications: meetings, soundSettings: sounds,
+                                         imageLoader: { NotifyLogoStore.image(named: $0) })
+            .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(MacSettingsTheme.bgContent)
     }
     private func render<V: View>(_ view: V, size: NSSize, to url: URL) throws {

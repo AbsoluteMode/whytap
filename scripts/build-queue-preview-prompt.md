@@ -63,7 +63,7 @@ preview worktree, never the integration one) and `app_lock`. The helper is
    Only a fresh `status: clear` allows a normal Quit; otherwise recheck every
    30 seconds for up to 20 minutes, then `set --status queued` with the
    reason (it keeps its place). Keep the known-good bundle: if
-   `~/.whytap-builder/known-good/Whytap.app` is missing or older than the
+   `known-good/Whytap.app` in the parent folder of `worktree` is missing or older than the
    installed main-based build (not a preview), copy the installed app there
    first and verify its signature. Quit normally, verify exit, replace the
    bundle without exposing a partial copy, launch that exact path, verify one

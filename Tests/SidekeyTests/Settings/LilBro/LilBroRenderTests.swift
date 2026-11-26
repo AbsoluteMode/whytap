@@ -98,6 +98,11 @@ final class LilBroRenderTests: XCTestCase {
         }
         XCTAssertEqual(selection.shownFeature, .drop)
         XCTAssertEqual(lilBro.turns.last?.opened, "Drop")
+        // Details on request: the place he opened and what to ask next.
+        try await render(fixture, selection, lilBro, name: "answer-more-light") {
+            lilBro.showMore = true
+        }
+        XCTAssertEqual(lilBro.bubble, .full)
     }
 
     func test_hidden_he_answers_from_the_sidebar_entry() async throws {
@@ -118,7 +123,11 @@ final class LilBroRenderTests: XCTestCase {
         let lilBro = controller(fixture, selection)
         try await render(fixture, selection, lilBro, name: "offer-light") {
             lilBro.toggleFromSidebar()
+            // The greeting's small link: the whole disclosure, on request.
+            lilBro.askToTurnOnAnswers()
         }
+        XCTAssertTrue(lilBro.consentShown)
+        XCTAssertFalse(lilBro.answersFromWhytap, "the link only shows the disclosure")
         lilBro.turnOnAnswers()
         try await render(fixture, selection, lilBro, name: "offline-light") {
             lilBro.ask("how do I dictate")

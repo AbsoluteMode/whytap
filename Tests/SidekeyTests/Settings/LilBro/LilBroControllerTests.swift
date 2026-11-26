@@ -302,8 +302,9 @@ final class LilBroControllerTests: XCTestCase {
     }
 
     /// Where the disclosure shows and with which buttons: after the greeting
-    /// and an unknown reply it offers Turn on answers; asked for from ⋯ it
-    /// shows after any reply, the unknown one too, with Not now.
+    /// and an unknown reply it offers Turn on answers (one line, full text
+    /// under Details); asked for from ⋯ it shows after any reply, the
+    /// unknown one too, with Not now.
     func test_the_disclosure_always_has_not_now_when_the_menu_asked_for_it() {
         let answer = LilBroReply.answer(LilBroAnswer(paragraphs: ["Hi"]))
         let unknown = LilBroReply.unknown(suggestions: [])
@@ -316,6 +317,10 @@ final class LilBroControllerTests: XCTestCase {
         }
         XCTAssertEqual(LilBroOffer(turnOn: {}, notNow: {}).choices, ["Turn on answers", "Not now"])
         XCTAssertEqual(LilBroOffer(turnOn: {}).choices, ["Turn on answers"])
+        XCTAssertEqual(LilBroOffer(asks: true, turnOn: {}).choices, ["Turn on and ask"])
+        // Folded to one line, the full text is kept for Details.
+        XCTAssertTrue(LilBroCopy.offerLine.contains("whytap.ai"))
+        XCTAssertTrue(LilBroCopy.offer.contains("Claude Sonnet 5.5"))
         // The disclosure says what is sent again and kept.
         XCTAssertTrue(LilBroCopy.offer.contains("earlier whytap.ai questions with its answers, sent again"))
         XCTAssertTrue(LilBroCopy.offer.contains("90 days"))
@@ -814,5 +819,59 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertTrue(controller.canCatch, "walking home after closing")
         controller.catchHim()
         await until { controller.bubble == .full }
+    }
+
+    /// A short answer and one action: the details (the place he opened,
+    /// examples, what to ask next) wait behind More, and every new question
+    /// starts short again.
+    func test_an_answer_is_short_until_more_is_asked_for() async {
+        let controller = make(reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        guard case .answer(let answer) = controller.turns.last?.reply else { return XCTFail("an answer") }
+        XCTAssertFalse(controller.showMore)
+        XCTAssertTrue(LilBroReplyView.hasDetails(answer, opened: controller.turns.last?.opened))
+        controller.showMore = true
+        controller.ask("where are my keys")
+        XCTAssertFalse(controller.showMore, "a new question starts short")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.showMore = true
+        controller.close()
+        XCTAssertFalse(controller.showMore)
+        XCTAssertFalse(LilBroReplyView.hasDetails(LilBroAnswer(paragraphs: ["Here it is."]), opened: nil))
+    }
+
+    /// A question this Mac did not understand (another language): "Turn on
+    /// and ask" turns answers on and sends that one question to whytap.ai;
+    /// the earlier local question never goes.
+    func test_turn_on_and_ask_sends_only_the_question_this_mac_did_not_understand() async {
+        let remote = Remote(.answer(LilBroAnswer(paragraphs: ["Meeting Notes takes notes."],
+                                                 destination: .feature(.meetings))))
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.ask("как мне использовать митинги")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(controller.turns.last?.reply?.isUnknown, true)
+        XCTAssertTrue(controller.turnOnAsks)
+        XCTAssertTrue(remote.asked.isEmpty, "nothing is sent before the press")
+        controller.turnOnAnswers()
+        await until { controller.bubble == .full && !controller.isBusy && controller.turns.last?.reply?.isUnknown == false }
+        XCTAssertEqual(remote.asked.map(\.text), ["как мне использовать митинги"])
+        XCTAssertEqual(remote.asked.first?.history, [], "the local question stays on this Mac")
+        XCTAssertEqual(controller.turns.count, 2, "the question is asked again in its place")
+        XCTAssertEqual(controller.turns.last?.opened, "Meeting Notes")
+    }
+
+    /// Turned on from ⋯ after an answer, nothing is sent by the press itself.
+    func test_turning_answers_on_after_an_answer_sends_nothing() async {
+        let remote = Remote(.unavailable)
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertFalse(controller.turnOnAsks)
+        controller.turnOnAnswers()
+        for _ in 0..<20 { await Task.yield() }
+        XCTAssertTrue(remote.asked.isEmpty)
     }
 }

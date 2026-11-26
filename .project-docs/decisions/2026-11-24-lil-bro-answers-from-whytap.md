@@ -2,7 +2,7 @@
 id: lil-bro-answers-from-whytap-2026-11-24
 type: decision
 title: Lil Bro may ask whytap.ai, the first Whytap server the app talks to, only after the person turns it on
-summary: The "no Whytap servers" invariant gets one exception. After the person presses Turn on answers in Lil Bro's balloon, each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-haiku-5-5. Off by default, turned off from the same balloon; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
+summary: The "no Whytap servers" invariant gets one exception. After the person presses Turn on answers in Lil Bro's balloon, each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5 while it is tried out (claude-haiku-5-5 before). Off by default, turned off from the same balloon; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
 status: confirmed
 tags: [settings, lil-bro, privacy, network, invariant, ask]
 canonical_for: [lil-bro-answers]
@@ -39,12 +39,27 @@ invariant said so.
   API; a test fails if another file does.
 - **Off by default.** Nothing is sent until the person presses **Turn on
   answers** on the disclosure in his balloon, under the text: each question
-  then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen and up to
+  then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen and up to
   three earlier whytap.ai questions with its answers, sent again; whytap.ai
   keeps each question, those earlier questions and answers, and its reply for
   90 days without your address; keys, dictated text and settings
   stay on this Mac. ⋯ → Turn on answers only shows that disclosure (with Not
-  now); it never saves the choice itself. ⋯ → Turn off answers from
+  now); it never saves the choice itself.
+- **One line, details on request (REV 4, 2026-11-26, the maintainer's product
+  decision).** He found the full disclosure under three buttons "too much
+  information at once". It is now one line ("Real answers come from
+  whytap.ai (Claude Sonnet 5.5).") with Turn on answers and **Details**; the
+  full text above (required by the builder in ticket 606) is kept unchanged
+  under Details, so it can be read before the button is pressed.
+- **The model picks the place (REV 4).** The maintainer: the guide should not
+  be taught phrasings, "Haiku or Sonnet — let's use it while we try it out —
+  they should understand on their own where to go". A question in any
+  language goes to the model, which chooses the screen; the endpoint now uses
+  claude-sonnet-5-5 (whytap-landing), with the same daily and monthly caps.
+  The keyword guide stays the path while answers are off or offline. After a
+  question this Mac did not understand, the line says whytap.ai understands
+  any language and the button is **Turn on and ask**: that press turns answers
+  on and sends that one question; earlier questions stay on this Mac. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
 - **What is sent:** the question normalised as the server's
   `clean_question` does — split by Unicode scalar on Python's whitespace set
@@ -123,3 +138,4 @@ invariant said so.
   would not know why answers got worse.
 
 2026-11-24 · step 2 PR: feature/lil-bro-answers
+2026-11-26 · REV 4 (one-line disclosure, Sonnet): feature/lil-bro-smooth

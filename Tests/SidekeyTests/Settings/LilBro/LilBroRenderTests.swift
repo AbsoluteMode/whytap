@@ -25,7 +25,8 @@ final class LilBroRenderTests: XCTestCase {
     private func render(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection,
                         _ lilBro: LilBroController, name: String, dark: Bool = false,
                         size: NSSize = NSSize(width: 960, height: 560),
-                        before: (() async -> Void)? = nil) async throws {
+                        before: (() async -> Void)? = nil,
+                        after: ((NSView) async throws -> Void)? = nil) async throws {
         let host = NSHostingView(rootView: fixture.shell(selection: selection, lilBro: lilBro)
             .environment(\.colorScheme, dark ? .dark : .light))
         host.frame = NSRect(origin: .zero, size: size)
@@ -43,6 +44,7 @@ final class LilBroRenderTests: XCTestCase {
             RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
         }
         XCTAssertFalse(window.isVisible)
+        if let after { try await after(host) }
         if let directory = FeaturesFixture.renderDirectory {
             let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: bitmap)
@@ -250,5 +252,33 @@ final class LilBroRenderTests: XCTestCase {
         }
         XCTAssertTrue(lilBro.showsBalloon)
         XCTAssertTrue(lilBro.answersFromWhytap)
+    }
+
+    /// Builder review of #493 (ticket 627), in the real window without the
+    /// little guy: the outline is the row's own place, and choosing another
+    /// tab ends it. (Scrolling away and back is covered in
+    /// LilBroControllerTests through the same map updates.)
+    func test_without_him_the_row_outline_is_the_row_and_ends_with_the_tab() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let record = try XCTUnwrap(LilBroRow.named("hotkeys.meetingRecord"))
+        let lilBro = controller(fixture, selection, mascot: false, remote: LilBroFixedBrain(reply: .answer(LilBroAnswer(
+            paragraphs: ["Meeting record."], destination: .row(record)))))
+        try await render(fixture, selection, lilBro, name: "row-follow-light", before: {
+            lilBro.toggleFromSidebar()
+            lilBro.ask("how do I set a hotkey to start a meeting")
+            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+        }, after: { host in
+            XCTAssertEqual(lilBro.target, lilBro.map.visible(.row(record.id)))
+            selection.select(.other)
+            for _ in 0..<6 {
+                host.layoutSubtreeIfNeeded()
+                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+            }
+            XCTAssertNil(lilBro.target, "another tab ends it")
+            XCTAssertNil(selection.focusedRow)
+            XCTAssertNil(lilBro.leadRow)
+        })
     }
 }

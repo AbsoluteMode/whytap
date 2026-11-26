@@ -93,6 +93,12 @@ final class LilBroController: ObservableObject {
     @Published private(set) var detailsShown = false
 
     private(set) var map = LilBroMap()
+    /// The row he led to (REV 12) while its tab shows it as focused: the
+    /// outline is that row's current place, gone while it is scrolled away
+    /// and back when it returns. Cleared with the focus (another tab, Clear,
+    /// Turn off answers, a new question, closing).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder review of #493, ticket 627)
+    private(set) var leadRow: LilBroRow?
     private(set) var busy = false
     /// The spot he stands at after guiding, until the balloon closes.
     private var holding = false
@@ -173,9 +179,8 @@ final class LilBroController: ObservableObject {
             return
         }
         guard !busy, segment == nil else { return }
-        // Without the little guy the outlined row follows its scrolling.
-        if !holding, target != nil, let row = selection.focusedRow {
-            target = map.visible(.row(row))
+        if let row = leadRow {
+            followLeadRow(row)
             return
         }
         if holding {
@@ -200,6 +205,42 @@ final class LilBroController: ObservableObject {
         // At home: keep standing on the entry when the window resizes.
         if let home = map.home, abs(feet.y - (home.minY + 1)) > 2 || feet.x < home.minX || feet.x > home.maxX {
             feet = CGPoint(x: min(max(feet.x, home.minX + 16), home.maxX - 14), y: home.minY + 1)
+        }
+    }
+
+    /// The outline is the led row's place now; with the little guy he stands
+    /// on it while it shows and waits at home while it is scrolled away.
+    private func followLeadRow(_ row: LilBroRow) {
+        guard leadIsActive(row) else { return endLead() }
+        let rect = map.visible(.row(row.id))
+        if target != rect { target = rect }
+        guard mascotVisible else { return }
+        if let rect, holding {
+            let perch = LilBroPlanner.perch(on: rect)
+            if abs(perch.y - feet.y) >= 1 || abs(perch.x - feet.x) >= 1 { feet = perch }
+        } else if rect == nil, holding {
+            holding = false
+            feet = map.homeStand
+            setPose(.idle)
+        }
+    }
+
+    /// The row is still the focused one on its own tab.
+    private func leadIsActive(_ row: LilBroRow) -> Bool {
+        selection.focusedRow == row.id && selection.selectedTab == row.tab.resolved
+    }
+
+    /// Ends a row lead: no outline; with the little guy he goes back home.
+    private func endLead() {
+        guard leadRow != nil else { return }
+        leadRow = nil
+        target = nil
+        if holding {
+            holding = false
+            if mascotVisible {
+                feet = map.homeStand
+                setPose(.idle)
+            }
         }
     }
 
@@ -250,6 +291,7 @@ final class LilBroController: ObservableObject {
     func close() {
         cancelJob()
         selection.focusedRow = nil
+        leadRow = nil
         detailsShown = false
         // A question closed before its reply came is dropped, not left empty.
         if let last = turns.last, last.reply == nil { turns.removeLast() }
@@ -286,6 +328,7 @@ final class LilBroController: ObservableObject {
         let pending = busy || bubble == .thinking
         cancelJob()
         selection.focusedRow = nil
+        endLead()
         guard pending else { return }
         target = nil
         holding = false
@@ -375,6 +418,7 @@ final class LilBroController: ObservableObject {
         cancelJob()
         target = nil
         selection.focusedRow = nil
+        leadRow = nil
         detailsShown = false
         let local: LilBroReply? = !answersFromWhytap ? .answersOff
             : !LilBroRemoteBrain.sends(question) ? .tooShort : nil
@@ -405,10 +449,10 @@ final class LilBroController: ObservableObject {
             case .answer(let answer):
                 // A place only when the model said the person asked for it.
                 if let destination = answer.destination {
-                    await guide(to: destination)
+                    let arrived = await guide(to: destination)
                     // Said only once the place is really open.
                     guard !Task.isCancelled else { return }
-                    turns[index].opened = destination.title
+                    if arrived { turns[index].opened = destination.title }
                 } else if mascotVisible {
                     // Answered in words: he stays where he is.
                     setPose(.idle)
@@ -482,54 +526,78 @@ final class LilBroController: ObservableObject {
         }
     }
 
-    private func guide(to destination: LilBroDestination) async {
+    /// Runs there and opens it. False when a row could not be shown (the
+    /// person left its tab meanwhile, or it never appeared): nothing is
+    /// outlined, their tab stays, and the row is not said to be opened.
+    @discardableResult
+    private func guide(to destination: LilBroDestination) async -> Bool {
         let stops = stops(for: destination)
+        var row: LilBroRow?
+        if case .row(let led) = destination { row = led }
         // WHY: a closed balloon or a new question cancels this job; after every
         // wait it checks before pressing a row or moving him, so a cancelled
         // guide never navigates.
         guard mascotVisible, !reduceMotion() else {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             stops.forEach { $0.press() }
             await settle()
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             // Without the little guy only a row he was asked about is
             // outlined; he never moves.
-            var row = false
-            if case .row = destination { row = true }
-            guard mascotVisible || row else { return }
+            guard mascotVisible || row != nil else { return true }
             let block = await landing(for: destination)
-            guard !Task.isCancelled, let block else { return }
+            guard !Task.isCancelled else { return false }
+            guard let block else { return row == nil }
+            if let row { leadRow = row }
             target = block
             if mascotVisible {
                 feet = LilBroPlanner.perch(on: block)
                 holding = true
                 setPose(.point)
             }
-            return
+            return true
         }
         bubble = .tag("On my way…")
         for stop in stops {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             if let rect = await visibleSpot(stop.spot) {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return false }
                 await walk(to: LilBroPlanner.perch(on: rect))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return false }
                 await punch(rect)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             stop.press()
             await settle()
         }
-        guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
         let landing = await landing(for: destination)
-        guard !Task.isCancelled else { return }
-        if let block = landing {
-            await walk(to: LilBroPlanner.perch(on: block))
-            guard !Task.isCancelled else { return }
-            target = block
-            holding = true
+        guard !Task.isCancelled else { return false }
+        guard let block = landing else {
+            // A row he could not show: back at home, nothing claimed.
+            if row != nil { feet = map.homeStand }
+            setPose(.idle)
+            return row == nil
         }
+        await walk(to: LilBroPlanner.perch(on: block))
+        guard !Task.isCancelled else { return false }
+        if let row {
+            // Left its tab while he ran there: nothing to outline.
+            guard leadIsActive(row), let now = map.visible(.row(row.id)) else {
+                if selection.focusedRow == row.id { selection.focusedRow = nil }
+                feet = map.homeStand
+                setPose(.idle)
+                return false
+            }
+            leadRow = row
+            target = now
+            feet = LilBroPlanner.perch(on: now)
+        } else {
+            target = block
+        }
+        holding = true
         setPose(.point)
+        return true
     }
 
     /// Where he stands and what he outlines once the place is open: the row
@@ -538,16 +606,20 @@ final class LilBroController: ObservableObject {
     private func landing(for destination: LilBroDestination) async -> CGRect? {
         guard case .row(let row) = destination else { return firstPaneBlock() }
         selection.focus(row)
-        // The tab scrolls to it (0.3 s); the row counts once it stands still.
+        // The tab scrolls to it (0.3 s); the row counts once it stands still,
+        // while it is still the focused row on its own tab. Never another
+        // card instead.
         var last: CGRect?
         for _ in 0..<30 {
+            guard leadIsActive(row) else { return nil }
             let rect = map.visible(.row(row.id))
             if let rect, rect == last, map.platforms.contains(rect) { return rect }
             last = rect
             await sleep(0.05)
             if Task.isCancelled { return nil }
         }
-        return map.visible(.row(row.id)) ?? firstPaneBlock()
+        guard leadIsActive(row) else { return nil }
+        return map.visible(.row(row.id))
     }
 
     /// The first block of the screen now in the pane.

@@ -789,4 +789,125 @@ final class LilBroControllerTests: XCTestCase {
         controller.hideDetails()
         XCTAssertFalse(controller.showsBalloon)
     }
+
+    // MARK: Exact row (REV 12; builder review of #493, ticket 627)
+
+    private static let record = LilBroRow.named("hotkeys.meetingRecord")!
+    private static let toRecord = LilBroReply.answer(LilBroAnswer(paragraphs: ["Meeting record is the row."],
+                                                                  destination: .row(record)))
+
+    /// The Hotkeys tab as the test plays it: while the row is focused on
+    /// that tab, it reports itself at `y` (nil = scrolled away).
+    @MainActor
+    private final class HotkeysTab {
+        var y: CGFloat? = 300
+        /// Called on every wait of his; lets a test act mid-guide.
+        var onWait: (() -> Void)?
+        weak var controller: LilBroController?
+        let selection: SettingsWindowSelection
+        let base: (spots: [LilBroSpot: CGRect], blocks: [CGRect])
+        init(selection: SettingsWindowSelection, base: (spots: [LilBroSpot: CGRect], blocks: [CGRect])) {
+            self.selection = selection
+            self.base = base
+        }
+        var rect: CGRect? { y.map { CGRect(x: 245, y: $0, width: 690, height: 53) } }
+        func report() {
+            guard let controller else { return }
+            var spots = base.spots
+            var blocks = base.blocks
+            if selection.selectedTab == .hotkeys, let rect {
+                spots[.row(LilBroControllerTests.record.id)] = rect
+                if selection.focusedRow == LilBroControllerTests.record.id { blocks.append(rect) }
+            }
+            controller.update(blocks: blocks)
+            controller.update(spots: spots)
+        }
+    }
+
+    private func leading(mascot: Bool, reduceMotion: Bool) -> (LilBroController, SettingsWindowSelection, HotkeysTab) {
+        let selection = SettingsWindowSelection()
+        let tab = HotkeysTab(selection: selection, base: map())
+        let controller = make(selection: selection, remote: Remote(Self.toRecord), mascot: mascot,
+                              reduceMotion: reduceMotion,
+                              sleep: { _ in tab.onWait?(); tab.report(); await Task.yield() })
+        tab.controller = controller
+        return (controller, selection, tab)
+    }
+
+    private let modes: [(mascot: Bool, reduceMotion: Bool)] = [(true, false), (true, true), (false, false)]
+
+    func test_he_leads_to_the_row_and_its_outline_follows_it_away_and_back() async {
+        for mode in modes {
+            let (controller, selection, tab) = leading(mascot: mode.mascot, reduceMotion: mode.reduceMotion)
+            controller.ask("how do I set a hotkey to start a meeting")
+            await until { controller.bubble == .full && !controller.isBusy }
+            XCTAssertEqual(selection.selectedTab, .hotkeys, "\(mode)")
+            XCTAssertEqual(controller.target, tab.rect, "the row itself is outlined \(mode)")
+            XCTAssertEqual(controller.turns.last?.opened, "Meeting record")
+            if mode.mascot { XCTAssertEqual(controller.feet.y, 301, "he stands on it \(mode)") }
+
+            tab.y = nil
+            tab.report()
+            XCTAssertNil(controller.target, "scrolled away: no outline left behind \(mode)")
+            tab.y = 180
+            tab.report()
+            XCTAssertEqual(controller.target, tab.rect, "back: outlined where it is now \(mode)")
+            tab.y = 120
+            tab.report()
+            XCTAssertEqual(controller.target, tab.rect, "follows its scrolling \(mode)")
+        }
+    }
+
+    func test_leaving_the_tab_clear_or_turning_off_ends_the_outline() async {
+        for mode in modes {
+            for end in ["tab", "clear", "off", "ask"] {
+                let (controller, selection, tab) = leading(mascot: mode.mascot, reduceMotion: mode.reduceMotion)
+                controller.ask("how do I set a hotkey to start a meeting")
+                await until { controller.bubble == .full && !controller.isBusy }
+                XCTAssertNotNil(controller.target, "\(mode) \(end)")
+                switch end {
+                case "tab": selection.select(.other)
+                case "clear": controller.clear()
+                case "off": controller.turnOffAnswers()
+                default:
+                    (controller.remote as? Remote)?.reply = .answer(LilBroAnswer(paragraphs: ["Yes."]))
+                    controller.ask("does it work offline")
+                    await until { controller.bubble == .full && !controller.isBusy }
+                }
+                tab.report()
+                XCTAssertNil(controller.target, "no stale outline after \(end) \(mode)")
+                XCTAssertNil(selection.focusedRow, "\(end) \(mode)")
+                // The row coming back later is not outlined again.
+                tab.report()
+                XCTAssertNil(controller.target, "\(end) \(mode)")
+            }
+        }
+    }
+
+    func test_leaving_the_tab_before_the_row_shows_outlines_nothing_and_opens_nothing() async {
+        for mode in modes {
+            let (controller, selection, tab) = leading(mascot: mode.mascot, reduceMotion: mode.reduceMotion)
+            tab.onWait = {
+                // The person picks General the moment the row is focused.
+                if selection.focusedRow == Self.record.id { selection.select(.other) }
+            }
+            controller.ask("how do I set a hotkey to start a meeting")
+            await until { controller.bubble == .full && !controller.isBusy }
+            XCTAssertEqual(selection.selectedTab, .other, "their tab stays \(mode)")
+            XCTAssertNil(controller.target, "no other card outlined instead \(mode)")
+            XCTAssertNil(controller.turns.last?.opened, "the row is not said to be opened \(mode)")
+            XCTAssertNil(selection.focusedRow)
+            if mode.mascot { XCTAssertEqual(controller.feet, CGPoint(x: 176, y: 471), "home \(mode)") }
+        }
+    }
+
+    func test_a_row_that_never_shows_is_not_claimed() async {
+        let (controller, selection, tab) = leading(mascot: false, reduceMotion: false)
+        tab.y = nil
+        controller.ask("how do I set a hotkey to start a meeting")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(selection.selectedTab, .hotkeys)
+        XCTAssertNil(controller.target)
+        XCTAssertNil(controller.turns.last?.opened)
+    }
 }

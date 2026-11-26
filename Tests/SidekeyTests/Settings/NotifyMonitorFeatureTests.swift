@@ -19,7 +19,7 @@ final class NotifyMonitorFeatureTests: XCTestCase {
 
     func testNotifyAndMonitorOpenTheirOwnScreens() {
         for feature in [AppFeature.notify, .monitor] {
-            let selection = SettingsWindowSelection(selectedTab: .notifications)
+            let selection = SettingsWindowSelection(selectedTab: .other)
             selection.open(feature)
             XCTAssertEqual(selection.selectedTab, .features)
             XCTAssertEqual(selection.shownFeature, feature)

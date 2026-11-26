@@ -27,7 +27,7 @@ below, so the person pastes it into their coding agent and says what they want
 to hear about (`Settings/Features/CodingAgentPrompt.swift`). Update the prompt
 when this contract changes.
 
-**Settings → Notifications** and the Notify screen list every connected source, its logo and current
+**Settings → Features → Notify** and Notify in the island list every connected source, its logo and current
 status and an on/off switch. Turning it off stops its script
 and notifications immediately, while keeping its configuration and event history;
 the switch remains off after restarting Whytap. Agent-added sources appear
@@ -42,7 +42,7 @@ sound every 0.75 seconds. Scripts cannot enable sound through JSON output.
 
 The built-in **Meeting notes** source needs no setup. It is enabled by default
 for new and existing users and announces successful processing with Whytap's
-color app icon. Settings → Notifications offers an off switch that survives relaunch. Notify → Sources also
+color app icon. Settings → Features → Notify offers an off switch that survives relaunch. Notify → Sources also
 offers the switch. Clicking a meeting event in the island or history opens that
 exact note. Failures do not announce success; old notifications do not replay
 on launch. This source runs inside Whytap and does not use a script slot or

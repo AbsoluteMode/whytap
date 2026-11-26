@@ -1,49 +1,9 @@
 import SwiftUI
 
-@MainActor
-struct SettingsNotificationsView: View {
-    @ObservedObject private var supervisor: NotifyScriptSupervisor
-    @ObservedObject private var meetingNotifications: MeetingReadyNotifications
-    @ObservedObject private var soundSettings: NotificationSoundSettings
-    private let imageLoader: (String) -> NSImage?
-
-    init(supervisor: NotifyScriptSupervisor? = nil, meetingNotifications: MeetingReadyNotifications? = nil,
-         soundSettings: NotificationSoundSettings? = nil, imageLoader: ((String) -> NSImage?)? = nil) {
-        self.supervisor = supervisor ?? .shared
-        self.meetingNotifications = meetingNotifications ?? .shared
-        self.soundSettings = soundSettings ?? .shared
-        self.imageLoader = imageLoader ?? { NotifyLogoStore.image(named: $0) }
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Notifications")
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundStyle(MacSettingsTheme.text)
-                    Text("Choose which notifications appear in the island. Turn off a source to stop its notifications.")
-                        .font(.system(size: 12))
-                        .foregroundStyle(MacSettingsTheme.text2)
-                }
-
-                NotificationSourcesGroups(supervisor: supervisor, meetingNotifications: meetingNotifications,
-                                          soundSettings: soundSettings, imageLoader: imageLoader)
-
-                Text("Notifications appear as cards to the left of the island. Click a meeting notification to open its notes. Click the speaker to choose a sound and hear a preview; crossed out means silent. Notifications appear while Whytap is open; turning a source off keeps its setup and history.")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            .padding(.horizontal, 24)
-            .padding(.vertical, 22)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-    }
-}
-
 /// The sources Notify shows, each with its switch and sound: the built-in
-/// Meeting notes and the ones a coding agent connected. Shared by the
-/// Notifications tab and the Notify screen in Features, so both are one list.
+/// Meeting notes and the ones a coding agent connected. Shown on the Notify
+/// screen in Features, the one place for notification settings.
+// WHY: .project-docs/decisions/2026-11-26-notifications-in-notify.md
 @MainActor
 struct NotificationSourcesGroups: View {
     @ObservedObject var supervisor: NotifyScriptSupervisor

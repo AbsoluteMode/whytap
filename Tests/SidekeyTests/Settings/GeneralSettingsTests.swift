@@ -28,13 +28,14 @@ final class GeneralSettingsTests: XCTestCase {
         }
         XCTAssertEqual(SettingsWindowTab.notes.sidebarHome, .features)
         XCTAssertEqual(SettingsWindowTab.toolbox.sidebarHome, .features)
-        for tab in [SettingsWindowTab.notifications, .integrations, .backup] {
+        XCTAssertEqual(SettingsWindowTab.notifications.sidebarHome, .features)
+        for tab in [SettingsWindowTab.integrations, .backup] {
             XCTAssertEqual(tab.sidebarHome, .other)
         }
     }
 
     func testTabsThatLeftTheSidebarStillOpenFromLinks() throws {
-        for tab in ["notes", "toolbox", "notifications", "integrations", "backup"] {
+        for tab in ["notes", "toolbox", "integrations", "backup"] {
             let url = try XCTUnwrap(URL(string: "whytap://settings/\(tab)"))
             XCTAssertEqual(WhytapLink.request(for: url), .show(.settings(.tab(try XCTUnwrap(SettingsWindowTab(rawValue: tab))))))
             let selection = SettingsWindowSelection()
@@ -43,8 +44,10 @@ final class GeneralSettingsTests: XCTestCase {
         }
     }
 
-    func testGeneralLeadsToNotificationsBackupAndIntegrationsAndBack() {
-        XCTAssertEqual(SettingsOtherView.moreRows.map(\.tab), [.notifications, .backup, .integrations])
+    /// Notifications left General: every notification setting is on Notify.
+    func testGeneralLeadsToBackupAndIntegrationsAndBack() {
+        XCTAssertEqual(SettingsOtherView.moreRows.map(\.tab), [.backup, .integrations])
+        XCTAssertFalse(SettingsOtherView.moreRows.map(\.title).contains("Notifications"))
         let selection = SettingsWindowSelection(selectedTab: .other)
         for row in SettingsOtherView.moreRows {
             selection.select(row.tab)
@@ -80,7 +83,7 @@ final class GeneralSettingsTests: XCTestCase {
         let fixture = try await FeaturesFixture(.usual)
         defer { fixture.cleanUp() }
         let directory = FeaturesFixture.renderDirectory
-        for tab in [SettingsWindowTab.notifications, .backup, .integrations] {
+        for tab in [SettingsWindowTab.backup, .integrations] {
             let selection = SettingsWindowSelection(selectedTab: tab)
             try FeaturesFixture.render(fixture.shell(selection: selection),
                                        size: NSSize(width: 960, height: 560), dark: false,

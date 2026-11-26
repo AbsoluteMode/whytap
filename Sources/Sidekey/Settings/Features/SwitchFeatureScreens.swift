@@ -123,7 +123,7 @@ struct MeetingsFeatureSettings: View {
             MacGroupTitle(title: "Settings")
             MacCard {
                 MacRow(title: "Tell me when a note is ready",
-                       subtitle: "A notification by the island; clicking it opens the note. Its sound is in Notifications.") {
+                       subtitle: "A notification by the island; clicking it opens the note. Its sound is in Notify.") {
                     MacSwitch(isOn: $notifications.enabled, label: "Tell me when a note is ready")
                 }
                 MacRowSeparator()

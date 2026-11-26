@@ -113,8 +113,9 @@ final class MeetingReadyNotificationTests: XCTestCase {
             source.enabled = enabled
             soundSettings.setSound(enabled ? .glass : .none, for: MeetingReadyNotifications.sourceID)
             for width in [560, 760] {
-                let view = SettingsNotificationsView(supervisor: supervisor, meetingNotifications: source,
-                                                    soundSettings: soundSettings, imageLoader: loadImage)
+                let view = NotificationSourcesGroups(supervisor: supervisor, meetingNotifications: source,
+                                                     soundSettings: soundSettings, imageLoader: loadImage)
+                    .padding(24).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     .background(Color(white: 0.12)).environment(\.colorScheme, .dark)
                 try render(view, size: NSSize(width: width, height: 650),
                            to: destination.appendingPathComponent("meeting-settings-\(enabled)-\(width).png"))

@@ -18,7 +18,7 @@ enum NotifySetupGuide {
         Notify in hover/search until history is opened, including after a restart;
         Monitor is not highlighted. Clear All clears history and current events
         immediately, without confirmation, and keeps connected sources enabled.
-        Settings > Notifications lists all sources with individual on/off switches
+        Settings > Features > Notify lists all sources with individual on/off switches
         and a speaker icon for the notification sound: Off (default, crossed out),
         Glass, Ping or Pop. Choosing a sound plays a preview. Only new accepted arrivals sound; duplicates, restored
         history and suspended delivery stay silent. Bursts sound at most once per
@@ -110,8 +110,9 @@ enum NotifySetupGuide {
         Tell the user which source/filter was connected and what was verified.
         Don't claim a Telegram connection from a synthetic test alone.
 
-        Settings > Notifications and Notify > Sources show runtime/configuration
-        errors and an enable switch. Disabling keeps the setup and event history.
+        Settings > Features > Notify and the island's Notify > Sources show
+        runtime/configuration errors and an enable switch. Disabling keeps the
+        setup and event history.
         Removing a source deletes only its manifest and stops it; script files,
         credential-manager entries and notification history are preserved.
         """

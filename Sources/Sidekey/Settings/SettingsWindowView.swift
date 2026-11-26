@@ -288,8 +288,8 @@ struct SettingsWindowView: View {
                 screenshotProtectionChanged: screenshotProtectionChanged,
                 open: { selection.select($0) }
             )
-        case .agentMode:
-            // Never selected: `select` opens the Agent screen in Features.
+        case .agentMode, .notifications:
+            // Never selected: `select` opens the Agent's or Notify's screen in Features.
             EmptyView()
         case .toolbox:
             ToolboxSettingsView(
@@ -297,8 +297,6 @@ struct SettingsWindowView: View {
                 selection: selection,
                 deps: toolboxDeps
             )
-        case .notifications:
-            SettingsNotificationsView()
         case .integrations:
             SettingsIntegrationsView()
         case .backup:
@@ -407,7 +405,7 @@ final class SettingsWindowSelection: ObservableObject {
         let resolvedTab = selectedTab.resolved
         let availableTab = resolvedTab.isAvailable ? resolvedTab : SettingsWindowTab.defaultAvailable
         self.selectedTab = availableTab
-        if selectedTab == .agentMode { shownFeature = .agent }
+        if let feature = selectedTab.featureScreen { shownFeature = feature }
         previousNonNotesTab = availableTab == .notes ? SettingsWindowTab.defaultAvailable : availableTab
     }
 
@@ -422,8 +420,9 @@ final class SettingsWindowSelection: ObservableObject {
             previousNonNotesTab = availableTab
         }
         // The sidebar's Features row is "Features home": back to the list.
-        // A link to the old Agents tab opens the Agent's own screen.
-        if availableTab == .features { shownFeature = tab == .agentMode ? .agent : nil }
+        // A link to the old Agents or Notifications tab opens the Agent's or
+        // Notify's own screen.
+        if availableTab == .features { shownFeature = tab.featureScreen }
         selectedTab = availableTab
     }
 
@@ -449,8 +448,8 @@ final class SettingsWindowSelection: ObservableObject {
         switch selectedTab {
         case .notes: return ("Meeting Notes", .features, .meetings)
         case .toolbox: return ("Hover", .features, .hover)
-        case .notifications, .integrations, .backup: return ("General", .other, nil)
-        case .features, .apiAndModels, .hotkeys, .permissions, .other, .agentMode: return nil
+        case .integrations, .backup: return ("General", .other, nil)
+        case .features, .apiAndModels, .hotkeys, .permissions, .other, .agentMode, .notifications: return nil
         }
     }
 

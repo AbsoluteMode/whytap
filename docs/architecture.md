@@ -1416,9 +1416,7 @@ or Key not accepted notice reports the result. Failed checks keep the previous k
 Other selection menus use MacMenu/MacPopup: a 30 pt neutral control with 8 pt corners
 and one down chevron, retaining native menu tracking. Provider menus,
 Backup, display, account/key sheets and translation share this label; the
-screenshot toolbar uses its AppKit counterpart MacPopupButton. Notifications
-centers the menu and enable switch, moving Notification type into the adjacent
-question-mark tooltip/popover. Bindings and saved selections are unchanged.
+screenshot toolbar uses its AppKit counterpart MacPopupButton.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
 Settings rows explain themselves with a short subtitle that names no
@@ -1473,10 +1471,16 @@ own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
 present place. Every feature has its own screen now. The sidebar
 (SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,
 Hotkeys and General. Meeting notes and Toolbox open from Meeting Notes and
-Hover; Notifications, Backup and Integrations from General's More group
+Hover; Backup and Integrations from General's More group
 (SettingsOtherView.moreRows). Each keeps its identifier and link, its
 sidebarHome row stays selected, and SettingsBackBar above it leads back
-(SettingsWindowSelection.backLink). Drop has its own screen (DropFeatureView): the
+(SettingsWindowSelection.backLink). The former Notifications tab repeated
+Notify's list and is gone: like agentMode, the notifications id stays only
+for links, What's new and Lil Bro, and opens the Notify screen
+(SettingsWindowTab.featureScreen). WHY:
+.project-docs/decisions/2026-11-26-notifications-in-notify.md
+
+Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
 HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another
@@ -1531,7 +1535,7 @@ chevron shows the tool's ToolboxHotkeyBlock and the way to its settings; a
 tool that is off keeps its shortcut and stays in island search. Notify and
 Monitor are Not set up until an agent connected a source or a dashboard.
 Their screens show the shortcut, an Open button for the island panel, the
-sources (NotificationSourcesGroups, shared with the Notifications tab) or the
+sources (NotificationSourcesGroups: Meeting notes and the connected ones, each with its switch and sound) or the
 dashboards with freshness (a MonitorStore that is only read, never started,
 so Settings never polls servers), and CodingAgentPromptCard: the marks of
 Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
@@ -1804,8 +1808,8 @@ voice demos were removed. WHY:
 Notify includes a built-in Meeting notes source, enabled by default for new and
 existing users unless explicitly switched off. MeetingReadyNotifications sends
 successful newMeetingAvailable events to the local queue/history with the
-packaged Whytap app icon in color. Settings -> Notifications has a persistent switch; Notify ->
-Sources also has the switch. An optional internal meetingID in the archived
+packaged Whytap app icon in color. Settings -> Features -> Notify has a persistent switch and its sound; Notify ->
+Sources in the island also has the switch. An optional internal meetingID in the archived
 event opens that exact note through SettingsWindowController.selectNoteMeeting;
 scripts cannot supply this target. Failed processing does not announce success,
 and loading history does not replay old popups. WHY:
@@ -1848,7 +1852,7 @@ configured separately. WHY:
 LocalNotificationHub persists up to 500 events, deduplicates scoped IDs and keeps
 content in history; unreadable history is never silently overwritten. Notify
 opens through hover search, Toolbox and assigned feature hotkeys without
-changing saved layouts. Settings -> Notifications lists connected sources with
+changing saved layouts. Settings -> Features -> Notify lists connected sources with
 their name, logo, runtime status and individual persistent enable switches.
 Disabling stops the source and keeps its setup/history for re-enabling.
 Agents get a resolved setup-guide path on every turn.

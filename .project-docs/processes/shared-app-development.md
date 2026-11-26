@@ -68,7 +68,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-test-shards.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md]
 ---
 
 # Parallel development, one working Whytap
@@ -252,15 +252,24 @@ six hours.
 
 The LaunchAgent runs only in the logged-in graphical session: signing needs
 the unlocked login keychain, and the engine needs its own signed-in CLI. A
-sleeping, logged-out or locked Mac processes nothing; the queue survives.
+sleeping or logged-out Mac processes nothing; the queue survives.
 Before starting a session for open work, including a deferred install, the
-watcher checks the environment without a model: a locked screen (or another
-user at the console) and a five-minute load average above
-`load_limit_per_cpu` (default 2) times the CPU count only wait, logged as
-`waiting: …`. A wait counts no backoff and blames no PR; the next tick starts
-the session once the screen is unlocked and the load has fallen. Unknown
-values never block. `build-queue-watcher.py environment` prints the same check
-(exit 0 clear, 3 not clear) for the builder.
+watcher checks the environment without a model: a five-minute load average
+above `load_limit_per_cpu` (default 2) times the CPU count only waits, logged
+as `waiting: …`. A locked screen (or another user at the console) waits only
+for install sessions (and, with `validate_while_locked: false`, for
+everything): review, tests and merges go on behind it, because only the two
+protected-data tests, signing and the install need an unlocked screen (see the
+[builder quick wins decision](../decisions/2026-11-26-builder-quick-wins.md)).
+A wait counts no backoff and blames no PR; the next tick starts the session
+once the condition is gone. Unknown values never block.
+`build-queue-watcher.py environment` prints the same check (exit 0 clear, 3
+not clear) for the builder; `environment --for suite` ignores the lock. On
+each tick the watcher also returns, without a model, a queued ticket whose
+`--depends-on` PR has been blocked or cancelled for over
+`stale_dependency_minutes` (120), and keeps `whytap-builder-notes` to its
+newest lines above `notes_max_bytes` (32 KB), appending older lines to
+`whytap-builder-notes.old`.
 
 Each session reads the builder prompt from `origin/main`, so a merged rule
 change reaches the next session without reinstalling. Only a successful fetch
@@ -315,7 +324,11 @@ python3 "$queue_git_dir/exodia-build-queue.py" enqueue \
 ```
 
 Use actual values, not literal placeholders. Repeat `--acceptance` for up to
-three concrete checks. When the PR must not merge before another PR, add
+three concrete checks. A resubmission after a block keeps the PR's earlier
+place at most twice; later ones go to the end. A return made without a model
+(a moved head, a dependency blocked too long) keeps the place without using
+that priority. `status --open` lists open work and the earlier tickets of the
+same PRs instead of the whole archive. When the PR must not merge before another PR, add
 `--depends-on <that PR's URL>` (repeatable) besides describing it in
 `--dependencies`: the ticket keeps its place but is not claimed, and starts no
 builder session, until the latest ticket of that PR is `done` or
@@ -410,9 +423,10 @@ queue survives downtime.
    tests failing because of the feature itself, missing review evidence, or a
    destructive migration or access decision. Preserve every other session's
    work. Do not automatically merge unrelated open PRs. Before the full suite
-   run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`
-   from the integration worktree (main's copy, also before reactivation);
-   while it is not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
+   run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment --for suite`
+   from the integration worktree (main's copy, also before reactivation): a
+   locked screen does not stop the review, the suite or the merge; while the
+   load keeps it not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
    running the suite. If it stays not clear, do not run it: return the ticket
    with `set --status queued` and a note that the environment, not the PR,
    stopped it. Failures in a
@@ -434,9 +448,22 @@ queue survives downtime.
    common directory and names it as a follow-up in the ticket note when it is
    already listed within the last seven days; if it fails again, it is a
    finding. A test skipped with "Protected data is unavailable" ran while the
-   screen was locked; it runs again once the environment is clear, before the
-   merge, and a failure there is a finding (see the
-   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)).
+   screen was locked. Its exact name is recorded on the ticket before the
+   merge (`protected-pending --ticket <id> --tests <json>`), so an interrupted
+   session, a deferred install or a group keeps it. The merge may proceed; the
+   runtime ticket then waits as `pending_install --retry-install`, and the
+   watcher starts its install session only with an unlocked screen. That
+   session runs the recorded tests on main before packaging and records them
+   with `protected-pending --passed`; a failure there is a finding against
+   merged code, holds the install (`--hold`) and is reported to the authors.
+   `done` is refused while tests are pending (see the
+   [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)
+   and the [builder quick wins decision](../decisions/2026-11-26-builder-quick-wins.md)).
+   Cheapest checks first: review, probes, documentation checks and `swift test
+   --filter` of the touched classes; a blocking finding blocks without the
+   full suite and names a reproducing check for its whole class that the
+   author adds to the PR. A stacked PR waits for its parent (`set --status
+   queued`). The full suite is the acceptance gate of a merge candidate.
    Block a PR once with everything. Before setting `blocked`, finish the whole
    inspection: every probe and check across all paths the PR touches. Write
    **all** problems found into the ticket note as one numbered list. When a
@@ -571,9 +598,10 @@ Under the lock:
    installs; until then each runtime PR installs as before (see the
    [group install decision](../decisions/2026-11-23-builder-queue-group-install.md)).
    Otherwise, and for that install,
-   prepare a signed production candidate from clean,
-   committed main using the current local build-only packaging procedure in
-   `docs/build-and-release.md`. Building must leave the installed app running.
+   prepare a signed local candidate from clean, committed main with the
+   local install procedure in `docs/build-and-release.md`
+   (`EXODIA_LOCAL_INSTALL=1`: arm64 only, no DMG, a local manifest naming
+   the source commit). Building must leave the installed app running.
    Verify the candidate's strict code signature and compare its signing
    identity/designated requirement with the installed app before replacement.
    A mismatch means pending until reconciled, not a silent ad-hoc fallback or
@@ -594,9 +622,10 @@ Under the lock:
    branches. Do not run a publish/upload command for a local refresh.
 
    On Apple Silicon, run the candidate's `--installation-check` in native
-   arm64 only. Launching its x86_64 slice through Rosetta can trigger the macOS
-   compatibility notification. Check both slices of the universal executable
-   and CLI helper with `lipo -archs` and verify the bundle with
+   arm64 only. A local candidate has only the `arm64` slice in the executable
+   and the CLI helper (`lipo -archs`); a public release candidate keeps both
+   slices, and its x86_64 slice is never launched through Rosetta. Verify the
+   bundle with
    `codesign --verify --deep --strict --all-architectures`.
 5. Preserve the last known working signed bundle privately before replacement.
    A data migration also needs a consistent private backup using the store's
@@ -604,7 +633,9 @@ Under the lock:
    reliable backup. Never inspect user content as part of a build check.
    Check for meetings immediately before a normal quit using
    `python3 scripts/build-queue-meeting-gate.py` from checked main. Only exit 0
-   with a fresh `status: clear` permits the next step; never reuse a cached
+   with a fresh `status: clear` permits the next step (the gate first
+   refuses a locked screen or a session not in front, so every Quit, including
+   a resumed candidate, happens while someone is at the Mac); never reuse a cached
    result or replace an error/timeout with an empty activity list. Whytap's
    own audio capture (a meeting, manual Notes, dictation, Subtitles), a call
    app's microphone or output, a browser microphone, an unknown microphone

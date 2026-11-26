@@ -429,12 +429,13 @@ final class MeetingDetectorTests: XCTestCase {
         await Task.yield()
         await feedVADChunks(true, count: 20, vad: vad, clock: clock)
 
-        let secondBatch = await collectEvents(from: stream, count: 1, within: 2.0)
-        XCTAssertEqual(
-            secondBatch.count,
-            1,
-            "A meeting-context false→true edge is a reconnect even when it is quicker than the recorder auto-end threshold."
-        )
+        // Returns at the event; 2 s ran out under a loaded parallel run.
+        let secondBatch = await collectEvents(from: stream, count: 1, within: 10.0)
+        // The cooldown latched the dismissal, so the false edge says nothing
+        // and the only event can be the new trigger.
+        guard case .triggered = secondBatch.first else {
+            return XCTFail("A meeting-context false→true edge is a reconnect even when it is quicker than the recorder auto-end threshold: \(secondBatch)")
+        }
     }
 
     func test_meeting_context_end_after_trigger_emits_contextEnded() async {

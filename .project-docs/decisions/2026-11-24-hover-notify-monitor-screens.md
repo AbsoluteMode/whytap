@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/NotifyMonitorFeatureTests.swift
     confirmed_at: 2026-11-24
-related: []
+related: [2026-11-26-notifications-in-notify.md]
 ---
 
 ## Context

@@ -70,8 +70,13 @@ actor MCPClient {
     private(set) var closedError: MCPError?
     private(set) var protocolVersion: String?
     private(set) var serverName: String?
-    /// Set by `notifications/tools/list_changed`; the owner re-lists.
+    /// Set by `notifications/tools/list_changed`; cleared only by a list that
+    /// completed after the last such notice, so a failed or concurrent
+    /// re-list never leaves old tools looking current.
     private(set) var toolsChanged = false
+    private var changeEpoch = 0
+    /// Sends in flight, cancelled when their request is abandoned.
+    private var sends: [Int: Task<Void, Never>] = [:]
     private var started = false
 
     init(transport: MCPTransport) { self.transport = transport }
@@ -106,7 +111,7 @@ actor MCPClient {
 
     func listTools(timeout: TimeInterval) async throws -> [MCPToolInfo] {
         var tools: [MCPToolInfo] = [], cursor: String?
-        toolsChanged = false
+        let epoch = changeEpoch
         for _ in 0..<20 {
             let params: MCPValue? = cursor.map { .object(["cursor": .string($0)]) }
             let result = try await request("tools/list", params: params, timeout: timeout)
@@ -115,6 +120,7 @@ actor MCPClient {
             if cursor == nil || tools.count >= Self.maxTools { break }
         }
         var seen = Set<String>()
+        if changeEpoch == epoch { toolsChanged = false }
         return Array(tools.filter { seen.insert($0.name).inserted }.prefix(Self.maxTools))
     }
 
@@ -130,6 +136,8 @@ actor MCPClient {
     func close() async {
         closedError = closedError ?? .notConnected
         failAll(.cancelled)
+        sends.values.forEach { $0.cancel() }
+        sends.removeAll()
         await transport.close()
         consumer?.cancel()
     }
@@ -186,11 +194,14 @@ actor MCPClient {
         if let closedError { continuation.resume(throwing: closedError); return }
         pending[id] = continuation
         let transport = transport
-        Task { [weak self] in
+        sends[id] = Task { [weak self] in
             do { try await transport.send(data, responseID: id) }
             catch { await self?.fail(id, error as? MCPError ?? .network) }
+            await self?.sendFinished(id)
         }
     }
+
+    private func sendFinished(_ id: Int) { sends[id] = nil }
 
     /// Timeout or cancellation: stop waiting and tell the server.
     private func abandon(_ id: Int, reason: MCPError) async {
@@ -199,8 +210,16 @@ actor MCPClient {
             return
         }
         continuation.resume(throwing: reason)
-        try? await notify("notifications/cancelled", params: .object([
-            "requestId": .number(Double(id)), "reason": .string(reason == .cancelled ? "cancelled" : "timeout")]))
+        // Stop the send itself (an HTTP request in flight), then tell the
+        // server, without waiting for it.
+        sends.removeValue(forKey: id)?.cancel()
+        guard closedError == nil, let data = try? MCPValue.object([
+            "jsonrpc": .string("2.0"), "method": .string("notifications/cancelled"),
+            "params": .object(["requestId": .number(Double(id)), "reason": .string(reason == .cancelled ? "cancelled" : "timeout")])
+        ]).encoded() else { return }
+        let transport = transport
+        let notice = Task { try? await transport.send(data, responseID: nil) }
+        Task { try? await Task.sleep(nanoseconds: 3_000_000_000); notice.cancel() }
     }
 
     private func fail(_ id: Int, _ error: MCPError) {
@@ -254,6 +273,6 @@ actor MCPClient {
             if let data = try? MCPValue.object(reply).encoded() { try? await transport.send(data, responseID: nil) }
             return
         }
-        if method == "notifications/tools/list_changed" { toolsChanged = true }
+        if method == "notifications/tools/list_changed" { toolsChanged = true; changeEpoch += 1 }
     }
 }

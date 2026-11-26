@@ -28,7 +28,7 @@ enum MCPValue: Codable, Hashable, Sendable {
         case .null: try container.encodeNil()
         case .bool(let value): try container.encode(value)
         case .number(let value):
-            if value.rounded() == value, abs(value) < 1e15 { try container.encode(Int64(value)) }
+            if let whole = Int64(exactly: value) { try container.encode(whole) }
             else { try container.encode(value) }
         case .string(let value): try container.encode(value)
         case .array(let value): try container.encode(value)
@@ -56,7 +56,7 @@ enum MCPValue: Codable, Hashable, Sendable {
         switch self {
         case .null: return NSNull()
         case .bool(let value): return value
-        case .number(let value): return value.rounded() == value && abs(value) < 1e15 ? Int(value) as Any : value
+        case .number(let value): return Int(exactly: value).map { $0 as Any } ?? value
         case .string(let value): return value
         case .array(let value): return value.map(\.any)
         case .object(let value): return value.mapValues(\.any)
@@ -67,7 +67,8 @@ enum MCPValue: Codable, Hashable, Sendable {
     var object: [String: MCPValue]? { if case .object(let value) = self { return value }; return nil }
     var array: [MCPValue]? { if case .array(let value) = self { return value }; return nil }
     var bool: Bool? { if case .bool(let value) = self { return value }; return nil }
-    var int: Int? { if case .number(let value) = self, value.rounded() == value { return Int(value) }; return nil }
+    /// Only an exactly representable whole number: never traps on untrusted input.
+    var int: Int? { if case .number(let value) = self { return Int(exactly: value) }; return nil }
     subscript(key: String) -> MCPValue? { object?[key] }
 
     /// Byte-stable JSON (sorted keys), for hashing and compact display.

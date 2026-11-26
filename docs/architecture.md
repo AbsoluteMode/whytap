@@ -425,8 +425,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   back), GitHub (GitHub's remote MCP server, pasted fine-grained token or the gh
   CLI sign-in, always X-MCP-Readonly) and Jira (uvx mcp-atlassian with
   READ_ONLY_MODE) tiles, folders (FolderSource: bounded name/text search inside
-  the folder, no hidden, symlinked, build or credential-like files) and custom
-  stdio/HTTPS servers. SourcesController keeps the manifest
+  the folder through one openat/O_NOFOLLOW opener, regular files only, no hidden,
+  symlinked, build or credential-like files) and custom stdio/HTTPS servers.
+  SourceCredentialPolicy is the one credential rule for import, tiles, the custom
+  form, previews and launch: argv or address credentials are refused (and
+  masked by the same test), credentials never go over plain http, and imports
+  keep their full launch parameters (Codex multi-line arrays, cwd, project
+  folder) or are listed with a reason. SourcesController keeps the manifest
   (Application Support/whytap/assistant/sources.json, 0600, names only),
   Keychain values (integration.<source>.<NAME>), live clients and statuses.
   MCPClient is hand-written (initialize, paginated tools/list, tools/call, ping,
@@ -441,16 +446,25 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   stop 10 min, stop on sleep, at most three restarts in five minutes. Each tool
   gets a class in app code (SourceToolClassifier: user > strictest of server
   hints, write/delete name rule and one Agent-model suggestion for tools nothing
-  else settles; unknown tools are never Read) and a pin hash; a changed tool or a
-  new Read tool after the first connection waits for Approve changes. Connecting
-  runs one harmless read call as proof. The Agent gets one strict function,
+  else settles; unknown tools are never Read) and a pin hash. Imported and
+  custom servers start with every tool waiting for Approve tools (no hint or
+  model suggestion approves; nothing, not even the proof, is called before);
+  GitHub, Jira and folders are trusted on connect. Every new client re-lists and
+  re-classifies before its first call, list_changed holds all tools until a later
+  list completes, and per-source generations make disable/remove/stop revoke at
+  once; callRead rechecks generation, client, validation and pin right before
+  the call. Connecting a trusted or approved source runs one harmless read call
+  as proof. The Agent gets one strict function,
   source_call(tool, arguments), whose tool enum lists only approved Read tools
   of enabled sources (signatures in the system prompt, 10,000 characters);
   SourcesController.callRead rechecks class, approval and enablement at every
   call. NativeAgentSources.installed is set by AppDelegate (nil in tests).
   Taint: after a request receives text from a source, write_file, run_command,
-  fetch_url, Tavily and the provider's search, and app-control writes leave the
-  catalog and are refused for the rest of the request. Nothing in this path
+  fetch_url, Tavily and the provider's search, read_file/list_directory/
+  search_files, capture_screen, case_list_keys, show_actions and app control
+  leave the catalog and are refused for the rest of the request, and
+  source_call is narrowed to the sources already read. Source failures reach the
+  model only as fixed MCPError.agentMessage text. Nothing in this path
   logs. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
   Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
   server-side tool when the model has it (Anthropic web_search_20250305 with
@@ -2756,8 +2770,8 @@ input layout, including live recording and previously saved non-English titles.
    Key contents read by the hotkey tap or the Brightness keys tap are never
    logged or persisted. Agent source secrets live in Keychain under
    integration.<source>.<NAME> and reach only that server's process
-   environment (or argv, for an imported command that already used it) or its
-   own HTTPS headers; the sources path logs nothing.
+   environment or its own HTTPS headers, never argv or an address
+   (`SourceCredentialPolicy`); the sources path logs nothing.
 3. **No on-device LLM and no silent route change.** Cleanup and meeting
    processing run only on providers or endpoints the user chose; speech runs
    there or, for the microphone features, on the On this Mac model the user
@@ -2820,6 +2834,8 @@ input layout, including live recording and previously saved non-English titles.
    the Agent only tools classified Read in app code (`source_call`'s enum and
    `SourcesController.callRead`); tools that change or delete things are never
    called by a model. An outward action will run only after a confirmation in
-   a Whytap-owned surface. After a request reads source content, its file
-   edits, commands, web access and Whytap changes are refused. WHY:
+   a Whytap-owned surface. Imported and custom servers are called only after
+   the user approves their tools. After a request reads source content, only
+   that source's Read tools and the answer remain; file edits and reads,
+   commands, web access, other sources and Whytap changes are refused. WHY:
    .project-docs/decisions/2026-11-26-agent-sources.md

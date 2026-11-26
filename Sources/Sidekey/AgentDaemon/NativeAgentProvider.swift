@@ -127,13 +127,21 @@ final class NativeAgentProvider: CLIProvider {
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
         // After a source result (taint), writes, commands and web access leave
         // the catalog for the rest of the turn. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
-        var tainted = false
+        var readSources = Set<String>()
+        var tainted: Bool { !readSources.isEmpty }
+        // A tainted request may only go back to the sources it already read.
+        var sourceCatalog: AgentSourceCatalog? {
+            guard let catalog else { return nil }
+            return tainted ? NativeAgentSources.narrowed(catalog, to: readSources) : catalog
+        }
         func catalogNow() -> [[String: Any]] {
             var tools = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions && !tainted,
-                                                               appControl: appControl != nil,
+                                                               appControl: appControl != nil && !tainted,
                                                                tavilySearch: search == .tavily && !tainted)
-            if tainted { tools.removeAll { $0["name"] as? String == "fetch_url" } }
-            if let catalog { tools.insert(NativeAgentSources.definition(catalog), at: max(0, tools.count - 1)) }
+            if tainted { tools.removeAll { NativeAgentSources.closedAfterSourceRead.contains($0["name"] as? String ?? "") } }
+            if let sourceCatalog, !sourceCatalog.tools.isEmpty {
+                tools.insert(NativeAgentSources.definition(sourceCatalog), at: max(0, tools.count - 1))
+            }
             return tools
         }
         var definitions = catalogNow()
@@ -263,7 +271,8 @@ final class NativeAgentProvider: CLIProvider {
                     : appOperation.map { NativeAgentAppControl.label($0.name) } ?? Self.label(call.name)
                 continuation.yield(.toolExecuting(tool: call.name, label: label))
                 let appWrite = appOperation?.writes == true
-                let refused = tainted && NativeAgentSources.blockedAfterSourceRead(call, appWrite: appWrite)
+                let refused = tainted && NativeAgentSources.blockedAfterSourceRead(
+                    call, appControl: appControl != nil && call.name == NativeAgentAppControl.toolName)
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
                 if !refused, options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
@@ -271,11 +280,11 @@ final class NativeAgentProvider: CLIProvider {
                 let result: NativeAgentToolResult
                 if refused { result = .init(text: NativeAgentSources.taintRefusal) }
                 else if call.name == NativeAgentSources.toolName {
-                    if let catalog {
-                        let (sourceResult, read) = await NativeAgentSources.execute(call, catalog: catalog)
+                    if let sourceCatalog {
+                        let (sourceResult, readFrom) = await NativeAgentSources.execute(call, catalog: sourceCatalog)
                         result = sourceResult
-                        if read, !tainted {
-                            tainted = true
+                        if let readFrom {
+                            readSources.insert(readFrom)
                             // The provider's own search is an exit too.
                             model.builtInSearch = false
                         }

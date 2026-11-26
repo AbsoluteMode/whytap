@@ -2,40 +2,105 @@ import Foundation
 
 /// Just enough TOML to read `[mcp_servers.*]` from Codex's config.toml:
 /// tables (dotted and quoted names), `key = value` with basic and literal
-/// strings, booleans, numbers, single-line arrays and inline tables. Lines it
-/// cannot read (multi-line strings, arrays of tables) are skipped; a server
-/// entry missing because of that shows up as not importable, never as a crash.
+/// strings, booleans, numbers, arrays (also across lines, with comments and a
+/// trailing comma) and inline tables. A line it cannot read (a multi-line
+/// string, an array of tables) marks its table unreadable, so an importer can
+/// refuse that entry instead of offering it with a setting missing.
 enum MiniTOML {
-    /// Table path → key → value. Inline tables become nested `.object`s.
-    static func parse(_ text: String) -> [[String]: [String: MCPValue]] {
+    struct Document {
+        /// Table path → key → value. Inline tables become nested `.object`s.
         var tables: [[String]: [String: MCPValue]] = [[]: [:]]
+        /// Tables with at least one line that was not understood.
+        var unreadable: Set<[String]> = []
+    }
+
+    static func parse(_ text: String) -> [[String]: [String: MCPValue]] { document(text).tables }
+
+    static func document(_ text: String) -> Document {
+        var document = Document()
         var current: [String] = []
-        var multiline = false
-        for raw in text.components(separatedBy: .newlines) {
-            let line = raw.trimmingCharacters(in: .whitespaces)
-            if multiline { if line.contains("\"\"\"") || line.contains("'''") { multiline = false }; continue }
-            if line.isEmpty || line.hasPrefix("#") { continue }
-            if line.hasPrefix("[[") { current = ["\u{0}skip"]; continue }
+        let lines = text.components(separatedBy: .newlines)
+        var index = 0
+        while index < lines.count {
+            let line = stripComment(lines[index]).trimmingCharacters(in: .whitespaces)
+            index += 1
+            if line.isEmpty { continue }
+            if line.hasPrefix("[[") {
+                var scanner = Scanner(line, at: 2)
+                current = (scanner.keyPath() ?? ["\u{0}unreadable"])
+                document.unreadable.insert(current)
+                continue
+            }
             if line.hasPrefix("[") {
                 var scanner = Scanner(line, at: 1)
-                guard let path = scanner.keyPath(), scanner.skip("]") else { current = ["\u{0}skip"]; continue }
+                guard let path = scanner.keyPath(), scanner.skip("]"), scanner.atEnd else {
+                    current = ["\u{0}unreadable"]; document.unreadable.insert(current); continue
+                }
                 current = path
-                if tables[current] == nil { tables[current] = [:] }
+                if document.tables[current] == nil { document.tables[current] = [:] }
                 continue
             }
             if line.contains("\"\"\"") || line.contains("'''") {
-                let count = line.components(separatedBy: "\"\"\"").count + line.components(separatedBy: "'''").count - 2
-                if count % 2 == 1 { multiline = true }
+                document.unreadable.insert(current)
+                // Skip to the end of the multi-line string.
+                let marker = line.contains("\"\"\"") ? "\"\"\"" : "'''"
+                if line.components(separatedBy: marker).count == 2 {
+                    while index < lines.count, !lines[index].contains(marker) { index += 1 }
+                    index += 1
+                }
                 continue
             }
-            guard current.first != "\u{0}skip" else { continue }
-            var scanner = Scanner(line, at: 0)
-            guard let key = scanner.keyPath(), scanner.skip("="), let value = scanner.value() else { continue }
+            // A value may continue on the next lines (an array).
+            var joined = line
+            var parsed: (key: [String], value: MCPValue)? = parseAssignment(joined)
+            var extra = 0
+            while parsed == nil, index < lines.count, extra < 500, bracketDepth(joined) > 0 {
+                joined += " " + stripComment(lines[index]).trimmingCharacters(in: .whitespaces)
+                index += 1; extra += 1
+                parsed = parseAssignment(joined)
+            }
+            guard let (key, value) = parsed else { document.unreadable.insert(current); continue }
             // A dotted key `env.TOKEN = "x"` lands in the sub-table.
             let table = current + key.dropLast()
-            tables[table, default: [:]][key.last!] = value
+            document.tables[table, default: [:]][key.last!] = value
         }
-        return tables
+        return document
+    }
+
+    private static func parseAssignment(_ line: String) -> ([String], MCPValue)? {
+        var scanner = Scanner(line, at: 0)
+        guard let key = scanner.keyPath(), scanner.skip("="), let value = scanner.value(), scanner.atEnd else { return nil }
+        return (key, value)
+    }
+
+    /// Removes a `#` comment outside quotes.
+    static func stripComment(_ line: String) -> String {
+        var quote: Character?, escaped = false, result = ""
+        for character in line {
+            if let open = quote {
+                if escaped { escaped = false }
+                else if character == "\\" && open == "\"" { escaped = true }
+                else if character == open { quote = nil }
+            } else if character == "\"" || character == "'" { quote = character }
+            else if character == "#" { break }
+            result.append(character)
+        }
+        return result
+    }
+
+    /// Open `[` and `{` outside quotes.
+    private static func bracketDepth(_ text: String) -> Int {
+        var depth = 0, quote: Character?, escaped = false
+        for character in text {
+            if let open = quote {
+                if escaped { escaped = false }
+                else if character == "\\" && open == "\"" { escaped = true }
+                else if character == open { quote = nil }
+            } else if character == "\"" || character == "'" { quote = character }
+            else if character == "[" || character == "{" { depth += 1 }
+            else if character == "]" || character == "}" { depth -= 1 }
+        }
+        return depth
     }
 
     private struct Scanner {
@@ -43,6 +108,8 @@ enum MiniTOML {
         var index: Int
 
         init(_ text: String, at index: Int) { characters = Array(text); self.index = index }
+
+        var atEnd: Bool { var copy = self; copy.spaces(); return copy.index >= copy.characters.count }
 
         mutating func spaces() { while index < characters.count, characters[index] == " " || characters[index] == "\t" { index += 1 } }
 

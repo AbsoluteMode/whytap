@@ -46,14 +46,10 @@ struct SourceValue: Codable, Equatable, Sendable {
     var value: String?
 }
 
-enum SourceArgument: Codable, Equatable, Sendable {
-    case plain(String)
-    /// The argument's value is in Keychain under this name (`arg.N`).
-    case secret(String)
-}
-
 enum SourceTransport: Codable, Equatable, Sendable {
-    case stdio(command: String, arguments: [SourceArgument])
+    /// Arguments never hold a secret (`SourceCredentialPolicy`); `directory`
+    /// is the working folder the other app used (a project), else home.
+    case stdio(command: String, arguments: [String], directory: String?)
     case http(url: String)
     /// A folder on this Mac, searched by Whytap itself (no MCP).
     case folder(path: String)
@@ -61,6 +57,11 @@ enum SourceTransport: Codable, Equatable, Sendable {
 
 enum SourceKind: String, Codable, Sendable {
     case github, jira, imported, custom, folder
+
+    /// Built in, or a reviewed preset whose server enforces read-only
+    /// (GitHub's X-MCP-Readonly, mcp-atlassian's READ_ONLY_MODE). Tools of
+    /// any other server are usable only after the user approves them.
+    var trustedOnConnect: Bool { self == .github || self == .jira || self == .folder }
 }
 
 /// A call that proves the source answers. Arguments are a JSON object.
@@ -91,12 +92,6 @@ struct SourceRecord: Codable, Equatable, Identifiable, Sendable {
 
     var secretNames: [String] {
         environment.filter(\.secret).map(\.name) + headers.filter(\.secret).map { "header." + $0.name }
-            + argumentSecretNames
-    }
-
-    var argumentSecretNames: [String] {
-        guard case .stdio(_, let arguments) = transport else { return [] }
-        return arguments.compactMap { if case .secret(let name) = $0 { return name }; return nil }
     }
 
     /// Tools the Agent may call automatically: approved Read tools.
@@ -107,23 +102,11 @@ struct SourceRecord: Codable, Equatable, Identifiable, Sendable {
         }
     }
 
-    var changedToolCount: Int { decisions.values.filter(\.needsReview).count }
+    /// Tools waiting for the user's approval: changed tools, and every Read
+    /// tool of a server that is not trusted on connect.
+    var pendingReviewCount: Int { decisions.values.filter(\.needsReview).count }
 
-    var summary: String {
-        switch transport {
-        case .stdio(let command, let arguments):
-            let shown = arguments.map { argument -> String in
-                if case .plain(let value) = argument { return value }
-                return "••••"
-            }
-            return ([command] + shown).joined(separator: " ")
-        case .http(let url): return url
-        case .folder(let path): return (path as NSString).abbreviatingWithTildeInPath
-        }
-    }
-
-    /// Secrets passed in argv are visible to local process listings.
-    var hasArgumentSecrets: Bool { !argumentSecretNames.isEmpty }
+    var summary: String { SourceCredentialPolicy.display(transport) }
 }
 
 /// What Settings shows for a source right now.

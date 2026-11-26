@@ -57,6 +57,7 @@ struct AddSourceSheet: View {
     }
 
     private func add(_ draft: SourceDraft) {
+        if let problem = draft.credentialProblem { customProblem = problem; presetProblem = problem; return }
         Task { await controller.add(draft) }
         close()
     }
@@ -289,28 +290,44 @@ struct AddSourceSheet: View {
         if remote {
             let address = url.trimmingCharacters(in: .whitespaces)
             guard let parsed = URL(string: address), parsed.host != nil else { return .failure(Problem(message: "Enter the server’s address.")) }
-            guard MCPHTTPTransport.isAllowed(parsed) else { return .failure(Problem(message: MCPError.insecureURL.message)) }
+            _ = parsed
             draft.transport = .http(url: address)
             for line in lines {
                 guard let colon = line.firstIndex(of: ":") else { return .failure(Problem(message: "Write each header as Name: value.")) }
                 let header = line[..<colon].trimmingCharacters(in: .whitespaces)
                 let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
                 guard !header.isEmpty, !value.isEmpty else { return .failure(Problem(message: "Write each header as Name: value.")) }
+                guard header.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }) else {
+                    return .failure(Problem(message: "Write each header as Name: value."))
+                }
+                guard SourceCredentialPolicy.isPlainValueAcceptable(value) else {
+                    return .failure(Problem(message: "A value is too long."))
+                }
                 draft.headers.append(SourceValue(name: header, secret: true, value: nil))
                 draft.secrets["header." + header] = value
             }
+            if let problem = draft.credentialProblem { return .failure(Problem(message: problem)) }
         } else {
             let words = splitCommand(command)
             guard let executable = words.first else { return .failure(Problem(message: "Enter the command that starts the server.")) }
-            draft.transport = .stdio(command: executable, arguments: words.dropFirst().map(SourceArgument.plain))
+            let arguments = Array(words.dropFirst())
+            // One credential policy for every source: secrets go in variables below, never argv.
+            if let problem = SourceCredentialPolicy.argumentsProblem([executable] + arguments) {
+                return .failure(Problem(message: problem))
+            }
+            draft.transport = .stdio(command: executable, arguments: arguments, directory: nil)
             for line in lines {
                 guard let equals = line.firstIndex(of: "=") else { return .failure(Problem(message: "Write each variable as NAME=value.")) }
                 let variable = line[..<equals].trimmingCharacters(in: .whitespaces)
                 guard !variable.isEmpty, variable.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
                     return .failure(Problem(message: "Write each variable as NAME=value."))
                 }
+                let value = String(line[line.index(after: equals)...])
+                guard SourceCredentialPolicy.isPlainValueAcceptable(value) else {
+                    return .failure(Problem(message: "A value is too long."))
+                }
                 draft.environment.append(SourceValue(name: variable, secret: true, value: nil))
-                draft.secrets[variable] = String(line[line.index(after: equals)...])
+                draft.secrets[variable] = value
             }
         }
         return .success(draft)

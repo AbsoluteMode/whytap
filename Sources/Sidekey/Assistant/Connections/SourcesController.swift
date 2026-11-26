@@ -66,9 +66,16 @@ struct SourceProcessEnvironment: Sendable {
 /// Keychain secrets, live MCP clients and each source's status.
 ///
 /// Servers start lazily (on Check or the first Agent call), stop after
-/// 10 idle minutes, on sleep, and with the app (parent-death guard). The
-/// Agent may call only approved Read tools; this is checked here, again, at
-/// every call. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+/// 10 idle minutes, on sleep, and with the app (parent-death guard).
+///
+/// Approval is checked at the current generation: every connection re-lists
+/// the tools (pinning) before any call, a list_changed notice holds them until
+/// a newer list is applied, and enablement, the live client and the tool's
+/// approved pin are checked again right before each proof or Agent call.
+/// Removing or turning off a source revokes it at once and discards answers
+/// still in flight. Tools of imported and custom servers wait for the user's
+/// approval before Whytap calls any of them.
+/// WHY: .project-docs/decisions/2026-11-26-agent-sources.md
 @MainActor
 final class SourcesController: ObservableObject {
     static let shared = SourcesController()
@@ -89,6 +96,12 @@ final class SourcesController: ObservableObject {
     private let environment: SourceProcessEnvironment
     private var clients: [String: MCPClient] = [:]
     private var connecting: [String: Task<MCPClient, Error>] = [:]
+    /// The client whose tool list was applied since it connected and since
+    /// its last list_changed notice.
+    private var validated: [String: ObjectIdentifier] = [:]
+    /// Bumped by stop, disable, remove and new values: work started under an
+    /// older generation must not publish, apply or call anything.
+    private var generations: [String: Int] = [:]
     private var lastUsed: [String: Date] = [:]
     private var exits: [String: [Date]] = [:]
     private var idle: Task<Void, Never>?
@@ -147,12 +160,24 @@ final class SourcesController: ObservableObject {
 
     func record(_ id: String) -> SourceRecord? { sources.first { $0.id == id } }
 
+    // MARK: - Generations
+
+    private func generation(_ id: String) -> Int { generations[id] ?? 0 }
+    private func bump(_ id: String) { generations[id] = generation(id) + 1 }
+
+    /// The source still exists, is on, and nothing revoked it since `generation`.
+    private func isCurrent(_ id: String, _ generation: Int) -> Bool {
+        record(id)?.enabled == true && self.generation(id) == generation
+    }
+
     // MARK: - Settings actions
 
-    /// Adds a source, stores its secrets in Keychain and checks it.
+    /// Adds a source, stores its secrets in Keychain and checks it. A draft
+    /// that breaks the credential policy is refused here too.
     @discardableResult
-    func add(_ draft: SourceDraft) async -> String {
+    func add(_ draft: SourceDraft) async -> String? {
         loadIfNeeded()
+        if let problem = draft.credentialProblem { error = problem; return nil }
         let id = Self.newID(name: draft.name, existing: Set(sources.map(\.id)))
         var record = SourceRecord(id: id, name: Self.uniqueName(draft.name, existing: sources.map(\.name)),
                                   kind: draft.kind, importedFrom: draft.importedFrom, transport: draft.transport,
@@ -171,18 +196,23 @@ final class SourcesController: ObservableObject {
 
     func setEnabled(_ enabled: Bool, id: String) async {
         update(id) { $0.enabled = enabled }
+        bump(id)
         if enabled { await check(id) }
-        else { await stop(id); statuses[id] = .off }
+        else { statuses[id] = .off; await stop(id) }
     }
 
+    /// Revokes first (the record, its generation, the Agent's access), then
+    /// stops the server and deletes its Keychain values.
     func remove(_ id: String) async {
         guard let record = record(id) else { return }
-        await stop(id)
-        for name in record.secretNames { try? keys.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
+        bump(id)
         sources.removeAll { $0.id == id }
         statuses[id] = nil
+        validated[id] = nil
         exits[id] = nil
         save()
+        await stop(id)
+        for name in record.secretNames { try? keys.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
     }
 
     func setSecret(_ value: String, name: String, id: String) async {
@@ -200,15 +230,16 @@ final class SourcesController: ObservableObject {
         keys.hasKey(account: SourceRecord.keychainAccount(source: id, name: name))
     }
 
-    /// The user's own class for one tool. It is approved as the tool is now.
+    /// The user's own class for one tool, approved as the tool is now.
     func setClass(_ toolClass: SourceToolClass, tool: String, id: String) {
         guard let info = record(id)?.tools.first(where: { $0.name == tool }) else { return }
         update(id) { $0.decisions[tool] = SourceToolDecision(toolClass: toolClass, origin: .user, pinHash: info.pinHash) }
         refreshStatusAfterReview(id)
     }
 
-    /// Accepts the current description of every changed tool.
-    func approveChanges(id: String) {
+    /// The user approves every tool waiting for review, as described now,
+    /// then the proof call runs.
+    func approveChanges(id: String) async {
         update(id) { record in
             for tool in record.tools {
                 guard var decision = record.decisions[tool.name], decision.needsReview else { continue }
@@ -218,6 +249,7 @@ final class SourcesController: ObservableObject {
             }
         }
         refreshStatusAfterReview(id)
+        await prove(id)
     }
 
     private func refreshStatusAfterReview(_ id: String) {
@@ -239,64 +271,93 @@ final class SourcesController: ObservableObject {
         guard missing.isEmpty else { statuses[id] = .needsValue(missing.map(Self.displayName)); return }
         statuses[id] = .connecting
         exits[id] = nil
+        await stop(id)
+        let generation = generation(id)
         if case .folder(let path) = record.transport {
             let folder = FolderSource(root: URL(fileURLWithPath: path))
-            var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            guard folder.rootIsDirectory else {
                 statuses[id] = .failed("The folder is missing. Remove this source or add the folder again."); return
             }
             let count = await Task.detached(priority: .utility) { folder.countFiles() }.value
-            applyTools(FolderSource.tools, to: id, suggestion: nil, firstConnect: record.neverConnected)
+            guard isCurrent(id, generation) else { return }
+            applyTools(FolderSource.tools, to: id, suggestion: nil)
             statuses[id] = .ready("Works · \(count >= FolderSource.maxFiles ? "\(FolderSource.maxFiles)+" : String(count)) text files")
             return
         }
         do {
-            await stop(id)
-            let client = try await client(for: id)
-            let tools = try await client.listTools(timeout: 20)
-            await classifyAndApply(tools, id: id)
-            guard let current = self.record(id) else { return }
-            let proof = await runProof(current, client: client)
+            let client = try await client(for: id, generation: generation)
+            try await validate(id, client: client, generation: generation)
+            let proof = await runProof(id, client: client, generation: generation)
+            guard isCurrent(id, generation), let current = self.record(id) else { return }
             statuses[id] = readyStatus(current, proof: proof)
         } catch {
+            // A disable, removal or new check while connecting wins.
+            guard isCurrent(id, generation) else { return }
             statuses[id] = .failed((error as? MCPError)?.message ?? MCPError.notConnected.message)
             await stop(id)
         }
     }
 
-    private func classifyAndApply(_ tools: [MCPToolInfo], id: String) async {
-        guard let record = record(id) else { return }
+    /// After approval: the proof call on the live (or a new) connection.
+    private func prove(_ id: String) async {
+        guard let record = record(id), record.enabled, !record.readTools.isEmpty else { return }
+        if case .folder = record.transport { return }
+        let generation = generation(id)
+        do {
+            let client = try await client(for: id, generation: generation)
+            let changed = await client.toolsChanged
+            if changed || validated[id] != ObjectIdentifier(client) {
+                try await validate(id, client: client, generation: generation)
+            }
+            let proof = await runProof(id, client: client, generation: generation)
+            guard isCurrent(id, generation), let current = self.record(id) else { return }
+            statuses[id] = readyStatus(current, proof: proof)
+        } catch {
+            guard isCurrent(id, generation) else { return }
+            statuses[id] = .failed((error as? MCPError)?.message ?? MCPError.notConnected.message)
+        }
+    }
+
+    /// Lists the client's tools and applies them (pinning, classes). Until it
+    /// succeeds on this client and generation, its tools cannot be called.
+    private func validate(_ id: String, client: MCPClient, generation: Int) async throws {
+        validated[id] = nil
+        let tools = try await client.listTools(timeout: 20)
+        guard isCurrent(id, generation), clients[id] === client, let record = record(id) else { throw MCPError.cancelled }
         let fresh = tools.filter { tool in record.decisions[tool.name]?.pinHash != tool.pinHash }
         let undecided = SourceToolClassifier.undecided(fresh, presets: [:])
         var suggestion: SourceToolModelClassifier.Suggestion?
         let needsProof = record.proof == nil && record.neverConnected
         if let classifier, !undecided.isEmpty || (needsProof && !tools.isEmpty) {
             suggestion = await classifier.run(undecided.isEmpty ? tools : undecided)
+            guard isCurrent(id, generation), clients[id] === client else { throw MCPError.cancelled }
         }
-        applyTools(tools, to: id, suggestion: suggestion, firstConnect: record.neverConnected)
+        applyTools(tools, to: id, suggestion: suggestion)
+        let changedMeanwhile = await client.toolsChanged
+        guard isCurrent(id, generation), clients[id] === client, !changedMeanwhile else { throw MCPError.cancelled }
+        validated[id] = ObjectIdentifier(client)
     }
 
-    /// Pinning: unchanged tools keep their approved class; new or changed
-    /// tools are classified again and, after the first connection, wait for review.
-    private func applyTools(_ tools: [MCPToolInfo], to id: String, suggestion: SourceToolModelClassifier.Suggestion?,
-                            firstConnect: Bool) {
+    /// Pinning: unchanged approved tools keep their class. New or changed
+    /// tools are classified again; a changed tool, a Read tool added after
+    /// the first connection, and every Read tool of a server that is not
+    /// trusted on connect wait for the user's approval.
+    private func applyTools(_ tools: [MCPToolInfo], to id: String, suggestion: SourceToolModelClassifier.Suggestion?) {
         update(id) { record in
+            let firstConnect = record.neverConnected
+            let trusted = record.kind.trustedOnConnect
             var decisions: [String: SourceToolDecision] = [:]
             for tool in tools {
-                if let old = record.decisions[tool.name], old.pinHash == tool.pinHash, !old.needsReview {
-                    decisions[tool.name] = old
-                    continue
-                }
-                if let old = record.decisions[tool.name], old.needsReview, old.origin == .user {
+                if let old = record.decisions[tool.name], old.pinHash == tool.pinHash {
                     decisions[tool.name] = old
                     continue
                 }
                 let (toolClass, origin) = SourceToolClassifier.classify(tool, preset: nil, model: suggestion?.classes[tool.name])
-                let changed = record.decisions[tool.name] != nil
+                let old = record.decisions[tool.name]
                 decisions[tool.name] = SourceToolDecision(
                     toolClass: toolClass, origin: origin,
-                    pinHash: changed ? (record.decisions[tool.name]?.pinHash ?? "") : tool.pinHash,
-                    needsReview: !firstConnect && (changed || toolClass == .read))
+                    pinHash: old?.pinHash ?? tool.pinHash,
+                    needsReview: old != nil || (toolClass == .read && (!trusted || !firstConnect)))
             }
             record.tools = tools
             record.decisions = decisions
@@ -307,7 +368,8 @@ final class SourcesController: ObservableObject {
 
     private enum ProofOutcome { case worked(String), failed(String), none }
 
-    private func runProof(_ record: SourceRecord, client: MCPClient) async -> ProofOutcome {
+    private func runProof(_ id: String, client: MCPClient, generation: Int) async -> ProofOutcome {
+        guard let record = record(id) else { return .none }
         let readable = record.readTools
         var call = record.proof.flatMap { proof in readable.contains { $0.name == proof.tool } ? proof : nil }
         if call == nil, let simple = readable.first(where: { ($0.inputSchema["required"]?.array ?? []).isEmpty }) {
@@ -315,21 +377,40 @@ final class SourcesController: ObservableObject {
         }
         guard let call else { return .none }
         do {
-            let result = try await client.callTool(call.tool, arguments: call.arguments, timeout: Self.proofTimeout,
-                                                   maxCharacters: 200_000)
-            if result.isError { return .failed(String(result.text.prefix(120))) }
+            let result = try await invoke(id, tool: call.tool, arguments: call.arguments, client: client,
+                                          generation: generation, timeout: Self.proofTimeout, limit: 200_000)
+            if result.isError { return .failed(Self.oneLine(result.text, limit: 120)) }
             return .worked(Self.proofSummary(result.text))
         } catch {
             return .failed((error as? MCPError)?.message ?? "No answer.")
         }
     }
 
+    /// The last gate before a server runs a tool: the source is current, the
+    /// client is the live validated one, and the tool is an approved Read
+    /// tool at its current pin. An answer that arrives after a revocation is
+    /// discarded.
+    private func invoke(_ id: String, tool: String, arguments: MCPValue, client: MCPClient, generation: Int,
+                        timeout: TimeInterval, limit: Int) async throws -> MCPToolResult {
+        let changed = await client.toolsChanged
+        guard !changed, isCurrent(id, generation), clients[id] === client, validated[id] == ObjectIdentifier(client),
+              record(id)?.readTools.contains(where: { $0.name == tool }) == true else { throw MCPError.notAllowed }
+        lastUsed[id] = Date()
+        let result = try await client.callTool(tool, arguments: arguments, timeout: timeout, maxCharacters: limit)
+        guard isCurrent(id, generation) else { throw MCPError.notAllowed }
+        lastUsed[id] = Date()
+        return result
+    }
+
     private func readyStatus(_ record: SourceRecord, proof: ProofOutcome?) -> SourceStatus {
         let reads = record.readTools.count
-        if record.changedToolCount > 0 {
-            return .warning("\(record.changedToolCount) tool\(record.changedToolCount == 1 ? "" : "s") changed · Review in Tools")
+        let pending = record.pendingReviewCount
+        if pending > 0 {
+            return .warning(reads == 0 && !record.kind.trustedOnConnect
+                ? "Connected · approve its tools in Details before the Agent uses them"
+                : "\(pending) tool\(pending == 1 ? "" : "s") changed · Review in Details")
         }
-        guard reads > 0 else { return .warning("Connected, but no read-only tools. Mark tools as Read in Tools.") }
+        guard reads > 0 else { return .warning("Connected, but no read-only tools. Mark tools as Read in Details.") }
         let count = "\(reads) read tool\(reads == 1 ? "" : "s")"
         switch proof {
         case .worked(let summary): return .ready(summary + " · " + count)
@@ -338,18 +419,22 @@ final class SourcesController: ObservableObject {
         }
     }
 
+    static func oneLine(_ text: String, limit: Int) -> String {
+        String(text.replacingOccurrences(of: "\n", with: " ").replacingOccurrences(of: "\r", with: " ").prefix(limit))
+    }
+
     /// One short line from the proof call's answer (untrusted text, bounded).
     static func proofSummary(_ text: String) -> String {
-        func clean(_ value: String) -> String {
-            String(value.replacingOccurrences(of: "\n", with: " ").prefix(40))
-        }
+        func clean(_ value: String) -> String { oneLine(value, limit: 40) }
         if let value = try? MCPValue.decode(Data(text.utf8)) {
             if let login = value["login"]?.string { return "Works · signed in as @" + clean(login) }
             for key in ["displayName", "name", "email", "emailAddress"] {
                 if let name = value[key]?.string, value.object?.count ?? 0 < 60 { return "Works · signed in as " + clean(name) }
             }
             if let array = value.array { return "Works · found \(array.count) item\(array.count == 1 ? "" : "s")" }
-            if let total = value["total_count"]?.int ?? value["total"]?.int { return "Works · found \(total) item\(total == 1 ? "" : "s")" }
+            if let total = value["total_count"]?.int ?? value["total"]?.int, total >= 0 {
+                return "Works · found \(total) item\(total == 1 ? "" : "s")"
+            }
             for key in ["items", "issues", "results", "values", "data", "nodes", "pull_requests", "repositories"] {
                 if let array = value[key]?.array { return "Works · found \(array.count) item\(array.count == 1 ? "" : "s")" }
             }
@@ -370,19 +455,21 @@ final class SourcesController: ObservableObject {
         record.secretNames.filter { !keys.hasKey(account: SourceRecord.keychainAccount(source: record.id, name: $0)) }
     }
 
-    /// "header.Authorization" → "the Authorization header"; "arg.1" → "argument 1".
-    static func displayName(_ name: String) -> String {
+    /// "header.Authorization" → "the Authorization header".
+    nonisolated static func displayName(_ name: String) -> String {
         if name.hasPrefix("header.") { return "the " + name.dropFirst(7) + " header" }
-        if name.hasPrefix("arg.") { return "argument " + name.dropFirst(4) }
         return name
     }
 
     // MARK: - Clients
 
-    private func client(for id: String) async throws -> MCPClient {
+    /// The live client for this generation, connecting when needed. A new
+    /// client is not validated: its tools are re-listed before any call.
+    private func client(for id: String, generation: Int) async throws -> MCPClient {
+        guard isCurrent(id, generation) else { throw MCPError.notAllowed }
         if let existing = clients[id] {
-            if await existing.isOpen { return existing }
-            clients[id] = nil
+            if await existing.isOpen, clients[id] === existing { return existing }
+            if clients[id] === existing { clients[id] = nil; validated[id] = nil }
             await existing.close()
             var recent = (exits[id] ?? []).filter { Date().timeIntervalSince($0) < 300 }
             recent.append(Date())
@@ -391,13 +478,31 @@ final class SourcesController: ObservableObject {
                 throw MCPError.exited(status: 1, detail: "It keeps exiting; press Check again after fixing it.")
             }
         }
-        if let pending = connecting[id] { return try await pending.value }
-        guard let record = record(id) else { throw MCPError.notConnected }
-        let task = Task { @MainActor in try await self.makeClient(record) }
-        connecting[id] = task
-        defer { connecting[id] = nil }
-        let client = try await task.value
+        guard isCurrent(id, generation) else { throw MCPError.notAllowed }
+        let task: Task<MCPClient, Error>
+        if let pending = connecting[id] { task = pending }
+        else {
+            guard let record = record(id) else { throw MCPError.notConnected }
+            task = Task { @MainActor in try await self.makeClient(record) }
+            connecting[id] = task
+        }
+        let client: MCPClient
+        do { client = try await task.value }
+        catch {
+            if connecting[id] == task { connecting[id] = nil }
+            throw error
+        }
+        if connecting[id] == task { connecting[id] = nil }
+        if let live = clients[id] {
+            // Another caller of the same connection stored it first.
+            if live !== client { await client.close() }
+            guard isCurrent(id, generation) else { throw MCPError.notAllowed }
+            return live
+        }
+        // Revoked while connecting: never keep it.
+        guard isCurrent(id, generation) else { await client.close(); throw MCPError.notAllowed }
         clients[id] = client
+        validated[id] = nil
         lastUsed[id] = Date()
         scheduleIdleStop()
         return client
@@ -411,8 +516,18 @@ final class SourcesController: ObservableObject {
         let timeout: TimeInterval
         switch record.transport {
         case .folder: throw MCPError.notConnected
-        case .stdio(let command, let arguments):
+        case .stdio(let command, let arguments, let directory):
+            // The same policy as at setup: no secret on the command line.
+            guard SourceCredentialPolicy.argumentsProblem(arguments) == nil else { throw MCPError.notAllowed }
             guard let executable = await environment.resolve(command) else { throw MCPError.commandNotFound(command) }
+            var workingDirectory = FileManager.default.homeDirectoryForCurrentUser
+            if let directory {
+                var isDirectory: ObjCBool = false
+                guard FileManager.default.fileExists(atPath: directory, isDirectory: &isDirectory), isDirectory.boolValue else {
+                    throw MCPError.commandNotFound((directory as NSString).lastPathComponent + " (its working folder)")
+                }
+                workingDirectory = URL(fileURLWithPath: directory, isDirectory: true)
+            }
             var values = await environment.base()
             var secrets: [String] = []
             for item in record.environment {
@@ -422,23 +537,15 @@ final class SourcesController: ObservableObject {
                     secrets.append(value)
                 } else if let value = item.value { values[item.name] = value }
             }
-            var argv: [String] = []
-            for argument in arguments {
-                switch argument {
-                case .plain(let value): argv.append(value)
-                case .secret(let name):
-                    guard let value = secret(name) else { throw MCPError.missingSecret(Self.displayName(name)) }
-                    argv.append(value)
-                    secrets.append(value)
-                }
-            }
-            transport = MCPStdioTransport(launch: MCPStdioLaunch(executable: executable, arguments: argv, environment: values,
-                                                                 directory: FileManager.default.homeDirectoryForCurrentUser,
+            transport = MCPStdioTransport(launch: MCPStdioLaunch(executable: executable, arguments: arguments,
+                                                                 environment: values, directory: workingDirectory,
                                                                  secrets: secrets))
             // A first `npx -y` or `uvx` run downloads the server.
             timeout = 90
         case .http(let address):
-            guard let url = URL(string: address), MCPHTTPTransport.isAllowed(url) else { throw MCPError.insecureURL }
+            let sendsSecrets = record.headers.contains(where: \.secret)
+            guard SourceCredentialPolicy.addressProblem(address, sendsSecrets: sendsSecrets) == nil,
+                  let url = URL(string: address) else { throw MCPError.insecureURL }
             var headers: [String: String] = [:]
             for item in record.headers {
                 if item.secret {
@@ -455,15 +562,31 @@ final class SourcesController: ObservableObject {
         return client
     }
 
+    /// Stops this source's server and in-flight connection; earlier work of
+    /// this source can no longer publish or call.
     func stop(_ id: String) async {
-        connecting[id]?.cancel()
-        connecting[id] = nil
+        bump(id)
+        validated[id] = nil
+        connecting.removeValue(forKey: id)?.cancel()
         guard let client = clients.removeValue(forKey: id) else { return }
         await client.close()
     }
 
+    /// Closes a client that ended (an expired session) without revoking the source.
+    private func drop(_ id: String, _ client: MCPClient) async {
+        guard clients[id] === client else { return }
+        clients[id] = nil
+        validated[id] = nil
+        await client.close()
+    }
+
+    nonisolated static func summaryOf(_ record: SourceRecord) -> String { record.summary }
+
+    /// Live and connecting servers (tests and diagnostics).
+    var liveClientCount: Int { clients.count + connecting.count }
+
     func stopAll() async {
-        for id in Array(clients.keys) { await stop(id) }
+        for id in Set(clients.keys).union(connecting.keys) { await stop(id) }
     }
 
     private func scheduleIdleStop() {
@@ -492,7 +615,6 @@ final class SourcesController: ObservableObject {
         var used = Set<String>()
         for record in sources where record.enabled {
             if case .needsValue = statuses[record.id] { continue }
-            if case .failed = statuses[record.id], clients[record.id] == nil, record.neverConnected { continue }
             let prefix = Self.slug(record.name)
             for tool in record.readTools {
                 var id = String((prefix + "__" + Self.slug(tool.name, limit: 48)).prefix(64))
@@ -510,49 +632,62 @@ final class SourcesController: ObservableObject {
         }
     }
 
-    /// The only way the Agent reaches a source. Rechecks enablement and the
-    /// tool's approved Read class (pinning included) at the moment of the call.
+    /// The only way the Agent reaches a source.
     func callRead(sourceID: String, tool: String, arguments: MCPValue) async throws -> MCPToolResult {
         guard let record = record(sourceID), record.enabled, record.readTools.contains(where: { $0.name == tool }) else {
             throw MCPError.notAllowed
         }
         guard arguments.object != nil else { throw MCPError.server(code: -32602, message: "arguments must be a JSON object") }
+        let generation = generation(sourceID)
         if case .folder(let path) = record.transport {
-            let folder = FolderSource(root: URL(fileURLWithPath: path))
-            let work = Task.detached(priority: .userInitiated) {
-                try folder.call(tool, arguments: arguments, maxCharacters: Self.resultLimit)
-            }
-            return try await withTaskCancellationHandler { try await work.value } onCancel: { work.cancel() }
+            return try await Self.folderCall(FolderSource(root: URL(fileURLWithPath: path)), tool: tool, arguments: arguments)
         }
         var attempt = 0
         while true {
             attempt += 1
+            let client = try await client(for: sourceID, generation: generation)
             do {
-                let client = try await client(for: sourceID)
-                lastUsed[sourceID] = Date()
-                if await client.toolsChanged {
-                    // The server says its tools changed: re-pin before calling.
-                    let tools = try await client.listTools(timeout: Self.readTimeout)
-                    await classifyAndApply(tools, id: sourceID)
-                    guard self.record(sourceID)?.readTools.contains(where: { $0.name == tool }) == true else {
-                        statuses[sourceID] = self.record(sourceID).map { readyStatus($0, proof: nil) }
-                        throw MCPError.notAllowed
+                let changed = await client.toolsChanged
+                if changed || validated[sourceID] != ObjectIdentifier(client) {
+                    // A new connection, or the server said its tools changed: re-pin first.
+                    do { try await validate(sourceID, client: client, generation: generation) }
+                    catch {
+                        if let current = self.record(sourceID), isCurrent(sourceID, generation) {
+                            statuses[sourceID] = readyStatus(current, proof: nil)
+                        }
+                        if let failure = error as? MCPError, failure == .cancelled { throw MCPError.notAllowed }
+                        throw error
+                    }
+                    if let current = self.record(sourceID), current.pendingReviewCount > 0 {
+                        statuses[sourceID] = readyStatus(current, proof: nil)
                     }
                 }
-                let result = try await client.callTool(tool, arguments: arguments, timeout: Self.readTimeout,
-                                                       maxCharacters: Self.resultLimit)
-                lastUsed[sourceID] = Date()
-                return result
+                return try await invoke(sourceID, tool: tool, arguments: arguments, client: client, generation: generation,
+                                        timeout: Self.readTimeout, limit: Self.resultLimit)
             } catch MCPError.sessionExpired where attempt == 1 {
-                await stop(sourceID)
+                await drop(sourceID, client)
             } catch let error as MCPError {
                 switch error {
                 case .exited, .commandNotFound, .unauthorized, .network, .tooLarge, .unsupportedProtocol, .insecureURL:
-                    statuses[sourceID] = .failed(error.message)
+                    if isCurrent(sourceID, generation) { statuses[sourceID] = .failed(error.message) }
                 default: break
                 }
                 throw error
             }
+        }
+    }
+
+    /// A folder search or read with the same deadline as a server call; the
+    /// walk stops when the deadline cancels it.
+    nonisolated static func folderCall(_ folder: FolderSource, tool: String, arguments: MCPValue) async throws -> MCPToolResult {
+        try await withThrowingTaskGroup(of: MCPToolResult.self) { group in
+            group.addTask { try folder.call(tool, arguments: arguments, maxCharacters: resultLimit) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(readTimeout * 1_000_000_000))
+                throw MCPError.timedOut(seconds: Int(readTimeout))
+            }
+            defer { group.cancelAll() }
+            return try await group.next()!
         }
     }
 

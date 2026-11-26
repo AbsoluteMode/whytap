@@ -56,10 +56,8 @@ enum SourcePreset: String, CaseIterable, Identifiable, Sendable {
                                secrets: ["header.Authorization": "Bearer " + token],
                                proof: SourceProofCall(tool: "get_me", arguments: .object([:])))
         case .jira:
-            var site = (fields["site"] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if !site.isEmpty, !site.contains("://") { site = "https://" + site }
-            return SourceDraft(name: "Jira", kind: .jira, transport: .stdio(command: "uvx", arguments: [.plain("mcp-atlassian")]),
-                               environment: [SourceValue(name: "JIRA_URL", secret: false, value: site),
+            return SourceDraft(name: "Jira", kind: .jira, transport: .stdio(command: "uvx", arguments: ["mcp-atlassian"], directory: nil),
+                               environment: [SourceValue(name: "JIRA_URL", secret: false, value: Self.jiraSite(fields["site"] ?? "") ?? ""),
                                              SourceValue(name: "JIRA_USERNAME", secret: false,
                                                          value: (fields["email"] ?? "").trimmingCharacters(in: .whitespaces)),
                                              SourceValue(name: "JIRA_API_TOKEN", secret: true, value: nil),
@@ -70,16 +68,39 @@ enum SourcePreset: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
+    /// A Jira site as an https address of a host and optional port: no credentials,
+    /// path, query or fragment, so the token goes only to that site.
+    static func jiraSite(_ raw: String) -> String? {
+        var text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !text.contains("://") { text = "https://" + text }
+        guard let url = URL(string: text), url.scheme?.lowercased() == "https", let host = url.host?.lowercased(),
+              host.contains("."), !host.hasPrefix("."), !host.hasSuffix("."),
+              host.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "." || $0 == "-") }),
+              url.user == nil, url.password == nil, url.query == nil, url.fragment == nil,
+              url.path.isEmpty || url.path == "/" else { return nil }
+        return "https://" + host + (url.port.map { ":\($0)" } ?? "")
+    }
+
+    static func isEmail(_ text: String) -> Bool {
+        let value = text.trimmingCharacters(in: .whitespaces)
+        let parts = value.split(separator: "@", omittingEmptySubsequences: false)
+        return value.count <= 254 && parts.count == 2 && !parts[0].isEmpty && parts[1].contains(".")
+            && !value.contains(where: { $0.isWhitespace || $0.isNewline || $0 == "\0" })
+    }
+
     func validate(token: String, fields: [String: String]) -> String? {
-        if token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return "Paste the token." }
+        let trimmed = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty { return "Paste the token." }
+        guard trimmed.count <= 2048, !trimmed.contains(where: { $0.isWhitespace || $0.isNewline || $0 == "\0" }) else {
+            return "That doesn’t look like a token: paste it without spaces or line breaks."
+        }
         switch self {
         case .github: return nil
         case .jira:
-            let site = (fields["site"] ?? "").trimmingCharacters(in: .whitespaces)
-            guard !site.isEmpty, URL(string: site.contains("://") ? site : "https://" + site)?.host != nil else {
-                return "Enter your Jira site address."
+            guard Self.jiraSite(fields["site"] ?? "") != nil else {
+                return "Enter your Jira site as https://your-team.atlassian.net (no path or extra parts)."
             }
-            return (fields["email"] ?? "").contains("@") ? nil : "Enter the e-mail of your Atlassian account."
+            return Self.isEmail(fields["email"] ?? "") ? nil : "Enter the e-mail of your Atlassian account."
         }
     }
 }

@@ -118,4 +118,49 @@ final class MCPClientStdioTests: XCTestCase {
         wait(for: [exited], timeout: 5)
         XCTAssertEqual(kill(process.pid, 0), -1, "The group leader is gone")
     }
+
+    // MARK: - Builder review regressions (point 6)
+
+    func testAbsurdNumbersNeverTrap() throws {
+        XCTAssertNil(MCPValue.number(1e300).int)
+        XCTAssertNil(MCPValue.number(-1e300).int)
+        XCTAssertNil(MCPValue.number(.nan).int)
+        XCTAssertNil(MCPValue.number(.infinity).int)
+        XCTAssertNil(MCPValue.number(1.5).int)
+        XCTAssertEqual(MCPValue.number(42).int, 42)
+        XCTAssertNoThrow(try MCPValue.number(1e300).encoded())
+        let decoded = try MCPValue.decode(Data(#"{"id":1e300}"#.utf8))
+        XCTAssertNil(decoded["id"]?.int)
+    }
+
+    func testAServerAnsweringWithAbsurdIDsDoesNotCrashTheClient() async throws {
+        let (client, _) = try client(mode: "bad_id")
+        try await client.connect(timeout: 10)
+        let result = try await client.callTool("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 1000)
+        XCTAssertTrue(result.text.contains("octo"), "Lines with ids like 1e300 are ignored; the real answer still arrives")
+    }
+
+    func testOneHugeLineIsRefusedAsTooLarge() async throws {
+        let (client, _) = try client(mode: "huge_line")
+        try await client.connect(timeout: 10)
+        do {
+            _ = try await client.callTool("get_me", arguments: .object([:]), timeout: 20, maxCharacters: 1000)
+            XCTFail("Expected tooLarge")
+        } catch let error as MCPError {
+            guard case .tooLarge = error else { return XCTFail("\(error)") }
+        }
+    }
+
+    func testAServerThatStopsReadingItsInputCannotBlockAWrite() throws {
+        let process = try MCPProcess(executable: "/bin/sleep", arguments: ["30"], environment: [:],
+                                     onLine: { _ in }, onExit: { _, _, _ in })
+        defer { process.stop() }
+        let started = Date()
+        let chunk = Data(repeating: UInt8(ascii: "x"), count: 900_000)
+        XCTAssertThrowsError(try process.write(chunk, timeout: 0.5)) { error in
+            XCTAssertEqual(error as? MCPError, .timedOut(seconds: 1))
+        }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+        XCTAssertThrowsError(try process.write(Data(repeating: 1, count: MCPProcess.maxWriteBytes)), "Oversized messages are refused")
+    }
 }

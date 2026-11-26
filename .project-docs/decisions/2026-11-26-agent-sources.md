@@ -2,7 +2,7 @@
 id: agent-sources-2026-11-26
 type: decision
 title: The Agent searches sources the user connects through Whytap's own MCP client, with read tools only
-summary: Iteration 1 of the Assistant plan. Settings → Features → Agent → Sources connects MCP servers (imported from Claude Code, Claude Desktop, Cursor, Codex or VS Code, GitHub and Jira tiles with a pasted token, a custom command or address) and folders on this Mac. A hand-written MCP client in the native runtime (stdio and Streamable HTTP with static headers) lists and calls tools. Every tool gets a class in app code; the Agent is offered only approved Read tools through one strict source_call function. Secrets live in Keychain and reach a server only through its process environment or its own HTTP headers. After a request reads source content, file edits, commands, web access and Whytap changes are removed and refused for the rest of that request.
+summary: Iteration 1 of the Assistant plan. Settings → Features → Agent → Sources connects MCP servers (imported from Claude Code, Claude Desktop, Cursor, Codex or VS Code, GitHub and Jira tiles with a pasted token, a custom command or address) and folders on this Mac. A hand-written MCP client in the native runtime (stdio and Streamable HTTP with static headers) lists and calls tools. Every tool gets a class in app code; the Agent is offered only approved Read tools through one strict source_call function. Secrets live in Keychain and reach a server only through its process environment or its own HTTP headers. Imported and custom servers are called only after the user approves their tools. After a request reads source content, only that source's Read tools and the answer remain for the rest of that request.
 status: confirmed
 tags: [agent, native-agent, sources, mcp, security, privacy, keychain, assistant]
 canonical_for: [agent-sources, mcp-client, source-tool-classes, source-taint-rule]
@@ -65,11 +65,18 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   service. The manifest (`Application Support/whytap/assistant/sources.json`,
   0600) keeps names only. A stdio server gets them only in its environment,
   beside an allowlist of the app's own variables (no model keys) and the
-  login shell's PATH; an HTTP server only in its own headers. A secret an
-  imported config passed on the command line is moved to Keychain and put
-  back into argv at start; the row warns that process listings can see it.
-  An exit reason shown in Settings masks the source's secret values. Nothing
-  in this module logs.
+  login shell's PATH; an HTTP server only in its own headers.
+- **Credential policy** (`SourceCredentialPolicy`), one rule for import,
+  tiles, the custom form, previews and launch: a command line with a
+  secret-looking argument (a token prefix, `NAME=value` with a secret name,
+  or a value after `--token`, `--api-key`, `--header` and similar flags) and
+  an address with user info, a secret-named query key or a secret-looking
+  path part are refused with the reason; previews mask by the same test.
+  Credentials never go over plain http, even to this Mac. A manifest edited
+  by hand to carry an argv secret does not launch. The Jira tile accepts only
+  an https address with only a host and optional port, and an e-mail address; tokens and values are one line,
+  bounded. An exit reason shown in Settings masks the source's secret values.
+  Nothing in this module logs.
 - **Tool classes** (Read, Local change, Changes things, Destructive),
   assigned in app code by `SourceToolClassifier`: the user's choice, else
   the strictest of the server's hints (`readOnlyHint`, `destructiveHint`), a
@@ -79,21 +86,38 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   and no user data, and also proposes the proof call. A suggestion can make
   an unhinted tool Read but never overrides a write signal; unknown tools
   are never Read.
-- **Pinning:** each decision stores a hash of the tool's name, title,
-  description, schema and hints. A changed tool, or a new Read tool after
-  the first connection, is unavailable until the user approves it in
-  Details.
+- **Explicit trust:** a reviewed tile (GitHub with `X-MCP-Readonly`, Jira
+  with `READ_ONLY_MODE`) and a folder are trusted on connect. For an imported
+  or custom server Whytap cannot check what a tool really does, so no hint or
+  model suggestion approves anything: every Read tool waits for Approve tools
+  in Details, and no tool (not even the proof) runs before that.
+- **Pinning at the current connection:** each decision stores a hash of the
+  tool's name, title, description, schema and hints. Every new process or HTTP
+  session re-lists and re-classifies before the first call; a
+  `tools/list_changed` notice holds every tool until a list that started
+  after the notice completes, so a failed or concurrent re-list never
+  revalidates old pins. A changed tool is unavailable until approved.
+  Each source has a generation bumped by stop, disable and removal; a check
+  re-verifies generation, enablement, the live client, validation and the
+  current pin after every await and immediately before the proof and every
+  Agent call, and a result arriving after revocation is discarded. Removal
+  revokes before stopping; stopping all ends connections in flight too.
 - **The Agent** gets one strict function, `source_call(tool, arguments)`.
   `tool` is an enum of approved Read tools of enabled sources; each tool's
   compact signature is in the system prompt (bounded to 10,000 characters),
   so many servers never break the provider's strict-schema rule. The
   controller checks class, approval and enablement again at every call.
   Tools of other classes never reach the model.
-- **Taint rule:** once a request has received text from a source (a
-  result, a tool error or a server error message), `write_file`,
-  `run_command`, `fetch_url`, Tavily and the provider's own web search, and
-  Whytap app-control writes leave the catalog and are refused for the rest
-  of that request. Read-only tools stay.
+- **Taint rule:** once a request has received text from a source (a result
+  or a tool error result), `write_file`, `run_command`, `fetch_url`, Tavily
+  and the provider's own web search, local file reads and listings, screen
+  capture, Case key listings, action cards and Whytap app control leave the
+  catalog and are refused for the rest of that request, and `source_call` is
+  narrowed to the sources already read. Content from source A therefore
+  cannot be sent to source B or anywhere else; the remaining channel is the
+  same source's own Read tools. Failures (exit, server error, unsupported
+  protocol, timeouts) reach the model only as fixed text with no server
+  output, so they do not taint; Settings may show the masked detail.
 - **Proof:** after connecting, one harmless read call (preset, model
   suggestion, or a Read tool without required parameters) and a one-line
   result in the row ("Works · signed in as @octo · 23 read tools").
@@ -101,15 +125,31 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   (user and project), Claude Desktop, `.cursor/mcp.json` in the home folder,
   `.codex/config.toml` in the home folder and VS Code's `mcp.json`, only when Add source
   opens, and writes nothing back. `${VAR}` and `${input:…}` values become
-  "Needs a value" fields. SSE-only servers, insecure addresses and Whytap's
-  own server are listed with a reason, not imported.
+  "Needs a value" fields. An entry is imported with its complete launch
+  parameters (Codex multi-line arrays, `cwd`, and a project server's project
+  folder as its working folder) or listed with a reason and not offered:
+  SSE-only servers, insecure or credential-bearing addresses, argv secrets,
+  keys Whytap can't carry (for example Codex `enabled_tools`, JSON
+  `envFile`), TOML it can't read (multi-line strings, arrays of tables),
+  non-text arguments and Whytap's own server.
 - **Tiles:** GitHub uses GitHub's remote MCP server with a pasted
   fine-grained token (the token page opens with read permissions prefilled)
   or the GitHub CLI's existing sign-in, always with `X-MCP-Readonly: true`.
   Jira runs `uvx mcp-atlassian` with `READ_ONLY_MODE=true`.
 - **Folder** sources are built in (no MCP): name and text search and a
-  bounded read inside the folder; hidden files, symbolic links, build
-  folders and credential-like files are never read.
+  bounded read inside the folder. The policy is enforced on the opened
+  object: the path is walked from the selected folder with `openat` and
+  `O_NOFOLLOW` (a link in any component, or the folder itself replaced by a
+  link, is refused), only a regular file passes `fstat`, reads are bounded
+  `pread`s, and search uses the same opener. Hidden files, build folders and
+  credential-like files are never read; offsets must be whole numbers from 0
+  to 64 MB.
+- **Untrusted decoding and transport:** JSON numbers become integers only by
+  exact conversion (1e300, NaN and fractions are not integers); the 16 MB
+  stdio limit applies to every completed line before delivery; writes to a
+  server's stdin are non-blocking with a 10 s deadline and messages over 1 MB
+  are refused; an abandoned request cancels its HTTP send as well as the wait;
+  folder calls stop after 10 s.
 
 ## Why
 
@@ -141,6 +181,22 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   credential files.
 - Import fixtures for every app: absent, broken and present files,
   placeholders, argv secrets, duplicates, SSE and Whytap's own server.
+- Builder review of PR #491 (ticket 621), one regression per point: the
+  builder's argv sentinel masked and not importable, custom argv and URL
+  credentials refused, secret headers over loopback http refused, invalid
+  Jira sites and e-mails, a hand-edited manifest with an argv secret not
+  launched; a tool changed while disconnected, a failed re-list and a
+  concurrent re-list after `list_changed` never reach the server, disabling
+  during classification and removing or stopping all during a slow connect
+  leave nothing running or approved; a custom server is not called and not
+  offered before approval even when a model calls every tool Read, a tile
+  proves at once; injected text in an exit detail, server error or protocol
+  string never reaches the model; after reading source A, source B leaves the
+  enum and its call is refused; a symlinked file, a symlinked folder and a
+  FIFO are refused by read and search, bad offsets fail; Codex multi-line
+  arguments and `cwd`, project folders, unknown keys and unreadable TOML;
+  1e300/NaN integers, absurd JSON-RPC ids, a 17 MB single line, and a write
+  to a process that never reads.
 - The Agent loop: a source search answered; an injected instruction in a
   source result followed by `run_command`, `write_file` and `fetch_url`
   calls runs nothing and the next request's catalog lacks those tools and
@@ -158,6 +214,11 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   confirmation surface yet.
 - Storing env values in the manifest when they look harmless: every
   imported value is treated as a secret.
+- Moving an argv secret to Keychain and putting it back on the command line
+  at start (the first version): it stays visible to process listings and the
+  preview had to mask it by a second, different test.
+- Trusting an imported server's own `readOnlyHint` or a model suggestion on
+  first connect: both come from the server's own descriptions.
 
 ## Not in this iteration
 

@@ -13,7 +13,7 @@ struct AgentSourcesSection: View {
 
     struct SourceSheetID: Identifiable { let id: String }
 
-    static let footnote = "The Agent searches sources only when you ask, with read-only tools. What it finds goes to your Agent model’s provider. After reading a source, the same request can’t edit files, run commands, open web pages or change Whytap."
+    static let footnote = "The Agent searches sources only when you ask, with read-only tools. What it finds goes to your Agent model’s provider. After reading a source, the same request can only search that source again: no file edits, commands, web pages, other sources or Whytap changes."
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -161,11 +161,6 @@ struct SourceDetailSheet: View {
                 MacPill(text: status.text, tone: SourceRow.tone(status), showsDot: true)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if record.hasArgumentSecrets {
-                Text("A secret is passed on this server’s command line, so other programs on this Mac can see it in process listings.")
-                    .font(.system(size: 11.5)).foregroundStyle(MacSettingsTheme.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
     }
 
@@ -197,14 +192,17 @@ struct SourceDetailSheet: View {
     private func toolsCard(_ record: SourceRecord) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "Tools", trailing: "\(record.readTools.count) of \(record.tools.count) usable by the Agent")
-            if record.changedToolCount > 0 {
+            if record.pendingReviewCount > 0 {
+                let count = record.pendingReviewCount
                 MacBanner(tone: .warn, systemImage: "exclamationmark.triangle",
-                          title: "\(record.changedToolCount) tool\(record.changedToolCount == 1 ? "" : "s") changed",
-                          text: "The server changed how these tools are described. They stay unavailable until you approve them.")
+                          title: "\(count) tool\(count == 1 ? "" : "s") waiting for you",
+                          text: record.kind.trustedOnConnect || record.tools.contains(where: { record.decisions[$0.name]?.needsReview == false && record.decisions[$0.name]?.toolClass == .read })
+                              ? "The server changed how these tools are described. They stay unavailable until you approve them."
+                              : "Whytap can’t check what this server’s tools really do. Look at the classes below; the Agent uses its Read tools only after you approve.")
                     .padding(.bottom, 8)
                 HStack {
                     Spacer()
-                    MacButton(title: "Approve changes", style: .tinted) { controller.approveChanges(id: id) }.fixedSize()
+                    MacButton(title: "Approve tools", style: .tinted) { Task { await controller.approveChanges(id: id) } }.fixedSize()
                 }
                 .padding(.bottom, 8)
             }
@@ -216,7 +214,7 @@ struct SourceDetailSheet: View {
                     if index > 0 { MacRowSeparator() }
                     let decision = record.decisions[tool.name]
                     MacRow(title: tool.title ?? tool.name,
-                           subtitle: (decision?.needsReview == true ? "Changed · " : "")
+                           subtitle: (decision?.needsReview == true ? "Waiting for approval · " : "")
                                + String(tool.description.replacingOccurrences(of: "\n", with: " ").prefix(140))) {
                         MacPopup(items: [SourceToolClass.read, .outward, .destructive].map { .init(value: $0, label: $0.label) },
                                  selection: Binding(get: { decision?.toolClass ?? .outward },

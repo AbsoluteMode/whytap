@@ -94,6 +94,8 @@ final class MCPProcess: @unchecked Sendable {
         for fd in [input[1], output[0], errors[0], life[1]] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
         // A server that exits mid-write must not SIGPIPE the app.
         _ = fcntl(input[1], F_SETNOSIGPIPE, 1)
+        // Writes wait with a deadline (poll) instead of blocking.
+        _ = fcntl(input[1], F_SETFL, fcntl(input[1], F_GETFL) | O_NONBLOCK)
         var actions: posix_spawn_file_actions_t?
         var attributes: posix_spawnattr_t?
         posix_spawn_file_actions_init(&actions)
@@ -128,19 +130,25 @@ final class MCPProcess: @unchecked Sendable {
             defer { readers.leave() }
             var buffer = [UInt8](repeating: 0, count: 65_536)
             var line = Data()
-            while true {
+            reading: while true {
                 let count = Darwin.read(stdoutFD, &buffer, buffer.count)
                 if count < 0 && errno == EINTR { continue }
                 guard count > 0 else { break }
                 var start = 0
                 for index in 0..<count where buffer[index] == 10 {
+                    // The limit holds for every complete line, before it is delivered.
+                    guard line.count + (index - start) <= Self.maxLineBytes else {
+                        lock.lock(); overflowed = true; lock.unlock(); stop(); break reading
+                    }
                     line.append(contentsOf: buffer[start..<index])
                     if !line.isEmpty { onLine(line) }
                     line.removeAll(keepingCapacity: true)
                     start = index + 1
                 }
+                guard line.count + (count - start) <= Self.maxLineBytes else {
+                    lock.lock(); overflowed = true; lock.unlock(); stop(); break
+                }
                 line.append(contentsOf: buffer[start..<count])
-                if line.count > Self.maxLineBytes { lock.lock(); overflowed = true; lock.unlock(); stop(); break }
             }
             lock.lock(); let overflow = overflowed; lock.unlock()
             if !overflow, !line.isEmpty { onLine(line) }
@@ -185,10 +193,16 @@ final class MCPProcess: @unchecked Sendable {
         }
     }
 
-    /// Writes one message and a newline. Fails once the server is gone.
-    func write(_ data: Data) throws {
+    /// Largest message Whytap sends to a server.
+    static let maxWriteBytes = 1_048_576
+
+    /// Writes one message and a newline within `timeout`: a server that stops
+    /// reading its input is stopped instead of blocking the app.
+    func write(_ data: Data, timeout: TimeInterval = 10) throws {
+        guard data.count < Self.maxWriteBytes else { throw MCPError.tooLarge(limit: Self.maxWriteBytes) }
         var payload = data
         payload.append(10)
+        let deadline = Date().addingTimeInterval(timeout)
         try writeQueue.sync {
             lock.lock()
             let open = stdinOpen
@@ -198,11 +212,13 @@ final class MCPProcess: @unchecked Sendable {
                 var offset = 0
                 while offset < raw.count {
                     let written = Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset)
-                    if written < 0 {
-                        if errno == EINTR { continue }
-                        throw MCPError.notConnected
-                    }
-                    offset += written
+                    if written >= 0 { offset += written; continue }
+                    if errno == EINTR { continue }
+                    guard errno == EAGAIN else { throw MCPError.notConnected }
+                    let remaining = Int32(max(0, deadline.timeIntervalSinceNow * 1000))
+                    guard remaining > 0 else { stop(); throw MCPError.timedOut(seconds: Int(timeout.rounded())) }
+                    var descriptor = pollfd(fd: stdinFD, events: Int16(POLLOUT), revents: 0)
+                    _ = poll(&descriptor, 1, min(remaining, 250))
                 }
             }
         }

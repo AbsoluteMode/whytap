@@ -9,11 +9,16 @@ import XCTest
 @MainActor
 final class LilBroRenderTests: XCTestCase {
     private func controller(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection,
-                            mascot: Bool = true) -> LilBroController {
+                            mascot: Bool = true, remote: LilBroBrain? = nil) -> LilBroController {
         let preferences = LilBroPreferences(defaults: fixture.defaults)
         preferences.mascotVisible = mascot
-        return LilBroController(selection: selection, preferences: preferences, reduceMotion: { true },
+        return LilBroController(selection: selection, preferences: preferences,
+                                remote: remote ?? Offline(), reduceMotion: { true },
                                 sleep: { _ in await Task.yield() })
+    }
+
+    private struct Offline: LilBroBrain {
+        func reply(to question: LilBroQuestion) async -> LilBroReply { .offline }
     }
 
     private func render(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection,
@@ -104,5 +109,22 @@ final class LilBroRenderTests: XCTestCase {
             lilBro.toggleFromSidebar()
         }
         XCTAssertEqual(lilBro.bubble, .full)
+    }
+
+    func test_answers_on_but_offline_he_offers_try_again_and_the_closest_page() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        try await render(fixture, selection, lilBro, name: "offer-light") {
+            lilBro.toggleFromSidebar()
+        }
+        lilBro.turnOnAnswers()
+        try await render(fixture, selection, lilBro, name: "offline-light") {
+            lilBro.ask("how do I dictate")
+            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+        }
+        XCTAssertEqual(lilBro.turns.last?.reply, .offline)
+        XCTAssertNil(selection.shownFeature, "offline changes nothing")
     }
 }

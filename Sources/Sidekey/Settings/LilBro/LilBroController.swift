@@ -1,21 +1,29 @@
 import AppKit
 import SwiftUI
 
-/// Whether the little guy runs around Settings. Off leaves only the "Lil Bro"
-/// entry in the sidebar, which opens the same balloon.
+/// Whether the little guy runs around Settings (off leaves only the "Lil Bro"
+/// entry in the sidebar, which opens the same balloon), and whether his
+/// answers come from whytap.ai. Answers are off until the person turns them
+/// on in his balloon; until then he finds settings by name on this Mac.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
+    static let answersKey = "lilBro.answersFromWhytap"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
+    @Published var answersFromWhytap: Bool {
+        didSet { defaults.set(answersFromWhytap, forKey: Self.answersKey) }
+    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
+        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? false
     }
 }
 
@@ -38,6 +46,10 @@ final class LilBroController: ObservableObject {
     struct Turn: Equatable, Identifiable {
         let id = UUID()
         let question: String
+        /// Asked with answers from whytap.ai on, so whytap.ai already has it.
+        /// Only such turns go back as earlier exchanges; a question asked on
+        /// this Mac never leaves it later.
+        var sentToWhytap = false
         var reply: LilBroReply?
         /// The place he opened for this answer, said under it.
         var opened: String?
@@ -65,6 +77,8 @@ final class LilBroController: ObservableObject {
     @Published var hovering = false
     @Published var showEarlier = false
     @Published var menuOpen = false
+    /// The disclosure before answers from whytap.ai, asked for from ⋯.
+    @Published private(set) var consentShown = false
     @Published var draft = ""
 
     private(set) var map = LilBroMap()
@@ -77,26 +91,32 @@ final class LilBroController: ObservableObject {
 
     let selection: SettingsWindowSelection
     let preferences: LilBroPreferences
-    let brain: LilBroBrain
+    /// Finds settings by name on this Mac; used while answers are off.
+    let local: LilBroBrain
+    /// whytap.ai; asked only while answers are on.
+    let remote: LilBroBrain
     private let reduceMotion: () -> Bool
     private let sleep: (TimeInterval) async -> Void
     private let now: () -> Date
 
     init(selection: SettingsWindowSelection,
          preferences: LilBroPreferences? = nil,
-         brain: LilBroBrain? = nil,
+         local: LilBroBrain? = nil,
+         remote: LilBroBrain? = nil,
          reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
          sleep: @escaping (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64(max(0, $0) * 1e9)) },
          now: @escaping () -> Date = Date.init) {
         self.selection = selection
         self.preferences = preferences ?? .shared
-        self.brain = brain ?? LilBroLocalGuide()
+        self.local = local ?? LilBroLocalGuide()
+        self.remote = remote ?? LilBroRemoteBrain()
         self.reduceMotion = reduceMotion
         self.sleep = sleep
         self.now = now
     }
 
     var mascotVisible: Bool { preferences.mascotVisible }
+    var answersFromWhytap: Bool { preferences.answersFromWhytap }
     var isOpen: Bool { bubble != .closed }
     var isBusy: Bool { busy }
 
@@ -221,6 +241,36 @@ final class LilBroController: ObservableObject {
         showEarlier = false
     }
 
+    /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+    func askToTurnOnAnswers() {
+        menuOpen = false
+        guard !answersFromWhytap else { return }
+        consentShown = true
+    }
+
+    /// The disclosure's Turn on answers button — the only way answers from
+    /// whytap.ai are turned on. Nothing is sent before it.
+    func turnOnAnswers() {
+        preferences.answersFromWhytap = true
+        consentShown = false
+        menuOpen = false
+        objectWillChange.send()
+    }
+
+    /// The disclosure's Not now.
+    func dismissConsent() {
+        consentShown = false
+    }
+
+    /// ⋯ → Turn off answers from whytap.ai.
+    func turnOffAnswers() {
+        preferences.answersFromWhytap = false
+        consentShown = false
+        menuOpen = false
+        objectWillChange.send()
+    }
+
     func setMascotVisible(_ visible: Bool) {
         cancelJob()
         preferences.mascotVisible = visible
@@ -239,15 +289,18 @@ final class LilBroController: ObservableObject {
         menuOpen = false
         showEarlier = false
         cancelJob()
-        turns.append(Turn(question: question))
+        let remoteOn = answersFromWhytap
+        let asked = LilBroQuestion(text: question, screen: remoteOn ? screen : "", history: remoteOn ? history : [])
+        turns.append(Turn(question: question, sentToWhytap: remoteOn && LilBroRemoteBrain.sends(question)))
         let index = turns.count - 1
         bubble = .thinking
         busy = true
         target = nil
         if mascotVisible { setPose(.think) }
+        let brain = remoteOn ? remote : local
         job = Task { [weak self] in
             guard let self else { return }
-            let reply = await brain.reply(to: question)
+            let reply = await brain.reply(to: asked)
             guard !Task.isCancelled, index < turns.count else { return }
             turns[index].reply = reply
             switch reply {
@@ -258,7 +311,7 @@ final class LilBroController: ObservableObject {
                     guard !Task.isCancelled else { return }
                     turns[index].opened = destination.title
                 }
-            case .offline, .limit, .unknown:
+            case .offline, .unavailable, .limit, .unknown:
                 if mascotVisible { setPose(.sad) }
             }
             guard !Task.isCancelled else { return }
@@ -267,6 +320,50 @@ final class LilBroController: ObservableObject {
             announce(turns[index])
             job = nil
         }
+    }
+
+    /// Asks the last question again in its place (after offline or an error).
+    func retry() {
+        guard !busy, let last = turns.last else { return }
+        turns.removeLast()
+        ask(last.question)
+    }
+
+    /// A page he offers when whytap.ai cannot answer: he runs there and opens it.
+    func open(_ destination: LilBroDestination) {
+        guard !busy else { return }
+        menuOpen = false
+        cancelJob()
+        busy = true
+        let index = turns.indices.last
+        job = Task { [weak self] in
+            guard let self else { return }
+            await guide(to: destination)
+            guard !Task.isCancelled else { return }
+            if let index, index < turns.count { turns[index].opened = destination.title }
+            busy = false
+            bubble = .full
+            job = nil
+        }
+    }
+
+    /// The screen he is asked from, as the server reads it: `tab` or `tab/feature`.
+    var screen: String {
+        let tab = selection.selectedTab.resolved.rawValue
+        if selection.selectedTab.resolved == .features, let feature = selection.shownFeature {
+            return "\(tab)/\(feature.rawValue)"
+        }
+        return tab
+    }
+
+    /// Up to three earlier exchanges answered by whytap.ai, oldest first.
+    /// Questions asked while answers were off stay on this Mac.
+    var history: [LilBroQuestion.Exchange] {
+        turns.compactMap { turn in
+            guard turn.sentToWhytap, case .answer(let answer) = turn.reply else { return nil }
+            return LilBroQuestion.Exchange(question: turn.question,
+                                           answer: (answer.paragraphs + answer.bullets).joined(separator: "\n"))
+        }.suffix(3).map { $0 }
     }
 
     // MARK: Guiding
@@ -504,6 +601,7 @@ final class LilBroController: ObservableObject {
         case .answer(let answer): text = answer.paragraphs.joined(separator: " ")
         case .unknown: text = LilBroCopy.unknown
         case .offline: text = LilBroCopy.offline
+        case .unavailable: text = LilBroCopy.unavailable
         case .limit: text = LilBroCopy.limit
         }
         NSAccessibility.post(element: NSApp as Any, notification: .announcementRequested,
@@ -514,10 +612,17 @@ final class LilBroController: ObservableObject {
 /// Lil Bro's fixed words, in one place for the view and the tests.
 enum LilBroCopy {
     static let greeting = "Hi, I’m Lil Bro. Ask me where anything is in Settings — I’ll run there and open it for you."
-    static let localNote = "Answers come from this Mac for now: I find settings by name."
-    static let unknown = "I only know Settings by name for now. Try one of these:"
-    static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline."
-    static let limit = "I’ve answered as many questions as I can today. Settings still work."
+    static let greetingAnswers = "Hi, I’m Lil Bro. Ask me anything about Whytap — I’ll open the right setting for you."
+    static let localNote = "Answers come from this Mac: I find settings by name."
+    /// Said once, before anything is sent, with the button that turns answers on.
+    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
+    static let turnOn = "Turn on answers"
+    static let answersNote = "Questions go to whytap.ai (Claude Haiku 5.5) with the screen you’re on and up to three earlier whytap.ai questions and answers; it keeps them 90 days. Keys and dictated text stay on your Mac."
+    static let notNow = "Not now"
+    static let unknown = "I only know Settings by name. Try one of these:"
+    static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"
+    static let unavailable = "whytap.ai can’t answer right now. Settings still work; this is the closest page:"
+    static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow. Settings still work — closest pages:"
     static let catchMe = "Catch me"
     static let placeholder = "Ask Lil Bro…"
 }

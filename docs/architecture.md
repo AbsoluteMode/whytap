@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers,
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's opt-in answers from whytap.ai),
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1555,10 +1555,22 @@ SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers come from LilBroLocalGuide: the feature catalog and tab
-names, on this Mac, no network. It is a keyword guide, not an English parser;
-its contract is LilBroLocalGuideTests (a new phrasing answered wrongly is added
-there as its own task, see the decision's "Contract"). The sprite sheet is Resources/LilBro, embedded
+same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
+names, on this Mac, no network; a keyword guide, not an English parser, whose
+contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
+there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
+the balloon's disclosure (LilBroOffer; ⋯ → Turn on answers only shows it;
+`lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
+question (cut to the server's 300 Unicode scalars), the screen (`tab` or
+`tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
+answered (questions asked while answers were off never leave the Mac), with
+redirects refused, to
+`https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
+claude-haiku-5-5), which returns sentences, points, follow-ups and one place;
+an id the app does not have is dropped. No internet or a timeout is offline,
+429 or a spent budget is the daily limit, any other error is unavailable; each
+offers Try again (offline, unavailable) and the closest pages the local guide
+finds, and changes nothing. ⋯ turns answers off again. The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md
 
@@ -2661,8 +2673,16 @@ input layout, including live recording and previously saved non-English titles.
 
 ## Invariants
 
-1. **No Whytap-owned services.** The app never contacts a Whytap backend,
-   has no account and sends no telemetry. Network traffic is limited to
+1. **No Whytap-owned services, except Lil Bro's opt-in answers.** The app
+   never contacts a Whytap backend, has no account and sends no telemetry. The
+   one exception is Lil Bro in Settings: after the person presses "Turn on
+   answers" in his balloon, each question they ask him, the Settings screen
+   they are on and up to three earlier exchanges go to
+   `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
+   checked by `LilBroRemoteBrainTests`); nothing is sent before that or after
+   they turn answers off. WHY:
+   .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+   Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this
    Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),

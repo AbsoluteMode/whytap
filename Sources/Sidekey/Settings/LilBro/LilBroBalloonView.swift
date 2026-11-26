@@ -68,6 +68,12 @@ struct LilBroBalloonView: View {
                 Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
                     controller.setMascotVisible(!controller.mascotVisible)
                 }
+                if controller.answersFromWhytap {
+                    Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
+                } else {
+                    // Opens the disclosure; only its button turns answers on.
+                    Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
+                }
                 if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
                 Button("Close") { controller.close() }
             } label: {
@@ -90,16 +96,45 @@ struct LilBroBalloonView: View {
 
     @ViewBuilder private var content: some View {
         if let turn = lastTurn, let reply = turn.reply {
-            LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
-                            ask: controller.ask, retry: { controller.ask(turn.question) }, current: true)
+            LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+                            mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                            actions: actions, current: true)
+            offer(after: reply)
+        } else if controller.answersFromWhytap {
+            paragraph(LilBroCopy.greetingAnswers)
+            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
+            note(LilBroCopy.answersNote)
         } else {
             paragraph(LilBroCopy.greeting)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
-            Text(LilBroCopy.localNote)
-                .font(.system(size: 11))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
+            offer(after: nil)
         }
+    }
+
+    /// The disclosure where it belongs: after the greeting or an unknown
+    /// reply, or anywhere once ⋯ asked for it — then with Not now.
+    @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
+        switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                     consentShown: controller.consentShown) {
+        case .none:
+            EmptyView()
+        case .turnOn:
+            LilBroOffer(turnOn: { controller.turnOnAnswers() })
+        case .turnOnOrNotNow:
+            LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
+        }
+    }
+
+    private var actions: LilBroReplyView.Actions {
+        LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
+                                turnOn: { controller.turnOnAnswers() })
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11))
+            .foregroundStyle(MacSettingsTheme.text2)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var earlier: some View {
@@ -110,8 +145,9 @@ struct LilBroBalloonView: View {
                         + Text(turn.question).fontWeight(.semibold).foregroundStyle(MacSettingsTheme.text))
                         .font(.system(size: 11.5))
                     if let reply = turn.reply {
-                        LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
-                                        ask: { _ in }, retry: {}, current: false)
+                        LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
+                                        mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                                        actions: .none, current: false)
                     }
                 }
                 .padding(.bottom, 4)
@@ -131,12 +167,24 @@ struct LilBroBalloonView: View {
 /// One reply's words: an answer with the place he opened, or why he could
 /// not answer. Earlier replies show the words only.
 struct LilBroReplyView: View {
+    struct Actions {
+        var ask: (String) -> Void
+        var retry: () -> Void
+        var open: (LilBroDestination) -> Void
+        var turnOn: () -> Void
+
+        static let none = Actions(ask: { _ in }, retry: {}, open: { _ in }, turnOn: {})
+    }
+
     let reply: LilBroReply
+    let question: String
     let opened: String?
     let mascot: Bool
-    let ask: (String) -> Void
-    let retry: () -> Void
+    let answersOn: Bool
+    let actions: Actions
     let current: Bool
+
+    private var ask: (String) -> Void { actions.ask }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -166,10 +214,32 @@ struct LilBroReplyView: View {
                 if current { LilBroChips(items: suggestions.map { q in (q, false, { ask(q) }) }) }
             case .offline:
                 paragraph(LilBroCopy.offline)
-                if current { LilBroChips(items: [("Try again", true, retry)]) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+            case .unavailable:
+                paragraph(LilBroCopy.unavailable)
+                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
             case .limit:
                 paragraph(LilBroCopy.limit)
+                if current { LilBroChips(items: closest) }
             }
+            if let opened, !isAnswer {
+                (Text(mascot ? "I opened " : "Opened ") + Text(opened).fontWeight(.semibold) + Text("."))
+                    .font(.system(size: 12))
+                    .foregroundStyle(MacSettingsTheme.text2)
+            }
+        }
+    }
+
+    private var isAnswer: Bool {
+        if case .answer = reply { return true }
+        return false
+    }
+
+    /// "Open <page>" buttons when whytap.ai cannot answer.
+    private var closest: [(String, Bool, () -> Void)] {
+        let open = actions.open
+        return LilBroLocalGuide.closestPlaces(for: question).map { place in
+            ("Open \(place.title)", false, { open(place) })
         }
     }
 
@@ -178,6 +248,44 @@ struct LilBroReplyView: View {
             .font(.system(size: 12.5))
             .foregroundStyle(MacSettingsTheme.text)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// The one place answers from whytap.ai are turned on: what goes there, what
+/// stays on this Mac, and the button. Nothing is sent before it is pressed.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+struct LilBroOffer: View {
+    let turnOn: () -> Void
+    var notNow: (() -> Void)? = nil
+
+    enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
+
+    /// Answers off: after the greeting (nil) or an unknown reply it offers
+    /// Turn on answers; once ⋯ asked for it, it shows after any reply, with
+    /// Not now.
+    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
+        guard !answersOn else { return .none }
+        if consentShown { return .turnOnOrNotNow }
+        return reply == nil || reply?.isUnknown == true ? .turnOn : .none
+    }
+
+    /// The buttons it shows, in order.
+    var choices: [String] { [LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow]) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(LilBroCopy.offer)
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            LilBroChips(items: [(LilBroCopy.turnOn, true, turnOn)]
+                        + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Answers from whytap.ai")
     }
 }
 
@@ -364,7 +472,7 @@ struct LilBroReplyField: View {
                 info.toggle()
             }
             .popover(isPresented: $info, arrowEdge: .top) {
-                Text(LilBroCopy.localNote)
+                Text(controller.answersFromWhytap ? LilBroCopy.answersNote : LilBroCopy.localNote)
                     .font(.system(size: 12))
                     .frame(width: 220, alignment: .leading)
                     .fixedSize(horizontal: false, vertical: true)

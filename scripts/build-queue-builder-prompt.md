@@ -114,21 +114,27 @@ holds it, leave the tickets queued and end your turn.
    when mechanical and safe; otherwise record it as a follow-up in the note
    and continue.
 4. Validate the final combined candidate: documentation checks, and for
-   runtime changes the build and the full `swift test`. Right before the full
+   runtime changes the build and the full suite. Right before the full
    suite run, in the integration worktree,
    `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment`.
    While it reports a locked screen or a load above its limit, wait and check
    again (up to 15 minutes) instead of running the suite; if it stays not
    clear, return the ticket with `set --status queued` and a note that the
    environment, not the PR, stopped it. Do not treat failures from a suite run under such load as PR
-   findings. When a test fails whose file and code under test the candidate
-   does not change, rerun only the failed tests
-   (`swift test --filter <Class>/<test>`), not the whole suite. If they pass,
-   it is not a finding: go on with the ticket, append the test, ticket and
+   findings. The full suite is `python3 scripts/test-shards.py --shards 2`
+   (in the background, output to a file): it builds the tests, runs two class
+   shards at once, checks that they cover exactly `swift test --list-tests`,
+   reruns every failed test alone, and falls back to the serial `swift test`
+   by itself when sharding cannot run (`mode`, `fallback_reason`). Read
+   `build/test-shards/summary.json`: exit 0 passed, 1 `failed` lists the tests
+   that failed again alone, 2 the suite could not run (a build error or a
+   crash: read the logs it names). A test in `failed_then_passed_alone` whose
+   file or code under test the candidate changes is still a finding. Any
+   other test there failed only beside the others: it is not a finding: go on with the ticket, append the test, ticket and
    date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git common directory, and name it
    as a follow-up in the ticket note when the file already lists it within
-   the last seven days. If a rerun fails again, it is a finding as before. A
-   test skipped with "Protected data is unavailable" ran while the screen was
+   the last seven days. A test in `failed` is a finding as before. A test in
+   `protected_skipped` ("Protected data is unavailable") ran while the screen was
    locked: run it again once `environment` is clear, before merging; a
    failure there is a finding. Commands that run
    longer than a few minutes go to the background with output in a file.

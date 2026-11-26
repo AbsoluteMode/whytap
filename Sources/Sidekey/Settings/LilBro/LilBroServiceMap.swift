@@ -3,7 +3,8 @@ import Foundation
 /// The whole service as Lil Bro's model reads it (REV 22): for every feature
 /// what it does, how to use it, what it needs, every setting with its row id
 /// and the common problems with the row that fixes each; then Keys & models,
-/// API hints, Case, Coding tools and every other screen's rows.
+/// API hints, Case, Coding tools and every other screen's rows; and every
+/// part of the island with what controls it (`LilBroIslandMap`, REV 24).
 ///
 /// Built from the code of this revision: `FeatureCatalog` (name, line,
 /// about, shortcuts, activation, island tool, examples, requirements) and
@@ -33,6 +34,7 @@ enum LilBroServiceMap {
             "",
         ]
         for feature in AppFeature.allCases { out += block(feature) }
+        out += LilBroIslandMap.lines
         out += sections()
         return out.joined(separator: "\n") + "\n"
     }

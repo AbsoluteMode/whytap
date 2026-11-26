@@ -237,6 +237,64 @@ Settings (row id: title — what it does):
 Common problems:
 * No dashboards → A coding agent builds them: copy the Build a dashboard prompt into your coding agent. Rows: monitor.buildDashboard.
 
+## The island
+
+Everything on the island, and what turns each part on, off or changes it. "Not in Settings" or "No setting" means there is no row: say what to do instead, never that it does not exist.
+
+### Island pill
+The black pill around the notch (or at the top of a display without one): the orb on the left, hints and status on the right. Hover it to open the drawer. Auto-hide island fades it into the notch after about 20 seconds of no use (hover or any shortcut brings it back); Show island on picks the display; Screenshot protection hides it from screenshots and screen shares. It cannot be removed: quitting Whytap removes it. Rows: other.autoHide, other.showIslandOn, other.screenshotProtection.
+
+### Eye: Hide Hover and Music
+While you hover the pill, an eye takes the orb's place on the left. Not in Settings. Click the eye to hide the hover drawer and the music player (it turns into a crossed-out eye); click it again (Show Hover and Music) to bring them back. While they are hidden the brightness keys go back to macOS.
+
+### Music (Now Playing)
+While a track plays in any app: a small wing with the track in the pill's right band, and on hover a player card with artwork, play/pause and skip. Always on; there is no music switch in Settings. To hide the player card, hover the pill and click the eye (Hide Hover and Music); the small wing stays while music plays and goes away when it stops.
+
+### Shortcut hints
+When nothing else is shown, the pill's right band takes turns showing the main shortcuts (Drop, Agent). Always on; they show the keys set in Hotkeys, so changing a shortcut changes its hint. Rows: hotkeys.dropVoice, hotkeys.agentText, hotkeys.agentVoice.
+
+### Hover drawer and tools
+Hover the pill: Search all tools and your tool tiles; Option 1 to Option 5 open the first five. A tool opens its panel in the drawer. Your hover chooses and orders the tiles; All tools lists every tool and opens it. Hide the whole drawer with the eye. Rows: toolbox.yourHover, toolbox.allTools.
+
+### Drop Mode panel and badge
+The Drop Mode tool switches Fast and Smart; after a switch the pill shows the new mode for a moment. Drop's Mode row or the Drop Mode tool. Rows: drop.mode, toolbox.dropMode.
+
+### Language panels
+Input Lang and Output Lang tools: flags for the language you speak and the language Smart writes in. The Input Lang and Output Lang tools, or Drop's Language you speak. Rows: toolbox.inputLang, toolbox.outputLang, drop.language.
+
+### Vocab and Filler panels
+The words dictation spells right (Vocab) and the words it cuts (Filler), editable from the island. The Vocab and Filler tools or Drop's Vocab and Filler rows. Rows: toolbox.vocab, toolbox.filler, drop.vocab, drop.filler.
+
+### Case panel
+Case keys and projects in the island: search, add a key, drag a key to another project, delete a project. The Case tool, or Case's Your keys. Rows: toolbox.caseVault, case.yourKeys.
+
+### Notify panel
+What arrived from your notification sources, with Clear All. The Notify tool; Add your own connects another source. Rows: toolbox.notifs, notify.inIsland, notify.addYourOwn.
+
+### Brightness strip
+The Display tool's brightness slider, with a yellow Extra part above the normal maximum. The Display tool and its Hold brightness, Extra and Brightness keys rows. Rows: toolbox.brightness, toolbox.holdBrightness, toolbox.extraBrightness, toolbox.brightnessKeys.
+
+### Dictation wing
+While you dictate, the pill shows your words as you speak; if the text could not be typed, Couldn't deliver with Retry. Drop's rows: its shortcut, Mode, lowering other audio and stopping automatically. Rows: drop.dictate, drop.mode, drop.lowerOtherAudio, drop.stopAutomatically.
+
+### Agent wing and answer
+While the Agent works, a wing with what it is doing; then its answer under the island. Agent's switch, Close the answer and Allow file edits and commands. Rows: agent.switch, agent.closeShortcut, agent.allowActions.
+
+### Meeting offer and recording
+When a call starts: Take notes / Skip with a countdown; while recording: a timer, a waveform and Stop. Meeting Notes' switch turns the offer off; its shortcut starts or stops a recording. Rows: meetings.switch, meetings.recordShortcut, meetings.readyNotification.
+
+### Notification pill
+A short pill when something arrives from a notification source or a meeting note is ready. Notify's sources and its Meeting notes row. Rows: notify.inIsland, notify.meetingNotes.
+
+### Update pill
+Update when a new version is out (Download / Skip, then Restart / Later), and Updated for a few seconds after it installs. No setting: nothing downloads until you click Download; Skip hides the pill.
+
+### Case access request
+A coding tool asks for Case keys: choose the project and allow or refuse, and see which tools are connected. Case's Your keys and Integrations (Coding tools) change what each tool may use. Rows: case.yourKeys, other.integrations.
+
+### Secure Input badge
+A dimmed app logo to the right of the island: that app holds Secure Input (usually a password field), so macOS keeps Whytap's shortcuts from working; it shakes when you press one. No setting: leave the password field or quit that app and the badge goes away.
+
 ## Case and coding tools
 
 Case keeps secret keys on this Mac in projects. A coding agent sees key names, never values, and runs a command through Case, which puts the value in and hides it in the output. Coding tools reach Whytap through its plugin after you allow them once (Integrations → Coding tools).

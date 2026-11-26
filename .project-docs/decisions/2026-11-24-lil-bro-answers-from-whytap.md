@@ -57,6 +57,20 @@ invariant said so.
   address, provider message or text. The server drops anything outside its
   allowlist. The model then names the likely cause and leads to the row
   that fixes it.
+- **The island on the map (REV 24, 2026-11-26).** The eval found a gap:
+  asked "how do I turn off the music widget?", both models said there is no
+  such setting. The music player has no switch in Settings; the eye that
+  takes the orb's place on hover (Hide Hover and Music) hides it and the
+  hover drawer. `LilBroIslandMap` now lists every part of the island (pill,
+  eye, music, shortcut hints, hover drawer and each tool panel, dictation
+  and Agent wings, meeting offer and recording, notification and update
+  pills, Case access request, Secure Input badge) with the rows that
+  control it, or "Not in Settings" / "No setting" / "Always on" and what to
+  do instead. `LilBroServiceMapTests` scans the source for every view or
+  view modifier under DynamicIsland and every `Island...` view elsewhere,
+  and fails when one belongs to no part, a part names a view that is gone,
+  or a part without rows does not say so. A temporary `IslandProbeWidget`
+  made the test fail as intended.
 - **The service map and a shorter conversation (REV 21 and REV 22,
   2026-11-26).** The maintainer: Lil Bro is either really useful or not
   needed, and he has to understand the service well. The inquisition asked

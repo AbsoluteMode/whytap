@@ -1648,9 +1648,12 @@ app is `LilBroServiceMap` (REV 22), generated from `FeatureCatalog` and
 `LilBroRow.catalog` and checked in at docs/lil-bro/service-map.md: per
 feature what it does, how to use it, what it needs, its rows and its common
 problems with the row that fixes each, then Keys & models, API hints, Case,
-coding tools and every other screen's rows. `LilBroServiceMapTests` fails
-when the file is stale, a feature lacks a part, a problem names a missing
-row, or a row is listed other than once.
+coding tools and every other screen's rows, and every part of the island
+(`LilBroIslandMap`, REV 24) with the rows that control it or what to do
+instead when nothing in Settings does (the music player is hidden with the
+eye on hover). `LilBroServiceMapTests` fails when the file is stale, a
+feature lacks a part, a problem names a missing row, a row is listed other
+than once, or an island view belongs to no island part.
 The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md

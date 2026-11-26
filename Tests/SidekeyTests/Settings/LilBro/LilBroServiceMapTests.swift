@@ -5,8 +5,8 @@ import XCTest
 /// REV 22: Lil Bro's model reads the whole service from a map built from this
 /// revision's code. Every feature has its full block, every row the map names
 /// exists, every catalog row is in exactly one block, and the checked-in copy
-/// whytap.ai reads is current. A new feature or row without its place here
-/// fails. Regenerate with `LILBRO_WRITE_SERVICE_MAP=1 swift test --filter LilBroServiceMapTests`.
+/// whytap.ai reads is current. A new feature, row or island view without its
+/// place here fails (REV 24: the island). Regenerate with `LILBRO_WRITE_SERVICE_MAP=1 swift test --filter LilBroServiceMapTests`.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md (REV 22)
 @MainActor
 final class LilBroServiceMapTests: XCTestCase {
@@ -56,6 +56,68 @@ final class LilBroServiceMapTests: XCTestCase {
         }
         let saved = try String(contentsOf: url, encoding: .utf8)
         XCTAssertEqual(saved, text, "regenerate \(LilBroServiceMap.path) (LILBRO_WRITE_SERVICE_MAP=1)")
+    }
+
+    // MARK: The island (REV 24)
+
+    /// Every view drawn on the island: any view or view modifier declared
+    /// under DynamicIsland, and any `Island…` view elsewhere.
+    static func islandViews() throws -> Set<String> {
+        let sources = root.appendingPathComponent("Sources")
+        let island = sources.appendingPathComponent("Sidekey/DynamicIsland").path
+        let declaration = try NSRegularExpression(
+            pattern: #"\bstruct\s+([A-Za-z0-9_]+)\s*(?:<[^>{]*>)?\s*:\s*(?:View|ViewModifier)\b"#
+        )
+        var names: Set<String> = []
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)
+        while let url = files?.nextObject() as? URL {
+            guard url.pathExtension == "swift" else { continue }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let range = NSRange(text.startIndex..., in: text)
+            for match in declaration.matches(in: text, range: range) {
+                guard let name = Range(match.range(at: 1), in: text).map({ String(text[$0]) }) else { continue }
+                if url.path.hasPrefix(island) || name.hasPrefix("Island") { names.insert(name) }
+            }
+        }
+        return names
+    }
+
+    /// A new island element without its part fails: give it a part in
+    /// `LilBroIslandMap.parts` with the rows that control it, or say that
+    /// nothing in Settings does and what does instead.
+    func test_every_island_view_belongs_to_a_part() throws {
+        let views = try Self.islandViews()
+        XCTAssertGreaterThan(views.count, 50, "the island scan found too little; check the path")
+        let claimed = LilBroIslandMap.parts.flatMap(\.views)
+        XCTAssertEqual(claimed.count, Set(claimed).count, "a view is claimed by two parts")
+        XCTAssertEqual(views.subtracting(claimed).sorted(), [], "island views in no LilBroIslandMap part")
+        XCTAssertEqual(Set(claimed).subtracting(views).sorted(), [], "parts name views that no longer exist")
+    }
+
+    func test_every_island_part_names_real_rows_or_says_what_to_do_instead() {
+        let ids = Set(LilBroRow.catalog.map(\.id))
+        for part in LilBroIslandMap.parts {
+            XCTAssertEqual(part.rows.filter { !ids.contains($0) }, [], part.name)
+            XCTAssertFalse(part.what.isEmpty, part.name)
+            if part.rows.isEmpty {
+                XCTAssertTrue(part.control.hasPrefix("Not in Settings") || part.control.hasPrefix("No setting")
+                    || part.control.hasPrefix("Always on"), "\(part.name) has no row and does not say so")
+            }
+        }
+    }
+
+    /// The question from the eval: “how do I turn off the music widget?”.
+    func test_the_music_player_is_on_the_map_with_the_eye_that_hides_it() throws {
+        let text = LilBroServiceMap.text
+        XCTAssertTrue(text.contains("## The island"))
+        let music = LilBroIslandMap.parts.first { $0.views.contains("IslandMusicStripView") }
+        XCTAssertNotNil(music)
+        XCTAssertTrue(music?.control.contains("Hide Hover and Music") == true)
+        let eye = LilBroIslandMap.parts.first { $0.views.contains("IslandHideButton") }
+        XCTAssertTrue(eye?.control.contains("Show Hover and Music") == true)
+        // The map quotes the eye's own words; renaming them must update the map.
+        let source = try String(contentsOf: Self.root.appendingPathComponent("Sources/Sidekey/DynamicIsland/IslandView.swift"), encoding: .utf8)
+        XCTAssertTrue(source.contains("\"Hide Hover and Music\"") && source.contains("\"Show Hover and Music\""))
     }
 
     /// It rides on every question as the cached prefix: small enough to be

@@ -685,9 +685,9 @@ enum LilBroCopy {
     static let greetingAnswers = "Hi, I’m Lil Bro. Ask me anything about Whytap — I’ll open the right setting for you."
     static let localNote = "Answers come from this Mac: I find settings by name."
     /// Said once, before anything is sent, with the button that turns answers on.
-    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen you’re on and up to three earlier answers from it. whytap.ai keeps your questions and its answers for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
+    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
-    static let answersNote = "Questions, the screen you’re on and recent answers go to whytap.ai (Claude Haiku 5.5), kept 90 days. Keys and dictated text stay on your Mac."
+    static let answersNote = "Questions go to whytap.ai (Claude Haiku 5.5) with the screen you’re on and up to three earlier whytap.ai questions and answers; it keeps them 90 days. Keys and dictated text stay on your Mac."
     static let notNow = "Not now"
     static let unknown = "I only know Settings by name. Try one of these:"
     static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"

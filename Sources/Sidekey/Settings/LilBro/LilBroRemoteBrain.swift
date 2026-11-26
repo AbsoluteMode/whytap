@@ -48,11 +48,33 @@ struct LilBroRemoteBrain: LilBroBrain {
         }
     }
 
-    /// The question as the server reads it: whitespace collapsed, cut at a
-    /// character boundary to 300 Unicode scalars; nil under three.
+    /// What Python's `str.split()` on the server treats as whitespace
+    /// (`str.isspace`), by Unicode scalar.
+    static let serverWhitespace: Set<UInt32> = Set([0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0,
+                                                   0x1680, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000] + Array(0x2000...0x200A))
+
+    /// The question as the server's `clean_question` reads it: split on its
+    /// whitespace by scalar and joined with single spaces, cut at a character
+    /// boundary to 300 scalars, trailing space trimmed again; nil under three.
     static func prepared(_ question: String) -> String? {
-        let text = clipped(question.split(whereSeparator: \.isWhitespace).joined(separator: " "), to: questionLimit)
-        return text.unicodeScalars.count >= questionMinimum ? text : nil
+        var words: [String.UnicodeScalarView] = []
+        var word = String.UnicodeScalarView()
+        for scalar in question.unicodeScalars {
+            if serverWhitespace.contains(scalar.value) {
+                if !word.isEmpty { words.append(word); word = String.UnicodeScalarView() }
+            } else {
+                word.append(scalar)
+            }
+        }
+        if !word.isEmpty { words.append(word) }
+        var joined = String.UnicodeScalarView()
+        for (index, word) in words.enumerated() {
+            if index > 0 { joined.append(" ") }
+            joined.append(contentsOf: word)
+        }
+        var text = clipped(String(joined), to: questionLimit).unicodeScalars
+        while let last = text.last, serverWhitespace.contains(last.value) { text.removeLast() }
+        return text.count >= questionMinimum ? String(text) : nil
     }
 
     /// Whether a question would leave this Mac (long enough for the server).
@@ -104,7 +126,7 @@ struct LilBroRemoteBrain: LilBroBrain {
         if !question.screen.isEmpty { body["screen"] = question.screen }
         if !question.history.isEmpty {
             body["history"] = question.history.suffix(3).map {
-                ["q": clipped($0.question.trimmingCharacters(in: .whitespacesAndNewlines), to: historyQuestionLimit),
+                ["q": prepared($0.question) ?? clipped($0.question, to: historyQuestionLimit),
                  "a": clipped($0.answer.trimmingCharacters(in: .whitespacesAndNewlines), to: historyAnswerLimit)]
             }
         }

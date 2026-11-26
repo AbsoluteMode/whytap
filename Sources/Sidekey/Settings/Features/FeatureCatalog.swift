@@ -570,13 +570,13 @@ enum FeatureCatalog {
             return FeatureInfo(
                 feature: feature, name: "Notify", kind: "Your own notifications",
                 line: "Cards beside the island from sources your coding agent connects: builds, messages, checks.",
-                video: nil, hotkeys: [.tool(.notifs)], activation: .islandTools([.notifs]), place: .screen,
+                video: .notify, hotkeys: [.tool(.notifs)], activation: .islandTools([.notifs]), place: .screen,
                 clipCaption: "A build finishes and its notification appears beside the island.")
         case .monitor:
             return FeatureInfo(
                 feature: feature, name: "Monitor", kind: "Dashboards in the island",
                 line: "Numbers from your servers or anything you watch, kept up to date by your coding agent's collector.",
-                video: nil, hotkeys: [.tool(.monitor)], activation: .islandTools([.monitor]), place: .screen,
+                video: .monitor, hotkeys: [.tool(.monitor)], activation: .islandTools([.monitor]), place: .screen,
                 clipCaption: "Open Monitor in the island and pick a dashboard to see its numbers.")
         }
     }

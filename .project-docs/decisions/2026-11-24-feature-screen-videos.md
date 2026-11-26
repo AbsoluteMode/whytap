@@ -2,11 +2,11 @@
 id: feature-screen-videos-2026-11-24
 type: decision
 title: Feature screens get the Drop, Shot and Translate clips
-summary: Four bundled clips for the feature screens (drop-fast, screenshot, translate, subtitles), named after their kit scene ids and referenced from FeatureCatalog; Subtitles plays as the second clip of the Translate & Subtitles screen; the clips follow build 1747 and show real model output.
+summary: Six bundled clips for the feature screens (drop-fast, screenshot, translate, subtitles, notify, monitor), named after their kit scene ids and referenced from FeatureCatalog; Subtitles plays as the second clip of the Translate & Subtitles screen; Drop, Shot, Translate and Subtitles follow build 1747 with real model output; Notify and Monitor show the setup through Copy prompt and Claude Code.
 status: confirmed
 tags: [settings, video, features]
 canonical_for: [feature-screen-videos]
-verified_at: 2026-11-25
+verified_at: 2026-11-26
 sources:
   - type: user-confirmed
     reference: On 2026-11-24 the user asked for the whole settings rebuild around features at once and said a new user must find it simple, so missing feature videos should be made (relayed by the orchestrator, task 104).
@@ -74,6 +74,19 @@ Once the Translate & Subtitles screen got its second clip (#459), the accepted
 Subtitles clip was bundled there (2026-11-25). The captions now say what each
 clip shows: Translate types a reply and copies it with a click; Shot blurs the
 private details before the arrow, as in its clip.
+
+## Notify and Monitor join
+
+The user accepted both clips on 2026-11-26 ("оба ролика класс"). Each starts
+on its feature screen with nothing connected: Copy prompt, paste into Claude
+Code and say what to watch. Notify then shows a test event, a "Build passed"
+card beside the island, the red dot on the Notify tool and Notify's History;
+Monitor shows the new dashboard in the picker (no Server status without
+servers, × on the row) and its numbers changing with the next snapshot.
+`notify.mp4` / `FeatureVideo.notify` and `monitor.mp4` / `FeatureVideo.monitor`,
+same encoding as the others; kit commit `dfb7a235`, scene files
+`motion/videos/notify.json` and `monitor.json`. They replace the earlier
+combined Notify + Monitor cut, which no longer matched the app.
 
 ## What we tested
 

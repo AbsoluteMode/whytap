@@ -2,9 +2,11 @@ import Foundation
 
 /// Answers from whytap.ai: the question, the screen the person is on and up to
 /// three earlier exchanges go to Ask's Lil Bro endpoint, which answers with
-/// claude-sonnet-5-5 and names one place from the app's own catalog.
+/// claude-sonnet-5-5 and names a place from the app's own catalog only when
+/// the person asked to go there or set something up.
 ///
-/// Used only after the person turns answers on in his balloon. Nothing else is
+/// Used for each question unless the person turned answers off in ⋯ (on by
+/// default since 2026-11-26, the maintainer's decision). Nothing else is
 /// sent: no keys, no dictated text, no settings, no identifier of this Mac.
 /// The server keeps the question text 90 days without an address or visitor.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
@@ -95,10 +97,8 @@ struct LilBroRemoteBrain: LilBroBrain {
     }
 
     func reply(to question: LilBroQuestion) async -> LilBroReply {
-        // Under three characters gets the local guide; the server needs three.
-        guard let text = Self.prepared(question.text) else {
-            return LilBroLocalGuide.match(question.text.trimmingCharacters(in: .whitespacesAndNewlines))
-        }
+        // The server needs three characters; nothing shorter is sent.
+        guard let text = Self.prepared(question.text) else { return .tooShort }
         let request: URLRequest
         do {
             request = try Self.request(for: LilBroQuestion(text: text, screen: question.screen,
@@ -147,8 +147,7 @@ struct LilBroRemoteBrain: LilBroBrain {
             let offtopic = object["offtopic"] as? Bool == true
             return .answer(LilBroAnswer(paragraphs: paragraphs,
                                         bullets: offtopic ? [] : strings(object["bullets"]),
-                                        destination: offtopic ? nil : destination(object["go"]),
-                                        followUps: offtopic ? [] : Array(strings(object["followUps"]).prefix(2))))
+                                        destination: offtopic ? nil : destination(object["go"])))
         case 429:
             return .limit
         case 503 where object?["error"] as? String == "budget_exhausted":
@@ -160,6 +159,8 @@ struct LilBroRemoteBrain: LilBroBrain {
 
     static func destination(_ value: Any?) -> LilBroDestination? {
         guard let go = value as? [String: Any] else { return nil }
+        // One row of a tab; the server also names its tab for older builds.
+        if let raw = go["row"] as? String, let row = LilBroRow.named(raw) { return .row(row) }
         if let raw = go["feature"] as? String, let feature = AppFeature(rawValue: raw) { return .feature(feature) }
         // A former tab (Agents, Notifications) is now a feature's screen: he runs there.
         if let raw = go["tab"] as? String, let tab = SettingsWindowTab(rawValue: raw) {

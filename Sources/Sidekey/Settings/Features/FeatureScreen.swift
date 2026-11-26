@@ -368,7 +368,6 @@ struct FeatureNeedsGroup: View {
                         download: context.downloadFraction,
                         perform: context.perform
                     ) { modelMenu(for: check) }
-                    .lilBroNeed(check, of: feature, perform: context.perform)
                 }
             }
         }

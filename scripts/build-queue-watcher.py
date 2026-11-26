@@ -1064,15 +1064,30 @@ def returned_stale_dependencies(root, config):
     return returned
 
 
-def tail_lines(data, limit):
-    """The newest complete lines of `data` (bytes) within `limit` bytes; one line
-    longer than the limit keeps only its newest bytes. Every byte bound of the notes
-    and their archive goes through here, so non-ASCII text cannot exceed it."""
+def utf8_tail(data, limit):
+    """At most `limit` newest bytes of `data`, starting at a character boundary:
+    a cut never splits a multi-byte UTF-8 character."""
     if len(data) <= limit:
         return data
-    tail = data[-limit:]
+    tail = data[len(data) - limit:] if limit > 0 else b""
+    start = 0
+    while start < len(tail) and tail[start] & 0xC0 == 0x80:
+        start += 1
+    return tail[start:]
+
+
+def tail_lines(data, limit):
+    """The newest complete lines of `data` (bytes) within `limit` bytes; when even
+    the newest line is longer, its newest characters. Every byte bound of the notes
+    and their archive goes through here."""
+    if len(data) <= limit:
+        return data
+    tail = data[len(data) - limit:] if limit > 0 else b""
     start = tail.find(b"\n") + 1
-    return tail[start:] if 0 < start < len(tail) else tail
+    return tail[start:] if 0 < start < len(tail) else utf8_tail(data, limit)
+
+
+TRUNCATED = b"[...] "  # the line continues from the archive
 
 
 def replace_bytes(path, data):
@@ -1094,15 +1109,22 @@ def trim_notes(root, config):
         if limit <= 0 or not path.is_file() or path.stat().st_size <= limit:
             return False
         lines = path.read_bytes().splitlines(keepends=True)
+        budget = limit // 2
         kept, size = [], 0
         for line in reversed(lines):
-            if kept and (len(kept) >= NOTES_KEPT_LINES or size + len(line) > limit // 2):
+            if kept and (len(kept) >= NOTES_KEPT_LINES or size + len(line) > budget):
                 break
             kept.insert(0, line)
             size += len(line)
         moved = lines[:len(lines) - len(kept)]
+        if size > budget:
+            # Only the newest line is left and it alone is over the budget: the whole
+            # line goes to the archive and the notes keep its newest characters.
+            moved.append(kept[0])
+            marker = TRUNCATED if budget > len(TRUNCATED) else b""
+            kept = [marker + utf8_tail(kept[0], budget - len(marker))]
         if not moved:
-            return False  # a single line over the limit: nothing older to move
+            return False
         archive = root / (NOTES + ".old")
         older = archive.read_bytes() if archive.is_file() else b""
         if older and not older.endswith(b"\n"):

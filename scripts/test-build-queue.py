@@ -788,6 +788,35 @@ class QueueTests(unittest.TestCase):
         self.assertTrue(newer["id"] > ticket["id"])
         self.assertIsNone(self.enqueue(1).get("requeued"))
 
+    def test_no_write_that_changes_the_dependency_graph_can_close_a_cycle(self):
+        """Review of ticket 641: a returned head that comes back, and a new head, both
+        pass the same dependency check, direct or through other PRs."""
+        url = lambda n: f"https://github.com/example/app/pull/{n}"
+        def submit(pr, head, *parents, ok=True):
+            args = ["enqueue", "--pr", url(pr), "--head", head, "--title", f"PR {pr}",
+                    "--checks", "x", "--acceptance", "x", "--session", "worker"]
+            for parent in parents:
+                args += ["--depends-on", url(parent)]
+            return self.call(*args, ok=ok)
+        parent = submit(1, self.change(content="parent"))["ticket"]
+        child = submit(2, self.head, 1)["ticket"]
+        self.call("claim")
+        self.update(parent["id"], "blocked")
+        self.assertEqual(self.call("return-stale-dependencies", "--minutes", "0")["returned"],
+                         [child["id"]])
+        submit(3, self.change(content="three"), 2)  # valid: 3 waits on 2
+        submit(4, self.change(content="four"), 3)   # valid: 4 waits on 3
+        for parents in ((3,), (4,), (1, 4)):
+            with self.subTest(path="returned head comes back", parents=parents):
+                submit(2, self.head, *parents, ok=False)
+                self.assertEqual(self.ticket(child["id"])["status"], "blocked")
+                self.assertEqual(self.ticket(child["id"])["depends_on"], [url(1)])
+            with self.subTest(path="new head", parents=parents):
+                submit(2, self.change(content=f"fix {parents}"), *parents, ok=False)
+        events = self.call("events", "--ticket", str(child["id"]))
+        self.assertNotIn("Resubmitted", " ".join(e["note"] for e in events))
+        self.assertTrue(submit(2, self.head)["requeued"])  # without the cycle it comes back
+
     def test_open_status_lists_open_work_and_its_history_only(self):
         old = self.enqueue(1)["ticket"]["id"]
         self.call("claim")

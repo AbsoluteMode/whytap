@@ -16,11 +16,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
+MAX_EVIDENCE_AGE = 5  # seconds between the audio samples and any verdict built on them
+
+
+def fresh(observed_at, now):
+    """True when audio evidence observed at `observed_at` (ISO 8601) is still current
+    at `now`. Every verdict that relies on the samples asks this one function, at the
+    moment of that verdict; a missing or unparsable time is never fresh."""
+    try:
+        observed = datetime.fromisoformat(str(observed_at).replace('Z', '+00:00'))
+        age = (now - observed).total_seconds()
+    except (TypeError, ValueError):
+        return False
+    return 0 <= age <= MAX_EVIDENCE_AGE
+
+
 def evaluate(report, now):
-    observed = datetime.fromisoformat(report['observed_at'].replace('Z', '+00:00'))
-    age = (now - observed).total_seconds()
     samples = report['samples']
-    if not 0 <= age <= 5 or len(samples) != 3:
+    if not fresh(report['observed_at'], now) or len(samples) != 3:
         return 'unknown', 'stale_or_incomplete_probe'
     if any(s['status'] == 'busy' for s in samples):
         return 'busy', next(s['reason'] for s in samples if s['status'] == 'busy')
@@ -31,22 +44,37 @@ def evaluate(report, now):
 
 def screen_state(ioreg_plist, uid):
     """('clear' | 'busy' | 'unknown', reason) for this user's console session, read
-    from `ioreg -n Root -d1 -a` like the login window does. Unreadable is unknown,
-    and unknown is never clear."""
+    from `ioreg -n Root -d1 -a` like the login window does. Only typed values count:
+    the user ID is an integer, on-console and locked are Booleans (locked may be
+    absent, which is how an unlocked session reads). Anything else, or more than
+    one on-console session for this user, is unknown, and unknown is never clear."""
+    unreadable = ('unknown', 'screen_state_unreadable')
     try:
         users = plistlib.loads(ioreg_plist).get('IOConsoleUsers', [])
-        if not isinstance(users, list):
-            raise ValueError('shape')
     except (ValueError, AttributeError, plistlib.InvalidFileException):
-        return 'unknown', 'screen_state_unreadable'
+        return unreadable
+    if not isinstance(users, list):
+        return unreadable
+    in_front = []
     for user in users:
-        if isinstance(user, dict) and user.get('kCGSSessionUserIDKey') == uid \
-                and user.get('kCGSSessionOnConsoleKey'):
-            locked = user.get('CGSSessionScreenIsLocked', False)
-            if not isinstance(locked, bool):
-                return 'unknown', 'screen_state_unreadable'
-            return ('busy', 'screen_locked') if locked else ('clear', 'screen_unlocked')
-    return 'busy', 'session_not_on_console'
+        if not isinstance(user, dict):
+            return unreadable
+        session_uid = user.get('kCGSSessionUserIDKey')
+        if type(session_uid) is not int:
+            return unreadable
+        if session_uid != uid:
+            continue
+        on_console = user.get('kCGSSessionOnConsoleKey', False)
+        locked = user.get('CGSSessionScreenIsLocked', False)
+        if not isinstance(on_console, bool) or not isinstance(locked, bool):
+            return unreadable
+        if on_console:
+            in_front.append(locked)
+    if not in_front:
+        return 'busy', 'session_not_on_console'
+    if len(in_front) > 1:
+        return 'unknown', 'screen_state_conflicting'
+    return ('busy', 'screen_locked') if in_front[0] else ('clear', 'screen_unlocked')
 
 
 def screen_probe(run=subprocess.run):
@@ -78,10 +106,16 @@ def audio_probe():
                            'observed_at': datetime.now(timezone.utc).isoformat()}
 
 
-def handoff(screen, audio):
+def now_utc():
+    return datetime.now(timezone.utc)
+
+
+def handoff(screen, audio, now=now_utc):
     """The gate's verdict: the screen before the audio samples (a locked Mac never
     starts them), the samples, and the screen again after them (it must still be
-    unlocked and in front when the Quit follows). Clear only when all three are."""
+    unlocked and in front when the Quit follows). Clear only when all three are and
+    the samples are still current when the verdict is given: a slow second screen
+    read cannot carry old audio evidence into a Quit."""
     before = screen()
     if before[0] != 'clear':
         return before[0], {'reason': before[1]}
@@ -91,6 +125,8 @@ def handoff(screen, audio):
     after = screen()
     if after[0] != 'clear':
         return after[0], {**evidence, 'reason': after[1] + '_after_audio_samples'}
+    if not fresh(evidence.get('observed_at'), now()):
+        return 'unknown', {**evidence, 'reason': 'audio_evidence_stale_at_verdict'}
     return 'clear', {**evidence, 'screen': 'unlocked_before_and_after'}
 
 
@@ -99,7 +135,8 @@ def main():
         print(json.dumps({'status': 'unknown', 'reason': 'unsupported_arguments'}))
         return 2
     status, evidence = handoff(screen_probe, audio_probe)
-    evidence = {'observed_at': datetime.now(timezone.utc).isoformat(), **evidence,
+    # The audio samples' own time stays the evidence time; the verdict time is separate.
+    evidence = {'observed_at': now_utc().isoformat(), **evidence, 'decided_at': now_utc().isoformat(),
                 'status': status, 'audio_captured': False}
     print(json.dumps(evidence, sort_keys=True))
     return 0 if status == 'clear' else 1

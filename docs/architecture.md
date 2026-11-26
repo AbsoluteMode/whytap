@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's opt-in answers from whytap.ai),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai),
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1560,44 +1560,48 @@ places them with the tail in one pass through LilBroBalloonLayout, inside the
 window at every edge. Opened before any question, only a one-line greeting in
 his slang (`LilBroCopy.greetings`, in turn) and the reply field show
 (`showsBalloon`); the balloon comes with the first answer and shows a short
-answer and one action, the rest behind More (`showMore`). Asked where something is, he runs to the sidebar row and then the
+answer, the rest behind More (`showMore`). No scripted scenarios (REV 10,
+2026-11-26): every question goes to whytap.ai and the model decides whether
+to answer in the balloon or open a place; there is no keyword guide on this
+Mac, no ready-made questions and no setup step he presses. When the answer
+names a row of a tab (LilBroRow, REV 12: e.g. Hotkeys → Meeting record), he
+opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
+(HotkeysSettingsView tags its rows with lilBroRow), and he stands on that row
+and outlines it; without the little guy only the outline shows. The outline
+is the led row's current place (`leadRow`): gone while it is scrolled away,
+back when it returns, ended with the focus (another tab, Clear, a new
+question, closing). With the little guy he waits at home while
+it is away and is back on it when it returns. A row he cannot show (the
+person left the tab meanwhile, even while it was still laying out, or it
+never reports) outlines nothing, leaves their tab and is not said to be
+opened; the guide never selects the tab again after its sidebar stop.
+Before every press he checks that the window is still where his last press
+left it; a click of the person's own during his run or punch ends the guide
+with nothing pressed or claimed. When the
+answer names another place, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
-names, on this Mac, no network; a keyword guide, not an English parser, whose
-contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
-there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon's one-line disclosure, full text under Details (LilBroOffer). It
-shows by itself only after a question this Mac did not understand and only
-until answers were first turned on (`lilBro.answersEverOn`); there the
-button is "Turn on and ask" and also sends that question; ⋯ → Turn on
-answers only shows it;
-`lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
+same balloon. Every question goes to whytap.ai: there is no switch to turn
+answers off and no "What is sent" item (REV 13, the maintainer's decision of
+2026-11-26: Lil Bro works only through Sonnet; a `lilBro.answersFromWhytap`
+saved by builds 1770–1772 is ignored). Clear ends a pending question and any
+guiding (the reply is ignored, nothing opens), and closing drops one that has
+no reply yet. A question under the server's
+three characters is not sent (`tooShort`). LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered (questions asked while answers were off never leave the Mac, except
-the one question a person sends with Turn on and ask), with
-redirects refused, to
+answered, with redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-sonnet-5-5 while it is tried out), which returns sentences, points, follow-ups and one place;
-an id the app does not have is dropped. No internet or a timeout is offline,
-429 or a spent budget is the daily limit, any other error is unavailable; each
-offers Try again (offline, unavailable) and the closest pages the local guide
-finds, and changes nothing. ⋯ turns answers off again. On a feature's screen
-the "What it needs" rows report themselves with lilBroNeed (FeatureNeedsGroup):
-their feature, spot and, while unmet, the step they offer (LilBroPressable;
-a model row showing its picker is not a button and is never pressed). After
-guiding to a feature he offers that feature's first required step — "One step
-left: Download free model. It downloads about 470 MB to this Mac. Press it?"
-(or "3 steps left. First: …") — and presses it only after "Yes, press it": he
-runs to the row, punches it, checks that the same feature's screen still
-offers the very step, and calls the row's current FeatureScreenContext.perform.
-"I'll do it", closing, a new question, leaving the feature or the step being
-done or changed meanwhile withdraw the offer or press nothing.
-Tabs and API keys never offer a press. The sprite sheet is Resources/LilBro, embedded
+claude-sonnet-5-5), which returns sentences, points and,
+only when the person asked to go or set something up, one place (a feature,
+tab, row `{row, tab}` from LilBroRows.swift, or API keys); an id the app does
+not have is dropped, and an unknown row falls back to its tab. No internet or a timeout is offline, 429 or a
+spent budget is the daily limit, any other error is unavailable; each is a
+short message (offline and unavailable with Try again) and changes nothing.
+The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md
 
@@ -2708,15 +2712,14 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
 
 ## Invariants
 
-1. **No Whytap-owned services, except Lil Bro's opt-in answers.** The app
-   never contacts a Whytap backend, has no account and sends no telemetry. The
-   one exception is Lil Bro in Settings: after the person presses "Turn on
-   answers" in his balloon, each question they ask him, the Settings screen
-   they are on and up to three earlier exchanges go to
+1. **No Whytap-owned services, except Lil Bro's answers.** The app never
+   contacts a Whytap backend, has no account and sends no telemetry. The one
+   exception is Lil Bro in Settings: each question the person asks him, the
+   Settings screen they are on and up to three earlier exchanges go to
    `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`); "Turn on and ask" turns answers on
-   and sends the one question this Mac did not understand; nothing is sent
-   before that or after they turn answers off. WHY:
+   checked by `LilBroRemoteBrainTests`). There is no switch to turn this
+   off (REV 13, the maintainer's decision of 2026-11-26: Lil Bro works only
+   through Sonnet); nothing is sent before a question. WHY:
    .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
    Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this

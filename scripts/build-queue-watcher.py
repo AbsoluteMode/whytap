@@ -183,7 +183,8 @@ def open_preview_work(root):
             status = {}
         if status.get("preview_rebuild"):
             work["queued"].append("rebuild")
-            seen.append(["rebuild", status.get("installed_app"), status.get("preview_train")])
+            seen.append(["rebuild", status.get("installed_app"), status.get("preview_train"),
+                         status.get("data_restore")])
     work["fingerprint"] = hashlib.sha256(json.dumps(seen).encode()).hexdigest() if seen else ""
     return work
 

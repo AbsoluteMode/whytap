@@ -345,7 +345,27 @@ preview-safe kind (regular files: Swift sources and tests, Markdown, images
 whose bytes match their type, text resources) and whose changed Swift files
 name no state gateway, file, process or run-time loading API anywhere is
 previewed; a PR that builds on another open PR is not. Everything else goes
-to normal validation, and its author is told why. The installed app itself is
+to normal validation, and its author is told why.
+
+Restore-point tier (decision record `preview-restore-points-2026-11-26`,
+which arrives with the app change that adds restore points): when the installed app declares
+`ExodiaRestorePointVersion`, a PR that changes settings or stores code is
+previewed too (`tier: restore_point`). Right after the Quit the outgoing app
+makes an encrypted local restore point (`--restore-point create`) of the
+owner's settings, meeting notes, Costs, workspace and To-do, never provider
+keys, Case, History or meeting audio; the preview session records it on the
+ticket (`preview-restore-point`), and a preview installed without one is not
+offered to the owner. Both tiers still send to normal validation what a
+restore point cannot undo: provider keys, Keychain and Case; signing,
+packaging and updates; permissions and TCC; the restore mechanism, startup
+and other binaries; History and meeting audio; deleting files, processes and
+network requests; run-time loading. The owner's rollback of his data is a
+separate request: `reject ... --restore-data [--sections settings,planner]`,
+relayed by the orchestrator; the next install applies that restore point
+before the launch and the app keeps what it replaced as a recovery
+checkpoint. A plain `reject` only removes the code.
+
+The installed app itself is
 the record of what the owner sees: the queue compares it with the train to
 decide a rebuild, refuses `awaiting_approval` unless the app carries the train
 plus that preview, and binds every decision to the app's current build.

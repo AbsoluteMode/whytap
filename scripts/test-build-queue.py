@@ -3,6 +3,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+from datetime import datetime, timedelta, timezone
 import plistlib
 import os
 from pathlib import Path
@@ -32,6 +33,7 @@ class QueueTests(unittest.TestCase):
                  "commit", "--allow-empty", "-qm", "fixture")
         self.head = self.git("rev-parse", "HEAD").strip()
         self.app = Path(self.temp.name) / "Applications" / "Whytap.app"  # never the real one
+        self.points = Path(self.temp.name) / "restore-points"  # never the owner's
         self.pulls = Path(self.temp.name) / "pulls.git"  # GitHub's refs/pull/<n>/head
         subprocess.run(["git", "init", "-q", "--bare", str(self.pulls)], check=True)
         self.call("configure", "--builder-thread", "builder")
@@ -43,7 +45,9 @@ class QueueTests(unittest.TestCase):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
                                 env={**HERMETIC_ENV, "WHYTAP_BUILD_QUEUE_PULL_REMOTE": str(self.pulls),
-                                     "WHYTAP_INSTALLED_APP": str(self.app), **(env or {})})
+                                     "WHYTAP_INSTALLED_APP": str(self.app),
+                                     "WHYTAP_RESTORE_POINTS_DIR": str(self.points),
+                                     **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -771,15 +775,17 @@ class QueueTests(unittest.TestCase):
                   "--token-file", str(self.token))
         self.git("update-ref", "refs/remotes/origin/main", self.head)
 
-    def install(self, members, build, base=""):
+    def install(self, members, build, base="", restore_points=0):
         """What a verified install leaves: the app itself names its composition."""
         plist = self.app / "Contents" / "Info.plist"
         plist.parent.mkdir(parents=True, exist_ok=True)
-        plist.write_bytes(plistlib.dumps({
-            "CFBundleVersion": str(build), "ExodiaSourceRevision": base or self.head,
-            "ExodiaBuildComposition": json.dumps({
-                "base": base or self.head,
-                "members": [{"ticket": t["id"], "head": t["head"]} for t in members]})}))
+        info = {"CFBundleVersion": str(build), "ExodiaSourceRevision": base or self.head,
+                "ExodiaBuildComposition": json.dumps({
+                    "base": base or self.head,
+                    "members": [{"ticket": t["id"], "head": t["head"]} for t in members]})}
+        if restore_points:
+            info["ExodiaRestorePointVersion"] = restore_points
+        plist.write_bytes(plistlib.dumps(info))
 
     def preview(self, pr, head=None, session="worker", ok=True):
         return self.call("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
@@ -825,7 +831,8 @@ class QueueTests(unittest.TestCase):
                            "Resources/en.lproj/Main.strings": "\"a\" = \"b\";\n",
                            "Resources/Icon.png": b"\x89PNG\r\n\x1a\nrest",
                            "docs/note.md": "text\n"})
-        self.assertEqual(safe, {"admissible": True, "reasons": []})
+        self.assertEqual((safe["admissible"], safe["tier"], safe["reasons"]),
+                         (True, "plain", []))
         for files in ({"Sources/App/Panel.swift": "func update() { PlannerSettings.shared.reset() }\n"},
                       {"Sources/App/ImportedBundle.swift":
                        "let panel = Bundle(url: candidateURL)?.principalClass\n"},
@@ -854,6 +861,124 @@ class QueueTests(unittest.TestCase):
         self.git("-c", "user.name=Q", "-c", "user.email=q@example.invalid", "commit", "-qm", "l")
         self.assertFalse(self.call("preview-admit", "--base", self.head, "--commit",
                                    self.git("rev-parse", "HEAD").strip())["admissible"])
+
+    # Restore-point tier. WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+
+    def restore_point(self, build, minutes_ago=1, ident="0b9a7c1e-3f52-4d8a-9c47-5e0f1a2b3c4d"):
+        """What the outgoing app's `--restore-point create` leaves on this Mac."""
+        self.points.mkdir(exist_ok=True)
+        made = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        (self.points / (ident + ".exodiabackup")).write_bytes(b"sealed")
+        (self.points / (ident + ".json")).write_text(json.dumps({
+            "id": ident.upper(), "sequence": 1, "reason": "preview",
+            "createdAt": made.strftime("%Y-%m-%dT%H:%M:%SZ"), "appBuild": str(build),
+            "archiveBytes": 6, "sections": ["settings", "workspace"]}))
+        return ident
+
+    def test_settings_code_is_previewed_only_with_a_restore_point(self):
+        settings = {"Sources/Sidekey/Settings/Panel.swift":
+                    "func save() { UserDefaults.standard.set(true, forKey: \"x\") }\n"}
+        refused = self.admit(settings)
+        self.assertFalse(refused["admissible"])
+        self.assertIn("makes no restore points", refused["reasons"][-1])
+        self.install([], 1800, restore_points=1)
+        admitted = self.admit(settings)
+        self.assertEqual((admitted["admissible"], admitted["tier"],
+                          admitted["restore_point_required"]), (True, "restore_point", True))
+        # Comments, string text and the To-do hover tool's case name are not uses.
+        self.assertTrue(self.admit({"Sources/Sidekey/Settings/Copy.swift":
+                                    "// Keys live in the Keychain\n"
+                                    "let hint = \"Sparkle updates, Keychain keys\"\n"
+                                    "let tool = HoverTool.caseVault\n"
+                                    "let store = PlannerStore.shared\n"})["admissible"])
+        self.assertTrue(self.admit({"Resources/FeatureVideos/drop.mp4":
+                                    b"\x00\x00\x00\x18ftypmp42rest"})["admissible"])
+        for files in ({"Sources/Sidekey/Settings/Keys.swift":
+                       "let key = try ProviderKeyStore.shared.read()\n"},
+                      {"Sources/Sidekey/Settings/Sync.swift":
+                       "let task = URLSession.shared.dataTask(with: url)\n"},
+                      {"Sources/Sidekey/Settings/Tidy.swift":
+                       "try FileManager.default.removeItem(at: url)\n"},
+                      {"Sources/Sidekey/Settings/Update.swift": "let updater = SPUUpdater()\n"},
+                      {"Sources/Sidekey/Settings/Mic.swift":
+                       "AVCaptureDevice.requestAccess(for: .audio) { _ in }\n"},
+                      {"Sources/Sidekey/Settings/Interp.swift":
+                       "let s = \"\\(ProviderKeyStore.shared.count)\"\n"},
+                      {"Sources/Sidekey/Backup/Restore.swift": "struct Restore {}\n"},
+                      {"Sources/Sidekey/SidekeyAppMain.swift": "struct Main {}\n"},
+                      {"Sources/WhytapCLI/main.swift": "print(1)\n"},
+                      {"Resources/FeatureVideos/drop.mp4": "not a video"},
+                      {"scripts/build-queue.py": "print(1)\n"}):
+            with self.subTest(files=list(files)):
+                self.assertFalse(self.admit(files)["admissible"])
+        # Removing a Keychain call changes credential handling as much as adding one.
+        self.git("checkout", "-q", "--detach", self.head)
+        base = self.commit({"Sources/Sidekey/Settings/Keys.swift":
+                            "func k() { SecItemDelete(query) }\n"})
+        head = self.commit({"Sources/Sidekey/Settings/Keys.swift": "func k() {}\n"})
+        self.assertFalse(self.call("preview-admit", "--base", base, "--commit",
+                                   head)["admissible"])
+
+    def test_a_restore_point_preview_needs_the_outgoing_apps_restore_point(self):
+        self.lane()
+        self.install([], 1800, restore_points=1)
+        ticket = self.preview(1, self.change("Sources/Sidekey/Settings/Panel.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        claim = self.call("preview-claim")
+        self.assertEqual(claim["ticket"]["preview_tier"], "restore_point")
+        record = lambda point: self.call("preview-restore-point", "--ticket", str(ticket["id"]),
+                                         "--restore-point", point, ok=False)
+        record("0b9a7c1e-3f52-4d8a-9c47-000000000000")  # none on this Mac
+        record("../../outside")  # an ID, never a path
+        record(self.restore_point(1799))  # made by another build
+        record(self.restore_point(1800, minutes_ago=180))  # not right before this install
+        self.call("preview-restore-point", "--ticket", str(ticket["id"]), "--restore-point",
+                  self.restore_point(1800), actor="worker", ok=False)
+        point = self.restore_point(1800)
+        # Installed without it: never offered to the owner.
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1801, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed", ok=False)
+        self.install([], 1800, restore_points=1)
+        self.assertEqual(self.call("preview-restore-point", "--ticket", str(ticket["id"]),
+                                   "--restore-point", point.upper())["restore_point"], point)
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1801, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "awaiting_approval")
+
+    def test_the_owner_can_roll_his_data_back_with_a_rejection(self):
+        self.lane()
+        self.install([], 1800, restore_points=1)
+        plain = self.previewed(2, 1801)
+        self.decide("reject", plain, 1801, "--restore-data", ok=False)  # no restore point
+        self.decide("reject", plain, 1801)
+        self.install([], 1801, restore_points=1)
+        ticket = self.preview(1, self.change("Sources/Sidekey/Settings/Panel.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        self.call("preview-claim")
+        point = self.restore_point(1801)
+        self.call("preview-restore-point", "--ticket", str(ticket["id"]), "--restore-point", point)
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1802, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        self.decide("reject", ticket, 1802, "--restore-data", "--sections", "settings,keys",
+                    ok=False)
+        self.decide("reject", ticket, 1802, "--restore-data", "--sections", "settings")
+        pending = {"ticket": ticket["id"], "restore_point": point, "sections": ["settings"]}
+        status = self.call("status")
+        self.assertTrue(status["preview_rebuild"])
+        self.assertLessEqual(pending.items(), status["data_restore"].items())
+        claim = self.call("preview-claim")
+        self.assertTrue(claim["rebuild"])
+        self.assertEqual(claim["data_restore"]["restore_point"], point)
+        self.call("data-restored", "--restore-point", point, "--note", "x", actor="worker",
+                  ok=False)
+        self.call("data-restored", "--restore-point", "other", "--note", "x", ok=False)
+        self.call("data-restored", "--restore-point", point, "--note", "applied, launched")
+        self.assertIsNone(self.call("status")["data_restore"])
+        events = self.call("events", "--pending", "--ticket", str(ticket["id"]))
+        self.assertIn("rolled back to restore point", events[-1]["note"])
 
     def test_an_inadmissible_or_stacked_preview_goes_to_normal_validation(self):
         self.lane()

@@ -6,7 +6,8 @@ person is watching. Speed is the point: the owner checks the feature itself
 (user scenarios, lag, looks) before anyone reviews the code or runs the full
 suite. Target: a pushed fix runs in the owner's app within minutes. WHY:
 `.project-docs/decisions/2026-11-26-preview-before-validation.md`,
-`.project-docs/decisions/2026-11-26-release-batches.md`.
+`.project-docs/decisions/2026-11-26-release-batches.md`,
+`.project-docs/decisions/2026-11-26-preview-restore-points.md`.
 
 ## What you never do
 
@@ -41,6 +42,9 @@ preview worktree, never the integration one) and `app_lock`. The helper is
    installed app differs from it. It has already sent stacked or out-of-scope
    PRs to normal validation and returned PRs whose head moved.
    `held_for_install`, or nothing claimed and no rebuild: end your turn.
+   `data_restore` (the owner asked to roll his data back with a rejection) is
+   applied by the next install you make, as step 5 says; while it is pending,
+   `rebuild` is true even when the app already matches the train.
 2. Compose in the preview worktree: `git fetch origin`, detach at `origin/main`,
    discard leftovers there only, then `git merge --no-ff --no-edit` each train
    head in order and the ticket's head last (exact SHAs). Commit locally only.
@@ -51,7 +55,8 @@ preview worktree, never the integration one) and `app_lock`. The helper is
    member silently and never resolve conflicts here. Then `preview-admit
    --base <origin/main SHA> --commit <composed SHA>`: anything but
    `admissible: true` blocks the ticket with the reasons (for a rebuild: stop
-   and report).
+   and report). `restore_point_required: true` (tier `restore_point`: it
+   changes settings or stores code) means step 5 makes a restore point.
 3. Build, arm64 only and incremental (the worktree's `.build` stays warm):
    `EXODIA_LOCAL_INSTALL=1 FLAVOR=prod BUILD_VERSION=<n>
    EXODIA_BUILD_COMPOSITION='{"base": "<origin/main SHA>", "members":
@@ -83,10 +88,25 @@ preview worktree, never the integration one) and `app_lock`. The helper is
    scripts/build-queue-meeting-gate.py scripts/build-queue-meeting-gate.swift`),
    never from the merged tree. Only a fresh `status: clear` allows a normal
    Quit; otherwise recheck every 30 seconds for up to 20 minutes, then `set
-   --status queued` with the reason (it keeps its place). Quit normally,
-   verify exit, replace the bundle without exposing a partial copy, launch
-   that exact path, verify one running instance with the new identity,
-   version, build and composition, and one smoke check. A declined Quit, a
+   --status queued` with the reason (it keeps its place). Quit normally and
+   verify exit. With `restore_point_required`, now run the outgoing app's own
+   executable (`Contents/MacOS/` plus its `CFBundleExecutable`) with
+   `--restore-point create --reason "preview #<ticket> build <n>"`, output to
+   a file; it prints JSON with `restore_point.id`. For a ticket, record it
+   with `preview-restore-point --ticket <id> --restore-point <id>`. A
+   nonzero exit or a refused record: do not swap; launch the outgoing app
+   again and `set --status queued` with the output (`blocked` for too little
+   disk space: a person must act). Replace the bundle without exposing a
+   partial copy. With `data_restore`: before the launch, if the new app's
+   `ExodiaRestorePointVersion` is at least 1, run its executable with
+   `--restore-point apply <restore_point> --sections <comma list>`, output
+   to a file; the launch applies it before startup and keeps the replaced
+   data as a recovery checkpoint. Then `data-restored --restore-point <id>
+   --note <the output and the launch>` (add `--failed` when it exited
+   nonzero or the app cannot apply it). Never run that command on an app
+   without the key: it would start the app instead. Launch that exact path,
+   verify one running instance with the new identity, version, build and
+   composition, and one smoke check. A declined Quit, a
    Quit that does not finish or a permission prompt: stop, keep the working
    app (restore the known-good bundle if the replacement was half done) and
    `set --status blocked` with the reason: a person must act; it never goes
@@ -95,7 +115,8 @@ preview worktree, never the integration one) and `app_lock`. The helper is
    `app_lock`) replace only the section `## Preview, not merged` with: build,
    source commit, main base, every PR of the train with its state (awaiting
    the owner's check, approved and waiting for a release), its head and its
-   1–3 acceptance steps, the known-good rollback path. Never call a preview
+   1–3 acceptance steps, the known-good rollback path and, for a
+   restore-point preview, its restore point ID. Never call a preview
    "merged" or "verified running main".
 7. For a ticket: `set --ticket <id> --status awaiting_approval --note <build,
    train, checks>`. The helper reads the installed app and refuses unless it

@@ -68,6 +68,12 @@ parent; and boundaries checked at claim time but not at the handoff.
   `preview-admit --base <main> --commit <composed>` checks the whole
   composition, for previews and for every builder install that carries the
   train.
+- **Restore-point tier** (added the same day, owner's decision REV 6): with
+  an installed app that makes restore points, settings and stores changes
+  are previewed too, protected by a restore point of the outgoing app; what
+  a restore point cannot undo stays in normal validation for both tiers.
+  Details: decision record `preview-restore-points-2026-11-26`, merged with
+  the app change.
 - **No stacked previews.** A preview that declares an unmerged dependency or
   contains another open PR's head in its history goes to normal validation.
 - **The installed app is the record.** A local build stores its composition

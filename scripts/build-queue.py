@@ -20,6 +20,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import uuid
 
 
 STATES = ("queued", "in_progress", "pending_install", "done", "blocked",
@@ -215,6 +216,91 @@ PREVIEW_IMAGE_MAGIC = {".png": (b"\x89PNG\r\n\x1a\n",), ".jpg": (b"\xff\xd8\xff"
                        ".jpeg": (b"\xff\xd8\xff",), ".pdf": (b"%PDF-",)}
 PREVIEW_TEXT_RESOURCES = (".strings", ".stringsdict", ".xcstrings", ".svg")
 
+# WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+# Restore-point tier. When the owner's installed app can make restore points (its
+# Info.plist declares ExodiaRestorePointVersion), the outgoing app saves his settings
+# and local data right before a preview replaces it, and a rollback restores those
+# files. A preview may then change settings and stores code. What a restore point
+# cannot undo stays out: provider keys and Case (never in a restore point), signing,
+# packaging and updates, permissions, the restore mechanism and startup, data outside
+# restore points (History, meeting audio), deletions, processes, the network (sent is
+# sent) and code loaded at run time. Paths first, then any use in the old or the new
+# text of a changed Swift file, comments and string text aside.
+RESTORE_POINT_VERSION = 1
+RESTORE_POINT_SECTIONS = ("settings", "meetings", "history", "workspace", "planner")
+RESTORE_POINT_MAX_AGE_MINUTES = 60
+RESTORE_POINT_EXCLUDED_PATHS = re.compile(
+    r"^Sources/Sidekey/(Backup|Auth|Case|Permissions|Privacy|Updates|Sync|History)/"
+    r"|^Sources/Sidekey/(SidekeyAppMain|InstallationGuard|ApplicationInstanceCoordinator|"
+    r"AppRelauncher|BuildConfig|PermissionsHelper)\.swift$"
+    # The app's entry point and the other binaries (CLI and MCP helper, Case kit,
+    # the onboarding preview tool) have their own startup and handover rules.
+    r"|^Sources/(SidekeyApp|WhytapCLI|WhytapCaseKit|OnboardingPreview|OnboardingPreviewKit)/")
+RESTORE_POINT_EXCLUDED_CONTENT = re.compile(
+    r"(?i:SecItem|kSec[A-Z]|keychain|TokenStore|ProviderKeyStore|password|"
+    r"codesign|SecCode|SecStaticCode|entitlement|Sparkle|SPUUpdater|SUUpdater|appcast|"
+    r"AXIsProcessTrusted|CGRequest|CGPreflight|requestAccess|AVCaptureDevice|"
+    r"SMAppService|\bTCC\b|LaunchAgent|tapCreate|"
+    r"\bProcess\s*\(|NSTask|posix_spawn|(?<![.\w])system\s*\(|NSAppleScript|osascript|"
+    r"URLSession|URLRequest|httpMethod|NSSharingService|"
+    r"removeItem|trashItem|replaceItem|\bunlink\s*\(|"
+    r"\bBundle\s*\(|Bundle\.main\.(url|path)|principalClass|dlopen|dlsym|"
+    r"NSClassFromString|NSSelectorFromString|environment\[|setenv|unsetenv|"
+    r"history\.sqlite|HistoryStore|meetings-staging|MeetingsStaging)"
+    # Types, case-sensitive: `.caseVault` is a hover tool, `CaseVault` the vault.
+    r"|\bCaseVault\w*|\b\w*(Credential|Secret)\w*\b")
+PREVIEW_VIDEO = {".mp4": b"ftyp", ".mov": b"ftyp", ".m4v": b"ftyp"}
+
+
+def swift_code(text):
+    """Swift source without comments and string text (interpolated code kept), so
+    a feature's copy that names Keychain or Sparkle is not mistaken for using it."""
+    out, i, n = [], 0, len(text)
+    while i < n:
+        if text.startswith("//", i):
+            end = text.find("\n", i)
+            i = n if end < 0 else end
+            continue
+        if text.startswith("/*", i):
+            depth, i = 1, i + 2
+            while i < n and depth:
+                if text.startswith("/*", i):
+                    depth, i = depth + 1, i + 2
+                elif text.startswith("*/", i):
+                    depth, i = depth - 1, i + 2
+                else:
+                    out.append("\n" if text[i] == "\n" else "")
+                    i += 1
+            continue
+        literal = re.match(r'(#*)("""|")', text[i:i + 12])
+        if literal:
+            hashes, quote = literal.group(1), literal.group(2)
+            close, escape = quote + hashes, "\\" + hashes
+            i += literal.end()
+            while i < n and not text.startswith(close, i):
+                if text.startswith(escape + "(", i):
+                    i += len(escape) + 1
+                    depth, start = 1, i
+                    while i < n and depth:
+                        depth += {"(": 1, ")": -1}.get(text[i], 0)
+                        i += 1
+                    out.append(" " + text[start:i - 1] + " ")
+                    continue
+                if text.startswith(escape, i):
+                    i += len(escape) + 1
+                    continue
+                if text[i] == "\n":
+                    out.append("\n")
+                    if quote == '"':
+                        break
+                i += 1
+            i += len(close)
+            out.append('""')
+            continue
+        out.append(text[i])
+        i += 1
+    return "".join(out)
+
 
 def preview_input_kind(path):
     """The preview-safe kind of a changed path, or None (unknown: normal validation)."""
@@ -255,6 +341,11 @@ def preview_admission(base, head):
                 reasons.append(path + " (mode %s -> %s: only regular files)" % (old_mode,
                                                                                  new_mode))
                 continue
+            if RESTORE_POINT_EXCLUDED_PATHS.search(path):
+                # Startup, the restore mechanism, credentials, permissions, updates and
+                # other binaries: never previewed, whatever the content.
+                reasons.append(path + " (outside what a preview may change)")
+                continue
             if new_mode == "000000":
                 content = b""
             else:
@@ -284,6 +375,108 @@ def preview_admission(base, head):
         return ["the change could not be read"]
 
 
+def restore_point_admission(base, head):
+    """Why base..head may not be previewed even with a restore point: a list of reasons,
+    empty when it may. Unknown is never admissible."""
+    try:
+        raw = git("diff", "--raw", "--no-renames", "-z", "--no-abbrev", base, head)
+        fields = raw.split("\0")
+        reasons = []
+        for index in range(0, len(fields) - 1, 2):
+            meta, path = fields[index], fields[index + 1]
+            if not meta.startswith(":") or not path:
+                continue
+            old_mode, new_mode, old_blob, new_blob, _status = meta[1:].split(" ", 4)
+            suffix = Path(path).suffix.lower()
+            kind = preview_input_kind(path)
+            if kind is None and path.startswith("Resources/") and suffix in PREVIEW_VIDEO:
+                kind = "video"
+            if kind is None and path.startswith("Resources/") and suffix == ".md":
+                kind = "documentation"
+            if kind is None:
+                reasons.append(path + " (not a preview-safe kind of input)")
+                continue
+            if {old_mode, new_mode} - {"100644", "000000"}:
+                reasons.append(path + " (mode %s -> %s: only regular files)" % (old_mode,
+                                                                                 new_mode))
+                continue
+            if RESTORE_POINT_EXCLUDED_PATHS.search(path):
+                reasons.append(path + " (outside what a restore point can undo)")
+                continue
+            blobs = [b for b, mode in ((new_blob, new_mode), (old_blob, old_mode))
+                     if mode != "000000"]
+            contents = [subprocess.check_output(["git", "cat-file", "blob", b]) for b in blobs]
+            if kind in ("image", "video"):
+                magic = PREVIEW_IMAGE_MAGIC.get(suffix) or ()
+                head_bytes = contents[0] if new_mode != "000000" else b""
+                if new_mode != "000000" and not (
+                        head_bytes.startswith(magic) if kind == "image"
+                        else head_bytes[4:8] == PREVIEW_VIDEO[suffix]):
+                    reasons.append(path + " (not the " + kind + " its name says)")
+                continue
+            if any(b"\0" in content for content in contents):
+                reasons.append(path + " (binary content)")
+                continue
+            texts = [content.decode("utf-8") for content in contents]
+            if kind == "swift":
+                texts = [swift_code(text) for text in texts]
+            elif kind == "text resource":
+                diff = git("diff", "--no-renames", "-U0", base, head, "--", path)
+                texts = ["\n".join(line[1:] for line in diff.splitlines()
+                                   if line[:1] in "+-" and not line.startswith(("+++", "---")))]
+            else:
+                continue
+            hits = sorted({m.group(0) for text in texts for line in text.splitlines()
+                           for m in [RESTORE_POINT_EXCLUDED_CONTENT.search(line)] if m})
+            if hits:
+                reasons.append(path + " (reaches " + ", ".join(hits[:4]) + ")")
+        return reasons
+    except (subprocess.CalledProcessError, OSError, UnicodeDecodeError, ValueError):
+        return ["the change could not be read"]
+
+
+def preview_tier(base, head, app=None):
+    """How base..head may be previewed: {"tier": "plain"} touches no state, {"tier":
+    "restore_point"} needs a restore point made by the outgoing app before the swap
+    (only when the installed app can make one), {"tier": None, "reasons": [...]} goes
+    to normal validation."""
+    # What a restore point cannot undo is never previewed, in either tier.
+    reasons = restore_point_admission(base, head)
+    if reasons:
+        return {"tier": None, "reasons": reasons}
+    strict = preview_admission(base, head)
+    if not strict:
+        return {"tier": "plain", "reasons": []}
+    app = installed_app() if app is None else app
+    if not app or app.get("restore_points", 0) < RESTORE_POINT_VERSION:
+        return {"tier": None, "reasons": strict + [
+            "the installed app makes no restore points, so state changes are not previewed"]}
+    return {"tier": "restore_point", "reasons": []}
+
+
+def restore_points_dir():
+    """Where the app keeps its restore points (`PreviewRestorePoints.Store`)."""
+    return Path(os.environ.get("WHYTAP_RESTORE_POINTS_DIR") or Path.home() / "Library" /
+                "Application Support" / "com.rootwise.sidekey" / "restore-points")
+
+
+def restore_point_record(restore_point):
+    """The restore point's record on this Mac, or None. The ID is a UUID, never a path."""
+    try:
+        name = str(uuid.UUID(str(restore_point)))
+    except ValueError:
+        return None
+    root = restore_points_dir()
+    try:
+        record = json.loads((root / (name + ".json")).read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(record, dict) or not (root / (name + ".exodiabackup")).is_file():
+        return None
+    record["id"] = name
+    return record
+
+
 def installed_app_path():
     return Path(os.environ.get("WHYTAP_INSTALLED_APP") or "/Applications/Whytap.app")
 
@@ -305,7 +498,12 @@ def installed_app():
                    for m in composition.get("members", [])]
     except (ValueError, TypeError, KeyError, AttributeError):
         members = None  # unreadable: never a basis for a decision
-    return {"build": str(info.get("CFBundleVersion", "")), "base": base, "members": members}
+    try:
+        restore_points = int(info.get("ExodiaRestorePointVersion") or 0)
+    except (TypeError, ValueError):
+        restore_points = 0
+    return {"build": str(info.get("CFBundleVersion", "")), "base": base, "members": members,
+            "restore_points": restore_points}
 
 
 TRAIN = "(status IN ('awaiting_approval', 'approved', 'releasing') OR " \
@@ -487,7 +685,7 @@ def preview_claim(db, args):
                 "rebuild": False, "train": preview_train(db)}
     if active:
         return {"claimed": False, "active": ticket_json(db, active["id"]),
-                "train": preview_train(db)}
+                "train": preview_train(db), "data_restore": pending_data_restore(db)}
     returned, normal_lane = [], []
     for item in db.execute("SELECT * FROM tickets WHERE status='queued' AND lane='preview' "
                            "ORDER BY queued_at, id").fetchall():
@@ -501,24 +699,38 @@ def preview_claim(db, args):
             continue
         try:
             base = git("merge-base", "origin/main", item["head"])
-            unsafe = preview_admission(base, item["head"])
+            admitted = preview_tier(base, item["head"])
         except (subprocess.CalledProcessError, OSError):
-            unsafe = ["the merge base with origin/main could not be read"]
+            admitted = {"tier": None, "reasons": ["the merge base with origin/main could not "
+                                                  "be read"]}
+        unsafe = admitted["reasons"] if admitted["tier"] is None else []
         if unsafe:
             to_normal_lane(db, item, "it changes inputs outside the preview scope ("
                            + "; ".join(unsafe[:8]) + ")")
             normal_lane.append(item["id"])
             continue
-        db.execute("UPDATE tickets SET status='previewing', owner=?, updated_at=? WHERE id=?",
-                   (args.actor, now(), item["id"]))
+        db.execute("UPDATE tickets SET status='previewing', owner=?, preview_tier=?, "
+                   "updated_at=? WHERE id=?",
+                   (args.actor, admitted["tier"], now(), item["id"]))
         event(db, item["id"], "previewing", "Preview build started (no review or full suite "
-              "before the owner's check)")
+              "before the owner's check)" + (
+                  "; it changes settings or stores code, so the outgoing app makes a "
+                  "restore point first" if admitted["tier"] == "restore_point" else ""))
         return {"claimed": True, "ticket": ticket_json(db, item["id"]),
                 "train": preview_train(db), "returned_moved_heads": returned,
-                "moved_to_normal_lane": normal_lane}
-    return {"claimed": False, "active": None, "rebuild": preview_rebuild_needed(db),
+                "moved_to_normal_lane": normal_lane, "data_restore": pending_data_restore(db)}
+    restore = pending_data_restore(db)
+    return {"claimed": False, "active": None,
+            "rebuild": preview_rebuild_needed(db) or bool(restore),
             "train": preview_train(db), "returned_moved_heads": returned,
-            "moved_to_normal_lane": normal_lane}
+            "moved_to_normal_lane": normal_lane, "data_restore": restore}
+
+
+def pending_data_restore(db):
+    """The owner's rollback of his data, relayed with `reject --restore-data`: applied
+    by the next install, after the swap and before the launch. None when there is none."""
+    value = config(db).get("pending_data_restore")
+    return json.loads(value) if value else None
 
 
 def handoff_problems(db, base, members, ticket=None, build=None):
@@ -740,7 +952,12 @@ def database():
                 ("approval", "TEXT NOT NULL DEFAULT ''"),
                 ("preview_build", "TEXT NOT NULL DEFAULT ''"),  # the build the owner saw
                 ("batch", "INTEGER NOT NULL DEFAULT 0"),        # release batch (0: none)
-                ("batch_order", "INTEGER NOT NULL DEFAULT 0")):  # merge order inside it
+                ("batch_order", "INTEGER NOT NULL DEFAULT 0"),  # merge order inside it
+                # 'plain' or 'restore_point': how the preview was admitted.
+                ("preview_tier", "TEXT NOT NULL DEFAULT ''"),
+                # The restore point the outgoing app made before this preview's first
+                # install (its ID); a rollback of the owner's data applies it.
+                ("restore_point", "TEXT NOT NULL DEFAULT ''")):
             if column not in columns:
                 db.execute(f"ALTER TABLE tickets ADD COLUMN {column} {sql}")
                 if column == "submitted_at":
@@ -952,7 +1169,9 @@ def run(args):
                     "install_boundary": install_boundary(db),
                     "local_install_blockers": local_install_blockers(db),
                     "preview_train": preview_train(db), "installed_app": app,
-                    "preview_rebuild": preview_rebuild_needed(db, app),
+                    "preview_rebuild": preview_rebuild_needed(db, app) or bool(
+                        pending_data_restore(db)),
+                    "data_restore": pending_data_restore(db),
                     "protected_pending": sorted({
                         name for t in db.execute(
                             "SELECT protected_pending FROM tickets WHERE status IN "
@@ -1018,8 +1237,61 @@ def run(args):
             return {"orchestrator": args.orchestrator, "token": "configured"}
 
         if args.command == "preview-admit":
-            reasons = preview_admission(args.base, args.commit)
-            return {"admissible": not reasons, "reasons": reasons}
+            admitted = preview_tier(args.base, args.commit)
+            return {"admissible": admitted["tier"] is not None, "tier": admitted["tier"],
+                    "restore_point_required": admitted["tier"] == "restore_point",
+                    "reasons": admitted["reasons"]}
+
+        if args.command == "preview-restore-point":
+            # WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+            # After the Quit and before the swap: the outgoing app's restore point is
+            # recorded on the preview it protects.
+            require_builder(db, args.actor)
+            item = row(db, args.ticket)
+            if item["status"] != "previewing":
+                raise ValueError("A restore point is recorded on the preview being built; "
+                                 "#%d is %s" % (item["id"], item["status"]))
+            record = restore_point_record(args.restore_point)
+            if not record:
+                raise ValueError("No restore point %s on this Mac (made with the outgoing "
+                                 "app's --restore-point create)" % args.restore_point)
+            app = installed_app()
+            if not app or str(record.get("appBuild") or "") != app["build"]:
+                raise ValueError("Restore point %s was made by build %s, not by the "
+                                 "installed app (build %s)" % (
+                                     record["id"], record.get("appBuild"),
+                                     app["build"] if app else "unknown"))
+            try:
+                made = datetime.fromisoformat(
+                    str(record.get("createdAt", "")).replace("Z", "+00:00"))
+                age = (datetime.now(timezone.utc) - made).total_seconds()
+            except ValueError:
+                age = None
+            if age is None or not -300 <= age <= RESTORE_POINT_MAX_AGE_MINUTES * 60:
+                raise ValueError("Restore point %s is not from right before this install"
+                                 % record["id"])
+            if not item["restore_point"]:
+                # The first one predates any install of this preview's code.
+                db.execute("UPDATE tickets SET restore_point=?, updated_at=? WHERE id=?",
+                           (record["id"], now(), item["id"]))
+            event(db, item["id"], "previewing", "Restore point %s made by build %s before "
+                  "the install" % (record["id"], app["build"]))
+            return ticket_json(db, item["id"])
+
+        if args.command == "data-restored":
+            # The next install applied the owner's data rollback (or could not).
+            require_builder(db, args.actor)
+            restore = pending_data_restore(db)
+            if not restore or restore["restore_point"] != args.restore_point:
+                raise ValueError("No data rollback with restore point %s is pending"
+                                 % args.restore_point)
+            db.execute("DELETE FROM config WHERE key='pending_data_restore'")
+            text = ("The owner's data was rolled back to restore point %s: " if not args.failed
+                    else "The data rollback to restore point %s failed, a person must act: "
+                    ) % args.restore_point + args.note
+            event(db, restore["ticket"], row(db, restore["ticket"])["status"], text,
+                  deliver=True)
+            return {"data_restore": restore, "applied": not args.failed}
 
         if args.command == "preview-handoff":
             # WHY: .project-docs/decisions/2026-11-26-release-batches.md
@@ -1095,6 +1367,27 @@ def run(args):
                       "). It stays in his app and goes out with the next release batch: one "
                       "review, one full suite, merge and one install.", deliver=True)
             else:
+                if args.restore_data:
+                    # WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+                    # Only on the owner's explicit request: the restore replaces what he
+                    # changed since, and the app keeps that as its recovery checkpoint.
+                    if pending_data_restore(db):
+                        raise ValueError("A data rollback is already pending; relay this one "
+                                         "after it is applied")
+                    if not item["restore_point"] or not restore_point_record(
+                            item["restore_point"]):
+                        raise ValueError("#%d has no restore point on this Mac; reject without "
+                                         "--restore-data" % item["id"])
+                    sections = sorted(set(args.sections.split(","))) if args.sections \
+                        else list(RESTORE_POINT_SECTIONS)
+                    if set(sections) - set(RESTORE_POINT_SECTIONS):
+                        raise ValueError("--sections is a comma list of " +
+                                         ", ".join(RESTORE_POINT_SECTIONS))
+                    db.execute("INSERT OR REPLACE INTO config VALUES ('pending_data_restore', ?)",
+                               (json.dumps({"ticket": item["id"],
+                                            "restore_point": item["restore_point"],
+                                            "sections": sections, "requested_by": args.actor,
+                                            "at": stamp}),))
                 db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
                            ("Owner's changes to the preview: " + args.note, stamp, item["id"]))
                 event(db, item["id"], "blocked", "The owner sent the preview back: " + args.note +
@@ -1178,6 +1471,10 @@ def run(args):
                     raise ValueError("The installed app does not carry the current train "
                                      "plus this preview (expected %s): rebuild it"
                                      % json.dumps(sorted(expected)))
+                if item["preview_tier"] == "restore_point" and not item["restore_point"]:
+                    raise ValueError("#%d changes settings or stores code and was installed "
+                                     "without a recorded restore point: roll the app back to "
+                                     "the known-good bundle" % item["id"])
                 for member in app["members"]:
                     db.execute("UPDATE tickets SET preview_build=? WHERE id=?",
                                (app["build"], member["ticket"]))
@@ -1269,6 +1566,15 @@ def main():
                          help="JSON [{ticket, head}] of the unmerged PRs it carries")
     handoff.add_argument("--ticket", type=int, help="the preview being built, if any")
     handoff.add_argument("--build", type=int, required=True, help="the candidate's build")
+    recorded = commands.add_parser("preview-restore-point",
+                                   help="Record the outgoing app's restore point on a preview")
+    recorded.add_argument("--ticket", type=int, required=True)
+    recorded.add_argument("--restore-point", required=True, help="its ID (a UUID)")
+    restored = commands.add_parser("data-restored",
+                                   help="The pending data rollback was applied (or failed)")
+    restored.add_argument("--restore-point", required=True)
+    restored.add_argument("--note", required=True, help="evidence: the apply output, launch")
+    restored.add_argument("--failed", action="store_true")
     commands.add_parser("preview-lane-off", help="Send previews to normal validation")
     release = commands.add_parser("release", help="Start one release batch of every "
                                                   "approved feature")
@@ -1284,6 +1590,10 @@ def main():
         decision.add_argument("--head", required=True, help="the head the owner saw")
         decision.add_argument("--build", required=True, help="the build he saw it in")
         decision.add_argument("--token-file")
+        if name == "reject":
+            decision.add_argument("--restore-data", action="store_true",
+                                  help="the owner asked to roll his data back as well")
+            decision.add_argument("--sections", help="comma list; default every section")
         if name == "approve":
             decision.add_argument("--by", required=True,
                                   help="who approved and their words, e.g. 'owner: feature OK'")

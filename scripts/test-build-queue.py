@@ -995,8 +995,10 @@ class QueueTests(unittest.TestCase):
         """What the outgoing app's `--restore-point create` leaves on this Mac."""
         self.points.mkdir(exist_ok=True)
         made = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
-        (self.points / (ident + ".exodiabackup")).write_bytes(b"sealed")
-        (self.points / (ident + ".json")).write_text(json.dumps({
+        point = self.points / ident
+        point.mkdir(exist_ok=True)
+        (point / "manifest.json").write_text("{}")
+        (point / "record.json").write_text(json.dumps({
             "id": ident.upper(), "sequence": 1, "reason": "preview",
             "createdAt": made.strftime("%Y-%m-%dT%H:%M:%SZ"), "appBuild": str(build),
             "archiveBytes": 6, "sections": ["settings", "workspace"]}))
@@ -1059,6 +1061,25 @@ class QueueTests(unittest.TestCase):
         record("../../outside")  # an ID, never a path
         record(self.restore_point(1799))  # made by another build
         record(self.restore_point(1800, minutes_ago=180))  # not right before this install
+        # Only a published restore point of the app's layout counts.
+        other = "1c2d3e4f-0000-4000-8000-000000000001"
+        self.restore_point(1800, ident=other)
+        (self.points / other / "manifest.json").unlink()
+        record(other)  # record without its snapshot
+        flat = "1c2d3e4f-0000-4000-8000-000000000002"
+        self.restore_point(1800, ident=flat)
+        (self.points / flat / "record.json").rename(self.points / (flat + ".json"))
+        record(flat)  # the earlier flat layout
+        named = "1c2d3e4f-0000-4000-8000-000000000003"
+        self.restore_point(1800, ident=named)
+        data = json.loads((self.points / named / "record.json").read_text())
+        data["id"] = other
+        (self.points / named / "record.json").write_text(json.dumps(data))
+        record(named)  # a record naming another restore point
+        linked = "1c2d3e4f-0000-4000-8000-000000000004"
+        (self.points / linked).symlink_to(self.points / self.restore_point(1800))
+        record(linked)  # a link to another restore point
+        record("." + "incoming-" + self.restore_point(1800))  # unpublished work
         self.call("preview-restore-point", "--ticket", str(ticket["id"]), "--restore-point",
                   self.restore_point(1800), actor="worker", ok=False)
         point = self.restore_point(1800)

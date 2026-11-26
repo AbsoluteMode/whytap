@@ -351,9 +351,10 @@ Restore-point tier (decision record `preview-restore-points-2026-11-26`,
 which arrives with the app change that adds restore points): when the installed app declares
 `ExodiaRestorePointVersion`, a PR that changes settings or stores code is
 previewed too (`tier: restore_point`). Right after the Quit the outgoing app
-makes an encrypted local restore point (`--restore-point create`) of the
-owner's settings, meeting notes, Costs, workspace and To-do, never provider
-keys, Case, History or meeting audio; the preview session records it on the
+makes a same-Mac, byte-exact restore point (`--restore-point create`;
+`<id>/record.json` beside its snapshot) of the owner's settings, meeting
+notes, Costs, workspace and To-do, never provider keys, Case, History or
+meeting audio; the preview session records it on the
 ticket (`preview-restore-point`), and a preview installed without one is not
 offered to the owner. Both tiers still send to normal validation what a
 restore point cannot undo: provider keys, Keychain and Case; signing,

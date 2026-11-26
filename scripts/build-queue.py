@@ -496,17 +496,27 @@ def restore_points_dir():
 
 
 def restore_point_record(restore_point):
-    """The restore point's record on this Mac, or None. The ID is a UUID, never a path."""
+    """The restore point's record on this Mac, or None. The ID is a UUID, never a path.
+    Layout of `PreviewRestorePoints.Store`: `<id>/record.json` beside the snapshot's
+    `manifest.json`, published together by one rename; a record that names another
+    ID is not a restore point."""
     try:
         name = str(uuid.UUID(str(restore_point)))
     except ValueError:
         return None
-    root = restore_points_dir()
+    point = restore_points_dir() / name
     try:
-        record = json.loads((root / (name + ".json")).read_text())
+        if point.is_symlink() or not (point / "manifest.json").is_file():
+            return None
+        record = json.loads((point / "record.json").read_text())
     except (OSError, ValueError):
         return None
-    if not isinstance(record, dict) or not (root / (name + ".exodiabackup")).is_file():
+    if not isinstance(record, dict):
+        return None
+    try:
+        if str(uuid.UUID(str(record.get("id")))) != name:
+            return None
+    except ValueError:
         return None
     record["id"] = name
     return record

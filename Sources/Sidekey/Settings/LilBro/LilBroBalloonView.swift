@@ -12,24 +12,15 @@ struct LilBroBalloonView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            ScrollViewReader { scroll in
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if controller.showEarlier { earlier }
-                        content
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if controller.showEarlier { earlier }
+                    content
                 }
-                .frame(maxHeight: max(80, maxHeight - 44))
-                .fixedSize(horizontal: false, vertical: true)
-                // Asked for, the disclosure's buttons come into view.
-                .onChange(of: controller.consentShown) { _, shown in
-                    if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
-                }
-                .onChange(of: controller.detailsShown) { _, shown in
-                    if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: max(80, maxHeight - 44))
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 13)
         .padding(.top, 10)
@@ -78,36 +69,8 @@ struct LilBroBalloonView: View {
 
     @ViewBuilder private var content: some View {
         if let turn = lastTurn, let reply = turn.reply {
-            LilBroReplyView(reply: reply, opened: turn.opened,
-                            mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+            LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
                             actions: actions, current: true, more: controller.showMore)
-            offer(after: reply)
-        } else {
-            // No question yet: the balloon shows only when ⋯ asked for the
-            // disclosure; otherwise there is just the reply field.
-            offer(after: nil)
-        }
-        if controller.detailsShown, controller.answersFromWhytap {
-            LilBroDataUse(done: controller.hideDetails)
-                .id(LilBroOffer.id)
-        }
-    }
-
-    /// The disclosure where it belongs: after a question asked while answers
-    /// were off, or anywhere once ⋯ asked for it — then with Not now. One line and its button; the full text
-    /// under Details.
-    @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
-        let asks = controller.turnOnAsks
-        switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
-                                     consentShown: controller.consentShown) {
-        case .none:
-            EmptyView()
-        case .turnOn:
-            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() })
-                .id(LilBroOffer.id)
-        case .turnOnOrNotNow:
-            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
-                .id(LilBroOffer.id)
         }
     }
 
@@ -123,8 +86,7 @@ struct LilBroBalloonView: View {
                         + Text(turn.question).fontWeight(.semibold).foregroundStyle(MacSettingsTheme.text))
                         .font(.system(size: 11.5))
                     if let reply = turn.reply {
-                        LilBroReplyView(reply: reply, opened: turn.opened,
-                                        mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                        LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
                                         actions: .none, current: false)
                     }
                 }
@@ -157,7 +119,6 @@ struct LilBroReplyView: View {
     let reply: LilBroReply
     let opened: String?
     let mascot: Bool
-    let answersOn: Bool
     let actions: Actions
     let current: Bool
     /// The current answer's details are shown.
@@ -177,12 +138,6 @@ struct LilBroReplyView: View {
                         .padding(.leading, -6)
                     if more { details(answer) }
                 }
-            case .answersOff:
-                // Not sent: only the card that turns answers on and sends it
-                // (shown under the reply).
-                // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-                // Answers turned on since (no card): ask again.
-                if current, answersOn { paragraph(LilBroCopy.askAgain) }
             case .tooShort:
                 paragraph(LilBroCopy.tooShort)
             case .offline:
@@ -239,86 +194,7 @@ struct LilBroReplyView: View {
     }
 }
 
-/// The one place answers from whytap.ai are turned on: one line and the
-/// button, the full text of what goes there and what stays on this Mac under
-/// Details, readable before the button is pressed. Nothing is sent before it.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-struct LilBroOffer: View {
-    /// After a question asked while answers were off: the button also asks it.
-    var asks = false
-    let turnOn: () -> Void
-    var notNow: (() -> Void)? = nil
-    @State private var details = false
-
-    enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
-    static let id = "lilBro.offer"
-
-    /// Answers off: after a question asked meanwhile it is the whole reply;
-    /// once ⋯ asked for it, it shows after any reply, with Not now. Never
-    /// before a question by itself.
-    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
-        guard !answersOn else { return .none }
-        if consentShown { return .turnOnOrNotNow }
-        return reply?.isAnswersOff == true ? .turnOn : .none
-    }
-
-    /// The buttons it shows, in order.
-    var choices: [String] {
-        [asks ? LilBroCopy.turnOnAndAsk : LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow])
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(asks ? LilBroCopy.offerLineOff : LilBroCopy.offerLine)
-                .font(.system(size: 11.5))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            // On its own line, so the buttons never squeeze it.
-            LilBroTextButton(title: details ? "Hide details ⌃" : "Details ⌄",
-                             label: details ? "Hide what is sent" : "What is sent and kept") {
-                details.toggle()
-            }
-            .padding(.leading, -6)
-            if details {
-                Text(LilBroCopy.offer)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            LilBroChips(items: [(choices[0], true, turnOn)]
-                        + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Answers from whytap.ai")
-    }
-}
-
-/// What goes to whytap.ai and what it keeps, readable while answers are on:
-/// the disclosure's full text and OK. Nothing to confirm; ⋯ turns answers off.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-struct LilBroDataUse: View {
-    let done: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(LilBroCopy.dataUse)
-                .font(.system(size: 11.5))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            LilBroChips(items: [(LilBroCopy.ok, false, done)])
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("What is sent to whytap.ai")
-    }
-}
-
-/// Rounded buttons (Try again, Turn on and ask) that wrap to the balloon's width.
+/// Rounded buttons (Try again) that wrap to the balloon's width.
 struct LilBroChips: View {
     let items: [(String, Bool, () -> Void)]
 
@@ -525,9 +401,9 @@ struct LilBroReplyField: View {
     }
 }
 
-/// ⋯: hide the little guy, answers from whytap.ai on or off, clear, close.
-/// In the balloon's header, and next to the greeting once answers are on, so
-/// they can be turned off before a question is sent.
+/// ⋯: hide the little guy, clear, close. In the balloon's header and next to
+/// the greeting. Answers always come from whytap.ai, so there is no switch
+/// for them here (REV 13).
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 struct LilBroOptionsMenu: View {
@@ -552,13 +428,6 @@ struct LilBroOptionsMenu: View {
         Menu {
             Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
                 controller.setMascotVisible(!controller.mascotVisible)
-            }
-            if controller.answersFromWhytap {
-                Button("What is sent to whytap.ai") { controller.showDetails() }
-                Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
-            } else {
-                // Opens the disclosure; only its button turns answers on.
-                Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
             }
             if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
             Button("Close") { controller.close() }

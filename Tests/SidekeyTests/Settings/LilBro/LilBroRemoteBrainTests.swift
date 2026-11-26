@@ -197,4 +197,14 @@ final class LilBroRemoteBrainTests: XCTestCase {
         }
         XCTAssertEqual(callers, ["LilBroRemoteBrain.swift"])
     }
+
+    /// REV 21: whytap.ai named features by their Swift case (`caseVault`);
+    /// the raw id (`case`) and the case name both open Case.
+    func test_a_feature_named_by_its_raw_id_or_its_case_name_opens_it() {
+        XCTAssertEqual(LilBroRemoteBrain.destination(["kind": "feature", "feature": "case"]), .feature(.caseVault))
+        XCTAssertEqual(LilBroRemoteBrain.destination(["kind": "feature", "feature": "caseVault"]), .feature(.caseVault))
+        XCTAssertEqual(LilBroRemoteBrain.destination(["kind": "feature", "feature": "drop"]), .feature(.drop))
+        XCTAssertNil(LilBroRemoteBrain.destination(["kind": "feature", "feature": "nope"]))
+    }
+
 }

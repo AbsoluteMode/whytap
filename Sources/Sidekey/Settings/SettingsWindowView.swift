@@ -74,7 +74,19 @@ struct SettingsWindowView: View {
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
         self.backupModel = backupModel
-        _lilBro = State(initialValue: lilBro ?? LilBroController(selection: selection))
+        let guide = lilBro ?? LilBroController(selection: selection)
+        _lilBro = State(initialValue: guide)
+        if guide.statusProvider == nil {
+            // What is wrong on this Mac, read when he is asked (REV 17).
+            let environment = featuresEnvironment ?? liveFeaturesEnvironment
+            guide.statusProvider = { [apiAndModelsViewModel, permissionsViewModel] in
+                LilBroStatus.make(
+                    snapshot: .live(models: apiAndModelsViewModel, permissions: permissionsViewModel,
+                                    environment: environment),
+                    keyChecks: KeyStatusStore.shared.recentChecks(now: Date()),
+                    failures: LilBroFailureLog.shared.entries, now: Date())
+            }
+        }
     }
 
     /// The live environment: this window's own switches and Drop mode.

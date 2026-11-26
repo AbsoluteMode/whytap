@@ -40,6 +40,40 @@ invariant said so.
   `https://whytap.ai/api/ask/lilbro` (server: AbsoluteMode/whytap-landing,
   `ask/lilbro.py`). It is the only place in `Sources/` that calls a whytap.ai
   API; a test fails if another file does.
+- **What is wrong on this Mac goes with a question (REV 17, 2026-11-26,
+  the maintainer asked to teach him to help people understand that a needed
+  access is missing, an API key ran out of money or something else).** `LilBroStatus` lists only deviations, so a working Mac sends
+  no `status` field (the orchestrator asked to keep it compact: it rides
+  on every question). Permissions from the Features snapshot (microphone,
+  accessibility, screen recording missing or needing a restart; system
+  audio "unknown" only while Meeting Notes is on, since macOS cannot be
+  asked), the last key check per provider kind within a day (refused, out
+  of credit, no speech permission, limited, unreachable; never a working
+  key), the model status of features in use (Drop's current mode, Meeting
+  Notes and the Agent only when on), and `LilBroFailureLog`: the last
+  `ProviderFailure` per provider and feature for a day, recorded where Drop
+  already reports it. Names are `AIProviderKind` and `AIFeature` raw values
+  (`openAICompatible` for any custom server); never a key, model name,
+  address, provider message or text. The server drops anything outside its
+  allowlist. The model then names the likely cause and leads to the row
+  that fixes it.
+- **The service map and a shorter conversation (REV 21 and REV 22,
+  2026-11-26).** The maintainer: Lil Bro is either really useful or not
+  needed, and he has to understand the service well. The inquisition asked
+  for cheaper repeat questions; the orchestrator for a full map generated
+  from the code. `LilBroServiceMap` writes docs/lil-bro/service-map.md from
+  `FeatureCatalog` (name, line, about, shortcuts, activation, island tool,
+  clip caption, examples, requirements in both Drop modes) and
+  `LilBroRow.catalog`; only the common problems per feature and the short
+  Keys & models, Case and coding tools texts are written by hand, and every
+  row they name must exist. whytap.ai reads that file from the app checkout
+  and sends it as the cached prefix in place of the site's guide. A new
+  feature without its problems does not compile (the switch is exhaustive);
+  a stale file, a missing part, an unknown row or a row listed twice fails
+  `LilBroServiceMapTests`. Closing the balloon ends the conversation: the
+  next question carries no earlier exchange, so it can be served from the
+  answer cache and old answers do not ride on every call. A feature named by
+  its Swift case name (`caseVault`, what older servers sent) still opens.
 - **Only Sonnet, no switch (REV 13, 2026-11-26, the maintainer's product
   decision).** On build 1772 the maintainer pointed at ⋯ → "What is sent to
   whytap.ai" and "Turn off answers from whytap.ai" and said to remove them:

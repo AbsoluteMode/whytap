@@ -282,6 +282,10 @@ final class LilBroController: ObservableObject {
         leadRow = nil
         // A question closed before its reply came is dropped, not left empty.
         if let last = turns.last, last.reply == nil { turns.removeLast() }
+        // The next question starts a new conversation: earlier turns stay
+        // under Earlier but are not sent again (REV 21: a cached answer can
+        // serve it, and no old exchanges ride on every call).
+        historyStart = turns.count
         bubble = .closed
         menuOpen = false
         showEarlier = false
@@ -303,6 +307,7 @@ final class LilBroController: ObservableObject {
     func clear() {
         stopPending()
         turns = []
+        historyStart = 0
         menuOpen = false
         showEarlier = false
         showMore = false
@@ -352,7 +357,8 @@ final class LilBroController: ObservableObject {
             announce(turns[turns.count - 1])
             return
         }
-        let asked = LilBroQuestion(text: question, screen: screen, history: history)
+        let asked = LilBroQuestion(text: question, screen: screen, history: history,
+                                   status: statusProvider?() ?? LilBroStatus())
         turns.append(Turn(question: question))
         let index = turns.count - 1
         bubble = .thinking
@@ -402,9 +408,18 @@ final class LilBroController: ObservableObject {
     /// The screen he is asked from, as the server reads it: `tab` or `tab/feature`.
     var screen: String { selection.lilBroScreen }
 
-    /// Up to three earlier exchanges answered by whytap.ai, oldest first.
+    /// What is wrong on this Mac when he is asked (REV 17); the Settings
+    /// window sets it from the same models its screens show.
+    var statusProvider: (@MainActor () -> LilBroStatus)?
+
+    /// Where the conversation since the balloon last opened begins in `turns`.
+    private(set) var historyStart = 0
+
+    /// Up to three earlier exchanges answered by whytap.ai since the balloon
+    /// last opened, oldest first.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md (REV 21)
     var history: [LilBroQuestion.Exchange] {
-        turns.compactMap { turn in
+        turns.dropFirst(min(historyStart, turns.count)).compactMap { turn in
             guard case .answer(let answer) = turn.reply else { return nil }
             return LilBroQuestion.Exchange(question: turn.question,
                                            answer: (answer.paragraphs + answer.bullets).joined(separator: "\n"))

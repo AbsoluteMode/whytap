@@ -1628,8 +1628,12 @@ guiding (the reply is ignored, nothing opens), and closing drops one that has
 no reply yet. A question under the server's
 three characters is not sent (`tooShort`). LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
-`tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered, with redirects refused, to
+`tab/feature` raw ids), up to three earlier exchanges whytap.ai itself
+answered and, only when something is wrong, a compact `status`
+(`LilBroStatus`, REV 17: missing permissions, refused or out-of-credit key
+checks, features in use without a working model, and `LilBroFailureLog`'s
+provider failures of the last day; named states only), with redirects
+refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
 claude-sonnet-5-5), which returns sentences, points and,
 only when the person asked to go or set something up, one place (a feature,
@@ -1637,6 +1641,16 @@ tab, row `{row, tab, feature?}` from LilBroRows.swift, or API keys); an id the a
 not have is dropped, and an unknown row falls back to its feature or tab. No internet or a timeout is offline, 429 or a
 spent budget is the daily limit, any other error is unavailable; each is a
 short message (offline and unavailable with Try again) and changes nothing.
+Closing the balloon starts a new conversation: earlier turns stay under
+Earlier but are not sent again (`historyStart`, REV 21). A feature in `go`
+is read by its raw value or its Swift case name. What whytap.ai knows of the
+app is `LilBroServiceMap` (REV 22), generated from `FeatureCatalog` and
+`LilBroRow.catalog` and checked in at docs/lil-bro/service-map.md: per
+feature what it does, how to use it, what it needs, its rows and its common
+problems with the row that fixes each, then Keys & models, API hints, Case,
+coding tools and every other screen's rows. `LilBroServiceMapTests` fails
+when the file is stale, a feature lacks a part, a problem names a missing
+row, or a row is listed other than once.
 The sprite sheet is Resources/LilBro, embedded
 into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
 .project-docs/decisions/2026-11-24-lil-bro.md

@@ -6,8 +6,11 @@ import Foundation
 /// the person asked to go there or set something up.
 ///
 /// Used for every question; there is no switch to turn it off (REV 13, the
-/// maintainer's decision: Lil Bro works only through Sonnet). Nothing else is
-/// sent: no keys, no dictated text, no settings, no identifier of this Mac.
+/// maintainer's decision: Lil Bro works only through Sonnet). With a question
+/// goes what is wrong on this Mac, if anything (`LilBroStatus`, REV 17):
+/// enumerated permission, key, model and failure states. Nothing else is
+/// sent: no keys, no dictated text, no model names or server addresses, no
+/// identifier of this Mac.
 /// The server keeps the question text 90 days without an address or visitor.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 struct LilBroRemoteBrain: LilBroBrain {
@@ -18,6 +21,8 @@ struct LilBroRemoteBrain: LilBroBrain {
     static let questionMinimum = 3
     static let historyQuestionLimit = 300
     static let historyAnswerLimit = 600
+    /// The server answers within 20 s (3 s in its queue, one 16 s model call,
+    /// no retries), so an answer it paid for arrives before this (REV 21).
     static let timeout: TimeInterval = 25
 
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
@@ -102,7 +107,7 @@ struct LilBroRemoteBrain: LilBroBrain {
         let request: URLRequest
         do {
             request = try Self.request(for: LilBroQuestion(text: text, screen: question.screen,
-                                                           history: question.history))
+                                                           history: question.history, status: question.status))
         } catch {
             return .unavailable
         }
@@ -124,6 +129,8 @@ struct LilBroRemoteBrain: LilBroBrain {
         request.httpShouldHandleCookies = false
         var body: [String: Any] = ["question": question.text]
         if !question.screen.isEmpty { body["screen"] = question.screen }
+        // Only what is wrong, as enumerated states; nothing when all is well (REV 17).
+        if !question.status.isEmpty { body["status"] = question.status.json }
         if !question.history.isEmpty {
             body["history"] = question.history.suffix(3).map {
                 ["q": prepared($0.question) ?? clipped($0.question, to: historyQuestionLimit),
@@ -161,7 +168,12 @@ struct LilBroRemoteBrain: LilBroBrain {
         guard let go = value as? [String: Any] else { return nil }
         // One row of a tab; the server also names its tab for older builds.
         if let raw = go["row"] as? String, let row = LilBroRow.named(raw) { return .row(row) }
-        if let raw = go["feature"] as? String, let feature = AppFeature(rawValue: raw) { return .feature(feature) }
+        // A feature by its raw value (`case`); an older server sent the Swift
+        // case name (`caseVault`), which is read too (REV 21).
+        if let raw = go["feature"] as? String,
+           let feature = AppFeature(rawValue: raw) ?? AppFeature.allCases.first(where: { "\($0)" == raw }) {
+            return .feature(feature)
+        }
         // A former tab (Agents, Notifications) is now a feature's screen: he runs there.
         if let raw = go["tab"] as? String, let tab = SettingsWindowTab(rawValue: raw) {
             return tab.featureScreen.map(LilBroDestination.feature) ?? .tab(tab)

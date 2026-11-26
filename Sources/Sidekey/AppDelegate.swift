@@ -3496,6 +3496,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
         AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
+        // Lil Bro can say why Drop stopped working (REV 17).
+        LilBroFailureLog.shared.record(failure, provider: route.account.kind, feature: DropTake.shared.feature)
         if let status = failure.keyStatus {
             KeyStatusStore.shared.set(status, for: route.account, at: Date())
         }

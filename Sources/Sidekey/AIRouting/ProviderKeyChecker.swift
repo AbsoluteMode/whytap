@@ -272,6 +272,17 @@ final class KeyStatusStore: ObservableObject {
         records[account.storageID]
     }
 
+    /// The last check of each provider kind within a day: what Lil Bro may
+    /// say about a key (REV 17). Never the key.
+    func recentChecks(now: Date) -> [AIProviderKind: KeyStatus] {
+        var out: [AIProviderKind: KeyStatus] = [:]
+        for (id, record) in records where now.timeIntervalSince(record.checkedAt) < Self.maxAge {
+            guard let account = ProviderAccount(storageID: id) else { continue }
+            out[account.kind] = record.status
+        }
+        return out
+    }
+
     func set(_ status: KeyStatus, for account: ProviderAccount, at date: Date) {
         records[account.storageID] = KeyCheckRecord(status: status, checkedAt: date)
         save()

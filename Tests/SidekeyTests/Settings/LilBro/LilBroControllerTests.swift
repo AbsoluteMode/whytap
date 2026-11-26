@@ -329,6 +329,29 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertEqual(remote.asked[2].history.map(\.question), ["first question to whytap"])
     }
 
+    /// REV 21: closing the balloon ends the conversation. The next question
+    /// carries no earlier exchange (it can be served from whytap.ai's cache
+    /// and no old answers ride on it), while the turns stay under Earlier.
+    func test_closing_the_balloon_starts_a_new_conversation() async {
+        let remote = Remote(.answer(LilBroAnswer(paragraphs: ["Drop types what you say."])))
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 1 }
+        controller.ask("and offline?")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 2 }
+        XCTAssertEqual(remote.asked[1].history.map(\.question), ["how do I dictate"])
+        controller.close()
+        controller.ask("where are the keys")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 3 }
+        XCTAssertEqual(remote.asked[2].history, [], "a closed conversation is not sent again")
+        XCTAssertEqual(controller.turns.count, 3, "earlier turns stay to read")
+        controller.ask("and the costs")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 4 }
+        XCTAssertEqual(remote.asked[3].history.map(\.question), ["where are the keys"])
+        controller.clear()
+        XCTAssertEqual(controller.historyStart, 0)
+    }
+
     func test_offline_try_again_asks_once_more_in_the_same_place() async {
         let remote = Remote(.offline)
         let selection = SettingsWindowSelection(selectedTab: .hotkeys)

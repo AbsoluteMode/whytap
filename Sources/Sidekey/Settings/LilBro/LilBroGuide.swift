@@ -50,6 +50,8 @@ struct LilBroQuestion: Equatable {
     var text: String
     var screen: String = ""
     var history: [Exchange] = []
+    /// What is wrong on this Mac, if anything (REV 17).
+    var status = LilBroStatus()
 }
 
 /// Who answers: whytap.ai. There are no scripted answers on this Mac; the

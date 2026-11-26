@@ -155,20 +155,13 @@ struct FeaturesFixture {
     }
 
     /// The whole Settings shell on `tab`.
-    /// Lil Bro always asks whytap.ai; fixtures answer with a fixed "offline"
-    /// reply so no test reaches the network.
-
-    func shell(selection: SettingsWindowSelection, lilBro: LilBroController? = nil) -> SettingsWindowView {
+    func shell(selection: SettingsWindowSelection) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
             selection: selection, agentModeViewModel: agent,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
-            featuresEnvironment: environment,
-            lilBro: lilBro ?? LilBroController(selection: selection,
-                                               preferences: LilBroPreferences(defaults: defaults),
-                                               remote: LilBroFixedBrain(reply: .offline),
-                                               reduceMotion: { true }))
+            featuresEnvironment: environment)
     }
 
     /// Draws `view` in a window that never reaches the screen and returns the

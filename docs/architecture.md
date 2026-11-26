@@ -428,10 +428,15 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   the folder through one openat/O_NOFOLLOW opener, regular files only, no hidden,
   symlinked, build or credential-like files) and custom stdio/HTTPS servers.
   SourceCredentialPolicy is the one credential rule for import, tiles, the custom
-  form, previews and launch: argv or address credentials are refused (and
-  masked by the same test), credentials never go over plain http, and imports
-  keep their full launch parameters (Codex multi-line arrays, cwd, project
-  folder) or are listed with a reason. SourcesController keeps the manifest
+  form, previews and launch (problem / display over redacted): argv or address
+  credentials are refused and masked by the same word-based test, credentials
+  never go over plain http, and imports are checked against one strict entry
+  shape (keys, types, one transport, enabled) and keep their full launch
+  parameters or are listed with a reason. SourceSecretMask masks each source's
+  known values out of every server text (results, errors, exit detail, proof,
+  tool metadata) before Settings, the manifest or a model. FolderSource stores
+  the folder's real path and device/inode and reaches it and every entry through
+  O_NOFOLLOW descriptors. SourcesController keeps the manifest
   (Application Support/whytap/assistant/sources.json, 0600, names only),
   Keychain values (integration.<source>.<NAME>), live clients and statuses.
   MCPClient is hand-written (initialize, paginated tools/list, tools/call, ping,
@@ -449,11 +454,13 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   else settles; unknown tools are never Read) and a pin hash. Imported and
   custom servers start with every tool waiting for Approve tools (no hint or
   model suggestion approves; nothing, not even the proof, is called before);
-  GitHub, Jira and folders are trusted on connect. Every new client re-lists and
-  re-classifies before its first call, list_changed holds all tools until a later
-  list completes, and per-source generations make disable/remove/stop revoke at
-  once; callRead rechecks generation, client, validation and pin right before
-  the call. Connecting a trusted or approved source runs one harmless read call
+  GitHub, Jira and folders are trusted on connect. Approval is bound to the exact
+  list: MCPClient.listTools returns its epoch, list_changed, an ended client or
+  another HTTP session moves it, and callTool checks the SourceLease, epoch and
+  pin in the same actor step that sends. Generations and leases are replaced by
+  stop, disable, remove, new values, class changes and approvals; late answers
+  are discarded. Operation-wide deadlines (MCPDeadline) and cancellation stop
+  the actual stdin write, HTTP task or folder read. Connecting a trusted or approved source runs one harmless read call
   as proof. The Agent gets one strict function,
   source_call(tool, arguments), whose tool enum lists only approved Read tools
   of enabled sources (signatures in the system prompt, 10,000 characters);
@@ -464,7 +471,9 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   search_files, capture_screen, case_list_keys, show_actions and app control
   leave the catalog and are refused for the rest of the request, and
   source_call is narrowed to the sources already read. Source failures reach the
-  model only as fixed MCPError.agentMessage text. Nothing in this path
+  model only as fixed MCPError.agentMessage text. Both completion paths keep only
+  link cards to addresses a source returned verbatim (taintedActions), and the
+  conversation's sourceReads keep its later requests restricted. Nothing in this path
   logs. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
   Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
   server-side tool when the model has it (Anthropic web_search_20250305 with

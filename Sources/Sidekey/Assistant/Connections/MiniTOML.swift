@@ -62,6 +62,8 @@ enum MiniTOML {
             guard let (key, value) = parsed else { document.unreadable.insert(current); continue }
             // A dotted key `env.TOKEN = "x"` lands in the sub-table.
             let table = current + key.dropLast()
+            // A repeated key is invalid TOML: not understood, never overwritten.
+            guard document.tables[table]?[key.last!] == nil else { document.unreadable.insert(current); continue }
             document.tables[table, default: [:]][key.last!] = value
         }
         return document
@@ -154,12 +156,24 @@ enum MiniTOML {
                 if quote == "\"", character == "\\", index < characters.count {
                     let escaped = characters[index]
                     index += 1
+                    // TOML's escapes exactly; any other is not understood
+                    // (never rewritten), so the line is unreadable.
                     switch escaped {
                     case "n": result.append("\n")
                     case "t": result.append("\t")
+                    case "r": result.append("\r")
+                    case "b": result.append("\u{08}")
+                    case "f": result.append("\u{0C}")
                     case "\"": result.append("\"")
                     case "\\": result.append("\\")
-                    default: result.append(escaped)
+                    case "u", "U":
+                        let length = escaped == "u" ? 4 : 8
+                        guard index + length <= characters.count,
+                              let code = UInt32(String(characters[index..<index + length]), radix: 16),
+                              let scalar = Unicode.Scalar(code) else { return nil }
+                        result.unicodeScalars.append(scalar)
+                        index += length
+                    default: return nil
                     }
                 } else { result.append(character) }
             }
@@ -188,8 +202,9 @@ enum MiniTOML {
                 var object: [String: MCPValue] = [:]
                 while true {
                     if skip("}") { return .object(object) }
-                    guard let key = keyPath(), skip("="), let item = value() else { return nil }
-                    object[key.joined(separator: ".")] = item
+                    // Dotted keys inside an inline table and repeated keys are not understood.
+                    guard let key = keyPath(), key.count == 1, object[key[0]] == nil, skip("="), let item = value() else { return nil }
+                    object[key[0]] = item
                     if skip(",") { continue }
                     return skip("}") ? .object(object) : nil
                 }

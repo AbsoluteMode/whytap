@@ -5,9 +5,10 @@ import Foundation
 /// through `onEvent`.
 protocol MCPTransport: AnyObject, Sendable {
     func start(onEvent: @escaping @Sendable (MCPTransportEvent) -> Void) async throws
-    /// Sends one message. `responseID` is the id of a request whose response
-    /// the caller waits for (HTTP reads the reply from this POST's body).
-    func send(_ message: Data, responseID: Int?) async throws
+    /// Sends one message before `deadline`. `responseID` is the id of a
+    /// request whose response the caller waits for (HTTP reads the reply from
+    /// this POST's body). Cancelling the calling task stops the actual I/O.
+    func send(_ message: Data, responseID: Int?, deadline: Date) async throws
     /// HTTP needs the negotiated version on every later request.
     func setProtocolVersion(_ version: String)
     func close() async
@@ -48,9 +49,12 @@ final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
         lock.withLock { self.process = process }
     }
 
-    func send(_ message: Data, responseID: Int?) async throws {
+    func send(_ message: Data, responseID: Int?, deadline: Date) async throws {
         guard let process = lock.withLock({ self.process }) else { throw MCPError.notConnected }
-        try process.write(message)
+        let cancelled = MCPCancelFlag()
+        try await withTaskCancellationHandler {
+            try await process.write(message, deadline: deadline, isCancelled: { cancelled.isSet })
+        } onCancel: { cancelled.raise() }
     }
 
     func setProtocolVersion(_ version: String) {}
@@ -78,6 +82,10 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
     private let session: URLSession
     private let lock = NSLock()
     private var sessionID: String?
+    /// The session is fixed by the first answer (initialize); a later answer
+    /// naming another session ends this client, so tools approved on one
+    /// session are never called on another.
+    private var answered = false
     private var protocolVersion: String?
     private var onEvent: (@Sendable (MCPTransportEvent) -> Void)?
 
@@ -99,9 +107,12 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
 
     func setProtocolVersion(_ version: String) { lock.withLock { protocolVersion = version } }
 
-    func send(_ message: Data, responseID: Int?) async throws {
+    func send(_ message: Data, responseID: Int?, deadline: Date) async throws {
         guard let deliver = lock.withLock({ onEvent }) else { throw MCPError.notConnected }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 120)
+        let seconds = MCPDeadline.seconds(until: deadline)
+        guard deadline.timeIntervalSinceNow > 0 else { throw MCPError.timedOut(seconds: seconds) }
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData,
+                                 timeoutInterval: max(1, deadline.timeIntervalSinceNow))
         request.httpMethod = "POST"
         request.httpBody = message
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -116,7 +127,14 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
         catch let error as URLError where error.code == .cancelled { throw MCPError.cancelled }
         catch { throw MCPError.network }
         guard let http = response as? HTTPURLResponse else { throw MCPError.invalidResponse }
-        if let id = http.value(forHTTPHeaderField: "Mcp-Session-Id"), !id.isEmpty { lock.withLock { sessionID = id } }
+        let offered = http.value(forHTTPHeaderField: "Mcp-Session-Id").flatMap { $0.isEmpty ? nil : $0 }
+        let sameSession = lock.withLock { () -> Bool in
+            defer { answered = true }
+            guard let offered else { return true }
+            if sessionID == nil, !answered { sessionID = offered; return true }
+            return sessionID == offered
+        }
+        guard sameSession else { bytes.task.cancel(); throw MCPError.sessionExpired }
         switch http.statusCode {
         case 200..<300: break
         case 401, 403: throw MCPError.unauthorized(status: http.statusCode)
@@ -138,6 +156,7 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
             for try await byte in bytes {
                 total += 1
                 guard total <= Self.maxResponseBytes else { throw MCPError.tooLarge(limit: Self.maxResponseBytes) }
+                if total % 4096 == 0, deadline.timeIntervalSinceNow <= 0 { throw MCPError.timedOut(seconds: seconds) }
                 guard byte == 10 else { if byte != 13 { line.append(byte) }; continue }
                 if line.isEmpty { if dispatch() { return } }
                 else if line.starts(with: Data("data:".utf8)) {
@@ -154,6 +173,7 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
             for try await byte in bytes {
                 body.append(byte)
                 guard body.count <= Self.maxResponseBytes else { throw MCPError.tooLarge(limit: Self.maxResponseBytes) }
+                if body.count % 4096 == 0, deadline.timeIntervalSinceNow <= 0 { throw MCPError.timedOut(seconds: seconds) }
             }
             guard !body.isEmpty else { return }
             deliver(.message(body))
@@ -171,7 +191,12 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
         request.httpMethod = "DELETE"
         for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
         request.setValue(id, forHTTPHeaderField: "Mcp-Session-Id")
-        _ = try? await session.data(for: request, delegate: self)
+        // Bounded: the status is enough, the body is never read.
+        let session = self.session
+        _ = try? await MCPDeadline.run(until: Date().addingTimeInterval(3), timeout: .timedOut(seconds: 3)) { [self] in
+            let (bytes, _) = try await session.bytes(for: request, delegate: self)
+            bytes.task.cancel()
+        }
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,

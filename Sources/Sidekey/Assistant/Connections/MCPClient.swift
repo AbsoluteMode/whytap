@@ -56,7 +56,14 @@ struct MCPToolResult: Equatable, Sendable {
 /// A minimal MCP client: initialize, tools/list, tools/call, ping and
 /// cancellation. No sampling, elicitation or roots: a server cannot ask our
 /// model anything. Hand-written instead of the official Swift SDK, which would
-/// add swift-nio and three more packages. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+/// add swift-nio and three more packages.
+///
+/// Approval is bound to the exact list: `listTools` returns the epoch it was
+/// read under and records each tool's pin; `callTool` checks the caller's
+/// lease, the epoch and the tool's pin in the same actor step that sends the
+/// request. A `tools/list_changed` notice or an ended session moves the epoch,
+/// so nothing approved on an older list is sent.
+/// WHY: .project-docs/decisions/2026-11-26-agent-sources.md
 actor MCPClient {
     static let requestedVersion = "2025-06-18"
     static let supportedVersions: Set<String> = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "2026-07-28"]
@@ -70,11 +77,11 @@ actor MCPClient {
     private(set) var closedError: MCPError?
     private(set) var protocolVersion: String?
     private(set) var serverName: String?
-    /// Set by `notifications/tools/list_changed`; cleared only by a list that
-    /// completed after the last such notice, so a failed or concurrent
-    /// re-list never leaves old tools looking current.
-    private(set) var toolsChanged = false
-    private var changeEpoch = 0
+    /// Moved by every `tools/list_changed` notice.
+    private(set) var listEpoch = 0
+    /// The epoch whose complete list produced `pins`; nil before a list.
+    private var pinsEpoch: Int?
+    private var pins: [String: String] = [:]
     /// Sends in flight, cancelled when their request is abandoned.
     private var sends: [Int: Task<Void, Never>] = [:]
     private var started = false
@@ -83,9 +90,17 @@ actor MCPClient {
 
     var isOpen: Bool { started && closedError == nil }
 
+    /// True until a list read entirely after the last change notice completes.
+    var toolsChanged: Bool { pinsEpoch != listEpoch }
+
+    /// The connection's identity for approval: same client, same list.
+    var currentEpoch: Int? { isOpen && pinsEpoch == listEpoch ? listEpoch : nil }
+
     func connect(timeout: TimeInterval) async throws {
         guard !started else { return }
         started = true
+        // One deadline for starting, initialize and the initialized notice.
+        let deadline = Date().addingTimeInterval(timeout)
         let (stream, continuation) = AsyncStream<MCPTransportEvent>.makeStream()
         consumer = Task { [weak self] in
             for await event in stream { await self?.handle(event) }
@@ -100,46 +115,72 @@ actor MCPClient {
             "protocolVersion": .string(Self.requestedVersion),
             "capabilities": .object([:]),
             "clientInfo": .object(["name": .string("Whytap"), "version": .string(AppBuildIdentity.current.version)]),
-        ]), timeout: timeout)
+        ]), deadline: deadline)
         guard let version = result["protocolVersion"]?.string else { throw MCPError.invalidResponse }
         guard Self.supportedVersions.contains(version) else { throw MCPError.unsupportedProtocol(version) }
         protocolVersion = version
         serverName = result["serverInfo"]?["name"]?.string
         transport.setProtocolVersion(version)
-        try await notify("notifications/initialized")
+        try await notify("notifications/initialized", deadline: deadline)
     }
 
-    func listTools(timeout: TimeInterval) async throws -> [MCPToolInfo] {
+    /// Every page under one deadline. `transform` is applied to each tool
+    /// before its pin is recorded (the controller masks known secrets), so
+    /// pins compare what the controller stores. Returns the epoch the list
+    /// was read under; its pins count only if no change notice arrived meanwhile.
+    func listTools(timeout: TimeInterval, transform: @Sendable (MCPToolInfo) -> MCPToolInfo? = { $0 })
+        async throws -> (tools: [MCPToolInfo], epoch: Int) {
+        let deadline = Date().addingTimeInterval(timeout)
         var tools: [MCPToolInfo] = [], cursor: String?
-        let epoch = changeEpoch
+        let epoch = listEpoch
         for _ in 0..<20 {
             let params: MCPValue? = cursor.map { .object(["cursor": .string($0)]) }
-            let result = try await request("tools/list", params: params, timeout: timeout)
-            tools += (result["tools"]?.array ?? []).compactMap(MCPToolInfo.init)
+            let result = try await request("tools/list", params: params, deadline: deadline)
+            tools += (result["tools"]?.array ?? []).compactMap(MCPToolInfo.init).compactMap(transform)
             cursor = result["nextCursor"]?.string
             if cursor == nil || tools.count >= Self.maxTools { break }
         }
         var seen = Set<String>()
-        if changeEpoch == epoch { toolsChanged = false }
-        return Array(tools.filter { seen.insert($0.name).inserted }.prefix(Self.maxTools))
+        let unique = Array(tools.filter { seen.insert($0.name).inserted }.prefix(Self.maxTools))
+        if listEpoch == epoch {
+            pins = Dictionary(uniqueKeysWithValues: unique.map { ($0.name, $0.pinHash) })
+            pinsEpoch = epoch
+        }
+        return (unique, epoch)
     }
 
-    /// Calls a tool and turns its content into text, clipped to `maxCharacters`.
-    func callTool(_ name: String, arguments: MCPValue, timeout: TimeInterval, maxCharacters: Int) async throws -> MCPToolResult {
+    /// Calls a tool and turns its content into text, clipped to
+    /// `maxCharacters`. Sent only if, at the moment of sending, `lease` is
+    /// valid, the list is still `epoch` and the tool's pin is `expectedPin`.
+    func callTool(_ name: String, arguments: MCPValue, timeout: TimeInterval, maxCharacters: Int,
+                  lease: SourceLease, epoch: Int, expectedPin: String) async throws -> MCPToolResult {
         let result = try await request("tools/call", params: .object(["name": .string(name), "arguments": arguments]),
-                                       timeout: timeout)
+                                       deadline: Date().addingTimeInterval(timeout)) { [self] in
+            guard lease.isValid, listEpoch == epoch, pinsEpoch == epoch, pins[name] == expectedPin else {
+                throw MCPError.notAllowed
+            }
+        }
         return Self.toolResult(result, maxCharacters: maxCharacters)
     }
 
-    func ping(timeout: TimeInterval) async throws { _ = try await request("ping", params: nil, timeout: timeout) }
+    func ping(timeout: TimeInterval) async throws {
+        _ = try await request("ping", params: nil, deadline: Date().addingTimeInterval(timeout))
+    }
 
     func close() async {
-        closedError = closedError ?? .notConnected
+        end(.notConnected)
+        await transport.close()
+        consumer?.cancel()
+    }
+
+    /// Ends the client without waiting for the transport: pending requests
+    /// fail, sends stop, and the epoch moves so no approval carries over.
+    private func end(_ error: MCPError) {
+        closedError = closedError ?? error
+        listEpoch += 1
         failAll(.cancelled)
         sends.values.forEach { $0.cancel() }
         sends.removeAll()
-        await transport.close()
-        consumer?.cancel()
     }
 
     static func toolResult(_ result: MCPValue, maxCharacters: Int) -> MCPToolResult {
@@ -167,70 +208,81 @@ actor MCPClient {
 
     // MARK: - JSON-RPC
 
-    private func request(_ method: String, params: MCPValue?, timeout: TimeInterval) async throws -> MCPValue {
+    /// `gate` runs in the same actor step that registers and sends the
+    /// request; if it throws, nothing is sent.
+    private func request(_ method: String, params: MCPValue?, deadline: Date,
+                         gate: (() throws -> Void)? = nil) async throws -> MCPValue {
         if let closedError { throw closedError }
         let id = nextID
         nextID += 1
         var message: [String: MCPValue] = ["jsonrpc": .string("2.0"), "id": .number(Double(id)), "method": .string(method)]
         if let params { message["params"] = params }
         let data = try MCPValue.object(message).encoded()
-        let deadline = Task { [weak self] in
-            try? await Task.sleep(nanoseconds: UInt64(max(0.05, timeout) * 1_000_000_000))
+        let seconds = MCPDeadline.seconds(until: deadline)
+        let timer = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(max(0.05, deadline.timeIntervalSinceNow) * 1_000_000_000))
             guard !Task.isCancelled else { return }
-            await self?.abandon(id, reason: .timedOut(seconds: Int(timeout.rounded())))
+            await self?.abandon(id, reason: .timedOut(seconds: seconds))
         }
-        defer { deadline.cancel() }
+        defer { timer.cancel() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MCPValue, Error>) in
-                register(id, continuation, data: data)
+                register(id, continuation, data: data, deadline: deadline, gate: gate)
             }
         } onCancel: {
             Task { [weak self] in await self?.abandon(id, reason: .cancelled) }
         }
     }
 
-    private func register(_ id: Int, _ continuation: CheckedContinuation<MCPValue, Error>, data: Data) {
+    private func register(_ id: Int, _ continuation: CheckedContinuation<MCPValue, Error>, data: Data, deadline: Date,
+                          gate: (() throws -> Void)?) {
         if abandoned.remove(id) != nil { continuation.resume(throwing: MCPError.cancelled); return }
         if let closedError { continuation.resume(throwing: closedError); return }
+        do { try gate?() } catch { continuation.resume(throwing: error); return }
         pending[id] = continuation
         let transport = transport
         sends[id] = Task { [weak self] in
-            do { try await transport.send(data, responseID: id) }
-            catch { await self?.fail(id, error as? MCPError ?? .network) }
+            do { try await transport.send(data, responseID: id, deadline: deadline) }
+            catch { await self?.sendFailed(id, error as? MCPError ?? .network) }
             await self?.sendFinished(id)
         }
     }
 
     private func sendFinished(_ id: Int) { sends[id] = nil }
 
-    /// Timeout or cancellation: stop waiting and tell the server.
+    private func sendFailed(_ id: Int, _ error: MCPError) {
+        pending.removeValue(forKey: id)?.resume(throwing: error)
+        // Another session or a stopped server: this client is done.
+        if error == .sessionExpired || error == .notConnected { end(error) }
+        if case .timedOut = error, closedError == nil { end(error) }
+    }
+
+    /// Timeout or cancellation: stop waiting, stop the send itself, and tell
+    /// the server within a bounded time.
     private func abandon(_ id: Int, reason: MCPError) async {
         guard let continuation = pending.removeValue(forKey: id) else {
             if id >= nextID - 1, reason == .cancelled { abandoned.insert(id) }
             return
         }
         continuation.resume(throwing: reason)
-        // Stop the send itself (an HTTP request in flight), then tell the
-        // server, without waiting for it.
         sends.removeValue(forKey: id)?.cancel()
         guard closedError == nil, let data = try? MCPValue.object([
             "jsonrpc": .string("2.0"), "method": .string("notifications/cancelled"),
             "params": .object(["requestId": .number(Double(id)), "reason": .string(reason == .cancelled ? "cancelled" : "timeout")])
         ]).encoded() else { return }
         let transport = transport
-        let notice = Task { try? await transport.send(data, responseID: nil) }
-        Task { try? await Task.sleep(nanoseconds: 3_000_000_000); notice.cancel() }
+        Task { try? await transport.send(data, responseID: nil, deadline: Date().addingTimeInterval(3)) }
     }
 
-    private func fail(_ id: Int, _ error: MCPError) {
-        pending.removeValue(forKey: id)?.resume(throwing: error)
-    }
-
-    private func notify(_ method: String, params: MCPValue? = nil) async throws {
+    private func notify(_ method: String, params: MCPValue? = nil, deadline: Date) async throws {
         guard closedError == nil else { return }
         var message: [String: MCPValue] = ["jsonrpc": .string("2.0"), "method": .string(method)]
         if let params { message["params"] = params }
-        try await transport.send(try MCPValue.object(message).encoded(), responseID: nil)
+        let data = try MCPValue.object(message).encoded()
+        let transport = transport
+        try await MCPDeadline.run(until: deadline, timeout: .timedOut(seconds: MCPDeadline.seconds(until: deadline))) {
+            try await transport.send(data, responseID: nil, deadline: deadline)
+        }
     }
 
     private func failAll(_ error: MCPError) {
@@ -243,6 +295,7 @@ actor MCPClient {
         switch event {
         case .closed(let error):
             if closedError == nil { closedError = error }
+            listEpoch += 1
             failAll(closedError ?? error)
         case .message(let data):
             // Servers sometimes print logs to stdout; a non-JSON line is skipped.
@@ -270,9 +323,12 @@ actor MCPClient {
                 ? ["jsonrpc": .string("2.0"), "id": id, "result": .object([:])]
                 : ["jsonrpc": .string("2.0"), "id": id,
                    "error": .object(["code": .number(-32601), "message": .string("Method not supported by Whytap")])]
-            if let data = try? MCPValue.object(reply).encoded() { try? await transport.send(data, responseID: nil) }
+            if let data = try? MCPValue.object(reply).encoded() {
+                let transport = transport
+                Task { try? await transport.send(data, responseID: nil, deadline: Date().addingTimeInterval(5)) }
+            }
             return
         }
-        if method == "notifications/tools/list_changed" { toolsChanged = true; changeEpoch += 1 }
+        if method == "notifications/tools/list_changed" { listEpoch += 1 }
     }
 }

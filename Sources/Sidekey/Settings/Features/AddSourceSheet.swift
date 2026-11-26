@@ -312,10 +312,8 @@ struct AddSourceSheet: View {
             guard let executable = words.first else { return .failure(Problem(message: "Enter the command that starts the server.")) }
             let arguments = Array(words.dropFirst())
             // One credential policy for every source: secrets go in variables below, never argv.
-            if let problem = SourceCredentialPolicy.argumentsProblem([executable] + arguments) {
-                return .failure(Problem(message: problem))
-            }
             draft.transport = .stdio(command: executable, arguments: arguments, directory: nil)
+            if let problem = draft.credentialProblem { return .failure(Problem(message: problem)) }
             for line in lines {
                 guard let equals = line.firstIndex(of: "=") else { return .failure(Problem(message: "Write each variable as NAME=value.")) }
                 let variable = line[..<equals].trimmingCharacters(in: .whitespaces)
@@ -330,6 +328,7 @@ struct AddSourceSheet: View {
                 draft.secrets[variable] = value
             }
         }
+        if let problem = draft.credentialProblem { return .failure(Problem(message: problem)) }
         return .success(draft)
     }
 

@@ -110,7 +110,12 @@ final class MCPProcess: @unchecked Sendable {
         posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO)
         posix_spawn_file_actions_adddup2(&actions, errors[1], STDERR_FILENO)
         posix_spawn_file_actions_adddup2(&actions, life[0], 3)
-        if let directory { posix_spawn_file_actions_addchdir_np(&actions, directory.path) }
+        // The declared working folder is part of the launch: if it can't be
+        // set, the server does not start.
+        if let directory, posix_spawn_file_actions_addchdir_np(&actions, directory.path) != 0 {
+            for fd in input + output + errors + life { close(fd) }
+            throw MCPError.commandNotFound((directory.path as NSString).lastPathComponent + " (its working folder)")
+        }
         var argv = (["/usr/bin/perl", "-e", Self.guardScript, "--", executable] + arguments).map { strdup($0) } + [nil]
         var env = environment.sorted { $0.key < $1.key }.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { argv.forEach { free($0) }; env.forEach { free($0) } }
@@ -119,6 +124,9 @@ final class MCPProcess: @unchecked Sendable {
         for fd in [input[0], output[1], errors[1], life[0]] { close(fd) }
         guard result == 0 else {
             for fd in [input[1], output[0], errors[0], life[1]] { close(fd) }
+            if let directory, access(directory.path, X_OK) != 0 {
+                throw MCPError.commandNotFound((directory.path as NSString).lastPathComponent + " (its working folder)")
+            }
             throw MCPError.commandNotFound((executable as NSString).lastPathComponent)
         }
         pid = child
@@ -196,30 +204,45 @@ final class MCPProcess: @unchecked Sendable {
     /// Largest message Whytap sends to a server.
     static let maxWriteBytes = 1_048_576
 
-    /// Writes one message and a newline within `timeout`: a server that stops
-    /// reading its input is stopped instead of blocking the app.
-    func write(_ data: Data, timeout: TimeInterval = 10) throws {
+    /// Writes one message and a newline before `deadline`, off the caller's
+    /// thread. Every wait is a short poll that also checks `isCancelled`, so a
+    /// cancelled or late write stops within 50 ms. A write stopped part-way
+    /// would leave half a message in the stream, so the server is stopped too;
+    /// so is a server that stops reading its input.
+    func write(_ data: Data, deadline: Date, isCancelled: @escaping @Sendable () -> Bool = { false }) async throws {
         guard data.count < Self.maxWriteBytes else { throw MCPError.tooLarge(limit: Self.maxWriteBytes) }
         var payload = data
         payload.append(10)
-        let deadline = Date().addingTimeInterval(timeout)
-        try writeQueue.sync {
-            lock.lock()
-            let open = stdinOpen
-            lock.unlock()
-            guard open else { throw MCPError.notConnected }
-            try payload.withUnsafeBytes { raw in
-                var offset = 0
-                while offset < raw.count {
-                    let written = Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset)
-                    if written >= 0 { offset += written; continue }
-                    if errno == EINTR { continue }
-                    guard errno == EAGAIN else { throw MCPError.notConnected }
-                    let remaining = Int32(max(0, deadline.timeIntervalSinceNow * 1000))
-                    guard remaining > 0 else { stop(); throw MCPError.timedOut(seconds: Int(timeout.rounded())) }
-                    var descriptor = pollfd(fd: stdinFD, events: Int16(POLLOUT), revents: 0)
-                    _ = poll(&descriptor, 1, min(remaining, 250))
+        let message = payload
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            writeQueue.async { [self] in
+                do { try writeNow(message, deadline: deadline, isCancelled: isCancelled); continuation.resume() }
+                catch { continuation.resume(throwing: error) }
+            }
+        }
+    }
+
+    private func writeNow(_ payload: Data, deadline: Date, isCancelled: () -> Bool) throws {
+        lock.lock()
+        let open = stdinOpen
+        lock.unlock()
+        guard open else { throw MCPError.notConnected }
+        let seconds = max(1, Int(deadline.timeIntervalSinceNow.rounded()))
+        try payload.withUnsafeBytes { raw in
+            var offset = 0
+            while offset < raw.count {
+                if isCancelled() {
+                    if offset > 0 { stop() }
+                    throw MCPError.cancelled
                 }
+                let written = Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset)
+                if written >= 0 { offset += written; continue }
+                if errno == EINTR { continue }
+                guard errno == EAGAIN else { throw MCPError.notConnected }
+                let remaining = Int32(max(0, deadline.timeIntervalSinceNow * 1000))
+                guard remaining > 0 else { stop(); throw MCPError.timedOut(seconds: seconds) }
+                var descriptor = pollfd(fd: stdinFD, events: Int16(POLLOUT), revents: 0)
+                _ = poll(&descriptor, 1, min(remaining, 50))
             }
         }
     }

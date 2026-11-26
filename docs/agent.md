@@ -128,8 +128,9 @@ use. **Add source…** offers, in this order:
    imported with its full command, arguments and working folder (a project
    server runs in its project folder) or not at all: servers that only speak
    the older SSE transport, insecure addresses, a secret on the command line
-   or in the address, settings Whytap can't carry over yet and Whytap's own
-   server are listed with the reason instead.
+   or in the address, settings Whytap can't carry over yet (for example
+   timeouts or tool filters), entries turned off in their app and Whytap's
+   own server are listed with the reason instead.
 2. **Services:** GitHub (GitHub's MCP server, read-only; **Create a token…**
    opens GitHub with read permissions prefilled) and Jira (site, e-mail and an
    API token; the site must be `https://your-team.atlassian.net`; runs
@@ -138,7 +139,8 @@ use. **Add source…** offers, in this order:
 3. **Folder:** names and text of regular files in that folder. Hidden files,
    build folders, symbolic links anywhere in a path, special files and
    credential-like files (`.env`, keys, `credentials…`) are never read, and
-   paths cannot leave the folder.
+   paths cannot leave the folder. If the folder is moved or replaced, add it
+   again.
 4. **Custom server:** a command on this Mac with environment variables, or an
    `https://` address with headers. Put secrets in the variables or headers:
    a command line or address that carries one is refused.
@@ -168,9 +170,12 @@ time it reconnects), that tool waits for **Approve tools** in Details.
 files may try to give the model instructions. So once a request has read
 anything from a source, only that source's Read tools and the answer remain:
 file edits and reads, commands, `fetch_url`, web search, screen capture,
-action cards, Whytap changes and every other source are removed and refused
-for the rest of that request; ask again in a new request for those. When a
-source fails, the model gets a fixed sentence, never the server's own text.
+action cards, Whytap changes and every other source are removed and refused.
+The answer's cards are only links the source itself returned; there is no
+Insert card. Later questions in the same conversation keep these limits,
+because its history now holds source text; start a new conversation for
+those. When a source fails, the model gets a fixed sentence, never the
+server's own text, and anything a server echoes of your token is masked.
 
 **Secrets** (tokens, API keys, header values) are kept in Keychain. A local
 server gets them only in its own process environment; a remote server only in

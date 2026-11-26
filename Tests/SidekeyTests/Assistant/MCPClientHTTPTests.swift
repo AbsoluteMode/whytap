@@ -48,9 +48,9 @@ final class MCPClientHTTPTests: XCTestCase {
         let client = MCPClient(transport: MCPHTTPTransport(url: URL(string: "https://mcp.example.com/mcp")!,
                                                            headers: ["Authorization": "Bearer tok"], session: session))
         try await client.connect(timeout: 5)
-        let tools = try await client.listTools(timeout: 5)
+        let tools = try await client.listTools(timeout: 5).tools
         XCTAssertEqual(tools.map(\.name), ["search"])
-        let result = try await client.callTool("search", arguments: .object(["query": .string("retry")]), timeout: 5, maxCharacters: 100)
+        let result = try await client.callListed("search", arguments: .object(["query": .string("retry")]), timeout: 5, maxCharacters: 100)
         XCTAssertEqual(result.text, "ok")
         let requests = StubURLProtocol.capturedRequests
         XCTAssertTrue(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization") == "Bearer tok" })
@@ -77,7 +77,7 @@ final class MCPClientHTTPTests: XCTestCase {
         serve(sse: false, callText: String(repeating: "y", count: 60_000))
         let client = MCPClient(transport: MCPHTTPTransport(url: URL(string: "https://mcp.example.com/mcp")!, headers: [:], session: session))
         try await client.connect(timeout: 5)
-        let result = try await client.callTool("search", arguments: .object([:]), timeout: 5, maxCharacters: 24_000)
+        let result = try await client.callListed("search", arguments: .object([:]), timeout: 5, maxCharacters: 24_000)
         XCTAssertEqual(result.text.count, 24_000)
         XCTAssertTrue(result.shortened)
     }
@@ -87,7 +87,7 @@ final class MCPClientHTTPTests: XCTestCase {
         StubURLProtocol.handler = { _ in (200, ["Content-Type": "application/json"], Data(count: MCPHTTPTransport.maxResponseBytes + 10)) }
         let transport = MCPHTTPTransport(url: URL(string: "https://mcp.example.com/mcp")!, headers: [:], session: session)
         try await transport.start { _ in }
-        do { try await transport.send(Data("{}".utf8), responseID: 1); XCTFail() }
+        do { try await transport.send(Data("{}".utf8), responseID: 1, deadline: Date().addingTimeInterval(5)); XCTFail() }
         catch let error as MCPError { XCTAssertEqual(error, .tooLarge(limit: MCPHTTPTransport.maxResponseBytes)) }
     }
 

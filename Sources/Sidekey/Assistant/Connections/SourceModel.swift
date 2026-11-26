@@ -85,6 +85,8 @@ struct SourceRecord: Codable, Equatable, Identifiable, Sendable {
     var proof: SourceProofCall?
     /// The tools list was never fetched successfully.
     var neverConnected = true
+    /// A folder source's selected folder: its real path and identity.
+    var folder: FolderIdentity?
     var addedAt = Date()
 
     /// Keychain account for one of this source's secret values.

@@ -127,8 +127,13 @@ final class NativeAgentProvider: CLIProvider {
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
         // After a source result (taint), writes, commands and web access leave
         // the catalog for the rest of the turn. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
-        var readSources = Set<String>()
+        // A conversation that read a source keeps the restriction for its
+        // later requests: its history carries source-derived text.
+        var readSources = Set(conversation.sourceReads ?? [])
         var tainted: Bool { !readSources.isEmpty }
+        // Addresses sources returned verbatim: the only cards a tainted turn may return.
+        var sourceLinks = Set<String>()
+        if tainted { model.builtInSearch = false }
         // A tainted request may only go back to the sources it already read.
         var sourceCatalog: AgentSourceCatalog? {
             guard let catalog else { return nil }
@@ -237,8 +242,11 @@ final class NativeAgentProvider: CLIProvider {
                 let cited = NativeAgentWebSearch.fallbackLinks(model.searchSources, existing: final.actions)
                 let answerActions = cited.isEmpty ? final.actions
                     : NativeAgentAnswerArtifacts.merging(final.actions, UsefulActionsBlock(items: cited))
-                let actions = NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: answerActions,
-                                                                 insert: final.insert) ?? answerActions
+                let actions = tainted
+                    ? NativeAgentSources.taintedActions(answerActions, answer: final.visibleText,
+                                                        allowed: sourceLinks.union(model.searchSources.map(\.url.absoluteString)))
+                    : NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: answerActions,
+                                                         insert: final.insert) ?? answerActions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
                 // Returned card destinations are part of the answer too: the
@@ -254,6 +262,7 @@ final class NativeAgentProvider: CLIProvider {
                     return "- " + (item.description.map { $0 + ": " } ?? "") + item.insertText
                 }.joined(separator: "\n")
                 let historyAnswer = [text, returnedItems].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                if tainted { conversation.sourceReads = readSources.sorted() }
                 try? conversation.append(user: prompt, assistant: historyAnswer, directory: directory)
                 lock.withLock { sessionID = conversation.id }
                 continuation.yield(.finalAnswer(text: text))
@@ -285,6 +294,7 @@ final class NativeAgentProvider: CLIProvider {
                         result = sourceResult
                         if let readFrom {
                             readSources.insert(readFrom)
+                            sourceLinks.formUnion(NativeAgentSources.links(in: sourceResult.text))
                             // The provider's own search is an exit too.
                             model.builtInSearch = false
                         }

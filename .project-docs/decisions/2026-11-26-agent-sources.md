@@ -58,7 +58,14 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   this Mac). Static token/header auth only; browser sign-in is later.
 - **Bounds:** 16 MB per message, tool results clipped to 24,000 characters
   before any model sees them, Agent calls 10 s, proof 15 s, connect 20 s
-  (HTTP) or 90 s (stdio, since a first `npx`/`uvx` run downloads). Servers
+  (HTTP) or 90 s (stdio, since a first `npx`/`uvx` run downloads). Each is
+  one deadline for the whole operation (initialize and its notice; every page
+  of a list). Cancellation and deadlines stop the actual I/O: stdin writes
+  poll every 50 ms and check cancellation (a write stopped part-way stops the
+  server), HTTP sends are URLSession tasks that are cancelled, the HTTP
+  session's closing DELETE is bounded to 3 s without reading its body, and
+  folder reads check cancellation between 16 KB reads. `MCPDeadline` returns
+  at the deadline without waiting for the operation to wind down. Servers
   start lazily, stop after 10 idle minutes, on sleep and with the app, and
   more than three exits in five minutes stop restarts until Check again.
 - **Secrets:** Keychain account `integration.<source>.<NAME>` in the app's
@@ -67,11 +74,25 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   beside an allowlist of the app's own variables (no model keys) and the
   login shell's PATH; an HTTP server only in its own headers.
 - **Credential policy** (`SourceCredentialPolicy`), one rule for import,
-  tiles, the custom form, previews and launch: a command line with a
-  secret-looking argument (a token prefix, `NAME=value` with a secret name,
-  or a value after `--token`, `--api-key`, `--header` and similar flags) and
-  an address with user info, a secret-named query key or a secret-looking
-  path part are refused with the reason; previews mask by the same test.
+  tiles, the custom form, previews and launch: `problem` decides everywhere,
+  `display` is the only preview and works on `redacted` (refused import
+  entries keep only a redacted preview), and one per-argument test drives
+  both. Names are split into words (`--api-key`, `GITHUB_TOKEN`,
+  `accessToken`) and matched whole against credential words, the same way
+  for a standalone flag and its next argument and for an inline
+  `--flag=value` or `NAME=value`; a URL-shaped argument runs the address
+  rule. An address with user info, a credential-named query key, a
+  credential-looking or long opaque query value, fragment or path part is
+  refused with the reason. The rule over-refuses rather than guesses (for
+  example `--session <id>`).
+- **Known values** (`SourceSecretMask`): each source's secret values
+  (6 characters or longer, raw, JSON-escaped and percent-encoded, and the
+  token part of an authorization header value) are masked out of everything a server wrote
+  before it reaches Settings, the manifest or a model: tool results
+  (including structured content), error results, JSON-RPC error and
+  protocol text, exit detail, proof summaries and tool metadata (title,
+  description, schema) before it is pinned, stored, classified or put in the
+  Agent's prompt. A tool whose name carries a value is dropped.
   Credentials never go over plain http, even to this Mac. A manifest edited
   by hand to carry an argv secret does not launch. The Jira tile accepts only
   an https address with only a host and optional port, and an e-mail address; tokens and values are one line,
@@ -97,11 +118,20 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   `tools/list_changed` notice holds every tool until a list that started
   after the notice completes, so a failed or concurrent re-list never
   revalidates old pins. A changed tool is unavailable until approved.
-  Each source has a generation bumped by stop, disable and removal; a check
-  re-verifies generation, enablement, the live client, validation and the
-  current pin after every await and immediately before the proof and every
-  Agent call, and a result arriving after revocation is discarded. Removal
-  revokes before stopping; stopping all ends connections in flight too.
+  Approval is bound to the exact list: `MCPClient.listTools` returns the
+  epoch it was read under and records each tool's pin (of the masked tool);
+  a `list_changed` notice, an ended client or another HTTP session (a later
+  answer naming a different `Mcp-Session-Id` ends the client) moves the
+  epoch. `callTool` checks the caller's `SourceLease`, the epoch and the
+  tool's pin in the same actor step that sends the request. Each source has
+  a generation and a lease, both replaced by stop, disable, removal, new
+  values, every class change and every approval; the old lease is revoked
+  synchronously, so a revocation wins even after the controller's own
+  check. After an answer the controller checks the lease and the tool's
+  approved pin again and discards a late answer (server and folder alike).
+  Every await before a launch (executable lookup, environment) is followed by
+  a current-generation check before a process or session starts. Stopping all
+  revokes every source first and then closes them together.
 - **The Agent** gets one strict function, `source_call(tool, arguments)`.
   `tool` is an enum of approved Read tools of enabled sources; each tool's
   compact signature is in the system prompt (bounded to 10,000 characters),
@@ -118,6 +148,18 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   same source's own Read tools. Failures (exit, server error, unsupported
   protocol, timeouts) reach the model only as fixed text with no server
   output, so they do not taint; Settings may show the masked detail.
+- **End of a turn that read a source:** both completion paths (finish_answer
+  and a direct-Anthropic plain-text reply) go through
+  `NativeAgentSources.taintedActions`: the only cards are link cards to
+  addresses a source (or the provider's own search) returned verbatim in this
+  request, whether listed in `sources` or written in the answer. No Insert
+  text, paths, copy or command cards, and no other links become cards, so
+  source content cannot become something pasted, opened or carrying data
+  elsewhere; links stay as text in the answer. The conversation records the
+  sources it read (`NativeAgentConversation.sourceReads`), and its later
+  requests (resumed within the resume window) start with the same
+  restrictions, because its saved history carries source-derived text. A
+  new conversation starts clear.
 - **Proof:** after connecting, one harmless read call (preset, model
   suggestion, or a Read tool without required parameters) and a one-line
   result in the row ("Works · signed in as @octo · 23 read tools").
@@ -127,29 +169,41 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   opens, and writes nothing back. `${VAR}` and `${input:…}` values become
   "Needs a value" fields. An entry is imported with its complete launch
   parameters (Codex multi-line arrays, `cwd`, and a project server's project
-  folder as its working folder) or listed with a reason and not offered:
-  SSE-only servers, insecure or credential-bearing addresses, argv secrets,
-  keys Whytap can't carry (for example Codex `enabled_tools`, JSON
-  `envFile`), TOML it can't read (multi-line strings, arrays of tables),
-  non-text arguments and Whytap's own server.
+  folder as its working folder) or listed with a reason and not offered.
+  Each entry is checked against one shape before a draft exists: allowed
+  keys only (JSON: type, command, args, env, url/serverUrl, headers, cwd,
+  disabled, enabled, description; Codex: command, args, env, env_vars, cwd,
+  url, bearer_token_env_var, http_headers, env_http_headers, enabled), every
+  value of its type (args a list of text, env and headers maps of text), one
+  transport (exactly one of command or address, matching an explicit type;
+  local keys only with a command, headers only with an address), and enabled.
+  Refused with a reason: timeouts and tool filters (Whytap applies its own),
+  an entry turned off in its app, unknown or mistyped keys, SSE or other
+  transports, credentials in argv or the address, TOML Whytap doesn't
+  understand (unknown escapes, multi-line strings, arrays of tables, dotted
+  keys in inline tables, repeated keys) and Whytap's own server. A declared
+  working folder that can't be set stops the launch.
 - **Tiles:** GitHub uses GitHub's remote MCP server with a pasted
   fine-grained token (the token page opens with read permissions prefilled)
   or the GitHub CLI's existing sign-in, always with `X-MCP-Readonly: true`.
   Jira runs `uvx mcp-atlassian` with `READ_ONLY_MODE=true`.
 - **Folder** sources are built in (no MCP): name and text search and a
-  bounded read inside the folder. The policy is enforced on the opened
-  object: the path is walked from the selected folder with `openat` and
-  `O_NOFOLLOW` (a link in any component, or the folder itself replaced by a
-  link, is refused), only a regular file passes `fstat`, reads are bounded
-  `pread`s, and search uses the same opener. Hidden files, build folders and
-  credential-like files are never read; offsets must be whole numbers from 0
-  to 64 MB.
+  bounded read inside the folder. When added, the folder's real path and its
+  device and inode are stored (`FolderIdentity`). Every listing, count,
+  search and read reaches it from `/` one component at a time with
+  `O_NOFOLLOW` and requires the same device and inode, so a moved, replaced
+  or relinked folder or ancestor is refused ("add the folder again"); below
+  it each entry is opened with `openat` and `O_NOFOLLOW` and checked with
+  `fstat` on the descriptor (directories and regular files only). The walk
+  reads directories through their descriptors and reports a name only after
+  its file passed that open, so a change between listing and opening cannot
+  substitute another object. Hidden files, build folders and credential-like
+  files are never read; offsets must be whole numbers from 0 to 64 MB.
 - **Untrusted decoding and transport:** JSON numbers become integers only by
   exact conversion (1e300, NaN and fractions are not integers); the 16 MB
   stdio limit applies to every completed line before delivery; writes to a
-  server's stdin are non-blocking with a 10 s deadline and messages over 1 MB
-  are refused; an abandoned request cancels its HTTP send as well as the wait;
-  folder calls stop after 10 s.
+  server's stdin are non-blocking under the request's deadline and messages
+  over 1 MB are refused.
 
 ## Why
 
@@ -197,6 +251,25 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   arguments and `cwd`, project folders, unknown keys and unreadable TOML;
   1e300/NaN integers, absurd JSON-RPC ids, a 17 MB single line, and a write
   to a process that never reads.
+- Second builder review (ticket 629), each point as a class: a table of
+  15 command-line credential forms and 6 address forms through the JSON and
+  Codex importers (accepted, and refused for another reason first), the
+  custom form, `problem`, `display`, `redacted`, `add` and a hand-edited
+  manifest's launch, asserting the sentinel never appears; a server echoing
+  its token in tool metadata, a tool name, structured content, an error
+  result, a JSON-RPC error and stderr, checked across the manifest, statuses,
+  the classification prompt, the Agent's prompt and tool schema, results and
+  errors; 6 await points (executable lookup, environment, connect, list,
+  classification, the call itself) × 4 revocations (disable, remove,
+  reclassify, stop all); dispatch refused for a wrong epoch, pin or a revoked
+  lease; another HTTP session ending the client; both completion paths after
+  a source read and a later request of the same conversation; every folder
+  entry kind (regular, link inside, link outside, link to a folder, FIFO,
+  hidden, credential, build folder) × count, search by name and content and
+  read, a replaced folder or ancestor, cancelled reads; 20 JSON and 19 Codex
+  forms Whytap can't carry; the working folder set or the launch refused;
+  cancelled and timed-out writes, one handshake deadline, and the deadline
+  helper not waiting.
 - The Agent loop: a source search answered; an injected instruction in a
   source result followed by `run_command`, `write_file` and `fetch_url`
   calls runs nothing and the next request's catalog lacks those tools and
@@ -219,6 +292,12 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   preview had to mask it by a second, different test.
 - Trusting an imported server's own `readOnlyHint` or a model suggestion on
   first connect: both come from the server's own descriptions.
+- Carrying Codex timeouts or other apps' enablement flags as ignored keys:
+  the import would silently differ from the source app, so such entries are
+  refused instead.
+- Keeping action cards, Insert text or Markdown-derived cards after a source
+  read, or clearing the restriction at the next request of the same
+  conversation: source text would still steer what is pasted or opened.
 
 ## Not in this iteration
 

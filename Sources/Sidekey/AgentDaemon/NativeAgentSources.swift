@@ -118,6 +118,34 @@ enum NativeAgentSources {
         }
     }
 
+    // MARK: - End of a tainted turn
+
+    /// http(s) addresses in a source's text, verbatim (trailing punctuation dropped).
+    static func links(in text: String) -> Set<String> {
+        guard let expression = try? NSRegularExpression(pattern: #"https?://[^\s<>"'`\)\]\}]+"#) else { return [] }
+        let range = NSRange(text.startIndex..., in: text)
+        return Set(expression.matches(in: text, range: range).compactMap { match in
+            Range(match.range, in: text).map { String(text[$0]).trimmingCharacters(in: CharacterSet(charactersIn: ".,;:!?")) }
+        })
+    }
+
+    /// The cards a turn that read source content may return: link cards to
+    /// addresses a source (or the provider's own search) returned verbatim in
+    /// this request, from `finish_answer` or the answer's Markdown alike. No
+    /// Insert text, paths, commands or other links, so content from a source
+    /// cannot turn into something pasted, opened or carrying data elsewhere.
+    /// Both completion paths (finish_answer and a plain-text reply) use this.
+    /// WHY: .project-docs/decisions/2026-11-26-agent-sources.md (Taint)
+    static func taintedActions(_ actions: UsefulActionsBlock, answer: String, allowed: Set<String>) -> UsefulActionsBlock {
+        let fromAnswer = NativeAgentAnswerArtifacts.collect(from: answer)?.items ?? []
+        var seen = Set<String>()
+        let links = (actions.items + fromAnswer).filter { item in
+            guard case .link(let url, _, _) = item, allowed.contains(url.absoluteString) else { return false }
+            return seen.insert(url.absoluteString).inserted
+        }
+        return UsefulActionsBlock(items: links)
+    }
+
     static func label(_ call: NativeAgentToolCall, catalog: AgentSourceCatalog?) -> String {
         let id = call.arguments["tool"] as? String
         let name = catalog?.tools.first { $0.id == id }?.sourceName

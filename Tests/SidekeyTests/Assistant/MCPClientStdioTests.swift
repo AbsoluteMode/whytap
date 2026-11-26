@@ -14,12 +14,12 @@ final class MCPClientStdioTests: XCTestCase {
     func testConnectListsAllPagesAndCallsToolWithEnvironmentSecret() async throws {
         let (client, log) = try client(extra: ["SECRET_TOKEN": "tok-123456"])
         try await client.connect(timeout: 10)
-        let tools = try await client.listTools(timeout: 5)
+        let tools = try await client.listTools(timeout: 5).tools
         XCTAssertEqual(tools.map(\.name), ["search_issues", "get_me", "create_issue", "delete_repository"])
         XCTAssertEqual(tools[0].readOnlyHint, true)
         XCTAssertEqual(tools[3].destructiveHint, true)
         XCTAssertEqual(tools[0].signature, "search_issues(query*: string)")
-        let result = try await client.callTool("search_issues", arguments: .object(["query": .string("retry")]),
+        let result = try await client.callListed("search_issues", arguments: .object(["query": .string("retry")]),
                                                timeout: 5, maxCharacters: 1000)
         XCTAssertEqual(result.text, "Found: #42 retry backoff for retry; token=tok-123456",
                        "The secret reaches the server only through its environment")
@@ -30,14 +30,14 @@ final class MCPClientStdioTests: XCTestCase {
     func testNonJSONStdoutLinesAreSkipped() async throws {
         let (client, _) = try client(mode: "noisy")
         try await client.connect(timeout: 10)
-        let tools = try await client.listTools(timeout: 5)
+        let tools = try await client.listTools(timeout: 5).tools
         XCTAssertEqual(tools.count, 4)
     }
 
     func testHugeResultIsClippedBeforeAnyModelSeesIt() async throws {
         let (client, _) = try client(mode: "huge")
         try await client.connect(timeout: 10)
-        let result = try await client.callTool("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 24_000)
+        let result = try await client.callListed("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 24_000)
         XCTAssertEqual(result.text.count, 24_000)
         XCTAssertTrue(result.shortened)
     }
@@ -47,7 +47,7 @@ final class MCPClientStdioTests: XCTestCase {
         try await client.connect(timeout: 10)
         let started = Date()
         do {
-            _ = try await client.callTool("get_me", arguments: .object([:]), timeout: 0.5, maxCharacters: 100)
+            _ = try await client.callListed("get_me", arguments: .object([:]), timeout: 0.5, maxCharacters: 100)
             XCTFail("Expected a timeout")
         } catch let error as MCPError {
             XCTAssertEqual(error, .timedOut(seconds: 1))
@@ -58,7 +58,7 @@ final class MCPClientStdioTests: XCTestCase {
     func testCancellingTheCallingTaskEndsTheWait() async throws {
         let (client, _) = try client(mode: "slow")
         try await client.connect(timeout: 10)
-        let task = Task { try await client.callTool("get_me", arguments: .object([:]), timeout: 30, maxCharacters: 100) }
+        let task = Task { try await client.callListed("get_me", arguments: .object([:]), timeout: 30, maxCharacters: 100) }
         try await Task.sleep(nanoseconds: 300_000_000)
         let started = Date()
         task.cancel()
@@ -71,7 +71,7 @@ final class MCPClientStdioTests: XCTestCase {
         let (client, log) = try client(mode: "crash_on_call", extra: ["SECRET_TOKEN": "tok-secret-9"])
         try await client.connect(timeout: 10)
         do {
-            _ = try await client.callTool("get_me", arguments: .object([:]), timeout: 10, maxCharacters: 100)
+            _ = try await client.callListed("get_me", arguments: .object([:]), timeout: 10, maxCharacters: 100)
             XCTFail("Expected the crash to surface")
         } catch let error as MCPError {
             guard case .exited(let status, let detail) = error else { return XCTFail("\(error)") }
@@ -136,7 +136,7 @@ final class MCPClientStdioTests: XCTestCase {
     func testAServerAnsweringWithAbsurdIDsDoesNotCrashTheClient() async throws {
         let (client, _) = try client(mode: "bad_id")
         try await client.connect(timeout: 10)
-        let result = try await client.callTool("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 1000)
+        let result = try await client.callListed("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 1000)
         XCTAssertTrue(result.text.contains("octo"), "Lines with ids like 1e300 are ignored; the real answer still arrives")
     }
 
@@ -144,23 +144,98 @@ final class MCPClientStdioTests: XCTestCase {
         let (client, _) = try client(mode: "huge_line")
         try await client.connect(timeout: 10)
         do {
-            _ = try await client.callTool("get_me", arguments: .object([:]), timeout: 20, maxCharacters: 1000)
+            _ = try await client.callListed("get_me", arguments: .object([:]), timeout: 20, maxCharacters: 1000)
             XCTFail("Expected tooLarge")
         } catch let error as MCPError {
             guard case .tooLarge = error else { return XCTFail("\(error)") }
         }
     }
 
-    func testAServerThatStopsReadingItsInputCannotBlockAWrite() throws {
+    func testAServerThatStopsReadingItsInputCannotBlockAWrite() async throws {
         let process = try MCPProcess(executable: "/bin/sleep", arguments: ["30"], environment: [:],
                                      onLine: { _ in }, onExit: { _, _, _ in })
         defer { process.stop() }
         let started = Date()
         let chunk = Data(repeating: UInt8(ascii: "x"), count: 900_000)
-        XCTAssertThrowsError(try process.write(chunk, timeout: 0.5)) { error in
-            XCTAssertEqual(error as? MCPError, .timedOut(seconds: 1))
-        }
+        do { try await process.write(chunk, deadline: Date().addingTimeInterval(0.5)); XCTFail("Expected a timeout") }
+        catch let error as MCPError { XCTAssertEqual(error, .timedOut(seconds: 1)) }
         XCTAssertLessThan(Date().timeIntervalSince(started), 3)
-        XCTAssertThrowsError(try process.write(Data(repeating: 1, count: MCPProcess.maxWriteBytes)), "Oversized messages are refused")
+        do { try await process.write(Data(repeating: 1, count: MCPProcess.maxWriteBytes), deadline: .distantFuture); XCTFail() }
+        catch let error as MCPError { XCTAssertEqual(error, .tooLarge(limit: MCPProcess.maxWriteBytes)) }
+    }
+
+    // MARK: - Second review (ticket 629), point 6: cancellation stops the actual I/O
+
+    /// A write blocked on a server that stops reading ends when its task is
+    /// cancelled, well before its deadline, and the half-written server is stopped.
+    func testCancellingABlockedWriteStopsTheWriteItself() async throws {
+        let launch = MCPStdioLaunch(executable: "/bin/sleep", arguments: ["30"], environment: [:])
+        let transport = MCPStdioTransport(launch: launch)
+        try await transport.start { _ in }
+        let chunk = Data(repeating: UInt8(ascii: "x"), count: 900_000)
+        let started = Date()
+        let send = Task { try await transport.send(chunk, responseID: nil, deadline: Date().addingTimeInterval(20)) }
+        try await Task.sleep(nanoseconds: 300_000_000)
+        send.cancel()
+        do { try await send.value; XCTFail() } catch let error as MCPError { XCTAssertEqual(error, .cancelled) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "The write itself stopped, not just the wait")
+        await transport.close()
+    }
+
+    /// One deadline covers initialize and the initialized notice: a server
+    /// that never reads its input cannot hold connect past it.
+    func testConnectHasOneDeadlineForTheWholeHandshake() async throws {
+        let client = MCPClient(transport: MCPStdioTransport(launch: MCPStdioLaunch(executable: "/bin/sleep", arguments: ["30"], environment: [:])))
+        let started = Date()
+        do { try await client.connect(timeout: 1); XCTFail() } catch {}
+        XCTAssertLessThan(Date().timeIntervalSince(started), 3)
+        await client.close()
+    }
+
+    /// The pages of one list share one deadline.
+    func testAListHasOneDeadlineAcrossPages() async throws {
+        let (client, _) = try client(mode: "normal")
+        try await client.connect(timeout: 10)
+        let (tools, _) = try await client.listTools(timeout: 5)
+        XCTAssertEqual(tools.count, 4, "Both pages under one deadline")
+    }
+
+    func testTheDeadlineHelperReturnsWithoutWaitingForTheOperation() async throws {
+        let started = Date()
+        do {
+            _ = try await MCPDeadline.run(until: Date().addingTimeInterval(0.3), timeout: .timedOut(seconds: 1)) { () -> Int in
+                // Ignores cancellation for a while, as a blocking read would.
+                Thread.sleep(forTimeInterval: 2)
+                return 1
+            }
+            XCTFail()
+        } catch let error as MCPError { XCTAssertEqual(error, .timedOut(seconds: 1)) }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 1.5)
+    }
+
+    // MARK: - Point 2: approval is bound to the exact list at dispatch
+
+    func testACallIsSentOnlyUnderTheListEpochLeaseAndPinItWasApprovedWith() async throws {
+        let (client, log) = try client()
+        try await client.connect(timeout: 10)
+        let (tools, epoch) = try await client.listTools(timeout: 5)
+        let pin = try XCTUnwrap(tools.first { $0.name == "get_me" }?.pinHash)
+        let lease = SourceLease()
+        func call(lease: SourceLease = lease, epoch: Int = epoch, pin: String = pin) async -> MCPError? {
+            do { _ = try await client.callTool("get_me", arguments: .object([:]), timeout: 5, maxCharacters: 100,
+                                               lease: lease, epoch: epoch, expectedPin: pin); return nil }
+            catch { return error as? MCPError }
+        }
+        let wrongPin = await call(pin: "other")
+        XCTAssertEqual(wrongPin, .notAllowed)
+        let wrongEpoch = await call(epoch: epoch + 1)
+        XCTAssertEqual(wrongEpoch, .notAllowed)
+        let revoked = SourceLease(); revoked.revoke()
+        let revokedCall = await call(lease: revoked)
+        XCTAssertEqual(revokedCall, .notAllowed)
+        XCTAssertEqual(FakeMCPServer.calls(log), [], "Nothing was sent")
+        let allowed = await call()
+        XCTAssertNil(allowed)
+        XCTAssertEqual(FakeMCPServer.calls(log), ["get_me {}"])
     }
 }

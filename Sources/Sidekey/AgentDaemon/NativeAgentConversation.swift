@@ -8,6 +8,10 @@ struct NativeAgentConversation: Codable {
     var route: String
     var updatedAt: Date
     var pairs: [Pair]
+    /// Sources this conversation read. Its later requests keep the
+    /// after-source restrictions, since its history carries their text.
+    /// WHY: .project-docs/decisions/2026-11-26-agent-sources.md (Taint)
+    var sourceReads: [String]?
     static let fileName = "native-conversation.json"
     static let maximumCharacters = 12_000
 

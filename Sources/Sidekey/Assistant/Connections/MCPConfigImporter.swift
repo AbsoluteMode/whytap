@@ -21,12 +21,9 @@ struct SourceDraft: Equatable, Sendable {
 
     /// The credential policy for this draft, or nil when it may be added.
     var credentialProblem: String? {
-        switch transport {
-        case .stdio(_, let arguments, _): return SourceCredentialPolicy.argumentsProblem(arguments)
-        case .http(let address):
-            return SourceCredentialPolicy.addressProblem(address, sendsSecrets: headers.contains(where: \.secret))
-        case .folder: return nil
-        }
+        if let problem = SourceCredentialPolicy.problem(transport, sendsSecrets: headers.contains(where: \.secret)) { return problem }
+        let plain = (environment + headers).compactMap(\.value)
+        return plain.allSatisfy(SourceCredentialPolicy.isPlainValueAcceptable) ? nil : "A value is too long or has line breaks."
     }
 }
 
@@ -40,7 +37,15 @@ struct SourceImportCandidate: Identifiable, Equatable, Sendable {
     var draft: SourceDraft?
     /// Why it cannot be imported, or a caveat.
     var note: String?
-    var summary: String
+    /// What the row shows, also for a refused entry: stored already redacted
+    /// and rendered only through `SourceCredentialPolicy.display`.
+    private(set) var preview: SourceTransport?
+    var summary: String { preview.map(SourceCredentialPolicy.display) ?? "" }
+
+    init(app: String, name: String, scope: String?, draft: SourceDraft?, note: String?, preview: SourceTransport?) {
+        self.app = app; self.name = name; self.scope = scope; self.draft = draft; self.note = note
+        self.preview = preview.map(SourceCredentialPolicy.redacted)
+    }
 }
 
 struct SourceImportScan: Equatable, Sendable {
@@ -121,141 +126,289 @@ struct MCPConfigImporter {
 
     private func servers(_ value: MCPValue?, app: String, scope: String?) -> [SourceImportCandidate] {
         (value?.object ?? [:]).sorted { $0.key < $1.key }.map { name, entry in
-            Self.candidate(app: app, name: name, scope: scope, entry: entry)
+            Self.candidate(app: app, name: name, scope: scope, parsed: Self.jsonEntry(entry, app: app), preview: Self.preview(entry))
         }
     }
 
-    /// Codex server keys Whytap carries over; any other key changes how the
-    /// server runs or which tools it offers, so such an entry is not offered.
+    /// A server entry checked against what Whytap can run the same way. Any
+    /// key, value type, transport or combination outside this shape is
+    /// refused with a reason instead of being dropped or guessed.
+    struct Entry: Equatable {
+        var command: String?
+        var arguments: [String] = []
+        var environment: [String: String] = [:]
+        var url: String?
+        var headers: [String: String] = [:]
+        var directory: String?
+    }
+
+    /// What the row can show even when the entry is refused.
+    static func preview(_ value: MCPValue?) -> SourceTransport? {
+        let arguments = (value?["args"]?.array ?? []).map { $0.string ?? "…" }
+        if let command = value?["command"]?.string { return .stdio(command: command, arguments: arguments, directory: nil) }
+        if let url = value?["url"]?.string ?? value?["serverUrl"]?.string { return .http(url: url) }
+        return nil
+    }
+
+    struct Refusal: Error, Equatable { let reason: String }
+
+    static func unsupported(_ keys: [String]) -> Refusal {
+        Refusal(reason: "Uses \(keys.sorted().joined(separator: ", ")), which Whytap can’t carry over yet.")
+    }
+
+    static let sseReason = "Uses the older SSE transport, which Whytap doesn’t support yet."
+
+    /// Keys of a JSON server entry (Claude Code, Claude Desktop, Cursor, VS
+    /// Code). `description` is only a label; every other key is carried over.
+    static let jsonKeys: Set<String> = ["type", "transportType", "command", "args", "env", "url", "serverUrl", "headers",
+                                        "cwd", "disabled", "enabled", "description"]
+
+    static func jsonEntry(_ value: MCPValue, app: String) -> Result<Entry, Refusal> {
+        guard let object = value.object else { return .failure(Refusal(reason: "Whytap couldn’t read this entry.")) }
+        let unknown = object.keys.filter { !jsonKeys.contains($0) }
+        guard unknown.isEmpty else { return .failure(unsupported(unknown)) }
+        if let disabled = object["disabled"] {
+            guard let flag = disabled.bool else { return .failure(unreadable("disabled")) }
+            if flag { return .failure(Refusal(reason: "It’s turned off in \(app).")) }
+        }
+        if let enabled = object["enabled"] {
+            guard let flag = enabled.bool else { return .failure(unreadable("enabled")) }
+            if !flag { return .failure(Refusal(reason: "It’s turned off in \(app).")) }
+        }
+        if let description = object["description"], description.string == nil { return .failure(unreadable("description")) }
+        var type: String?
+        for key in ["type", "transportType"] where object[key] != nil {
+            guard let text = object[key]?.string else { return .failure(unreadable(key)) }
+            type = text.lowercased()
+        }
+        if object["url"] != nil, object["serverUrl"] != nil { return .failure(Refusal(reason: "Has two addresses.")) }
+        var entry = Entry()
+        if let command = object["command"] {
+            guard let text = command.string, !text.isEmpty else { return .failure(unreadable("command")) }
+            entry.command = text
+        }
+        if let url = object["url"] ?? object["serverUrl"] {
+            guard let text = url.string, !text.isEmpty else { return .failure(unreadable("url")) }
+            entry.url = text
+        }
+        switch type {
+        case nil:
+            if entry.command == nil, entry.url?.hasSuffix("/sse") == true { return .failure(Refusal(reason: sseReason)) }
+        case "stdio":
+            guard entry.command != nil, entry.url == nil else { return .failure(Refusal(reason: "Its type is stdio but it has no command.")) }
+        case "http", "streamable-http", "streamablehttp", "streamable_http":
+            guard entry.url != nil, entry.command == nil else { return .failure(Refusal(reason: "Its type is http but it has no address.")) }
+        case "sse", "ws", "websocket":
+            return .failure(Refusal(reason: sseReason))
+        case let other?:
+            return .failure(Refusal(reason: "Uses the \(String(other.prefix(30))) transport, which Whytap doesn’t support."))
+        }
+        if entry.command != nil, entry.url != nil { return .failure(Refusal(reason: "Has both a command and an address.")) }
+        if entry.command != nil {
+            guard object["headers"] == nil else { return .failure(Refusal(reason: "Has headers but runs as a command.")) }
+            if let args = object["args"] {
+                guard let list = strings(args) else { return .failure(unreadable("args")) }
+                entry.arguments = list
+            }
+            if let env = object["env"] {
+                guard let map = stringMap(env) else { return .failure(unreadable("env")) }
+                entry.environment = map
+            }
+            if let cwd = object["cwd"] {
+                guard let path = cwd.string, !path.isEmpty else { return .failure(unreadable("cwd")) }
+                entry.directory = path
+            }
+        } else if entry.url != nil {
+            let local = ["args", "env", "cwd"].filter { object[$0] != nil }
+            guard local.isEmpty else { return .failure(Refusal(reason: "Has \(local.joined(separator: ", ")) but connects to an address.")) }
+            if let headers = object["headers"] {
+                guard let map = stringMap(headers) else { return .failure(unreadable("headers")) }
+                entry.headers = map
+            }
+        } else {
+            return .failure(Refusal(reason: "Has no command or address Whytap can use."))
+        }
+        return .success(entry)
+    }
+
+    /// Codex server keys Whytap carries over. Timeouts, tool filters and any
+    /// other key change how Codex runs the server, so such an entry is refused.
     static let codexKeys: Set<String> = ["command", "args", "env", "env_vars", "cwd", "url", "bearer_token_env_var",
-                                         "http_headers", "env_http_headers", "enabled", "startup_timeout_sec",
-                                         "tool_timeout_sec", "startup_timeout_ms"]
+                                         "http_headers", "env_http_headers", "enabled"]
+    static let codexSubtables: Set<String> = ["env", "http_headers", "env_http_headers"]
 
     private func codex(_ document: MiniTOML.Document, app: String) -> [SourceImportCandidate] {
         let tables = document.tables
         let names = Set(tables.keys.filter { $0.count >= 2 && $0[0] == "mcp_servers" }.map { $0[1] })
+            .union(document.unreadable.filter { $0.count >= 2 && $0[0] == "mcp_servers" }.map { $0[1] })
         return names.sorted().map { name in
-            var entry = tables[["mcp_servers", name]] ?? [:]
-            for sub in ["env", "http_headers", "env_http_headers"] {
-                if let table = tables[["mcp_servers", name, sub]] {
-                    entry[sub] = .object((entry[sub]?.object ?? [:]).merging(table) { $1 })
+            var raw = tables[["mcp_servers", name]] ?? [:]
+            var conflict = false
+            for sub in Self.codexSubtables {
+                guard let table = tables[["mcp_servers", name, sub]] else { continue }
+                if raw[sub] != nil { conflict = true }
+                raw[sub] = .object(table)
+            }
+            let preview = Self.preview(.object(raw))
+            let unreadable = document.unreadable.contains { $0.count >= 2 && $0[0] == "mcp_servers" && $0[1] == name }
+            if unreadable {
+                return Self.refused(app: app, name: name, scope: nil, preview: preview,
+                                    "Whytap couldn’t read all of its settings in config.toml, so it isn’t offered.")
+            }
+            if conflict { return Self.refused(app: app, name: name, scope: nil, preview: preview, "Sets the same table twice.") }
+            let nested = tables.keys.filter { $0.count >= 3 && $0[0] == "mcp_servers" && $0[1] == name
+                && ($0.count > 3 || !Self.codexSubtables.contains($0[2])) }.map { $0.dropFirst(2).joined(separator: ".") }
+            let unknown = raw.keys.filter { !Self.codexKeys.contains($0) } + nested
+            if !unknown.isEmpty { return Self.refused(app: app, name: name, scope: nil, preview: preview, Self.unsupported(unknown).reason) }
+            return Self.candidate(app: app, name: name, scope: nil, parsed: Self.codexEntry(raw, app: app), preview: preview)
+        }
+    }
+
+    static func codexEntry(_ raw: [String: MCPValue], app: String) -> Result<Entry, Refusal> {
+        if let enabled = raw["enabled"] {
+            guard let flag = enabled.bool else { return .failure(unreadable("enabled")) }
+            if !flag { return .failure(Refusal(reason: "It’s turned off in \(app).")) }
+        }
+        var entry = Entry()
+        if let command = raw["command"] {
+            guard let text = command.string, !text.isEmpty else { return .failure(unreadable("command")) }
+            entry.command = text
+        }
+        if let url = raw["url"] {
+            guard let text = url.string, !text.isEmpty else { return .failure(unreadable("url")) }
+            entry.url = text
+        }
+        if entry.command != nil, entry.url != nil { return .failure(Refusal(reason: "Has both a command and an address.")) }
+        if entry.command != nil {
+            let remote = ["bearer_token_env_var", "http_headers", "env_http_headers"].filter { raw[$0] != nil }
+            guard remote.isEmpty else { return .failure(Refusal(reason: "Has \(remote.joined(separator: ", ")) but runs as a command.")) }
+            if let args = raw["args"] {
+                guard let list = strings(args) else { return .failure(unreadable("args")) }
+                entry.arguments = list
+            }
+            if let env = raw["env"] {
+                guard let map = stringMap(env) else { return .failure(unreadable("env")) }
+                entry.environment = map
+            }
+            if let names = raw["env_vars"] {
+                guard let list = strings(names), list.allSatisfy(isVariableName) else { return .failure(unreadable("env_vars")) }
+                // Codex passes these from its own environment; we ask for the values.
+                for variable in list where entry.environment[variable] == nil { entry.environment[variable] = "${\(variable)}" }
+            }
+            if let cwd = raw["cwd"] {
+                guard let path = cwd.string, !path.isEmpty else { return .failure(unreadable("cwd")) }
+                entry.directory = path
+            }
+        } else if entry.url != nil {
+            let local = ["args", "env", "env_vars", "cwd"].filter { raw[$0] != nil }
+            guard local.isEmpty else { return .failure(Refusal(reason: "Has \(local.joined(separator: ", ")) but connects to an address.")) }
+            if let headers = raw["http_headers"] {
+                guard let map = stringMap(headers) else { return .failure(unreadable("http_headers")) }
+                entry.headers = map
+            }
+            if let variable = raw["bearer_token_env_var"] {
+                guard let name = variable.string, isVariableName(name) else { return .failure(unreadable("bearer_token_env_var")) }
+                guard entry.headers["Authorization"] == nil else { return .failure(Refusal(reason: "Sets Authorization twice.")) }
+                entry.headers["Authorization"] = "Bearer ${\(name)}"
+            }
+            if let mapped = raw["env_http_headers"] {
+                guard let map = stringMap(mapped), map.values.allSatisfy(isVariableName) else {
+                    return .failure(unreadable("env_http_headers"))
+                }
+                for (header, variable) in map {
+                    guard entry.headers[header] == nil else { return .failure(Refusal(reason: "Sets \(header) twice.")) }
+                    entry.headers[header] = "${\(variable)}"
                 }
             }
-            let unreadable = document.unreadable.contains { $0.count >= 2 && $0[0] == "mcp_servers" && $0[1] == name }
-            let unknown = entry.keys.filter { !Self.codexKeys.contains($0) }.sorted()
-                + tables.keys.filter { $0.count > 3 && $0[0] == "mcp_servers" && $0[1] == name }.map { $0.joined(separator: ".") }
-                + tables.keys.filter { $0.count == 3 && $0[0] == "mcp_servers" && $0[1] == name
-                    && !["env", "http_headers", "env_http_headers"].contains($0[2]) }.map { $0[2] }
-            if unreadable || !unknown.isEmpty {
-                return SourceImportCandidate(app: app, name: name, scope: nil, draft: nil,
-                    note: unreadable ? "Whytap couldn’t read all of its settings in config.toml, so it isn’t offered."
-                        : "Uses \(unknown.joined(separator: ", ")), which Whytap can’t carry over yet.",
-                    summary: entry["command"]?.string ?? entry["url"]?.string ?? name)
-            }
-            var headers = entry["http_headers"]?.object ?? [:]
-            // Codex reads these headers from its own environment; we ask for the values.
-            if let variable = entry["bearer_token_env_var"]?.string {
-                headers["Authorization"] = .string("Bearer ${\(variable)}")
-            }
-            for (header, variable) in entry["env_http_headers"]?.object ?? [:] {
-                headers[header] = .string("${\(variable.string ?? header)}")
-            }
-            var environment = entry["env"]?.object ?? [:]
-            for variable in entry["env_vars"]?.array?.compactMap(\.string) ?? [] where environment[variable] == nil {
-                environment[variable] = .string("${\(variable)}")
-            }
-            var normalized: [String: MCPValue] = [:]
-            normalized["command"] = entry["command"]
-            normalized["args"] = entry["args"]
-            normalized["url"] = entry["url"]
-            normalized["cwd"] = entry["cwd"]
-            normalized["env"] = .object(environment)
-            normalized["headers"] = .object(headers)
-            return Self.candidate(app: app, name: name, scope: nil, entry: .object(normalized))
+        } else {
+            return .failure(Refusal(reason: "Has no command or address Whytap can use."))
         }
+        return .success(entry)
+    }
+
+    private static func unreadable(_ key: String) -> Refusal {
+        Refusal(reason: "Its \(key) setting isn’t in a form Whytap can carry over.")
+    }
+
+    private static func strings(_ value: MCPValue) -> [String]? {
+        guard let array = value.array else { return nil }
+        let list = array.compactMap(\.string)
+        return list.count == array.count ? list : nil
+    }
+
+    private static func stringMap(_ value: MCPValue) -> [String: String]? {
+        guard let object = value.object else { return nil }
+        let map = object.compactMapValues(\.string)
+        return map.count == object.count ? map : nil
+    }
+
+    private static func isVariableName(_ name: String) -> Bool {
+        !name.isEmpty && name.count <= 128 && name.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_") }
     }
 
     // MARK: - One entry
 
-    /// Keys of a JSON server entry Whytap carries over or may ignore safely.
-    static let jsonKeys: Set<String> = ["type", "command", "args", "env", "url", "serverUrl", "headers", "cwd",
-                                        "disabled", "enabled", "autoApprove", "alwaysAllow", "timeout", "description",
-                                        "transportType"]
-
-    static func candidate(app: String, name: String, scope: String?, entry: MCPValue) -> SourceImportCandidate {
+    static func refused(app: String, name: String, scope: String?, preview: SourceTransport?, _ reason: String) -> SourceImportCandidate {
         let projectSuffix = scope.map { " (" + ($0 as NSString).lastPathComponent + ")" } ?? ""
-        var candidate = SourceImportCandidate(app: app, name: name + projectSuffix, scope: scope, draft: nil, note: nil, summary: name)
-        let type = (entry["type"]?.string ?? entry["transportType"]?.string)?.lowercased()
-        let command = entry["command"]?.string
-        let url = entry["url"]?.string ?? entry["serverUrl"]?.string
-        func refuse(_ note: String, summary: SourceTransport? = nil) -> SourceImportCandidate {
-            var copy = candidate
-            if let summary { copy.summary = SourceCredentialPolicy.display(summary) }
-            copy.draft = nil
-            copy.note = note
-            return copy
+        return SourceImportCandidate(app: app, name: name + projectSuffix, scope: scope, draft: nil, note: reason, preview: preview)
+    }
+
+    /// The draft for a checked entry, or the entry refused with its reason.
+    /// Both run the one credential policy; the preview is always masked.
+    static func candidate(app: String, name: String, scope: String?, parsed: Result<Entry, Refusal>,
+                          preview: SourceTransport? = nil) -> SourceImportCandidate {
+        var shown = preview
+        if shown == nil, case .success(let entry) = parsed {
+            shown = entry.command.map { .stdio(command: $0, arguments: entry.arguments, directory: nil) } ?? entry.url.map { .http(url: $0) }
         }
-        // What the preview shows is the same masked rendering as a saved source.
-        let rawArguments = entry["args"]?.array
-        let arguments = rawArguments?.compactMap(\.string) ?? []
-        let shownTransport: SourceTransport? = command.map { .stdio(command: $0, arguments: arguments, directory: nil) }
-            ?? url.map { .http(url: $0) }
-        if let shownTransport { candidate.summary = SourceCredentialPolicy.display(shownTransport) }
-        if name.lowercased() == "whytap" || command?.contains("Whytap.app/") == true || command?.contains("whytap-mcp") == true {
+        func refuse(_ reason: String) -> SourceImportCandidate { refused(app: app, name: name, scope: scope, preview: shown, reason) }
+        let entry: Entry
+        switch parsed {
+        case .failure(let refusal): return refuse(refusal.reason)
+        case .success(let value): entry = value
+        }
+        if name.lowercased() == "whytap" || entry.command?.contains("Whytap.app/") == true || entry.command?.contains("whytap-mcp") == true {
             return refuse("This is Whytap’s own server.")
         }
-        guard let object = entry.object else { return refuse("Whytap couldn’t read this entry.") }
-        let unknown = object.keys.filter { !jsonKeys.contains($0) }.sorted()
-        guard unknown.isEmpty else { return refuse("Uses \(unknown.joined(separator: ", ")), which Whytap can’t carry over yet.") }
-        if type == "sse" || type == "ws" || (type == nil && url?.hasSuffix("/sse") == true && command == nil) {
-            return refuse("Uses the older SSE transport, which Whytap doesn’t support yet.")
-        }
         var draft = SourceDraft(name: name, kind: .imported, importedFrom: app, transport: .http(url: ""))
-        if let command, !command.isEmpty, type == nil || type == "stdio" {
-            guard rawArguments == nil || rawArguments?.count == arguments.count else {
-                return refuse("Its arguments aren’t all text, so Whytap can’t run it the same way.")
-            }
+        if let command = entry.command {
             var directory = scope
-            if let cwd = entry["cwd"] {
-                guard let path = cwd.string, !path.isEmpty else { return refuse("Its working folder isn’t a path.") }
+            if let path = entry.directory {
                 let expanded = (path as NSString).expandingTildeInPath
                 if expanded.hasPrefix("/") { directory = expanded }
                 else if let scope { directory = (scope as NSString).appendingPathComponent(expanded) }
                 else { return refuse("Its working folder is relative, so Whytap can’t run it the same way.") }
+                directory = (directory! as NSString).standardizingPath
             }
-            draft.transport = .stdio(command: command, arguments: arguments, directory: directory)
-        } else if let url, !url.isEmpty {
+            draft.transport = .stdio(command: command, arguments: entry.arguments, directory: directory)
+            shown = draft.transport
+        } else if let url = entry.url {
             draft.transport = .http(url: url)
-        } else {
-            return refuse("Has no command or address Whytap can use.")
         }
-        return complete()
-
-        func complete() -> SourceImportCandidate {
-            candidate.summary = SourceCredentialPolicy.display(draft.transport)
-            for (key, value) in (entry["env"]?.object ?? [:]).sorted(by: { $0.key < $1.key }) {
-                guard let text = value.string ?? value.int.map(String.init) ?? value.bool.map({ $0 ? "true" : "false" }),
-                      SourceCredentialPolicy.isPlainValueAcceptable(text) else {
-                    return refuse("A value of \(key) can’t be carried over.")
-                }
-                draft.environment.append(SourceValue(name: key, secret: true, value: nil))
-                if !text.contains("${") { draft.secrets[key] = text }
+        // Every imported value is a secret: Keychain, never the manifest.
+        for (key, text) in entry.environment.sorted(by: { $0.key < $1.key }) {
+            guard isVariableName(key), SourceCredentialPolicy.isPlainValueAcceptable(text) else {
+                return refuse("A value of \(isVariableName(key) ? key : "a variable") can’t be carried over.")
             }
-            for (key, value) in (entry["headers"]?.object ?? [:]).sorted(by: { $0.key < $1.key }) {
-                guard let text = value.string, SourceCredentialPolicy.isPlainValueAcceptable(text) else {
-                    return refuse("A value of the \(key) header can’t be carried over.")
-                }
-                draft.headers.append(SourceValue(name: key, secret: true, value: nil))
-                if !text.contains("${") { draft.secrets["header." + key] = text }
-            }
-            if let problem = draft.credentialProblem { return refuse(problem) }
-            if case .http = draft.transport, draft.headers.isEmpty {
-                candidate.note = "Has no token in its settings. If it signs in through the browser, it won’t connect yet."
-            } else if !draft.missing.isEmpty {
-                candidate.note = "Needs a value for " + draft.missing.map(SourcesController.displayName).joined(separator: ", ") + " after import."
-            }
-            candidate.draft = draft
-            return candidate
+            draft.environment.append(SourceValue(name: key, secret: true, value: nil))
+            if !text.contains("${") { draft.secrets[key] = text }
         }
+        for (key, text) in entry.headers.sorted(by: { $0.key < $1.key }) {
+            guard key.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") }), !key.isEmpty,
+                  SourceCredentialPolicy.isPlainValueAcceptable(text) else {
+                return refuse("A header can’t be carried over.")
+            }
+            draft.headers.append(SourceValue(name: key, secret: true, value: nil))
+            if !text.contains("${") { draft.secrets["header." + key] = text }
+        }
+        if let problem = draft.credentialProblem { return refuse(problem) }
+        let projectSuffix = scope.map { " (" + ($0 as NSString).lastPathComponent + ")" } ?? ""
+        var candidate = SourceImportCandidate(app: app, name: name + projectSuffix, scope: scope, draft: draft, note: nil, preview: shown)
+        if case .http = draft.transport, draft.headers.isEmpty {
+            candidate.note = "Has no token in its settings. If it signs in through the browser, it won’t connect yet."
+        } else if !draft.missing.isEmpty {
+            candidate.note = "Needs a value for " + draft.missing.map(SourcesController.displayName).joined(separator: ", ") + " after import."
+        }
+        return candidate
     }
 }

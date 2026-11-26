@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/SettingsProjectFooter.swift
     confirmed_at: 2026-11-26
-related: [2026-11-26-lil-bro-removed.md]
+related: []
 ---
 
 # Help Center link next to the website link

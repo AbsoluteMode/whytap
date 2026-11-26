@@ -29,6 +29,8 @@ struct ArtifactBackupLocations: Sendable {
     var plannerArchive: URL { legacyMeetingsRoot.appendingPathComponent("Planner/planner-v1.json") }
     var pendingRestoreRoot: URL { bundleRoot.appendingPathComponent("pending-restore", isDirectory: true) }
     var stagingWorkRoot: URL { bundleRoot.appendingPathComponent("backup-work", isDirectory: true) }
+    /// Same-Mac preview restore points (`PreviewRestorePoints`).
+    var restorePointsRoot: URL { bundleRoot.appendingPathComponent("restore-points", isDirectory: true) }
     /// Retained checkpoints of data a finished restore replaced.
     var recoveryRoot: URL { pendingRestoreRoot.appendingPathComponent("recovery", isDirectory: true) }
 

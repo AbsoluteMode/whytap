@@ -26,12 +26,14 @@ struct ArtifactBackupEnvironment {
     var usage: ArtifactUsageExporting?
     var faults = ArtifactBackupFaults()
     var now: () -> Date = Date.init
+    /// The preferences domain behind `defaults` (a test suite's name in tests).
+    var defaultsDomain: String = BuildConfig.bundleID
 
     func transaction() -> ArtifactRestoreTransaction {
         ArtifactRestoreTransaction(locations: locations, defaults: defaults,
                                    credentialStore: credentialStore, caseKeys: caseVaultKeys,
                                    pendingKeyStore: pendingKeyStore, recoveryKeyStore: recoveryKeyStore,
-                                   faults: faults)
+                                   faults: faults, defaultsDomain: defaultsDomain)
     }
 }
 

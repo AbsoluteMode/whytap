@@ -40,16 +40,20 @@ invariant said so.
 - **Off by default.** Nothing is sent until the person presses **Turn on
   answers** on the disclosure in his balloon, under the text: each question
   then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen and up to
-  three earlier answers from it; whytap.ai keeps the questions and its
-  answers for 90 days without your address; keys, dictated text and settings
+  three earlier whytap.ai questions with its answers, sent again; whytap.ai
+  keeps each question, those earlier questions and answers, and its reply for
+  90 days without your address; keys, dictated text and settings
   stay on this Mac. ⋯ → Turn on answers only shows that disclosure (with Not
   now); it never saves the choice itself. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
-- **What is sent:** the question with whitespace collapsed and cut at a
-  character boundary to 300 Unicode scalars, as the server counts (under 3
-  stays local), the screen as raw ids (`features/drop`), and up to three
+- **What is sent:** the question normalised as the server's
+  `clean_question` does — split by Unicode scalar on Python's whitespace set
+  (including U+001C–U+001F; a combining mark after a space is kept), joined
+  with single spaces, cut at a character boundary to 300 scalars and trimmed
+  again before the 3-scalar minimum (shorter stays local), the screen as raw ids (`features/drop`), and up to three
   earlier exchanges that whytap.ai itself answered, each cut to 300/600
-  scalars. A question asked while answers were off is never sent, also not
+  scalars (the question prepared the same way). A question asked while
+  answers were off is never sent, also not
   later as history; with answers off the local guide gets no screen or
   history. No keys, dictated text, notes, settings, cookies or an identifier
   of this Mac (ephemeral URLSession). Redirects are refused, so the request
@@ -99,7 +103,12 @@ invariant said so.
   shows the disclosure and only its button turns answers on; local turns stay
   out of history on the first opt-in and after off/on; mixed emoji questions
   and long earlier turns are cut to the server's scalar limits; the redirect
-  delegate refuses any redirect.
+  delegate refuses any redirect. After ticket 606: the disclosure names the
+  earlier questions and answers that are sent again and kept; after an
+  unknown reply the menu's disclosure also has Not now (one placement rule,
+  `LilBroOffer.placement`, tested in every state); normalisation matches
+  `clean_question` on U+001C–U+001F, combining marks after spaces and a
+  dropped long cluster.
 - Not tested: a real call to whytap.ai (the endpoint is not deployed yet).
 
 ## Rejected

@@ -301,6 +301,41 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertFalse(controller.answersFromWhytap)
     }
 
+    /// Where the disclosure shows and with which buttons: after the greeting
+    /// and an unknown reply it offers Turn on answers; asked for from ⋯ it
+    /// shows after any reply, the unknown one too, with Not now.
+    func test_the_disclosure_always_has_not_now_when_the_menu_asked_for_it() {
+        let answer = LilBroReply.answer(LilBroAnswer(paragraphs: ["Hi"]))
+        let unknown = LilBroReply.unknown(suggestions: [])
+        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: answer, answersOn: false, consentShown: false), .none)
+        for reply in [nil, answer, unknown, .offline] as [LilBroReply?] {
+            XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: false, consentShown: true), .turnOnOrNotNow)
+            XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: true, consentShown: true), .none)
+        }
+        XCTAssertEqual(LilBroOffer(turnOn: {}, notNow: {}).choices, ["Turn on answers", "Not now"])
+        XCTAssertEqual(LilBroOffer(turnOn: {}).choices, ["Turn on answers"])
+        // The disclosure says what is sent again and kept.
+        XCTAssertTrue(LilBroCopy.offer.contains("earlier whytap.ai questions with its answers, sent again"))
+        XCTAssertTrue(LilBroCopy.offer.contains("90 days"))
+        XCTAssertTrue(LilBroCopy.answersNote.contains("earlier whytap.ai questions and answers"))
+    }
+
+    func test_after_an_unknown_reply_the_menu_shows_the_disclosure_with_not_now() async {
+        let controller = make(brain: Remote(.unknown(suggestions: ["Set up dictation"])), reduceMotion: true)
+        controller.ask("zzz qqq")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.askToTurnOnAnswers()
+        let reply = controller.turns.last?.reply
+        XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                             consentShown: controller.consentShown), .turnOnOrNotNow)
+        controller.dismissConsent()
+        XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                             consentShown: controller.consentShown), .turnOn)
+        XCTAssertFalse(controller.answersFromWhytap)
+    }
+
     /// Questions asked while answers were off never reach whytap.ai later, on
     /// the first opt-in or after turning answers off and on again.
     func test_questions_asked_on_this_mac_stay_out_of_what_goes_to_whytap() async {

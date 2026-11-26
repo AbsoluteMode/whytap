@@ -74,6 +74,30 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertTrue(LilBroRemoteBrain.sends("hey"))
     }
 
+    /// Normalisation by scalar with the server's whitespace set (Python
+    /// `str.split`), checked against `clean_question` on these inputs
+    /// (builder review of #465, ticket 606).
+    func test_the_question_is_normalised_as_the_server_does() {
+        // U+001C–U+001F are whitespace to Python: one letter is left, too short.
+        XCTAssertNil(LilBroRemoteBrain.prepared("\u{1C}\u{1D}a"))
+        // A combining mark after a space stays, as Python keeps it.
+        XCTAssertEqual(LilBroRemoteBrain.prepared("a  \u{301} b").map { Array($0.unicodeScalars).map(\.value) },
+                       [0x61, 0x20, 0x301, 0x20, 0x62])
+        XCTAssertEqual(LilBroRemoteBrain.prepared("how\u{A0}do\u{2003}I\u{3000}dictate"), "how do I dictate")
+        // A cluster longer than the limit is dropped and the space before it
+        // trimmed before the minimum: "ab" is too short, it stays local.
+        XCTAssertNil(LilBroRemoteBrain.prepared("ab e" + String(repeating: "\u{301}", count: 300)))
+        XCTAssertEqual(LilBroRemoteBrain.prepared("abc e" + String(repeating: "\u{301}", count: 300)), "abc")
+        // Whatever is sent is already what the server makes of it.
+        for raw in ["  x  y  ", "a\u{1F}b\u{1E}c", "👍🏽 " + String(repeating: "é ", count: 200), "\u{85}tab\tnew\nline"] {
+            guard let sent = LilBroRemoteBrain.prepared(raw) else { continue }
+            XCTAssertLessThanOrEqual(sent.unicodeScalars.count, 300, raw)
+            XCTAssertEqual(LilBroRemoteBrain.prepared(sent), sent, raw)
+            XCTAssertFalse(sent.unicodeScalars.contains { LilBroRemoteBrain.serverWhitespace.contains($0.value) && $0 != " " })
+            XCTAssertFalse(sent.hasPrefix(" ") || sent.hasSuffix(" "), raw)
+        }
+    }
+
     func test_a_redirect_away_from_the_endpoint_is_refused() async {
         let delegate = LilBroRemoteBrain.NoRedirects()
         let response = HTTPURLResponse(url: LilBroRemoteBrain.endpoint, statusCode: 302, httpVersion: nil,

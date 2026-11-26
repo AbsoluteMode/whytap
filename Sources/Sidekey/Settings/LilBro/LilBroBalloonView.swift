@@ -99,10 +99,7 @@ struct LilBroBalloonView: View {
             LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
                             mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
                             actions: actions, current: true)
-            // Asked for from ⋯ after a reply; an unknown reply already shows it.
-            if controller.consentShown, !controller.answersFromWhytap, !reply.isUnknown {
-                LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
-            }
+            offer(after: reply)
         } else if controller.answersFromWhytap {
             paragraph(LilBroCopy.greetingAnswers)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
@@ -110,11 +107,21 @@ struct LilBroBalloonView: View {
         } else {
             paragraph(LilBroCopy.greeting)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
-            if controller.consentShown {
-                LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
-            } else {
-                LilBroOffer(turnOn: { controller.turnOnAnswers() })
-            }
+            offer(after: nil)
+        }
+    }
+
+    /// The disclosure where it belongs: after the greeting or an unknown
+    /// reply, or anywhere once ⋯ asked for it — then with Not now.
+    @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
+        switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                     consentShown: controller.consentShown) {
+        case .none:
+            EmptyView()
+        case .turnOn:
+            LilBroOffer(turnOn: { controller.turnOnAnswers() })
+        case .turnOnOrNotNow:
+            LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
         }
     }
 
@@ -205,7 +212,6 @@ struct LilBroReplyView: View {
             case .unknown(let suggestions):
                 paragraph(LilBroCopy.unknown)
                 if current { LilBroChips(items: suggestions.map { q in (q, false, { ask(q) }) }) }
-                if current, !answersOn { LilBroOffer(turnOn: actions.turnOn) }
             case .offline:
                 paragraph(LilBroCopy.offline)
                 if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
@@ -251,6 +257,20 @@ struct LilBroReplyView: View {
 struct LilBroOffer: View {
     let turnOn: () -> Void
     var notNow: (() -> Void)? = nil
+
+    enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
+
+    /// Answers off: after the greeting (nil) or an unknown reply it offers
+    /// Turn on answers; once ⋯ asked for it, it shows after any reply, with
+    /// Not now.
+    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
+        guard !answersOn else { return .none }
+        if consentShown { return .turnOnOrNotNow }
+        return reply == nil || reply?.isUnknown == true ? .turnOn : .none
+    }
+
+    /// The buttons it shows, in order.
+    var choices: [String] { [LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow]) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {

@@ -46,9 +46,13 @@ the load gate's limit.
   (`account`): the named final XCTest summary ("All tests" or "Selected
   tests", singular or plural skipped and failure counts), every expected test
   identity with exactly one terminal result, the summary consistent with
-  those results and the exit consistent with the failures. A shard that does
+  those results, the final suite's passed/failed outcome consistent with its
+  failures, and the exit status pinned to the runners' own (0 all passed, 1 a
+  test failed; a signal or any other status is an error of the run even
+  beside a failed test, and no rerun is attempted for it). A shard that does
   not account for itself falls back to the serial suite, which must account
-  for every listed test (or at least one test without a list); otherwise the
+  for every listed test whenever the inventory is known, also with
+  `--shards 1` (at least one test only when discovery failed); otherwise the
   run fails with exit 2. On the recorded 6,208-test log with 59 skips the
   earlier parser read 11 tests; `account` reads 6,208.
 - Every failed test is rerun alone with `swift test --filter`, serially; the

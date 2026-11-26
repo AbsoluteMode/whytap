@@ -90,6 +90,13 @@ if (control / "serial-empty").exists():
 if (control / "serial-class-total-only").exists():
     print(xctest_log("Mod.Big", [t for t in tests if t.startswith("Mod.Big/")], [], False))
     sys.exit(0)
+if (control / "serial-one-test").exists():
+    print(xctest_log("All tests", tests[:1], [], False))
+    sys.exit(0)
+if (control / "serial-killed").exists():
+    print(xctest_log("All tests", tests, tests[:1], False))
+    sys.stdout.flush()
+    os.kill(os.getpid(), 9)
 if (control / "serial-fail-once.txt").exists():
     failing += (control / "serial-fail-once.txt").read_text().split()
 print(xctest_log("All tests", tests, failing, (control / "protected").exists()))
@@ -296,6 +303,51 @@ class ShardTests(unittest.TestCase):
         self.assertEqual((summary["passed"], summary["failed"],
                           summary["failed_then_passed_alone"]),
                          (False, ["Mod.Small/test_c"], []))
+
+    # Ticket 642.
+
+    def test_the_known_inventory_binds_every_serial_run(self):
+        (self.control / "serial-one-test").touch()
+        for extra in (("--shards", "1"), ()):
+            with self.subTest(extra=extra):
+                if not extra:
+                    (self.control / "crash").touch()  # shards fail, serial fallback
+                summary = self.shards(*extra, code=2)
+                self.assertEqual((summary["mode"], summary["passed"]), ("serial", False))
+                self.assertIn("expected tests have no result", " ".join(summary["problems"]))
+        (self.control / "list-fails").touch()  # only a failed discovery is unbound
+        self.assertTrue(self.shards(code=0)["passed"])
+
+    def test_a_status_that_is_not_a_test_result_is_never_waived(self):
+        spec = importlib.util.spec_from_file_location("shards", SCRIPT)
+        shards = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(shards)
+        names = ["Mod.A/test_1", "Mod.A/test_2"]
+        log = Path(self.temp.name) / "x.log"
+        cases = [  # (log, exit status, accounts for itself)
+            (self.log("All tests", names, [], False), 0, True),
+            (self.log("All tests", names, names[:1], False), 1, True),
+            (self.log("All tests", names, names[:1], False), -9, False),   # SIGKILL
+            (self.log("All tests", names, names[:1], False), 66, False),   # other status
+            (self.log("All tests", names, [], False), -15, False),
+            (self.log("All tests", names, [], False), 2, False),
+            (self.log("All tests", names, [], False).replace("' passed at", "' failed at"),
+             0, False),                                                    # failed suite
+            (self.log("All tests", names, names[:1], False).replace(
+                "Test Suite 'All tests' failed at", "Test Suite 'All tests' passed at"),
+             1, False)]
+        for text, code, fine in cases:
+            with self.subTest(code=code, text=text[-160:]):
+                log.write_text(text)
+                self.assertEqual(not shards.account(log, code, names)["problems"], fine)
+        # End to end: a killed serial suite with a failed test that passes alone is
+        # an error of the run (exit 2), never a waivable flake (exit 3).
+        (self.control / "list-fails").touch()
+        (self.control / "serial-killed").touch()
+        summary = self.shards(code=2)
+        self.assertEqual((summary["passed"], summary["waiver_needed"]), (False, False))
+        self.assertIn("signal 9", " ".join(summary["problems"]))
+        self.assertNotIn("--filter", " ".join(self.calls()))  # no rerun of a broken run
 
 
 if __name__ == "__main__":

@@ -132,13 +132,20 @@ def parse(log):
             match = re.search(r"-\[(\w+)\.(\w+) (\w+)\]", line)
             if match:
                 protected.add(f"{match[1]}.{match[2]}/{match[3]}")
-        if FINAL_SUITE.search(line):
+        suite = FINAL_SUITE.search(line)
+        if suite:
             summary = next((SUMMARY.match(after) for after in lines[index + 1:index + 3]
                             if SUMMARY.match(after)), None)
             final = None if summary is None else {
-                "executed": int(summary[1]), "skipped": int(summary[2] or 0),
-                "failures": int(summary[3])}
+                "outcome": suite[2], "executed": int(summary[1]),
+                "skipped": int(summary[2] or 0), "failures": int(summary[3])}
     return {"results": results, "final": final, "protected_skipped": sorted(protected)}
+
+
+# What `xcrun xctest` and `swift test` exit with: 0 when every test passed, 1 when a
+# test failed. A signal (negative status) or any other status is an error of the
+# run itself, never an assertion failure, even beside a failed test.
+FAILURE_EXIT = 1
 
 
 def account(log, code, expected=None):
@@ -173,12 +180,18 @@ def account(log, code, expected=None):
             # with failures and no failed test, or the reverse, is inconsistent.
             problems.append(f"the summary says {final['failures']} failures, the log shows "
                             f"{len(failed)} failed tests")
+        if (final["outcome"] == "failed") != bool(failed or final["failures"]):
+            problems.append(f"the final suite {final['outcome']} with {final['failures']} "
+                            f"failures and {len(failed)} failed tests")
         if final["skipped"] != len(skipped):
             problems.append(f"the summary says {final['skipped']} skipped, the log shows "
                             f"{len(skipped)}")
-    if code != 0 and not failed:
+    if code not in (0, FAILURE_EXIT):
+        problems.append(f"the process ended with status {code}"
+                        + (f" (signal {-code})" if code < 0 else "") + ", not a test result")
+    elif code == FAILURE_EXIT and not failed:
         problems.append(f"the process exited {code} without a failed test")
-    if code == 0 and failed:
+    elif code == 0 and failed:
         problems.append("the process exited 0 with failed tests")
     return {"executed": len(terminal), "failed": failed, "skipped": len(skipped),
             "protected_skipped": parsed["protected_skipped"], "problems": problems}
@@ -254,7 +267,9 @@ def main():
         if args.plan:
             print(json.dumps({"plan": None, "reason": reason}))
             return 2
-        return finish(work, serial(work, reason))
+        # The known inventory always binds the serial run; only a failed discovery
+        # leaves the nonempty rule.
+        return finish(work, serial(work, reason, classes))
     plan, weights = split(classes, args.shards, load_times(args.times))
     problem = check_split(classes, plan)
     total = sum(len(t) for t in classes.values())
@@ -285,7 +300,9 @@ def finish(work, summary):
     """Rerun each failure alone, then the verdict and the exit code (see the module
     docstring). A run that did not account for itself never passes."""
     first = summary.get("failed", [])
-    real = [t for t in first if not rerun(t, work)]
+    # A run that did not account for itself is an error of the run: no rerun can
+    # turn it into a pass, so none is attempted.
+    real = first if summary.get("problems") else [t for t in first if not rerun(t, work)]
     summary["failed_then_passed_alone"] = [t for t in first if t not in real]
     summary["failed"] = real
     summary["passed"] = not summary.get("problems") and not real

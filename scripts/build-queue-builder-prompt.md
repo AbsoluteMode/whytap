@@ -129,8 +129,8 @@ holds it, leave the tickets queued and end your turn.
    `build/test-shards/summary.json`: exit 0 every test passed the first time,
    1 `failed` lists the tests that failed again alone, 2 the suite could not
    run or did not account for itself (`problems`: a build error, a crash, an
-   exit without a failed test such as an after-suite guard, missing tests,
-   no final summary; read the logs it names; never a pass), 3 no real
+   exit without a failed test such as an after-suite guard, a signal or any
+   status other than 0/1, missing tests, no final summary; read the logs it names; never a pass), 3 no real
    failure but `failed_then_passed_alone` is not empty: the runner never
    waives it, you decide by this rule. A test in `failed_then_passed_alone` whose
    file or code under test the candidate changes is still a finding. Any

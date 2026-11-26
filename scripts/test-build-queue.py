@@ -2,6 +2,8 @@
 """Exercise concurrency and recovery using disposable repositories only."""
 
 from concurrent.futures import ThreadPoolExecutor
+import importlib.util
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -524,7 +526,8 @@ class QueueTests(unittest.TestCase):
         self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/1/head")
         db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
         # Submitted after the remote read started (the snapshot may predate it).
-        db.execute("UPDATE tickets SET queued_at='2999-01-01T00:00:00+00:00' WHERE id=?", (ticket,))
+        db.execute("UPDATE tickets SET submitted_at='2999-01-01T00:00:00+00:00' WHERE id=?",
+                   (ticket,))
         db.commit()
         db.close()
         self.assertEqual(self.call("check-heads")["returned_moved_heads"], [])
@@ -641,6 +644,241 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.call("claim")["held_for_install"], [queued])
         self.update(ticket, "done")
         self.assertFalse(self.call("status")["install_boundary"])
+
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    def change(self, name="Sources/App/Window.swift", content="ui"):
+        self.git("checkout", "-q", "--detach", self.head)
+        return self.commit({name: content})
+
+    def test_resubmission_after_a_block_keeps_its_place_twice(self):
+        places = []
+        ticket = self.enqueue(1)["ticket"]
+        other = self.enqueue(2)["ticket"]["id"]
+        for round_ in range(3):
+            self.assertEqual(self.call("claim")["ticket"]["id"], ticket["id"])
+            self.update(ticket["id"], "blocked")
+            ticket = self.enqueue(1, head=self.change(f"Sources/App/Fix{round_}.swift"))["ticket"]
+            places.append((ticket["position"], ticket["resubmits"]))
+        self.assertEqual(places, [(1, 1), (1, 2), (2, 2)])  # the third goes behind #2
+        events = self.call("events", "--ticket", str(ticket["id"]))
+        self.assertIn("goes to the end", events[-1]["note"])
+        self.assertEqual(self.call("claim")["ticket"]["id"], other)
+
+    def test_a_ticket_whose_dependency_stays_blocked_goes_back_to_its_author(self):
+        parent = self.enqueue(1)["ticket"]["id"]
+        child = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                          "--head", self.head, "--title", "Child", "--checks", "x",
+                          "--acceptance", "x", "--session", "worker",
+                          "--depends-on", "https://github.com/example/app/pull/1")["ticket"]
+        self.call("claim")
+        self.update(parent, "blocked")
+        self.assertEqual(self.call("return-stale-dependencies")["returned"], [])  # under 2 h
+        self.assertEqual(self.call("return-stale-dependencies", "--minutes", "0")["returned"],
+                         [child["id"]])
+        returned = self.ticket(child["id"])
+        self.assertEqual(returned["status"], "blocked")
+        self.assertIn("dependency", returned["note"])
+        self.assertEqual(self.call("events", "--pending", "--ticket", str(child["id"]))[-1]
+                         ["status"], "blocked")
+        self.call("return-stale-dependencies", actor="worker", ok=False)
+        # A return without a model keeps the place and spends no resubmission priority.
+        again = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                          "--head", self.change(content="again"), "--title", "Child",
+                          "--checks", "x", "--acceptance", "x", "--session", "worker",
+                          "--depends-on", "https://github.com/example/app/pull/1")["ticket"]
+        self.assertEqual((again["queued_at"], again["resubmits"]), (child["queued_at"], 0))
+
+    def stale_snapshot_blocks(self, ticket_id, started, head):
+        """Ask the helper's own head check, with a remote snapshot that started at
+        `started` and saw `head`, whether it would return this ticket."""
+        spec = importlib.util.spec_from_file_location("queue_helper", SCRIPT)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        db.row_factory = sqlite3.Row
+        cwd = os.getcwd()
+        try:
+            os.chdir(self.repo)
+            ticket = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            return helper.block_moved_head(db, ticket, {"started": started,
+                                                        "heads": {1: head}})
+        finally:
+            os.chdir(cwd)
+            db.rollback()
+            db.close()
+
+    def test_every_way_a_head_reenters_review_refreshes_its_head_check(self):
+        """The class of re-entries (review item 2 on ticket 635): a set back to the
+        queue from blocked or in_progress, and the author's resubmission of a head
+        returned without review. Each keeps or ends its FIFO place as designed and
+        is never judged by a remote snapshot that started before it re-entered."""
+        elsewhere = self.change("elsewhere.txt", "pushed")
+
+        def blocked_by_builder():
+            ticket = self.enqueue(1)["ticket"]
+            self.call("claim")
+            self.update(ticket["id"], "blocked")
+            return ticket, lambda: self.update(ticket["id"], "queued"), False
+
+        def returned_from_in_progress():
+            ticket = self.enqueue(1)["ticket"]
+            self.call("claim")
+            return ticket, lambda: self.update(ticket["id"], "queued"), True
+
+        def returned_without_review():
+            parent = self.enqueue(3, head=self.change(content="parent"))["ticket"]
+            child = self.call("enqueue", "--pr", "https://github.com/example/app/pull/1",
+                              "--head", self.head, "--title", "Child", "--checks", "x",
+                              "--acceptance", "x", "--session", "worker", "--depends-on",
+                              "https://github.com/example/app/pull/3")["ticket"]
+            self.call("claim")
+            self.update(parent["id"], "blocked")
+            self.call("return-stale-dependencies", "--minutes", "0")
+            again = lambda: self.assertTrue(self.enqueue(1)["requeued"])  # drops --depends-on
+            return child, again, True
+
+        for scenario in (blocked_by_builder, returned_from_in_progress,
+                         returned_without_review):
+            with self.subTest(scenario.__name__):
+                (self.repo / ".git" / "exodia-build-queue.sqlite3").unlink(missing_ok=True)
+                self.call("configure", "--builder-thread", "builder")
+                ticket, reenter, keeps_place = scenario()
+                snapshot_started = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+                reenter()
+                after = self.ticket(ticket["id"])
+                self.assertEqual(after["status"], "queued")
+                self.assertEqual(after["queued_at"] == ticket["queued_at"], keeps_place)
+                self.assertGreater(after["submitted_at"], snapshot_started)
+                self.assertEqual(after["resubmits"], ticket["resubmits"])
+                self.assertFalse(self.stale_snapshot_blocks(ticket["id"], snapshot_started,
+                                                            elsewhere))
+                # A snapshot read after the re-entry still returns a moved head.
+                later = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+                self.assertTrue(self.stale_snapshot_blocks(ticket["id"], later, elsewhere))
+
+    def test_only_a_head_returned_without_review_comes_back_by_resubmission(self):
+        """Review item 1 on ticket 635, and what stays idempotent."""
+        ticket = self.enqueue(1)["ticket"]
+        self.assertFalse(self.enqueue(1).get("requeued"))  # queued: idempotent
+        self.call("claim")
+        self.assertEqual(self.enqueue(1)["ticket"]["status"], "in_progress")
+        self.update(ticket["id"], "blocked")  # a builder reviewed and blocked this head
+        again = self.enqueue(1)
+        self.assertEqual((again["created"], again.get("requeued"), again["ticket"]["status"]),
+                         (False, None, "blocked"))
+        self.enqueue(1, session="other", ok=False)
+        # Returned by the moved-head check: the same head comes back to its place.
+        self.update(ticket["id"], "queued")
+        self.git("push", "-q", str(self.pulls), f"{self.change(content='moved')}:refs/pull/1/head")
+        self.call("check-heads")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "blocked")
+        self.enqueue(1, session="other", ok=False)  # never another session
+        back = self.enqueue(1)
+        self.assertEqual((back["requeued"], back["ticket"]["status"]), (True, "queued"))
+        self.assertEqual(back["ticket"]["auto_returned"], 0)
+        # A newer ticket of the PR exists: the old head never comes back.
+        self.git("push", "-q", "-f", str(self.pulls), f"{self.head}:refs/pull/1/head")
+        self.assertEqual(self.call("claim")["ticket"]["id"], ticket["id"])
+        self.update(ticket["id"], "blocked")
+        newer = self.enqueue(1, head=self.change(content="fix"))["ticket"]
+        self.assertTrue(newer["id"] > ticket["id"])
+        self.assertIsNone(self.enqueue(1).get("requeued"))
+
+    def test_no_write_that_changes_the_dependency_graph_can_close_a_cycle(self):
+        """Review of ticket 641: a returned head that comes back, and a new head, both
+        pass the same dependency check, direct or through other PRs."""
+        url = lambda n: f"https://github.com/example/app/pull/{n}"
+        def submit(pr, head, *parents, ok=True):
+            args = ["enqueue", "--pr", url(pr), "--head", head, "--title", f"PR {pr}",
+                    "--checks", "x", "--acceptance", "x", "--session", "worker"]
+            for parent in parents:
+                args += ["--depends-on", url(parent)]
+            return self.call(*args, ok=ok)
+        parent = submit(1, self.change(content="parent"))["ticket"]
+        child = submit(2, self.head, 1)["ticket"]
+        self.call("claim")
+        self.update(parent["id"], "blocked")
+        self.assertEqual(self.call("return-stale-dependencies", "--minutes", "0")["returned"],
+                         [child["id"]])
+        submit(3, self.change(content="three"), 2)  # valid: 3 waits on 2
+        submit(4, self.change(content="four"), 3)   # valid: 4 waits on 3
+        for parents in ((3,), (4,), (1, 4)):
+            with self.subTest(path="returned head comes back", parents=parents):
+                submit(2, self.head, *parents, ok=False)
+                self.assertEqual(self.ticket(child["id"])["status"], "blocked")
+                self.assertEqual(self.ticket(child["id"])["depends_on"], [url(1)])
+            with self.subTest(path="new head", parents=parents):
+                submit(2, self.change(content=f"fix {parents}"), *parents, ok=False)
+        events = self.call("events", "--ticket", str(child["id"]))
+        self.assertNotIn("Resubmitted", " ".join(e["note"] for e in events))
+        self.assertTrue(submit(2, self.head)["requeued"])  # without the cycle it comes back
+
+    def test_open_status_lists_open_work_and_its_history_only(self):
+        old = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(old), "--status", "done", "--note", "n" * 2000)
+        history = self.enqueue(2)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(history), "--status", "blocked", "--note", "b" * 2000)
+        current = self.enqueue(2, head=self.change())["ticket"]["id"]
+        listed = self.call("status", "--open")["tickets"]
+        self.assertEqual([t["id"] for t in listed], [history, current])
+        self.assertLess(len(listed[0]["note"]), 700)
+        self.assertEqual(len(self.call("status")["tickets"]), 3)
+        self.assertEqual(len(self.call("status", "--ticket", str(history))["tickets"][0]["note"]),
+                         2000)
+
+    def test_stale_head_snapshot_ignores_a_priority_resubmission(self):
+        old = self.enqueue(1, self.change(content="first"))["ticket"]
+        self.call("claim")
+        self.update(old["id"], "blocked")
+        self.git("push", "-q", str(self.pulls), f"{old['head']}:refs/pull/1/head")
+        new = self.enqueue(1, self.change(content="revised"))["ticket"]
+        self.assertEqual(new["queued_at"], old["queued_at"])  # kept its place
+        self.git("push", "-q", "-f", str(self.pulls), f"{new['head']}:refs/pull/1/head")
+        self.assertEqual(self.call("claim")["ticket"]["id"], new["id"])
+        self.assertGreater(self.ticket(new["id"])["submitted_at"], old["queued_at"])
+
+    def test_protected_tests_skipped_behind_a_lock_survive_until_they_pass(self):
+        names = ["SidekeyTests.PlannerExternalChangesTests/testMigration",
+                 "WhytapCaseKitTests.TodoCommandTests/testLockedFile"]
+        ticket = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", "[1]", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), ok=False)  # neither mode
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names),
+                  actor="worker", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names))
+        # Merged behind the lock: the install waits; a deferral and a recovery keep them.
+        self.call("set", "--ticket", str(ticket), "--status", "pending_install",
+                  "--retry-install", "--note", "merged; install waits for an unlocked screen")
+        self.call("set", "--ticket", str(ticket), "--status", "pending_install",
+                  "--install-first", "--note", "meeting gate busy")
+        self.assertEqual(self.call("status")["protected_pending"], names)
+        refused = self.call("set", "--ticket", str(ticket), "--status", "done", "--note", "x",
+                            ok=False)
+        self.assertIn("protected-data tests pending", refused["error"])
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[:1]),
+                  ok=False)  # evidence required
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[:1]),
+                  "--note", "swift test --filter, unlocked")
+        self.assertEqual(self.ticket(ticket)["protected_pending"], names[1:])
+        self.call("set", "--ticket", str(ticket), "--status", "done", "--note", "x", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[1:]),
+                  "--note", "swift test --filter, unlocked")
+        self.update(ticket, "done")
+        self.assertEqual(self.call("status")["protected_pending"], [])
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names),
+                  ok=False)  # only open tickets
+
+    def test_a_ticket_returned_to_the_queue_drops_its_pending_tests(self):
+        ticket = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("protected-pending", "--ticket", str(ticket), "--tests",
+                  '["SidekeyTests.A/testB"]')
+        self.call("set", "--ticket", str(ticket), "--status", "queued", "--note", "load")
+        self.assertEqual(self.ticket(ticket)["protected_pending"], [])  # validated again
+
 
 if __name__ == "__main__":
     unittest.main()

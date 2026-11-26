@@ -182,6 +182,10 @@ struct SecureInputHolderTracker {
         secureInputOn: Bool
     ) {
         guard secureInputOn else { forgetCandidate(); return }
+        // The remembered app came back to front: what it does from here is a
+        // new story (it may release unseen while in front), so forget it. If
+        // it still holds secure input it is the frontmost holder now.
+        if let candidate = staleCandidate, candidate.pid == current?.pid { forgetCandidate() }
         guard staleCandidate == nil, !unverifiedSwitch,
               let previous, previous.pid != current?.pid else { return }
         switch wasOnBeforeSwitch {

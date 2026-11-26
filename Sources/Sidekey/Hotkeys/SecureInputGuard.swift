@@ -46,6 +46,8 @@ final class SecureInputGuard {
         var blockedChords: @MainActor () -> Set<ModifierChord>
         var lastHotkeyFire: @MainActor () -> Date?
         var now: @MainActor () -> Date
+        /// Seconds since boot, the clock `NSEvent.timestamp` uses.
+        var uptime: @MainActor () -> TimeInterval
         /// Runs `work` once the app that lost focus had time to release.
         var afterSwitchSettles: (@escaping @MainActor () -> Void) -> Void
         /// Runs `work` once a released chord's shortcut had time to arrive.
@@ -76,8 +78,15 @@ final class SecureInputGuard {
     private var commandSample: (on: Bool, frontPID: pid_t?, releasedAt: Date?)?
     /// How long after ⌘ is released a switch still counts as Cmd-Tab.
     static let commandReleaseWindow: TimeInterval = 0.5
-    /// Bumped by every OFF read; a pending switch that saw one is void.
+    /// Bumped by every OFF read: a switch still settling or a chord still in
+    /// its arrival window that began before it belongs to an ended episode.
     private var offGeneration = 0
+    /// Command evidence captured by switches still settling, with the
+    /// uptime at which each activation was handled. A click that physically
+    /// happened before that moment caused the switch, whatever order the
+    /// two callbacks were delivered in, and voids its evidence.
+    private var pendingEvidence: [Int: (evidence: Bool?, activationUptime: TimeInterval)] = [:]
+    private var nextSwitchID = 0
     private var lastShake: Date?
     private(set) var persistentBadge: SecureInputHolderBadge?
     /// A badge was presented and not yet dismissed by the guard; only then
@@ -113,11 +122,12 @@ final class SecureInputGuard {
         // Only that a click happened, never where: a click while ⌘ is held
         // makes the next switch a click, not Cmd-Tab.
         let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
-        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
-            MainActor.assumeIsolated { self?.handleMouseDown() }
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] event in
+            let time = event.timestamp
+            MainActor.assumeIsolated { self?.handleMouseDown(eventUptime: time) }
         }
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
-            self?.handleMouseDown()
+            self?.handleMouseDown(eventUptime: event.timestamp)
             return event
         }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -148,7 +158,11 @@ final class SecureInputGuard {
             return
         }
         guard let start = detector.flagsChanged(to: [], at: now, blockedChords: system.blockedChords()) else { return }
-        system.afterArrivalWindow { [weak self] in self?.evaluateAttempt(heldSince: start) }
+        let generation = offGeneration
+        system.afterArrivalWindow { [weak self] in
+            guard let self, self.offGeneration == generation else { return } // an OFF ended that episode
+            self.evaluateAttempt(heldSince: start)
+        }
     }
 
     /// Decided after the arrival window: a shortcut that arrived, through
@@ -163,8 +177,13 @@ final class SecureInputGuard {
         reportBlockedAttempt(at: system.now())
     }
 
-    func handleMouseDown() {
+    /// `eventUptime` is when the click physically happened (`NSEvent.timestamp`).
+    func handleMouseDown(eventUptime: TimeInterval? = nil) {
         commandSample = nil
+        let time = eventUptime ?? system.uptime()
+        for (id, pending) in pendingEvidence where time <= pending.activationUptime {
+            pendingEvidence[id] = (nil, pending.activationUptime)
+        }
     }
 
     func handleActivation(_ app: SecureInputApp?) {
@@ -183,10 +202,14 @@ final class SecureInputGuard {
         }
         commandSample = nil // one switch per ⌘
         let generation = offGeneration
+        let id = nextSwitchID
+        nextSwitchID &+= 1
+        pendingEvidence[id] = (wasOn, system.uptime())
         system.afterSwitchSettles { [weak self] in
             guard let self else { return }
+            let captured = self.pendingEvidence.removeValue(forKey: id)?.evidence ?? nil
             // An OFF seen since the switch means the app left let go.
-            let evidence = self.offGeneration == generation ? wasOn : false
+            let evidence = self.offGeneration == generation ? captured : false
             self.settleSwitch(from: previous, to: app, wasOnBeforeSwitch: evidence)
         }
     }
@@ -346,6 +369,7 @@ extension SecureInputGuard.System {
             blockedChords: { SecureInputBlockedShortcuts.chords(in: HotkeyPreferences.shared.configuration) },
             lastHotkeyFire: { HotkeyFireRecorder.lastFire },
             now: Date.init,
+            uptime: { ProcessInfo.processInfo.systemUptime },
             afterSwitchSettles: { work in
                 DispatchQueue.main.asyncAfter(deadline: .now() + SecureInputGuard.switchSettleDelay) {
                     MainActor.assumeIsolated { work() }

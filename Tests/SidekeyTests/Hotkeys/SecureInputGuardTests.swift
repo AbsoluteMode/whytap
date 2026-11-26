@@ -61,6 +61,7 @@ final class SecureInputGuardTests: XCTestCase {
             blockedChords: { world.blocked },
             lastHotkeyFire: { world.lastFire },
             now: { world.now },
+            uptime: { world.now.timeIntervalSinceReferenceDate },
             afterSwitchSettles: { world.pendingSettle.append($0) },
             afterArrivalWindow: { world.pendingAttempts.append($0) }
         )
@@ -323,6 +324,80 @@ final class SecureInputGuardTests: XCTestCase {
 
         press(.option)
         XCTAssertEqual(presenter.presented.last?.badge, SecureInputHolderBadge(app: nil), "unknown: the lock")
+    }
+
+    func testActivationDeliveredBeforeTheClickThatCausedItNamesNobody() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command)
+        world.now += 0.1
+        guardian.handleFlagsChanged([])          // ⌘ released...
+        world.now += 0.05
+        let clickTime = world.now.timeIntervalSinceReferenceDate
+        world.now += 0.01
+        switchApp(to: telegram)                  // ...activation delivered first
+        guardian.handleMouseDown(eventUptime: clickTime) // the click that caused it
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "a pointer switch cannot use ⌘ evidence")
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testActivationBeforeTheClickWithCommandStillHeldNamesNobody() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command)
+        world.now += 0.1
+        let clickTime = world.now.timeIntervalSinceReferenceDate
+        world.now += 0.01
+        switchApp(to: telegram)
+        guardian.handleMouseDown(eventUptime: clickTime)
+        guardian.handleFlagsChanged([])
+        settle()
+        XCTAssertNil(guardian.persistentBadge)
+    }
+
+    func testClickInTheNewAppAfterARealCmdTabKeepsTheEvidence() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        cmdTab(to: telegram)
+        world.now += 0.1
+        guardian.handleMouseDown() // clicks in Telegram, after the switch
+        settle()
+        XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
+    }
+
+    func testHolderThatCameBackToFrontIsNotBlamedForTheNextEpisode() {
+        stickDiaBehindTelegram()
+        switchApp(to: dia)            // back to Dia: the dim logo goes
+        settle()
+        world.secureOn = false        // Dia lets go while in front, unseen (no keys)
+        world.now += 3
+        world.secureOn = true         // a click to 1Password, which turns it on
+        switchApp(to: onePassword)
+        settle()
+        XCTAssertNil(guardian.persistentBadge)
+        press(.option)
+        XCTAssertNotEqual(presenter.presented.last?.badge, SecureInputHolderBadge(app: dia),
+                          "Dia's earlier episode is never reused")
+    }
+
+    func testAttemptQueuedBeforeAnOffNeverShakesTheNextEpisode() {
+        stickDiaBehindTelegram()
+        guardian.handleFlagsChanged(.option)
+        world.now += 0.05
+        guardian.handleFlagsChanged([])     // candidate queued, window open
+        world.secureOn = false
+        guardian.handleFlagsChanged(.shift) // OFF read: every badge goes
+        guardian.handleFlagsChanged([])
+        world.secureOn = true               // a new episode starts
+        switchApp(to: onePassword)          // by click: its owner is unknown
+        settle()
+        endArrivalWindow()
+        XCTAssertEqual(presenter.presented.count, 1, "the old ⌥ never shakes anything")
+        XCTAssertEqual(presenter.dismissals, 1)
     }
 
     func testOffWhileCommandIsStillHeldVoidsItsSample() {

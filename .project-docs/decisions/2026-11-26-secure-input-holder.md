@@ -97,8 +97,15 @@ the app the person switched to.
    at most 0.5 s after its release. Cmd-Tab commits on the release, so its
    activation normally arrives just after ⌘ up; both orders are accepted
    because the real order was not measured, and a long look at the switcher
-   still counts. The click monitor notes only that a click happened, never
-   where. A click or Dock
+   still counts. The click monitor notes only that a click happened and its
+   event time (`NSEvent.timestamp`), never where: a click that physically
+   happened before an activation was handled caused that switch, so it voids
+   the evidence the switch captured even when the activation callback was
+   delivered first; a later click in the new app does not. A remembered app
+   that comes back to front is forgotten, since it may let go unseen while in
+   front; leaving it again needs new evidence. A chord still in its 0.3 s
+   window, like a switch still settling, belongs to the episode it began in:
+   an OFF read in between discards it. A click or Dock
    switch, with or without ⌘ held, has no evidence, so nobody is named: an
    attempt shows the lock. Any OFF read (a modifier press or release, the
    settling read, the reads when an attempt is decided and resolved, the 1 s
@@ -111,8 +118,10 @@ the app the person switched to.
    once, with no OFF in between that Whytap could read, names the app left.
    A second accepted limit: with Google on Right ⌥ (the default), Right ⌥+F
    under secure input looks exactly like a Right ⌥ tap, since the F is never
-   seen; Google answers and nothing shakes. Left ⌥+F is unaffected. A
-   remembered app back in front gets no 1 s check until the next switch.
+   seen; Google answers and nothing shakes. Left ⌥+F is unaffected. And
+   arrivals are global: any Whytap shortcut arriving within the 0.3 s window
+   (say a ⌃ shortcut right after) also keeps an ⌥ chord from shaking. A
+   remembered app back in front is forgotten rather than polled.
    The frontmost app is the holder instead when its focused element is a
    password field (Accessibility role `AXSecureTextField`, both calls with a
    0.2 s timeout, asked on an attempt or a switch whenever a remembered or
@@ -193,7 +202,11 @@ gestures and are judged 0.3 s after the release with 0.05 s of slack;
 scenarios include the real gesture state machine. An independent review
 before resubmitting found that Cmd-Tab commits on ⌘ release, so requiring ⌘
 held at the switch would have lost the main case; the release window above
-fixes it, and the test Cmd-Tab now releases ⌘ before the switch.
+fixes it, and the test Cmd-Tab now releases ⌘ before the switch. The fourth
+pass (ticket #617) found an activation delivered before the click that caused
+it still using ⌘ evidence, a holder back in front kept across an unseen
+release, and a chord queued before an OFF shaking the next episode; point 3
+now covers all three with scenarios that fail on the previous head.
 
 ## Rejected
 

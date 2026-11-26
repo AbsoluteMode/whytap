@@ -122,6 +122,23 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertFalse(lilBro.answersFromWhytap)
     }
 
+    /// A question this Mac did not understand: only the card that sends it
+    /// to whytap.ai, no "I only know Settings by name", no suggestions.
+    func test_not_understood_he_shows_only_turn_on_and_ask() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        try await render(fixture, selection, lilBro, name: "unknown-light") {
+            lilBro.toggleFromSidebar()
+            lilBro.ask("как изменить хоткей рекорда")
+            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+        }
+        XCTAssertEqual(lilBro.turns.last?.reply?.isUnknown, true)
+        XCTAssertTrue(lilBro.turnOnAsks)
+        XCTAssertNil(selection.shownFeature, "nothing opened")
+    }
+
     func test_hidden_he_answers_from_the_sidebar_entry() async throws {
         let fixture = try await FeaturesFixture(.usual)
         defer { fixture.cleanUp() }

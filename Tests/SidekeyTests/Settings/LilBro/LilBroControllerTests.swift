@@ -302,18 +302,15 @@ final class LilBroControllerTests: XCTestCase {
     }
 
     /// Where the disclosure shows and with which buttons: never by itself
-    /// before a question; after an unknown reply it offers Turn on answers
-    /// (one line, full text under Details) until answers were first turned
-    /// on; asked for from ⋯ it shows after any reply, with Not now.
+    /// before a question; after an unknown reply it is the whole reply (one
+    /// line, full text under Details, Turn on answers), also after answers
+    /// were turned on and off; asked for from ⋯ it shows after any reply,
+    /// with Not now.
     func test_the_disclosure_always_has_not_now_when_the_menu_asked_for_it() {
         let answer = LilBroReply.answer(LilBroAnswer(paragraphs: ["Hi"]))
         let unknown = LilBroReply.unknown(suggestions: [])
         XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .none)
         XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, consentShown: false), .turnOn)
-        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: false), .none,
-                       "turned on once, the balloon does not offer it again by itself")
-        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: true),
-                       .turnOnOrNotNow)
         XCTAssertEqual(LilBroOffer.placement(after: answer, answersOn: false, consentShown: false), .none)
         for reply in [nil, answer, unknown, .offline] as [LilBroReply?] {
             XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: false, consentShown: true), .turnOnOrNotNow)
@@ -893,25 +890,6 @@ final class LilBroControllerTests: XCTestCase {
         controller.ask("how do I dictate")
         await until { controller.bubble == .full && !controller.isBusy }
         XCTAssertTrue(controller.showsBalloon)
-        XCTAssertFalse(controller.preferences.answersEverOn)
-        controller.turnOnAnswers()
-        controller.turnOffAnswers()
-        XCTAssertTrue(controller.preferences.answersEverOn)
-        XCTAssertTrue(LilBroPreferences(defaults: defaults).answersEverOn, "remembered")
-    }
-
-    /// Upgrading with answers already on, then turning them off and
-    /// relaunching: the earlier opt-in is still known, so the balloon does not
-    /// offer answers again by itself.
-    func test_an_opt_in_from_before_the_marker_survives_turning_off_and_relaunch() {
-        defaults.set(true, forKey: LilBroPreferences.answersKey)
-        let upgraded = LilBroPreferences(defaults: defaults)
-        XCTAssertTrue(upgraded.answersEverOn)
-        upgraded.answersFromWhytap = false
-        let relaunched = LilBroPreferences(defaults: defaults)
-        XCTAssertFalse(relaunched.answersFromWhytap)
-        XCTAssertTrue(relaunched.answersEverOn, "remembered across relaunch")
-        XCTAssertFalse(LilBroPreferences(defaults: UserDefaults(suiteName: UUID().uuidString)!).answersEverOn)
     }
 
     /// A question too short for whytap.ai never gets "Turn on and ask".

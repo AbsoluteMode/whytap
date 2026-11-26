@@ -104,7 +104,6 @@ struct LilBroBalloonView: View {
     @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
         let asks = controller.turnOnAsks
         switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
-                                     everOn: controller.preferences.answersEverOn,
                                      consentShown: controller.consentShown) {
         case .none:
             EmptyView()
@@ -189,9 +188,13 @@ struct LilBroReplyView: View {
                         .padding(.leading, -6)
                     if more { details(answer) }
                 }
-            case .unknown(let suggestions):
-                paragraph(LilBroCopy.unknown)
-                if current { LilBroChips(items: suggestions.map { q in (q, false, { ask(q) }) }) }
+            case .unknown:
+                // Not understood here: only the card that sends it to
+                // whytap.ai (shown under the reply), no "I only know…" and no
+                // suggested questions.
+                // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+                // Answers turned on since (no card): ask again.
+                if current, answersOn { paragraph(LilBroCopy.askAgain) }
             case .offline:
                 paragraph(LilBroCopy.offline)
                 if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
@@ -272,15 +275,13 @@ struct LilBroOffer: View {
     enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
     static let id = "lilBro.offer"
 
-    /// Answers off: after a question this Mac could not answer it offers
-    /// Turn on answers, only until answers were first turned on; once ⋯
-    /// asked for it, it shows after any reply, with Not now. Never before a
-    /// question by itself.
-    static func placement(after reply: LilBroReply?, answersOn: Bool, everOn: Bool = false,
-                          consentShown: Bool) -> Placement {
+    /// Answers off: after a question this Mac could not answer it is the
+    /// whole reply; once ⋯ asked for it, it shows after any reply, with Not
+    /// now. Never before a question by itself.
+    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
         guard !answersOn else { return .none }
         if consentShown { return .turnOnOrNotNow }
-        return reply?.isUnknown == true && !everOn ? .turnOn : .none
+        return reply?.isUnknown == true ? .turnOn : .none
     }
 
     /// The buttons it shows, in order.

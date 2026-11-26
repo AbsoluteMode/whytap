@@ -60,14 +60,16 @@ invariant said so.
   question this Mac did not understand, the line says whytap.ai understands
   any language and the button is **Turn on and ask**: that press turns answers
   on and sends that one question; earlier questions stay on this Mac.
-- **Offered only when it helps (REV 5).** The balloon opens with only the
-  reply field; the one-line disclosure shows by itself only after a question
-  this Mac could not answer, and only until answers were first turned on
-  (`lilBro.answersEverOn`). ⋯ → Turn on answers still shows it any time.
+- **Offered only when it helps (REV 5, REV 7).** The balloon opens with
+  only the greeting and the reply field; the one-line disclosure shows by
+  itself only after a question this Mac could not answer. There it is the
+  whole reply: no "I only know Settings by name", no suggested questions
+  (REV 7, the maintainer on 1769: "why isn't this fixed yet?"). It shows also
+  after answers were turned on and off, since otherwise such a question would
+  get no reply at all; the REV 5 marker `lilBro.answersEverOn` is gone.
+  ⋯ → Turn on answers still shows it any time.
   With answers on, ⋯ sits next to the greeting, so they can be turned off
-  before a question is sent (builder ticket 616). An opt-in saved before the
-  marker existed is written to it at launch, so turning answers off and
-  relaunching does not bring the offer back. A question too short for
+  before a question is sent (builder ticket 616). A question too short for
   whytap.ai gets the plain Turn on answers, never Turn on and ask. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
 - **What is sent:** the question normalised as the server's
@@ -148,3 +150,4 @@ invariant said so.
 
 2026-11-24 · step 2 PR: feature/lil-bro-answers
 2026-11-26 · REV 4 (one-line disclosure, Sonnet): feature/lil-bro-smooth
+2026-11-26 · REV 7 (only the card when not understood): feature/lil-bro-unknown

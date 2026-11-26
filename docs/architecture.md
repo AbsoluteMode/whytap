@@ -1571,8 +1571,8 @@ names, on this Mac, no network; a keyword guide, not an English parser, whose
 contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
 there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
 the balloon's one-line disclosure, full text under Details (LilBroOffer). It
-shows by itself only after a question this Mac did not understand and only
-until answers were first turned on (`lilBro.answersEverOn`); there the
+shows by itself only after a question this Mac did not understand, and there
+it is the whole reply (no "I only know…", no suggested questions); its
 button is "Turn on and ask" and also sends that question; ⋯ → Turn on
 answers only shows it;
 `lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the

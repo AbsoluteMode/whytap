@@ -11,33 +11,19 @@ final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
     static let answersKey = "lilBro.answersFromWhytap"
-    static let answersEverOnKey = "lilBro.answersEverOn"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
     @Published var answersFromWhytap: Bool {
-        didSet {
-            defaults.set(answersFromWhytap, forKey: Self.answersKey)
-            if answersFromWhytap { answersEverOn = true }
-        }
-    }
-    /// Answers were turned on at least once: after that the balloon no longer
-    /// offers them by itself (⋯ still does).
-    private(set) var answersEverOn: Bool {
-        didSet { defaults.set(answersEverOn, forKey: Self.answersEverOnKey) }
+        didSet { defaults.set(answersFromWhytap, forKey: Self.answersKey) }
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        let on = defaults.object(forKey: Self.answersKey) as? Bool ?? false
-        answersFromWhytap = on
-        answersEverOn = on || defaults.bool(forKey: Self.answersEverOnKey)
-        // Saved right away: an opt-in from before this marker existed stays
-        // known after turning answers off and relaunching.
-        if answersEverOn { defaults.set(true, forKey: Self.answersEverOnKey) }
+        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? false
     }
 }
 
@@ -788,7 +774,7 @@ final class LilBroController: ObservableObject {
         var text: String
         switch reply {
         case .answer(let answer): text = answer.paragraphs.first ?? ""
-        case .unknown: text = LilBroCopy.unknown
+        case .unknown: text = LilBroCopy.offerLineUnknown
         case .offline: text = LilBroCopy.offline
         case .unavailable: text = LilBroCopy.unavailable
         case .limit: text = LilBroCopy.limit
@@ -817,11 +803,12 @@ enum LilBroCopy {
     /// After a question this Mac did not understand.
     static let offerLineUnknown = "whytap.ai (Claude Sonnet 5.5) understands questions in any language."
     static let turnOnAndAsk = "Turn on and ask"
+    /// Under a question this Mac did not understand, once answers are on.
+    static let askAgain = "Answers are on now — ask again."
     /// Said once, before anything is sent, with the button that turns answers on.
     static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
     static let notNow = "Not now"
-    static let unknown = "I only know Settings by name. Try one of these:"
     static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"
     static let unavailable = "whytap.ai can’t answer right now. Settings still work; this is the closest page:"
     static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow. Settings still work — closest page:"

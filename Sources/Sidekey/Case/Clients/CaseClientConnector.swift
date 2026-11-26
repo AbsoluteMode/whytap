@@ -39,21 +39,23 @@ enum WhytapMCPEntry {
     static let legacyName = "case"
     static let legacyArguments = ["case", "mcp"]
 
-    /// A Claude Code entry it can start, by its transport: stdio (`type`
-    /// missing or "stdio") needs a command and, if set, a list of string
-    /// arguments; "http" and "sse" need an http(s) URL. Anything else (`null`,
-    /// `{}`, a blank command, a URL without its type, an unknown type) is left
-    /// as it is but serves nothing.
+    /// A Claude Code entry it can start, checked the way Claude Code reads its
+    /// config: stdio (`type` left out or "stdio") needs a non-blank command,
+    /// "http" and "sse" an http(s) URL. A field that is there must have its
+    /// type: `null` is not "left out" (`type`, `args`, `env`, `headers`,
+    /// `headersHelper`), `args` is a list of strings, `env` and `headers` map
+    /// strings to strings. Anything else is left as it is but serves nothing.
     // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
     static func claudeCanStart(_ entry: Any?) -> Bool {
         guard let object = entry as? [String: Any] else { return false }
         switch object["type"] {
-        case nil, is NSNull:
-            return isStdio(object)
+        case nil:
+            return isStdio(object) && isStringMap(object, "env")
         case let type as String where type == "stdio":
-            return isStdio(object)
+            return isStdio(object) && isStringMap(object, "env")
         case let type as String where type == "http" || type == "sse":
-            return isWebURL(object["url"])
+            return isWebURL(object["url"]) && isStringMap(object, "headers")
+                && (object["headersHelper"] == nil || object["headersHelper"] is String)
         default:
             return false
         }
@@ -66,20 +68,31 @@ enum WhytapMCPEntry {
         return isStdio(object) || isWebURL(object["url"])
     }
 
+    /// A non-blank command and, when there, a list of string arguments.
     static func isStdio(_ object: [String: Any]) -> Bool {
         guard let command = object["command"] as? String,
               !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
         switch object["args"] {
-        case nil, is NSNull: return true
+        case nil: return true
         case let list as [Any]: return list.allSatisfy { $0 is String }
         default: return false
         }
     }
 
+    /// Left out, or a table of strings (`null` is neither).
+    static func isStringMap(_ object: [String: Any], _ key: String) -> Bool {
+        guard let value = object[key] else { return true }
+        guard let map = value as? [String: Any] else { return false }
+        return map.values.allSatisfy { $0 is String }
+    }
+
+    /// An http(s) URL with a host and, when given, a port of 1–65535.
     static func isWebURL(_ value: Any?) -> Bool {
         guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let url = URL(string: text), let scheme = url.scheme?.lowercased(),
-              scheme == "http" || scheme == "https", !(url.host ?? "").isEmpty else { return false }
+              let parts = URLComponents(string: text), let scheme = parts.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", !(parts.host ?? "").isEmpty,
+              URL(string: text) != nil else { return false }
+        if let port = parts.port, !(1...65_535).contains(port) { return false }
         return true
     }
 }
@@ -475,7 +488,12 @@ enum CodexMCPEntry: Equatable {
               let transport = object["transport"] as? [String: Any] else { return false }
         if let enabled = object["enabled"], isBoolean(enabled), !isTrue(enabled) { return false }
         switch transport["type"] as? String {
-        case "stdio": return WhytapMCPEntry.isStdio(transport)
+        case "stdio":
+            // Codex's normalized answer reports unset arguments as `null`;
+            // its own parser has already refused arguments that aren't strings.
+            var stdio = transport
+            if stdio["args"] is NSNull { stdio["args"] = nil }
+            return WhytapMCPEntry.isStdio(stdio)
         case "streamable_http": return WhytapMCPEntry.isWebURL(transport["url"])
         default: return false
         }

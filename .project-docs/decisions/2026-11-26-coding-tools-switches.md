@@ -38,11 +38,14 @@ until the tool had already connected.
   onboarding do); once the tool has a `whytap` entry it can start, Yes is
   recorded in `HarnessAccessStore`, the same answer the island's question
   stores. An entry the person wrote is left as it is and counts when the tool
-  can start it, checked per transport: Claude Code stdio needs a non-blank
-  command and string arguments, `http`/`sse` an http(s) URL; Codex needs
-  `enabled` not false and a non-blank stdio command or a `streamable_http`
-  http(s) URL. `null`, `{}`, a blank command, a bad URL, a URL without its
-  type or an unknown type is left as it is but does not count. If no usable entry is there after setup, no Yes is
+  can start it, checked per transport the way the tool reads it: Claude Code
+  stdio needs a non-blank command, `http`/`sse` an http(s) URL with a port of
+  1–65535, and every field that is there its type (`null` is not "left out";
+  arguments a list of strings, `env` and `headers` maps of strings); Codex
+  needs `enabled` not false and a non-blank stdio command or a
+  `streamable_http` URL of the same kind. `null`, `{}`, a blank command, a bad
+  URL or port, a URL without its type, a field of the wrong type or an unknown
+  type is left as it is but does not count. If no usable entry is there after setup, no Yes is
   recorded and the row says what failed. An answer given while setup runs (a
   No in the island) is newer and stays.
 - **Off** records No at once. The MCP entry stays: without a Yes the gate
@@ -92,7 +95,10 @@ holds the builder's seven reproducers and one for the new row lines. Its
 review of ticket 672 found entries still counted with a blank command, a bad
 URL or fields of the wrong transport; `CodingToolsTransportShapeTests` holds
 its two shape fixtures and checks that On records no Yes for such entries and
-leaves the files as they are.
+leaves the files as they are. Ticket 673 added explicit `null` fields, env and
+headers that are not strings and ports past 65535, all refused by Claude
+Code's own `claude mcp get`; `CodingToolsClaudeSchemaTests` holds that fixture,
+Codex's `null` arguments (still valid) and the URL checks.
 
 Not checked in a running app: Connect against the real `claude` and `codex`
 CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).

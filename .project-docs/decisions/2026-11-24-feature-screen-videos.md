@@ -77,7 +77,7 @@ private details before the arrow, as in its clip.
 
 ## Notify and Monitor join
 
-The user accepted both clips on 2026-11-26 ("оба ролика класс"). Each starts
+The user accepted both clips on 2026-11-26 ("both clips are great"). Each starts
 on its feature screen with nothing connected: Copy prompt, paste into Claude
 Code and say what to watch. Notify then shows a test event, a "Build passed"
 card beside the island, the red dot on the Notify tool and Notify's History;

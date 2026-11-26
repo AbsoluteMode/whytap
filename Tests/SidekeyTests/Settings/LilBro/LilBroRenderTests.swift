@@ -189,4 +189,66 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertNil(selection.shownFeature, "nothing opened")
         XCTAssertNil(lilBro.turns.last?.opened)
     }
+
+    /// REV 12, the maintainer's own question: asked in Russian how to set a
+    /// hotkey that starts a meeting, he opens Hotkeys, scrolls to Meeting
+    /// record and outlines that row, not only the tab.
+    func test_asked_for_the_meeting_hotkey_he_leads_to_the_meeting_record_row() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let record = try XCTUnwrap(LilBroRow.named("hotkeys.meetingRecord"))
+        let model = LilBroFixedBrain(reply: .answer(LilBroAnswer(
+            paragraphs: ["Запись встречи по хоткею — строка Meeting record во вкладке Hotkeys: нажмите на неё и запишите сочетание."],
+            destination: .row(record))))
+        for (name, mascot) in [("row-light", true), ("row-hidden-light", false)] {
+            selection.select(.features)
+            let lilBro = controller(fixture, selection, mascot: mascot, remote: model)
+            try await render(fixture, selection, lilBro, name: name) {
+                lilBro.toggleFromSidebar()
+                lilBro.ask("Как мне поставить хоткей, чтобы meeting запускался по хоткею?")
+                await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+            }
+            XCTAssertEqual(selection.selectedTab, .hotkeys, name)
+            XCTAssertEqual(selection.focusedRow, record.id, name)
+            let row = try XCTUnwrap(lilBro.map.visible(.row(record.id)), "the row is scrolled into view: \(name)")
+            XCTAssertEqual(lilBro.target, row, "the row itself is outlined: \(name)")
+            XCTAssertEqual(lilBro.turns.last?.opened, "Meeting record")
+            if mascot { XCTAssertEqual(lilBro.feet.y, row.minY + 1, accuracy: 2, "he stands on that row") }
+            lilBro.close()
+            XCTAssertNil(selection.focusedRow, "closing clears the lead")
+        }
+    }
+
+    /// A row far down the tab is scrolled to.
+    func test_a_row_below_the_fold_is_scrolled_into_view() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let close = try XCTUnwrap(LilBroRow.named("hotkeys.agentClose"))
+        let lilBro = controller(fixture, selection, remote: LilBroFixedBrain(reply: .answer(LilBroAnswer(
+            paragraphs: ["Agent close is the row for that."], destination: .row(close)))))
+        try await render(fixture, selection, lilBro, name: "row-scrolled-light", size: NSSize(width: 960, height: 520)) {
+            lilBro.toggleFromSidebar()
+            lilBro.ask("how do I change the shortcut that closes the agent")
+            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
+        }
+        XCTAssertNotNil(lilBro.map.visible(.row(close.id)))
+        XCTAssertEqual(lilBro.target, lilBro.map.visible(.row(close.id)))
+    }
+
+    /// ⋯ → What is sent to whytap.ai, before the first question: the text
+    /// and OK, nothing to confirm.
+    func test_details_while_answers_are_on() async throws {
+        let fixture = try await FeaturesFixture(.freshInstall)
+        defer { fixture.cleanUp() }
+        let selection = SettingsWindowSelection()
+        let lilBro = controller(fixture, selection)
+        try await render(fixture, selection, lilBro, name: "details-on-light") {
+            lilBro.toggleFromSidebar()
+            lilBro.showDetails()
+        }
+        XCTAssertTrue(lilBro.showsBalloon)
+        XCTAssertTrue(lilBro.answersFromWhytap)
+    }
 }

@@ -9,6 +9,8 @@ enum LilBroSpot: Hashable {
     case pane
     case tab(SettingsWindowTab)
     case feature(AppFeature)
+    /// One row of a tab he can lead to (`LilBroRow.id`).
+    case row(String)
 }
 
 /// The window as Lil Bro sees it: named spots and the blocks (cards) he can
@@ -90,6 +92,18 @@ extension View {
             Color.clear.preference(key: LilBroSpotsKey.self,
                                    value: [spot: proxy.frame(in: .named(LilBroSpace.name))])
         })
+    }
+
+    /// A row Lil Bro can lead to: scrolled to by its id, and while it is the
+    /// one he brought the person to, a block he stands on and outlines.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
+    func lilBroRow(_ id: String, focused: String?) -> some View {
+        self.id(id)
+            .lilBroSpot(.row(id))
+            .background(GeometryReader { proxy in
+                Color.clear.preference(key: LilBroBlocksKey.self,
+                                       value: focused == id ? [proxy.frame(in: .named(LilBroSpace.name))] : [])
+            })
     }
 
     /// Tells Lil Bro this view is a block he can stand on.

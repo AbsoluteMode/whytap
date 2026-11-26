@@ -49,6 +49,12 @@ invariant said so.
   Details of the card. No card, "I only know…" or suggested questions on the
   default path: a question goes to the model, with the thinking dots while
   it answers.
+- **Off means off at once; what is sent stays readable (ticket 625).** The
+  builder's review of #493: ⋯ → Turn off answers cancels a question still on
+  its way, the preference is checked again right before sending, and a late
+  reply or its navigation is ignored. While answers are on, ⋯ → What is sent
+  to whytap.ai shows the full text with OK (no confirmation; default-on is
+  the maintainer's decision).
 - **No local fallback (REV 10, 2026-11-26).** The maintainer asked for no
   scripted scenarios. With answers off or whytap.ai unreachable there is no
   keyword guide and no closest page any more: answers off gives only the

@@ -87,6 +87,10 @@ final class LilBroController: ObservableObject {
     @Published var menuOpen = false
     /// The disclosure before answers from whytap.ai, asked for from ⋯.
     @Published private(set) var consentShown = false
+    /// What goes to whytap.ai and what it keeps, asked for from ⋯ while
+    /// answers are on (also before the first question). Only words and OK:
+    /// answers stay on (builder review of #493, ticket 625).
+    @Published private(set) var detailsShown = false
 
     private(set) var map = LilBroMap()
     private(set) var busy = false
@@ -124,7 +128,7 @@ final class LilBroController: ObservableObject {
     /// Opened before any question, only the reply field shows: no greeting,
     /// no suggestions, no disclosure. The balloon appears with the first
     /// answer (or when ⋯ asked for the disclosure).
-    var showsBalloon: Bool { !turns.isEmpty || consentShown }
+    var showsBalloon: Bool { !turns.isEmpty || consentShown || detailsShown }
     /// The line he greets with over the field, a different one each opening.
     private(set) var greeting = LilBroCopy.greetings[0]
     private var opened = 0
@@ -169,10 +173,17 @@ final class LilBroController: ObservableObject {
             return
         }
         guard !busy, segment == nil else { return }
+        // Without the little guy the outlined row follows its scrolling.
+        if !holding, target != nil, let row = selection.focusedRow {
+            target = map.visible(.row(row))
+            return
+        }
         if holding {
             // He stays with the block he brought the person to; if it
             // scrolled away, he waits at home.
-            if let target, map.platforms.contains(where: { abs($0.minY - target.minY) < 1 && abs($0.minX - target.minX) < 1 }) {
+            if let target, let same = map.platforms.first(where: { abs($0.minY - target.minY) < 1 && abs($0.minX - target.minX) < 1 }) {
+                // A last half-point of scrolling: the outline follows, he stays.
+                if same != target { self.target = same }
                 return
             }
             if let moved = nearestPlatform(to: target) {
@@ -238,6 +249,10 @@ final class LilBroController: ObservableObject {
 
     func close() {
         cancelJob()
+        selection.focusedRow = nil
+        detailsShown = false
+        // A question closed before its reply came is dropped, not left empty.
+        if let last = turns.last, last.reply == nil { turns.removeLast() }
         bubble = .closed
         menuOpen = false
         showEarlier = false
@@ -253,11 +268,39 @@ final class LilBroController: ObservableObject {
         }
     }
 
+    /// ⋯ → Clear: also ends a question still on its way and the guide, so
+    /// no late reply lands and the entry stays usable (builder review of
+    /// #493, ticket 625).
     func clear() {
+        stopPending()
         turns = []
         menuOpen = false
         showEarlier = false
         showMore = false
+        detailsShown = false
+    }
+
+    /// Ends the question on its way and any guiding: no late reply, no
+    /// navigation. He stays where he is with the balloon open.
+    private func stopPending() {
+        let pending = busy || bubble == .thinking
+        cancelJob()
+        selection.focusedRow = nil
+        guard pending else { return }
+        target = nil
+        holding = false
+        if bubble != .closed { bubble = .full }
+        if mascotVisible { setPose(.idle) }
+    }
+
+    /// ⋯ → What is sent to whytap.ai, while answers are on.
+    func showDetails() {
+        menuOpen = false
+        detailsShown = true
+    }
+
+    func hideDetails() {
+        detailsShown = false
     }
 
     /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
@@ -294,9 +337,18 @@ final class LilBroController: ObservableObject {
     }
 
     /// ⋯ → Turn off answers from whytap.ai.
+    /// Takes effect at once: a question still on its way is stopped and its
+    /// reply, if it comes, is ignored, and nothing opens; that question gets
+    /// the card that turns answers on and asks it again (builder review of
+    /// #493, ticket 625).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
     func turnOffAnswers() {
         preferences.answersFromWhytap = false
+        let pending = turns.indices.last.flatMap { turns[$0].reply == nil ? $0 : nil }
+        stopPending()
+        if let pending { turns[pending].reply = .answersOff }
         consentShown = false
+        detailsShown = false
         menuOpen = false
         objectWillChange.send()
     }
@@ -322,6 +374,8 @@ final class LilBroController: ObservableObject {
         showMore = false
         cancelJob()
         target = nil
+        selection.focusedRow = nil
+        detailsShown = false
         let local: LilBroReply? = !answersFromWhytap ? .answersOff
             : !LilBroRemoteBrain.sends(question) ? .tooShort : nil
         if let local {
@@ -340,8 +394,12 @@ final class LilBroController: ObservableObject {
         let brain = remote
         job = Task { [weak self] in
             guard let self else { return }
+            // Checked again right before it leaves: answers turned off or
+            // the question cleared meanwhile send nothing.
+            guard !Task.isCancelled, answersFromWhytap, index < turns.count else { return }
             let reply = await brain.reply(to: asked)
-            guard !Task.isCancelled, index < turns.count else { return }
+            // A reply after opt-out, Clear or a new question is ignored.
+            guard !Task.isCancelled, answersFromWhytap, index < turns.count else { return }
             turns[index].reply = reply
             switch reply {
             case .answer(let answer):
@@ -416,6 +474,11 @@ final class LilBroController: ObservableObject {
             return [Stop(spot: .tab(tab.resolved)) { selection.select(tab) }]
         case .apiKeys:
             return [Stop(spot: .tab(.apiAndModels)) { selection.showAPIKeys() }]
+        case .row(let row):
+            // The tab's sidebar row, as a person would click it; the row
+            // itself is scrolled to and outlined after it opens.
+            if selection.selectedTab == row.tab.resolved { return [] }
+            return [Stop(spot: .tab(row.tab.resolved)) { selection.select(row.tab) }]
         }
     }
 
@@ -429,7 +492,19 @@ final class LilBroController: ObservableObject {
             stops.forEach { $0.press() }
             await settle()
             guard !Task.isCancelled else { return }
-            if mascotVisible { arrive() }
+            // Without the little guy only a row he was asked about is
+            // outlined; he never moves.
+            var row = false
+            if case .row = destination { row = true }
+            guard mascotVisible || row else { return }
+            let block = await landing(for: destination)
+            guard !Task.isCancelled, let block else { return }
+            target = block
+            if mascotVisible {
+                feet = LilBroPlanner.perch(on: block)
+                holding = true
+                setPose(.point)
+            }
             return
         }
         bubble = .tag("On my way…")
@@ -446,7 +521,9 @@ final class LilBroController: ObservableObject {
             await settle()
         }
         guard !Task.isCancelled else { return }
-        if let block = firstPaneBlock() {
+        let landing = await landing(for: destination)
+        guard !Task.isCancelled else { return }
+        if let block = landing {
             await walk(to: LilBroPlanner.perch(on: block))
             guard !Task.isCancelled else { return }
             target = block
@@ -455,13 +532,22 @@ final class LilBroController: ObservableObject {
         setPose(.point)
     }
 
-    /// Reduced motion or no mascot: he appears on the block he opened.
-    private func arrive() {
-        guard let block = firstPaneBlock() else { return }
-        feet = LilBroPlanner.perch(on: block)
-        target = block
-        holding = true
-        setPose(.point)
+    /// Where he stands and what he outlines once the place is open: the row
+    /// he was asked about, scrolled into view, or the screen's first block.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
+    private func landing(for destination: LilBroDestination) async -> CGRect? {
+        guard case .row(let row) = destination else { return firstPaneBlock() }
+        selection.focus(row)
+        // The tab scrolls to it (0.3 s); the row counts once it stands still.
+        var last: CGRect?
+        for _ in 0..<30 {
+            let rect = map.visible(.row(row.id))
+            if let rect, rect == last, map.platforms.contains(rect) { return rect }
+            last = rect
+            await sleep(0.05)
+            if Task.isCancelled { return nil }
+        }
+        return map.visible(.row(row.id)) ?? firstPaneBlock()
     }
 
     /// The first block of the screen now in the pane.
@@ -659,6 +745,9 @@ enum LilBroCopy {
     /// Said once, before anything is sent, with the button that turns answers on.
     static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
+    /// Read from ⋯ while answers are on.
+    static let dataUse = "Each question you ask here goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac. ⋯ → Turn off answers stops it."
+    static let ok = "OK"
     static let notNow = "Not now"
     static let offline = "I can’t reach whytap.ai — no internet, so answers aren’t available right now."
     static let unavailable = "whytap.ai can’t answer right now."

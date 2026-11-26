@@ -26,6 +26,9 @@ struct LilBroBalloonView: View {
                 .onChange(of: controller.consentShown) { _, shown in
                     if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
                 }
+                .onChange(of: controller.detailsShown) { _, shown in
+                    if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
+                }
             }
         }
         .padding(.horizontal, 13)
@@ -83,6 +86,10 @@ struct LilBroBalloonView: View {
             // No question yet: the balloon shows only when ⋯ asked for the
             // disclosure; otherwise there is just the reply field.
             offer(after: nil)
+        }
+        if controller.detailsShown, controller.answersFromWhytap {
+            LilBroDataUse(done: controller.hideDetails)
+                .id(LilBroOffer.id)
         }
     }
 
@@ -286,6 +293,28 @@ struct LilBroOffer: View {
         .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Answers from whytap.ai")
+    }
+}
+
+/// What goes to whytap.ai and what it keeps, readable while answers are on:
+/// the disclosure's full text and OK. Nothing to confirm; ⋯ turns answers off.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+struct LilBroDataUse: View {
+    let done: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text(LilBroCopy.dataUse)
+                .font(.system(size: 11.5))
+                .foregroundStyle(MacSettingsTheme.text2)
+                .fixedSize(horizontal: false, vertical: true)
+            LilBroChips(items: [(LilBroCopy.ok, false, done)])
+        }
+        .padding(9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("What is sent to whytap.ai")
     }
 }
 
@@ -525,6 +554,7 @@ struct LilBroOptionsMenu: View {
                 controller.setMascotVisible(!controller.mascotVisible)
             }
             if controller.answersFromWhytap {
+                Button("What is sent to whytap.ai") { controller.showDetails() }
                 Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
             } else {
                 // Opens the disclosure; only its button turns answers on.

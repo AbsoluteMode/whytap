@@ -112,7 +112,7 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertEqual(reply, .unavailable, "an unfollowed redirect reads as unavailable")
     }
 
-    func test_an_answer_names_a_feature_a_tab_or_the_keys() async {
+    func test_an_answer_names_a_feature_a_tab_or_the_keys() async throws {
         let feature = await brain(status: 200, json: """
             {"text":["Drop types what you say."],"bullets":["Download the model"],"followUps":["a","b","c"],
              "go":{"feature":"drop"},"offtopic":false,"cached":false}
@@ -130,6 +130,14 @@ final class LilBroRemoteBrainTests: XCTestCase {
                 .reply(to: LilBroQuestion(text: "where"))
             XCTAssertEqual(former, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .feature(feature))), raw)
         }
+        // REV 12: one row of a tab; an id this build does not know falls back to its tab.
+        let row = await brain(status: 200, json: #"{"text":["Here."],"go":{"row":"hotkeys.meetingRecord","tab":"hotkeys"}}"#)
+            .reply(to: LilBroQuestion(text: "hotkey for meetings"))
+        XCTAssertEqual(row, .answer(LilBroAnswer(paragraphs: ["Here."],
+                                                 destination: .row(try XCTUnwrap(LilBroRow.named("hotkeys.meetingRecord"))))))
+        let unknownRow = await brain(status: 200, json: #"{"text":["Here."],"go":{"row":"hotkeys.teleport","tab":"hotkeys"}}"#)
+            .reply(to: LilBroQuestion(text: "hotkey for teleport"))
+        XCTAssertEqual(unknownRow, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .tab(.hotkeys))))
         let keys = await brain(status: 200, json: #"{"text":["Here."],"go":{"keys":true}}"#)
             .reply(to: LilBroQuestion(text: "my key"))
         XCTAssertEqual(keys, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .apiKeys)))

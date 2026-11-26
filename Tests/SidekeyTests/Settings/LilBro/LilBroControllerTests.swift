@@ -240,6 +240,10 @@ final class LilBroControllerTests: XCTestCase {
         selection.open(.drop)
         XCTAssertTrue(controller.stops(for: .feature(.drop)).isEmpty, "already there")
         XCTAssertEqual(controller.stops(for: .apiKeys).map(\.spot), [.tab(.apiAndModels)])
+        let record = LilBroRow.named("hotkeys.meetingRecord")!
+        XCTAssertEqual(controller.stops(for: .row(record)).map(\.spot), [.tab(.hotkeys)], "the tab first")
+        selection.select(.hotkeys)
+        XCTAssertTrue(controller.stops(for: .row(record)).isEmpty, "already on the tab: only the scroll")
         XCTAssertEqual(controller.stops(for: .tab(.agentMode)).map(\.spot), [.tab(SettingsWindowTab.agentMode.resolved)])
     }
 
@@ -668,5 +672,121 @@ final class LilBroControllerTests: XCTestCase {
         controller.turnOnAnswers()
         for _ in 0..<20 { await Task.yield() }
         XCTAssertTrue(remote.asked.isEmpty)
+    }
+
+    // MARK: Opt-out, Clear and Details while on (builder review of #493, ticket 625)
+
+    /// whytap.ai that answers only when the test lets it.
+    @MainActor
+    private final class Held: LilBroBrain {
+        private(set) var asked: [LilBroQuestion] = []
+        private var waiting: CheckedContinuation<LilBroReply, Never>?
+        var isWaiting: Bool { waiting != nil }
+        func reply(to question: LilBroQuestion) async -> LilBroReply {
+            asked.append(question)
+            return await withCheckedContinuation { waiting = $0 }
+        }
+        func answer(_ reply: LilBroReply) {
+            waiting?.resume(returning: reply)
+            waiting = nil
+        }
+    }
+
+    private static let toDrop = LilBroReply.answer(LilBroAnswer(paragraphs: ["Drop types what you say."],
+                                                                destination: .feature(.drop)))
+
+    func test_turning_answers_off_before_the_question_leaves_sends_nothing() async {
+        let remote = Remote()
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.ask("Set up dictation")
+        controller.turnOffAnswers()
+        await settleDown()
+        XCTAssertTrue(remote.asked.isEmpty, "rechecked right before it leaves")
+        XCTAssertEqual(controller.turns.last?.reply, .answersOff, "Turn on and ask stays available")
+        XCTAssertTrue(controller.turnOnAsks)
+        XCTAssertNil(selection.shownFeature)
+        XCTAssertFalse(controller.isBusy)
+        XCTAssertEqual(controller.bubble, .full)
+        XCTAssertFalse(LilBroPreferences(defaults: defaults).answersFromWhytap, "the off choice is saved")
+    }
+
+    func test_turning_answers_off_while_a_reply_is_on_its_way_ignores_it() async {
+        let remote = Held()
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.ask("Set up dictation")
+        await until { remote.isWaiting }
+        controller.turnOffAnswers()
+        XCTAssertFalse(controller.isBusy)
+        remote.answer(Self.toDrop)
+        await settleDown()
+        XCTAssertEqual(controller.turns.last?.reply, .answersOff, "the late reply is ignored")
+        XCTAssertNil(selection.shownFeature, "and nothing opens")
+        XCTAssertNil(controller.target)
+    }
+
+    func test_turning_answers_off_while_he_guides_stops_before_the_press() async {
+        let gate = Gate { $0 == 0.43 }
+        let selection = SettingsWindowSelection(selectedTab: .hotkeys)
+        let controller = make(selection: selection, sleep: { await gate.sleep($0) })
+        controller.ask("Set up dictation")
+        await until { controller.flash != nil && gate.waiting == 1 }
+        controller.turnOffAnswers()
+        gate.release()
+        await settleDown()
+        XCTAssertEqual(selection.selectedTab, .hotkeys, "no navigation after opt-out")
+        XCTAssertNil(selection.shownFeature)
+        XCTAssertFalse(controller.isBusy)
+    }
+
+    func test_clear_ends_a_pending_question_and_he_stays_usable() async {
+        let remote = Held()
+        let selection = SettingsWindowSelection()
+        let controller = make(selection: selection, remote: remote, reduceMotion: true)
+        controller.toggleFromSidebar()
+        controller.ask("Set up dictation")
+        await until { remote.isWaiting }
+        controller.clear()
+        XCTAssertTrue(controller.turns.isEmpty)
+        XCTAssertFalse(controller.isBusy, "the entry is usable at once")
+        XCTAssertEqual(controller.bubble, .full)
+        remote.answer(Self.toDrop)
+        await settleDown()
+        XCTAssertTrue(controller.turns.isEmpty, "no late reply lands")
+        XCTAssertNil(selection.shownFeature, "and nothing opens")
+        controller.ask("does dictation work offline")
+        await until { remote.isWaiting }
+        remote.answer(.answer(LilBroAnswer(paragraphs: ["Yes."])))
+        await until { !controller.isBusy && controller.turns.count == 1 && controller.turns[0].reply != nil }
+    }
+
+    func test_closing_before_the_reply_drops_the_empty_question() async {
+        let remote = Held()
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("Set up dictation")
+        await until { remote.isWaiting }
+        controller.close()
+        remote.answer(Self.toDrop)
+        await settleDown()
+        XCTAssertTrue(controller.turns.isEmpty)
+    }
+
+    /// What is sent can be read while answers are on, also before the first
+    /// question, with nothing to confirm.
+    func test_details_are_readable_while_answers_are_on() {
+        let controller = make(reduceMotion: true)
+        controller.toggleFromSidebar()
+        XCTAssertFalse(controller.showsBalloon)
+        controller.showDetails()
+        XCTAssertTrue(controller.detailsShown)
+        XCTAssertTrue(controller.showsBalloon, "before the first question too")
+        XCTAssertTrue(controller.answersFromWhytap, "reading changes nothing")
+        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: true, consentShown: false), .none,
+                       "no confirmation card")
+        XCTAssertTrue(LilBroCopy.dataUse.contains("90 days"))
+        XCTAssertTrue(LilBroCopy.dataUse.contains("earlier whytap.ai questions with its answers, sent again"))
+        controller.hideDetails()
+        XCTAssertFalse(controller.showsBalloon)
     }
 }

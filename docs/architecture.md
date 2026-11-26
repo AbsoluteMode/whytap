@@ -1564,7 +1564,11 @@ answer, the rest behind More (`showMore`). No scripted scenarios (REV 10,
 2026-11-26): every question goes to whytap.ai and the model decides whether
 to answer in the balloon or open a place; there is no keyword guide on this
 Mac, no ready-made questions and no setup step he presses. When the answer
-names a place, he runs to the sidebar row and then the
+names a row of a tab (LilBroRow, REV 12: e.g. Hotkeys → Meeting record), he
+opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
+(HotkeysSettingsView tags its rows with lilBroRow), and he stands on that row
+and outlines it; without the little guy only the outline shows. When the
+answer names another place, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
@@ -1575,8 +1579,12 @@ on unless the person turned it off; the maintainer's decision of 2026-11-26).
 Turned off with ⋯, nothing is sent: a question gets only the one-line
 disclosure, full text under Details (LilBroOffer), with "Turn on and ask",
 which turns answers on and sends that question; ⋯ → Turn on answers shows it
-with Not now. A question under the server's three characters is not sent
-(`tooShort`). LilBroRemoteBrain posts the
+with Not now. Turning answers off stops a question on its way and any
+guiding (the reply is ignored, nothing opens; that question gets Turn on and
+ask); Clear ends a pending question too, and closing drops one that has no
+reply yet. While answers are on, ⋯ → What is sent to whytap.ai shows the same
+text with OK, also before the first question. A question under the server's
+three characters is not sent (`tooShort`). LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
 answered (questions asked while answers were off never leave the Mac, except
@@ -1584,8 +1592,9 @@ the one question a person sends with Turn on and ask), with
 redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
 claude-sonnet-5-5 while it is tried out), which returns sentences, points and,
-only when the person asked to go or set something up, one place; an id the
-app does not have is dropped. No internet or a timeout is offline, 429 or a
+only when the person asked to go or set something up, one place (a feature,
+tab, row `{row, tab}` from LilBroRows.swift, or API keys); an id the app does
+not have is dropped, and an unknown row falls back to its tab. No internet or a timeout is offline, 429 or a
 spent budget is the daily limit, any other error is unavailable; each is a
 short message (offline and unavailable with Try again) and changes nothing.
 The sprite sheet is Resources/LilBro, embedded

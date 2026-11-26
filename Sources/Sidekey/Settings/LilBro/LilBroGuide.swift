@@ -1,16 +1,18 @@
 import Foundation
 
 /// Where Lil Bro takes the person: a feature's screen or row, a sidebar tab,
-/// or the API keys.
+/// one row of a tab (scrolled to and outlined), or the API keys.
 enum LilBroDestination: Equatable {
     case feature(AppFeature)
     case tab(SettingsWindowTab)
+    case row(LilBroRow)
     case apiKeys
 
     var title: String {
         switch self {
         case .feature(let feature): return FeatureCatalog.info(for: feature).name
         case .tab(let tab): return tab.resolved.title
+        case .row(let row): return row.title
         case .apiKeys: return "API keys"
         }
     }

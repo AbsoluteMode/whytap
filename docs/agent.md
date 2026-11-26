@@ -26,8 +26,7 @@ simple question is answered without long thinking; tool use stays. On
 **OpenAI** that is `none`, `minimal` or `low` depending on the model; on
 **Anthropic** low effort, with thinking turned off on Claude Haiku 5.5 and
 Claude Sonnet 5, and on Claude Sonnet 5.5 its lowest setting, `between_tools`
-(no thinking before answering), when the turn does not use Anthropic's web
-search; on **OpenRouter** reasoning off where the model makes it optional,
+(no thinking before answering), also with Anthropic's web search; on **OpenRouter** reasoning off where the model makes it optional,
 else its lowest level. Models that do not take the setting keep their own
 default. If a provider refuses the setting on a turn's first request, the
 request is sent once more: on OpenAI at `low`, elsewhere without the setting.
@@ -36,6 +35,14 @@ is sent once more, the same way; an error unrelated to the setting then
 fails again with the same message. It is repeated only once, only for the turn's first request
 (not after the search fallback), and a 400 is not billed and runs no tool. On Anthropic and OpenAI an answer can be up to 16,384 tokens;
 a longer one says it reached the model's output limit.
+
+A simple factual question with a web search, such as the weather in a city,
+is meant to take one request: the provider searches once and the model writes
+1-3 sentences, without a table or callout. On Claude, citation tags the model
+copies into its answer are removed. From a turn's second request on, direct
+Anthropic requests mark the tools and instructions for Anthropic's prompt
+cache, so the next steps of the same task read them instead of processing
+them again; a single question pays no cache write.
 
 ## Answers and actions
 

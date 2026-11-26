@@ -121,6 +121,7 @@ struct NativeAgentModel {
         // A repeat must change what was sent.
         let mayRepeat = reasoning != nil && !turnRefused && !requestSentInTurn
             && !NSDictionary(dictionary: reasoning?.fields ?? [:]).isEqual(to: fallback?.fields ?? [:])
+        let laterRequest = requestSentInTurn
         requestSentInTurn = true
         // Searches still allowed: Anthropic enforces max_uses across its own
         // turn, so its tool stays unchanged within that turn; OpenAI and
@@ -147,14 +148,17 @@ struct NativeAgentModel {
                 request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body,
                                                       timeout: Self.directTimeout)
             case .anthropic:
-                // The tools and the system prompt (about 15k tokens with
-                // Anthropic's search tool) are the same on every request of a
-                // turn and across turns: one cache breakpoint after them lets
-                // later requests read them instead of processing them again.
+                // From the turn's second request on, the tools and the system
+                // prompt (about 15k tokens with Anthropic's search tool) are
+                // repeated input: a cache breakpoint after them lets the next
+                // requests read them. A turn's first request gets none: a
+                // single question would pay the cache write (1.25x) and the
+                // 5-minute cache rarely meets the next question.
                 // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+                var systemBlock: [String: Any] = ["type": "text", "text": system]
+                if laterRequest { systemBlock["cache_control"] = ["type": "ephemeral"] }
                 var body: [String: Any] = [
-                    "model": model,
-                    "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]]],
+                    "model": model, "system": [systemBlock],
                     "messages": messages, "max_tokens": outputLimit,
                     "tools": tools.map { tool -> [String: Any] in
                         var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]

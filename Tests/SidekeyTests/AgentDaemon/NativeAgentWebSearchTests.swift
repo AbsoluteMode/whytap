@@ -54,10 +54,9 @@ final class NativeAgentWebSearchTests: XCTestCase {
         }.flatMap { $0 }.filter { if case .link = $0 { return true }; return false }
     }
 
-    /// The Anthropic system prompt: one text block marked for the prompt cache.
+    /// The Anthropic system prompt: one text block.
     static func systemText(_ body: [String: Any]) -> String {
-        guard let blocks = body["system"] as? [[String: Any]], blocks.count == 1,
-              (blocks[0]["cache_control"] as? [String: Any])?["type"] as? String == "ephemeral" else { return "" }
+        guard let blocks = body["system"] as? [[String: Any]], blocks.count == 1 else { return "" }
         return blocks[0]["text"] as? String ?? ""
     }
 

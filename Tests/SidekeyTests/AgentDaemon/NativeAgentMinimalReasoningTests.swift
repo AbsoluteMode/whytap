@@ -581,7 +581,7 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
     }
 
     /// 2026-11-26: Claude copied its search citation tags into the answer
-    /// (`(cite index="1-9">` with no closing tag). They are removed on
+    /// (`<cite index="1-9">` with no closing tag). They are removed on
     /// Claude turns, the cited words kept; code and other providers stay.
     func testClaudeCitationTagsAreRemovedFromTheAnswer() async throws {
         let answer = "Около −2°.\n\n- <cite index=\"1-9\">Днём −3…0°, без осадков.</cite>\n- `<cite index=\"1\">` stays in code."
@@ -593,15 +593,20 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(openAI.store.streamingText, "<cite index=\"1\">kept</cite>")
     }
 
-    /// The tools and system prompt are one prompt-cache prefix on every
-    /// direct Anthropic request; OpenAI and OpenRouter bodies are unchanged.
-    func testAnthropicSystemPromptIsMarkedForThePromptCache() async throws {
-        let result = try await run("hi", anthropic("claude-haiku-5-5"), [json(anthropicFinal("Hello."))])
-        let system = try XCTUnwrap(result.bodies.first?["system"] as? [[String: Any]])
-        XCTAssertEqual(system.count, 1)
-        XCTAssertEqual(system[0]["type"] as? String, "text")
-        XCTAssertTrue((system[0]["text"] as? String)?.contains("finish_answer") == true)
-        XCTAssertEqual((system[0]["cache_control"] as? [String: Any])?["type"] as? String, "ephemeral")
+    /// The tools and system prompt are marked for the prompt cache from a
+    /// turn's second request on, where they repeat; a single-request
+    /// question pays no cache write. OpenAI bodies are unchanged.
+    func testAnthropicSystemPromptIsCachedFromTheTurnsSecondRequest() async throws {
+        let result = try await run("what is in my workspace?", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "t1", "name": "list_directory", "input": ["path": NSNull()]]]]),
+            json(anthropicFinal("Empty.")),
+        ])
+        XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
+        let systems = try result.bodies.map { try XCTUnwrap($0["system"] as? [[String: Any]]) }
+        XCTAssertEqual(systems.map(\.count), [1, 1])
+        XCTAssertTrue((systems[0][0]["text"] as? String)?.contains("finish_answer") == true)
+        XCTAssertEqual(systems.map { ($0[0]["cache_control"] as? [String: Any])?["type"] as? String }, [nil, "ephemeral"])
+        XCTAssertEqual(systems[0][0]["text"] as? String, systems[1][0]["text"] as? String)
         let direct = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("Hello."))])
         XCTAssertTrue(direct.bodies.first?["instructions"] is String)
     }

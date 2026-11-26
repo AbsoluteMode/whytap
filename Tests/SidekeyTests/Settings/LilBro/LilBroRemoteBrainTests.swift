@@ -39,14 +39,15 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertEqual((body["history"] as? [[String: String]])?.map { $0["q"] }, ["q3", "q4", "q5"])
     }
 
-    func test_a_long_question_is_cut_to_what_the_server_takes_and_a_short_one_stays_local() async throws {
+    func test_a_long_question_is_cut_to_what_the_server_takes_and_a_short_one_is_not_sent() async throws {
         let box = Box()
         let remote = brain(status: 200, json: #"{"text":["Hi"]}"#, box: box)
         _ = await remote.reply(to: LilBroQuestion(text: String(repeating: "a", count: 400)))
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: box.requests[0].httpBody!) as? [String: Any])
         XCTAssertEqual((body["question"] as? String)?.count, 300)
-        _ = await remote.reply(to: LilBroQuestion(text: "hi"))
+        let short = await remote.reply(to: LilBroQuestion(text: "hi"))
         XCTAssertEqual(box.requests.count, 1, "under three characters nothing is sent")
+        XCTAssertEqual(short, .tooShort, "no scripted answer on this Mac either")
     }
 
     /// The server counts Unicode scalars (builder review of #465, ticket
@@ -67,7 +68,7 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertLessThanOrEqual(sent["q"]!.unicodeScalars.count, 300)
         XCTAssertLessThanOrEqual(sent["a"]!.unicodeScalars.count, 600)
         XCTAssertFalse(sent["a"]!.hasPrefix(" "))
-        // Whitespace is collapsed as on the server; under three scalars stays local.
+        // Whitespace is collapsed as on the server; under three scalars is not sent.
         XCTAssertEqual(LilBroRemoteBrain.prepared("  how   do\nI  dictate "), "how do I dictate")
         XCTAssertNil(LilBroRemoteBrain.prepared(" a  "))
         XCTAssertFalse(LilBroRemoteBrain.sends("hi"))
@@ -85,7 +86,7 @@ final class LilBroRemoteBrainTests: XCTestCase {
                        [0x61, 0x20, 0x301, 0x20, 0x62])
         XCTAssertEqual(LilBroRemoteBrain.prepared("how\u{A0}do\u{2003}I\u{3000}dictate"), "how do I dictate")
         // A cluster longer than the limit is dropped and the space before it
-        // trimmed before the minimum: "ab" is too short, it stays local.
+        // trimmed before the minimum: "ab" is too short, it is not sent.
         XCTAssertNil(LilBroRemoteBrain.prepared("ab e" + String(repeating: "\u{301}", count: 300)))
         XCTAssertEqual(LilBroRemoteBrain.prepared("abc e" + String(repeating: "\u{301}", count: 300)), "abc")
         // Whatever is sent is already what the server makes of it.
@@ -111,14 +112,15 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertEqual(reply, .unavailable, "an unfollowed redirect reads as unavailable")
     }
 
-    func test_an_answer_names_a_feature_a_tab_or_the_keys() async {
+    func test_an_answer_names_a_feature_a_tab_or_the_keys() async throws {
         let feature = await brain(status: 200, json: """
             {"text":["Drop types what you say."],"bullets":["Download the model"],"followUps":["a","b","c"],
              "go":{"feature":"drop"},"offtopic":false,"cached":false}
             """).reply(to: LilBroQuestion(text: "dictation?"))
         XCTAssertEqual(feature, .answer(LilBroAnswer(paragraphs: ["Drop types what you say."],
                                                      bullets: ["Download the model"],
-                                                     destination: .feature(.drop), followUps: ["a", "b"])))
+                                                     destination: .feature(.drop))),
+                       "follow-up questions an older server still sends are not shown")
         let tab = await brain(status: 200, json: #"{"text":["Here."],"go":{"tab":"hotkeys"}}"#)
             .reply(to: LilBroQuestion(text: "shortcuts"))
         XCTAssertEqual(tab, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .tab(.hotkeys))))
@@ -128,6 +130,14 @@ final class LilBroRemoteBrainTests: XCTestCase {
                 .reply(to: LilBroQuestion(text: "where"))
             XCTAssertEqual(former, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .feature(feature))), raw)
         }
+        // REV 12: one row of a tab; an id this build does not know falls back to its tab.
+        let row = await brain(status: 200, json: #"{"text":["Here."],"go":{"row":"hotkeys.meetingRecord","tab":"hotkeys"}}"#)
+            .reply(to: LilBroQuestion(text: "hotkey for meetings"))
+        XCTAssertEqual(row, .answer(LilBroAnswer(paragraphs: ["Here."],
+                                                 destination: .row(try XCTUnwrap(LilBroRow.named("hotkeys.meetingRecord"))))))
+        let unknownRow = await brain(status: 200, json: #"{"text":["Here."],"go":{"row":"hotkeys.teleport","tab":"hotkeys"}}"#)
+            .reply(to: LilBroQuestion(text: "hotkey for teleport"))
+        XCTAssertEqual(unknownRow, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .tab(.hotkeys))))
         let keys = await brain(status: 200, json: #"{"text":["Here."],"go":{"keys":true}}"#)
             .reply(to: LilBroQuestion(text: "my key"))
         XCTAssertEqual(keys, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .apiKeys)))

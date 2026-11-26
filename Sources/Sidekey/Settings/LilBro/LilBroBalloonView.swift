@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The balloon over Lil Bro (variant C): the question, his answer, the place
-/// he opened and what to ask next. Earlier questions fold under "earlier";
+/// The balloon over Lil Bro (variant C): the question, his answer and the
+/// place he opened, if any. Earlier questions fold under "earlier";
 /// the ⋯ menu hides the little guy, clears and closes.
 @MainActor
 struct LilBroBalloonView: View {
@@ -12,21 +12,15 @@ struct LilBroBalloonView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             header
-            ScrollViewReader { scroll in
-                ScrollView(.vertical, showsIndicators: true) {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if controller.showEarlier { earlier }
-                        content
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 8) {
+                    if controller.showEarlier { earlier }
+                    content
                 }
-                .frame(maxHeight: max(80, maxHeight - 44))
-                .fixedSize(horizontal: false, vertical: true)
-                // Asked for, the disclosure's buttons come into view.
-                .onChange(of: controller.consentShown) { _, shown in
-                    if shown { scroll.scrollTo(LilBroOffer.id, anchor: .bottom) }
-                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: max(80, maxHeight - 44))
+            .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 13)
         .padding(.top, 10)
@@ -75,52 +69,13 @@ struct LilBroBalloonView: View {
 
     @ViewBuilder private var content: some View {
         if let turn = lastTurn, let reply = turn.reply {
-            LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
-                            mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+            LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
                             actions: actions, current: true, more: controller.showMore)
-            if let pressed = turn.pressed {
-                (Text(controller.mascotVisible ? "I pressed " : "Pressed ") + Text(pressed).fontWeight(.semibold)
-                    + Text("."))
-                    .font(.system(size: 12))
-                    .foregroundStyle(MacSettingsTheme.text2)
-            }
-            if let step = controller.proposal {
-                LilBroPressPrompt(action: step.action, steps: controller.proposalSteps,
-                                  confirm: controller.confirmProposal,
-                                  decline: controller.declineProposal)
-            }
-            offer(after: reply)
-        } else {
-            // No question yet: the balloon shows only when ⋯ asked for the
-            // disclosure; otherwise there is just the reply field.
-            offer(after: nil)
-        }
-    }
-
-    /// The disclosure where it belongs: after a question this Mac could not
-    /// answer, until answers were first turned on, or anywhere once ⋯ asked
-    /// for it — then with Not now. One line and its button; the full text
-    /// under Details.
-    @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
-        let asks = controller.turnOnAsks
-        switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
-                                     everOn: controller.preferences.answersEverOn,
-                                     consentShown: controller.consentShown) {
-        case .none:
-            EmptyView()
-        case .turnOn:
-            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() })
-                .id(LilBroOffer.id)
-        case .turnOnOrNotNow:
-            LilBroOffer(asks: asks, turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
-                .id(LilBroOffer.id)
         }
     }
 
     private var actions: LilBroReplyView.Actions {
-        LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
-                                turnOn: { controller.turnOnAnswers() },
-                                toggleMore: { controller.showMore.toggle() })
+        LilBroReplyView.Actions(retry: controller.retry, toggleMore: { controller.showMore.toggle() })
     }
 
     private var earlier: some View {
@@ -131,8 +86,7 @@ struct LilBroBalloonView: View {
                         + Text(turn.question).fontWeight(.semibold).foregroundStyle(MacSettingsTheme.text))
                         .font(.system(size: 11.5))
                     if let reply = turn.reply {
-                        LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
-                                        mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
+                        LilBroReplyView(reply: reply, opened: turn.opened, mascot: controller.mascotVisible,
                                         actions: .none, current: false)
                     }
                 }
@@ -151,29 +105,24 @@ struct LilBroBalloonView: View {
 }
 
 /// One reply's words: an answer with the place he opened, or why he could
-/// not answer. Earlier replies show the words only.
+/// not answer. Earlier replies show the words only. No ready-made questions
+/// and no "closest page": he opens a place only when the answer says so.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 10)
 struct LilBroReplyView: View {
     struct Actions {
-        var ask: (String) -> Void
         var retry: () -> Void
-        var open: (LilBroDestination) -> Void
-        var turnOn: () -> Void
         var toggleMore: () -> Void = {}
 
-        static let none = Actions(ask: { _ in }, retry: {}, open: { _ in }, turnOn: {})
+        static let none = Actions(retry: {})
     }
 
     let reply: LilBroReply
-    let question: String
     let opened: String?
     let mascot: Bool
-    let answersOn: Bool
     let actions: Actions
     let current: Bool
     /// The current answer's details are shown.
     var more = false
-
-    private var ask: (String) -> Void { actions.ask }
 
     /// A short answer first; the rest only on request. Earlier replies keep
     /// their first words only.
@@ -189,18 +138,16 @@ struct LilBroReplyView: View {
                         .padding(.leading, -6)
                     if more { details(answer) }
                 }
-            case .unknown(let suggestions):
-                paragraph(LilBroCopy.unknown)
-                if current { LilBroChips(items: suggestions.map { q in (q, false, { ask(q) }) }) }
+            case .tooShort:
+                paragraph(LilBroCopy.tooShort)
             case .offline:
                 paragraph(LilBroCopy.offline)
-                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)]) }
             case .unavailable:
                 paragraph(LilBroCopy.unavailable)
-                if current { LilBroChips(items: [("Try again", true, actions.retry)] + closest) }
+                if current { LilBroChips(items: [("Try again", true, actions.retry)]) }
             case .limit:
                 paragraph(LilBroCopy.limit)
-                if current { LilBroChips(items: closest) }
             }
             if let opened, !isAnswer {
                 openedLine(opened)
@@ -210,7 +157,7 @@ struct LilBroReplyView: View {
 
     /// Whether an answer has more than its first paragraph to show.
     static func hasDetails(_ answer: LilBroAnswer, opened: String?) -> Bool {
-        answer.paragraphs.count > 1 || !answer.bullets.isEmpty || opened != nil || !answer.followUps.isEmpty
+        answer.paragraphs.count > 1 || !answer.bullets.isEmpty || opened != nil
     }
 
     @ViewBuilder private func details(_ answer: LilBroAnswer) -> some View {
@@ -226,9 +173,6 @@ struct LilBroReplyView: View {
             }
         }
         if let opened { openedLine(opened) }
-        if !answer.followUps.isEmpty {
-            LilBroChips(items: answer.followUps.map { q in (q, false, { ask(q) }) })
-        }
     }
 
     private func openedLine(_ opened: String) -> some View {
@@ -242,14 +186,6 @@ struct LilBroReplyView: View {
         return false
     }
 
-    /// The closest page when whytap.ai cannot answer: one button, not a list.
-    private var closest: [(String, Bool, () -> Void)] {
-        let open = actions.open
-        return LilBroLocalGuide.closestPlaces(for: question).prefix(1).map { place in
-            ("Open \(place.title)", false, { open(place) })
-        }
-    }
-
     private func paragraph(_ text: String) -> some View {
         Text(text)
             .font(.system(size: 12.5))
@@ -258,92 +194,7 @@ struct LilBroReplyView: View {
     }
 }
 
-/// The one place answers from whytap.ai are turned on: one line and the
-/// button, the full text of what goes there and what stays on this Mac under
-/// Details, readable before the button is pressed. Nothing is sent before it.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-struct LilBroOffer: View {
-    /// After a question this Mac did not understand: the button also asks it.
-    var asks = false
-    let turnOn: () -> Void
-    var notNow: (() -> Void)? = nil
-    @State private var details = false
-
-    enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
-    static let id = "lilBro.offer"
-
-    /// Answers off: after a question this Mac could not answer it offers
-    /// Turn on answers, only until answers were first turned on; once ⋯
-    /// asked for it, it shows after any reply, with Not now. Never before a
-    /// question by itself.
-    static func placement(after reply: LilBroReply?, answersOn: Bool, everOn: Bool = false,
-                          consentShown: Bool) -> Placement {
-        guard !answersOn else { return .none }
-        if consentShown { return .turnOnOrNotNow }
-        return reply?.isUnknown == true && !everOn ? .turnOn : .none
-    }
-
-    /// The buttons it shows, in order.
-    var choices: [String] {
-        [asks ? LilBroCopy.turnOnAndAsk : LilBroCopy.turnOn] + (notNow == nil ? [] : [LilBroCopy.notNow])
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            Text(asks ? LilBroCopy.offerLineUnknown : LilBroCopy.offerLine)
-                .font(.system(size: 11.5))
-                .foregroundStyle(MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-            // On its own line, so the buttons never squeeze it.
-            LilBroTextButton(title: details ? "Hide details ⌃" : "Details ⌄",
-                             label: details ? "Hide what is sent" : "What is sent and kept") {
-                details.toggle()
-            }
-            .padding(.leading, -6)
-            if details {
-                Text(LilBroCopy.offer)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text2)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            LilBroChips(items: [(choices[0], true, turnOn)]
-                        + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Answers from whytap.ai")
-    }
-}
-
-/// "One step left: … Press it?" He presses only after Yes; the step runs the
-/// same action as the row's own button.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-struct LilBroPressPrompt: View {
-    let action: FeatureSetupAction
-    var steps = 1
-    let confirm: () -> Void
-    let decline: () -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            (Text(LilBroCopy.lead(steps) + " ") + Text(action.title).fontWeight(.semibold) + Text(". ")
-                + Text(LilBroCopy.consequence(of: action)) + Text(" Press it?"))
-                .font(.system(size: 12.5))
-                .foregroundStyle(MacSettingsTheme.text)
-                .fixedSize(horizontal: false, vertical: true)
-            LilBroChips(items: [(LilBroCopy.yes, true, confirm), (LilBroCopy.no, false, decline)])
-        }
-        .padding(9)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 8).fill(MacSettingsTheme.controlBg))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Press it?")
-    }
-}
-
-/// Rounded suggestion buttons that wrap to the balloon's width.
+/// Rounded buttons (Try again) that wrap to the balloon's width.
 struct LilBroChips: View {
     let items: [(String, Bool, () -> Void)]
 
@@ -550,9 +401,9 @@ struct LilBroReplyField: View {
     }
 }
 
-/// ⋯: hide the little guy, answers from whytap.ai on or off, clear, close.
-/// In the balloon's header, and next to the greeting once answers are on, so
-/// they can be turned off before a question is sent.
+/// ⋯: hide the little guy, clear, close. In the balloon's header and next to
+/// the greeting. Answers always come from whytap.ai, so there is no switch
+/// for them here (REV 13).
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 struct LilBroOptionsMenu: View {
@@ -577,12 +428,6 @@ struct LilBroOptionsMenu: View {
         Menu {
             Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
                 controller.setMascotVisible(!controller.mascotVisible)
-            }
-            if controller.answersFromWhytap {
-                Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
-            } else {
-                // Opens the disclosure; only its button turns answers on.
-                Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
             }
             if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
             Button("Close") { controller.close() }

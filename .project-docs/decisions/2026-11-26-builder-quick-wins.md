@@ -68,7 +68,13 @@ cost a noticeable part of each session.
   only with an unlocked screen, and the one install gate run right before
   every Quit (`build-queue-meeting-gate.py`) itself refuses a locked screen or
   a session not in front, read before and again after its audio samples
-  (a failed or malformed screen probe is never clear), so a recovered
+  (a failed or malformed screen probe is never clear; only typed values count:
+  an integer user ID, Boolean on-console and lock flags, a missing lock flag
+  read as unlocked, and two on-console sessions of one user are unknown). The
+  audio samples must still be at most 5 seconds old when the verdict is given,
+  judged by one freshness function at that moment, so a slow second screen
+  read cannot carry old evidence into a Quit; the samples keep their own time
+  and the verdict reports `decided_at` separately. So a recovered
   candidate or a screen that locked after packaging cannot reach the Quit, run the recorded tests on main before
   packaging, and a failure holds the install. `done` is refused while tests
   are pending.

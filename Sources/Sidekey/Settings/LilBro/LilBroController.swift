@@ -2,50 +2,34 @@ import AppKit
 import SwiftUI
 
 /// Whether the little guy runs around Settings (off leaves only the "Lil Bro"
-/// entry in the sidebar, which opens the same balloon), and whether his
-/// answers come from whytap.ai. Answers are off until the person turns them
-/// on in his balloon; until then he finds settings by name on this Mac.
+/// entry in the sidebar, which opens the same balloon). His answers always
+/// come from whytap.ai (Claude Sonnet 5.5): there is no switch to turn them
+/// off (the maintainer's decision, REV 13).
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
-    static let answersKey = "lilBro.answersFromWhytap"
-    static let answersEverOnKey = "lilBro.answersEverOn"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
-    @Published var answersFromWhytap: Bool {
-        didSet {
-            defaults.set(answersFromWhytap, forKey: Self.answersKey)
-            if answersFromWhytap { answersEverOn = true }
-        }
-    }
-    /// Answers were turned on at least once: after that the balloon no longer
-    /// offers them by itself (⋯ still does).
-    private(set) var answersEverOn: Bool {
-        didSet { defaults.set(answersEverOn, forKey: Self.answersEverOnKey) }
-    }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        let on = defaults.object(forKey: Self.answersKey) as? Bool ?? false
-        answersFromWhytap = on
-        answersEverOn = on || defaults.bool(forKey: Self.answersEverOnKey)
-        // Saved right away: an opt-in from before this marker existed stays
-        // known after turning answers off and relaunching.
-        if answersEverOn { defaults.set(true, forKey: Self.answersEverOnKey) }
     }
 }
 
 /// Lil Bro, the guide in the Settings window: where he stands, what he does,
-/// and his speech balloon. He walks the window like a map (run, jump, fetch
-/// the ladder), punches the row that opens the place he was asked about and
-/// opens it through the same calls the row itself makes. While his balloon is
-/// open he stands still; he runs home only after it is closed.
+/// and his speech balloon. Every question goes to whytap.ai; when the model
+/// says the person asked to go somewhere, he walks the window like a map
+/// (run, jump, fetch the ladder), punches the row that opens that place and
+/// opens it through the same calls the row itself makes. Otherwise the answer
+/// stays in the balloon. No scripted scenarios: he presses no setup step and
+/// offers no ready-made questions. While his balloon is open he stands still;
+/// he runs home only after it is closed.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
 @MainActor
 final class LilBroController: ObservableObject {
@@ -60,15 +44,9 @@ final class LilBroController: ObservableObject {
     struct Turn: Equatable, Identifiable {
         let id = UUID()
         let question: String
-        /// Asked with answers from whytap.ai on, so whytap.ai already has it.
-        /// Only such turns go back as earlier exchanges; a question asked on
-        /// this Mac never leaves it later.
-        var sentToWhytap = false
         var reply: LilBroReply?
         /// The place he opened for this answer, said under it.
         var opened: String?
-        /// The step he pressed after the person said yes.
-        var pressed: String?
     }
 
     struct Ladder: Equatable {
@@ -90,27 +68,20 @@ final class LilBroController: ObservableObject {
     /// The row he is punching, lit for the moment of the hit.
     @Published private(set) var flash: CGRect?
     @Published private(set) var placed = false
-    /// The step he asks "Press it?" about, waiting for the person's answer.
-    @Published private(set) var proposal: LilBroPressable?
-    /// Required steps still undone on that screen, the proposed one first.
-    @Published private(set) var proposalSteps = 0
-    /// A feature just opened whose rows have not reported yet: the offer
-    /// waits for them, and is dropped when anything else happens.
-    private var awaitingSteps: (feature: AppFeature, since: Date)?
-    /// How long a just-opened feature's rows may take to report.
-    static let stepsWait: TimeInterval = 2
     @Published var hovering = false
     @Published var showEarlier = false
     /// The current answer's details (more words, the place he opened,
     /// follow-up questions): hidden until asked for.
     @Published var showMore = false
     @Published var menuOpen = false
-    /// The disclosure before answers from whytap.ai, asked for from ⋯.
-    @Published private(set) var consentShown = false
 
     private(set) var map = LilBroMap()
-    /// The setup steps the screen now in the pane offers, in screen order.
-    private(set) var pressables: [LilBroPressable] = []
+    /// The row he led to (REV 12) while its tab shows it as focused: the
+    /// outline is that row's current place, gone while it is scrolled away
+    /// and back when it returns. Cleared with the focus (another tab, Clear,
+    /// a new question, closing).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder review of #493, ticket 627)
+    private(set) var leadRow: LilBroRow?
     private(set) var busy = false
     /// The spot he stands at after guiding, until the balloon closes.
     private var holding = false
@@ -120,9 +91,7 @@ final class LilBroController: ObservableObject {
 
     let selection: SettingsWindowSelection
     let preferences: LilBroPreferences
-    /// Finds settings by name on this Mac; used while answers are off.
-    let local: LilBroBrain
-    /// whytap.ai; asked only while answers are on.
+    /// whytap.ai, which answers every question.
     let remote: LilBroBrain
     private let reduceMotion: () -> Bool
     private let sleep: (TimeInterval) async -> Void
@@ -130,14 +99,12 @@ final class LilBroController: ObservableObject {
 
     init(selection: SettingsWindowSelection,
          preferences: LilBroPreferences? = nil,
-         local: LilBroBrain? = nil,
          remote: LilBroBrain? = nil,
          reduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
          sleep: @escaping (TimeInterval) async -> Void = { try? await Task.sleep(nanoseconds: UInt64(max(0, $0) * 1e9)) },
          now: @escaping () -> Date = Date.init) {
         self.selection = selection
         self.preferences = preferences ?? .shared
-        self.local = local ?? LilBroLocalGuide()
         self.remote = remote ?? LilBroRemoteBrain()
         self.reduceMotion = reduceMotion
         self.sleep = sleep
@@ -145,12 +112,10 @@ final class LilBroController: ObservableObject {
     }
 
     var mascotVisible: Bool { preferences.mascotVisible }
-    var answersFromWhytap: Bool { preferences.answersFromWhytap }
     var isOpen: Bool { bubble != .closed }
-    /// Opened before any question, only the reply field shows: no greeting,
-    /// no suggestions, no disclosure. The balloon appears with the first
-    /// answer (or when ⋯ asked for the disclosure).
-    var showsBalloon: Bool { !turns.isEmpty || consentShown }
+    /// Opened before any question, only the greeting and the reply field
+    /// show; the balloon appears with the first answer.
+    var showsBalloon: Bool { !turns.isEmpty }
     /// The line he greets with over the field, a different one each opening.
     private(set) var greeting = LilBroCopy.greetings[0]
     private var opened = 0
@@ -182,43 +147,6 @@ final class LilBroController: ObservableObject {
         mapChanged()
     }
 
-    func update(pressables: [LilBroPressable]) {
-        self.pressables = pressables
-        if let awaiting = awaitingSteps {
-            if now().timeIntervalSince(awaiting.since) > Self.stepsWait {
-                awaitingSteps = nil
-            } else if pressables.contains(where: { $0.feature == awaiting.feature }) {
-                offerNextStep(on: awaiting.feature)
-                return
-            }
-        }
-        // A step done, changed or left meanwhile is not asked about.
-        guard let proposal else { return }
-        if currentFeature == proposal.feature,
-           pressables.contains(where: { $0.isSameStep(as: proposal) && $0.hasButton }) {
-            let steps = requiredSteps(on: proposal.feature).count
-            // Unchanged steps publish nothing: the rows report on every layout.
-            if proposalSteps != steps { proposalSteps = steps }
-        } else {
-            dropProposal()
-        }
-    }
-
-    /// The feature screen open right now, if any.
-    var currentFeature: AppFeature? {
-        selection.selectedTab.resolved == .features ? selection.shownFeature : nil
-    }
-
-    private func requiredSteps(on feature: AppFeature) -> [LilBroPressable] {
-        pressables.filter { $0.feature == feature && !$0.optional }
-    }
-
-    private func dropProposal() {
-        proposal = nil
-        proposalSteps = 0
-        awaitingSteps = nil
-    }
-
     func update(bounds: CGRect) {
         map.bounds = bounds
         mapChanged()
@@ -232,10 +160,16 @@ final class LilBroController: ObservableObject {
             return
         }
         guard !busy, segment == nil else { return }
+        if let row = leadRow {
+            followLeadRow(row)
+            return
+        }
         if holding {
             // He stays with the block he brought the person to; if it
             // scrolled away, he waits at home.
-            if let target, map.platforms.contains(where: { abs($0.minY - target.minY) < 1 && abs($0.minX - target.minX) < 1 }) {
+            if let target, let same = map.platforms.first(where: { abs($0.minY - target.minY) < 1 && abs($0.minX - target.minX) < 1 }) {
+                // A last half-point of scrolling: the outline follows, he stays.
+                if same != target { self.target = same }
                 return
             }
             if let moved = nearestPlatform(to: target) {
@@ -252,6 +186,48 @@ final class LilBroController: ObservableObject {
         // At home: keep standing on the entry when the window resizes.
         if let home = map.home, abs(feet.y - (home.minY + 1)) > 2 || feet.x < home.minX || feet.x > home.maxX {
             feet = CGPoint(x: min(max(feet.x, home.minX + 16), home.maxX - 14), y: home.minY + 1)
+        }
+    }
+
+    /// The outline is the led row's place now; with the little guy he stands
+    /// on it while it shows, waits at home while it is scrolled away and is
+    /// back on it when it returns, for as long as the lead lasts (builder
+    /// review of #493, ticket 630).
+    private func followLeadRow(_ row: LilBroRow) {
+        guard leadIsActive(row) else { return endLead() }
+        let rect = map.visible(.row(row.id))
+        if target != rect { target = rect }
+        guard mascotVisible else { return }
+        if let rect {
+            let perch = LilBroPlanner.perch(on: rect)
+            if abs(perch.y - feet.y) >= 1 || abs(perch.x - feet.x) >= 1 { feet = perch }
+            if !holding {
+                holding = true
+                setPose(.point)
+            }
+        } else if holding {
+            holding = false
+            feet = map.homeStand
+            setPose(.idle)
+        }
+    }
+
+    /// The row is still the focused one on its own tab.
+    private func leadIsActive(_ row: LilBroRow) -> Bool {
+        selection.focusedRow == row.id && selection.selectedTab == row.tab.resolved
+    }
+
+    /// Ends a row lead: no outline; with the little guy he goes back home.
+    private func endLead() {
+        guard leadRow != nil else { return }
+        leadRow = nil
+        target = nil
+        if holding {
+            holding = false
+            if mascotVisible {
+                feet = map.homeStand
+                setPose(.idle)
+            }
         }
     }
 
@@ -301,7 +277,10 @@ final class LilBroController: ObservableObject {
 
     func close() {
         cancelJob()
-        dropProposal()
+        selection.focusedRow = nil
+        leadRow = nil
+        // A question closed before its reply came is dropped, not left empty.
+        if let last = turns.last, last.reply == nil { turns.removeLast() }
         bubble = .closed
         menuOpen = false
         showEarlier = false
@@ -317,54 +296,29 @@ final class LilBroController: ObservableObject {
         }
     }
 
+    /// ⋯ → Clear: also ends a question still on its way and the guide, so
+    /// no late reply lands and the entry stays usable (builder review of
+    /// #493, ticket 625).
     func clear() {
-        dropProposal()
+        stopPending()
         turns = []
         menuOpen = false
         showEarlier = false
         showMore = false
     }
 
-    /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-    func askToTurnOnAnswers() {
-        menuOpen = false
-        guard !answersFromWhytap else { return }
-        consentShown = true
-    }
-
-    /// The disclosure's Turn on answers button — the only way answers from
-    /// whytap.ai are turned on. Nothing is sent before it.
-    func turnOnAnswers() {
-        let askAgain = turnOnAsks
-        preferences.answersFromWhytap = true
-        consentShown = false
-        menuOpen = false
-        objectWillChange.send()
-        // "Turn on and ask": the question this Mac could not read goes to
-        // whytap.ai now, by this press; earlier ones stay here.
-        if askAgain { retry() }
-    }
-
-    /// The disclosure's button also asks the last question again: this Mac
-    /// did not understand it, and whytap.ai reads any language.
-    var turnOnAsks: Bool {
-        guard !busy, let last = turns.last, last.reply?.isUnknown == true else { return false }
-        // Too short for whytap.ai to take: the plain Turn on answers instead.
-        return LilBroRemoteBrain.sends(last.question)
-    }
-
-    /// The disclosure's Not now.
-    func dismissConsent() {
-        consentShown = false
-    }
-
-    /// ⋯ → Turn off answers from whytap.ai.
-    func turnOffAnswers() {
-        preferences.answersFromWhytap = false
-        consentShown = false
-        menuOpen = false
-        objectWillChange.send()
+    /// Ends the question on its way and any guiding: no late reply, no
+    /// navigation. He stays where he is with the balloon open.
+    private func stopPending() {
+        let pending = busy || bubble == .thinking
+        cancelJob()
+        selection.focusedRow = nil
+        endLead()
+        guard pending else { return }
+        target = nil
+        holding = false
+        if bubble != .closed { bubble = .full }
+        if mascotVisible { setPose(.idle) }
     }
 
     func setMascotVisible(_ visible: Bool) {
@@ -377,43 +331,55 @@ final class LilBroController: ObservableObject {
         setPose(.idle)
     }
 
-    /// Sends the draft or a suggested question.
+    /// Sends the typed question to whytap.ai. Under the three characters it
+    /// takes, nothing is sent and the reply says so.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 10, REV 13)
     func ask(_ raw: String) {
         let question = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !question.isEmpty else { return }
         menuOpen = false
         showEarlier = false
         showMore = false
-        dropProposal()
         cancelJob()
-        let remoteOn = answersFromWhytap
-        let asked = LilBroQuestion(text: question, screen: remoteOn ? screen : "", history: remoteOn ? history : [])
-        turns.append(Turn(question: question, sentToWhytap: remoteOn && LilBroRemoteBrain.sends(question)))
+        target = nil
+        selection.focusedRow = nil
+        leadRow = nil
+        guard LilBroRemoteBrain.sends(question) else {
+            turns.append(Turn(question: question, reply: .tooShort))
+            if mascotVisible { setPose(.idle) }
+            bubble = .full
+            announce(turns[turns.count - 1])
+            return
+        }
+        let asked = LilBroQuestion(text: question, screen: screen, history: history)
+        turns.append(Turn(question: question))
         let index = turns.count - 1
         bubble = .thinking
         busy = true
-        target = nil
         if mascotVisible { setPose(.think) }
-        let brain = remoteOn ? remote : local
+        let brain = remote
         job = Task { [weak self] in
             guard let self else { return }
+            // Checked again right before it leaves: a question cleared
+            // meanwhile sends nothing.
+            guard !Task.isCancelled, index < turns.count else { return }
             let reply = await brain.reply(to: asked)
+            // A reply after Clear or a new question is ignored.
             guard !Task.isCancelled, index < turns.count else { return }
             turns[index].reply = reply
             switch reply {
             case .answer(let answer):
+                // A place only when the model said the person asked for it.
                 if let destination = answer.destination {
-                    await guide(to: destination)
+                    let arrived = await guide(to: destination)
                     // Said only once the place is really open.
                     guard !Task.isCancelled else { return }
-                    turns[index].opened = destination.title
-                    if case .feature(let feature) = destination {
-                        offerNextStep(on: feature)
-                        await stepsReported()
-                        guard !Task.isCancelled else { return }
-                    }
+                    if arrived { turns[index].opened = destination.title }
+                } else if mascotVisible {
+                    // Answered in words: he stays where he is.
+                    setPose(.idle)
                 }
-            case .offline, .unavailable, .limit, .unknown:
+            case .offline, .unavailable, .limit, .tooShort:
                 if mascotVisible { setPose(.sad) }
             }
             guard !Task.isCancelled else { return }
@@ -431,29 +397,6 @@ final class LilBroController: ObservableObject {
         ask(last.question)
     }
 
-    /// A page he offers when whytap.ai cannot answer: he runs there and opens it.
-    func open(_ destination: LilBroDestination) {
-        guard !busy else { return }
-        menuOpen = false
-        cancelJob()
-        busy = true
-        let index = turns.indices.last
-        job = Task { [weak self] in
-            guard let self else { return }
-            await guide(to: destination)
-            guard !Task.isCancelled else { return }
-            if let index, index < turns.count { turns[index].opened = destination.title }
-            if case .feature(let feature) = destination {
-                offerNextStep(on: feature)
-                await stepsReported()
-                guard !Task.isCancelled else { return }
-            }
-            busy = false
-            bubble = .full
-            job = nil
-        }
-    }
-
     /// The screen he is asked from, as the server reads it: `tab` or `tab/feature`.
     var screen: String {
         let tab = selection.selectedTab.resolved.rawValue
@@ -464,95 +407,12 @@ final class LilBroController: ObservableObject {
     }
 
     /// Up to three earlier exchanges answered by whytap.ai, oldest first.
-    /// Questions asked while answers were off stay on this Mac.
     var history: [LilBroQuestion.Exchange] {
         turns.compactMap { turn in
-            guard turn.sentToWhytap, case .answer(let answer) = turn.reply else { return nil }
+            guard case .answer(let answer) = turn.reply else { return nil }
             return LilBroQuestion.Exchange(question: turn.question,
                                            answer: (answer.paragraphs + answer.bullets).joined(separator: "\n"))
         }.suffix(3).map { $0 }
-    }
-
-    // MARK: Pressing, after a yes
-
-    /// On a feature's screen, the first required step still undone: he asks
-    /// "Press it?" and waits.
-    private func offerNextStep(on feature: AppFeature) {
-        dropProposal()
-        guard currentFeature == feature else { return }
-        guard pressables.contains(where: { $0.feature == feature }) else {
-            // Its rows have not reported yet (the list may still be the last
-            // screen's): offer when they do, shortly after.
-            awaitingSteps = (feature, now())
-            return
-        }
-        let steps = requiredSteps(on: feature)
-        // The first required step; one the row does not offer as a button
-        // (a model picker) is left to the person, and so are the rest.
-        guard let first = steps.first, first.hasButton else { return }
-        proposal = first
-        proposalSteps = steps.count
-    }
-
-    /// Waits briefly for a new screen's setup steps, so the balloon opens
-    /// with its "Press it?" already in place instead of growing under the
-    /// person's eyes a moment later.
-    private func stepsReported() async {
-        for _ in 0..<12 where awaitingSteps != nil {
-            await sleep(0.05)
-            if Task.isCancelled { return }
-        }
-    }
-
-    /// The person said yes: he runs to the row, punches it, and the row's own
-    /// action runs. Nothing is pressed without this call.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-    func confirmProposal() {
-        guard let step = proposal, !busy else { return }
-        dropProposal()
-        cancelJob()
-        let index = turns.indices.last
-        busy = true
-        job = Task { [weak self] in
-            guard let self else { return }
-            if mascotVisible, !reduceMotion() {
-                bubble = .tag("Pressing it…")
-                if let rect = await visibleSpot(.need(step.id)) {
-                    holding = false
-                    await walk(to: LilBroPlanner.perch(on: rect))
-                    guard !Task.isCancelled else { return }
-                    await punch(rect)
-                }
-            }
-            guard !Task.isCancelled else { return }
-            // Checked again right before pressing: still this feature's screen
-            // and the very step that was approved, through the row's current
-            // registration. Otherwise nothing is pressed.
-            guard currentFeature == step.feature,
-                  let live = pressables.first(where: { $0.isSameStep(as: step) && $0.hasButton })
-            else {
-                if mascotVisible { setPose(.idle) }
-                busy = false
-                bubble = .full
-                announce(LilBroCopy.stepChanged)
-                job = nil
-                return
-            }
-            live.perform(live.action)
-            if let index, index < turns.count { turns[index].pressed = step.action.title }
-            await settle()
-            guard !Task.isCancelled else { return }
-            if mascotVisible { setPose(.done) }
-            busy = false
-            bubble = .full
-            announce(LilBroCopy.pressed(step.action))
-            job = nil
-        }
-    }
-
-    /// "I'll do it": nothing is pressed.
-    func declineProposal() {
-        dropProposal()
     }
 
     // MARK: Guiding
@@ -579,52 +439,139 @@ final class LilBroController: ObservableObject {
             return [Stop(spot: .tab(tab.resolved)) { selection.select(tab) }]
         case .apiKeys:
             return [Stop(spot: .tab(.apiAndModels)) { selection.showAPIKeys() }]
+        case .row(let row):
+            // The tab's sidebar row, as a person would click it; the row
+            // itself is scrolled to and outlined after it opens.
+            if selection.selectedTab == row.tab.resolved { return [] }
+            return [Stop(spot: .tab(row.tab.resolved)) { selection.select(row.tab) }]
         }
     }
 
-    private func guide(to destination: LilBroDestination) async {
+    /// Runs there and opens it. False when a row could not be shown (the
+    /// person left its tab meanwhile, or it never appeared): nothing is
+    /// outlined, their tab stays, and the row is not said to be opened.
+    @discardableResult
+    private func guide(to destination: LilBroDestination) async -> Bool {
         let stops = stops(for: destination)
+        var row: LilBroRow?
+        if case .row(let led) = destination { row = led }
         // WHY: a closed balloon or a new question cancels this job; after every
         // wait it checks before pressing a row or moving him, so a cancelled
         // guide never navigates.
         guard mascotVisible, !reduceMotion() else {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             stops.forEach { $0.press() }
             await settle()
-            guard !Task.isCancelled else { return }
-            if mascotVisible { arrive() }
-            return
+            guard !Task.isCancelled else { return false }
+            // Without the little guy only a row he was asked about is
+            // outlined; he never moves.
+            guard mascotVisible || row != nil else { return true }
+            let block = await landing(for: destination)
+            guard !Task.isCancelled else { return false }
+            guard let block else { return row == nil }
+            if let row { leadRow = row }
+            target = block
+            if mascotVisible {
+                feet = LilBroPlanner.perch(on: block)
+                holding = true
+                setPose(.point)
+            }
+            return true
         }
         bubble = .tag("On my way…")
+        // Where the window is as far as he knows; a click of the person's
+        // own during his run or punch changes it, and then he presses
+        // nothing more (builder review of #493, ticket 631).
+        var expected = place
         for stop in stops {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
             if let rect = await visibleSpot(stop.spot) {
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return false }
                 await walk(to: LilBroPlanner.perch(on: rect))
-                guard !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return false }
                 await punch(rect)
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else { return false }
+            guard place == expected else {
+                // The person went somewhere themselves: their choice stays.
+                if row != nil, selection.focusedRow == row?.id { selection.focusedRow = nil }
+                feet = map.homeStand
+                setPose(.idle)
+                return false
+            }
             stop.press()
             await settle()
+            expected = place
         }
-        guard !Task.isCancelled else { return }
-        if let block = firstPaneBlock() {
-            await walk(to: LilBroPlanner.perch(on: block))
-            guard !Task.isCancelled else { return }
+        guard !Task.isCancelled else { return false }
+        let landing = await landing(for: destination)
+        guard !Task.isCancelled else { return false }
+        guard let block = landing else {
+            // A row he could not show: back at home, nothing claimed.
+            if row != nil { feet = map.homeStand }
+            setPose(.idle)
+            return row == nil
+        }
+        await walk(to: LilBroPlanner.perch(on: block))
+        guard !Task.isCancelled else { return false }
+        if let row {
+            // Left its tab while he ran there: nothing to outline.
+            guard leadIsActive(row), let now = map.visible(.row(row.id)) else {
+                if selection.focusedRow == row.id { selection.focusedRow = nil }
+                feet = map.homeStand
+                setPose(.idle)
+                return false
+            }
+            leadRow = row
+            target = now
+            feet = LilBroPlanner.perch(on: now)
+        } else {
+            // The person went elsewhere while he walked to the card: he
+            // outlines nothing on their screen.
+            guard place == expected, map.platforms.contains(block) else {
+                feet = map.homeStand
+                setPose(.idle)
+                return true
+            }
             target = block
-            holding = true
         }
-        setPose(.point)
-    }
-
-    /// Reduced motion or no mascot: he appears on the block he opened.
-    private func arrive() {
-        guard let block = firstPaneBlock() else { return }
-        feet = LilBroPlanner.perch(on: block)
-        target = block
         holding = true
         setPose(.point)
+        return true
+    }
+
+    /// The window's place as far as guiding goes: tab and feature screen.
+    private struct Place: Equatable {
+        let tab: SettingsWindowTab
+        let feature: AppFeature?
+    }
+
+    private var place: Place { Place(tab: selection.selectedTab, feature: selection.shownFeature) }
+
+    /// Where he stands and what he outlines once the place is open: the row
+    /// he was asked about, scrolled into view, or the screen's first block.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
+    private func landing(for destination: LilBroDestination) async -> CGRect? {
+        guard case .row(let row) = destination else { return firstPaneBlock() }
+        // The person's tab wins: if they left the row's tab while it opened,
+        // the lead ends here and their choice stays (builder review of #493,
+        // ticket 630). Only the focus is set, never the tab again.
+        guard selection.selectedTab == row.tab.resolved else { return nil }
+        selection.focusedRow = row.id
+        // The tab scrolls to it (0.3 s); the row counts once it stands still,
+        // while it is still the focused row on its own tab. Never another
+        // card instead.
+        var last: CGRect?
+        for _ in 0..<30 {
+            guard leadIsActive(row) else { return nil }
+            let rect = map.visible(.row(row.id))
+            if let rect, rect == last, map.platforms.contains(rect) { return rect }
+            last = rect
+            await sleep(0.05)
+            if Task.isCancelled { return nil }
+        }
+        guard leadIsActive(row) else { return nil }
+        return map.visible(.row(row.id))
     }
 
     /// The first block of the screen now in the pane.
@@ -785,15 +732,14 @@ final class LilBroController: ObservableObject {
 
     private func announce(_ turn: Turn) {
         guard let reply = turn.reply else { return }
-        var text: String
+        let text: String
         switch reply {
         case .answer(let answer): text = answer.paragraphs.first ?? ""
-        case .unknown: text = LilBroCopy.unknown
+        case .tooShort: text = LilBroCopy.tooShort
         case .offline: text = LilBroCopy.offline
         case .unavailable: text = LilBroCopy.unavailable
         case .limit: text = LilBroCopy.limit
         }
-        if let proposal { text += " " + LilBroCopy.ask(proposal.action, steps: proposalSteps) }
         announce(text)
     }
 
@@ -812,57 +758,10 @@ enum LilBroCopy {
         "Sup bro, where we headed?",
         "Hey hey. What's the move?",
     ]
-    /// The disclosure folded to one line; the full text is under Details.
-    static let offerLine = "Real answers come from whytap.ai (Claude Sonnet 5.5)."
-    /// After a question this Mac did not understand.
-    static let offerLineUnknown = "whytap.ai (Claude Sonnet 5.5) understands questions in any language."
-    static let turnOnAndAsk = "Turn on and ask"
-    /// Said once, before anything is sent, with the button that turns answers on.
-    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
-    static let turnOn = "Turn on answers"
-    static let notNow = "Not now"
-    static let unknown = "I only know Settings by name. Try one of these:"
-    static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"
-    static let unavailable = "whytap.ai can’t answer right now. Settings still work; this is the closest page:"
-    static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow. Settings still work — closest page:"
+    static let offline = "I can’t reach whytap.ai — no internet, so answers aren’t available right now."
+    static let unavailable = "whytap.ai can’t answer right now."
+    static let limit = "I’ve answered as many questions as I can today. I’ll be back tomorrow."
+    static let tooShort = "Tell me a bit more — a few words is enough."
     static let catchMe = "Catch me"
-    static let yes = "Yes, press it"
-    static let no = "I’ll do it"
-
-    /// "One step left: Download free model. It downloads about 470 MB to this
-    /// Mac. Press it?" or, with more required, "3 steps left. First: …".
-    static func ask(_ action: FeatureSetupAction, steps: Int) -> String {
-        "\(lead(steps)) \(action.title). \(consequence(of: action)) Press it?"
-    }
-
-    static func lead(_ steps: Int) -> String {
-        steps > 1 ? "\(steps) steps left. First:" : "One step left:"
-    }
-
-    static let stepChanged = "That step changed, so I didn’t press it."
-
-    static func pressed(_ action: FeatureSetupAction) -> String {
-        "I pressed \(action.title)."
-    }
-
-    /// What pressing the step does, said before the person agrees.
-    static func consequence(of action: FeatureSetupAction) -> String {
-        switch action {
-        case .downloadOnDeviceModel:
-            return "It downloads \(OnDeviceSpeechModel.parakeetTdtV3.approximateSize) to this Mac."
-        case .useOnDeviceModel(let feature):
-            return "\(feature.title) will use the free model on this Mac."
-        case .chooseModel, .addKey, .fixKey, .addOpenAIKey:
-            return "It opens API & Models."
-        case .allow:
-            return "macOS asks you to allow it, or System Settings opens where you turn it on."
-        case .openInputMonitoring:
-            return "System Settings opens at Input Monitoring."
-        case .restartWhytap:
-            return "Whytap quits and opens again; Settings closes."
-        case .retryShortcut:
-            return "Whytap tries to register the shortcut again."
-        }
-    }
     static let placeholder = "Ask Lil Bro…"
 }

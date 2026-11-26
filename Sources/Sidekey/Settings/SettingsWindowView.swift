@@ -138,7 +138,6 @@ struct SettingsWindowView: View {
         .coordinateSpace(name: LilBroSpace.name)
         .onPreferenceChange(LilBroSpotsKey.self) { lilBro.update(spots: $0) }
         .onPreferenceChange(LilBroBlocksKey.self) { lilBro.update(blocks: $0) }
-        .onPreferenceChange(LilBroPressablesKey.self) { lilBro.update(pressables: $0) }
         .onAppear { lilBro.startWandering() }
         .onDisappear { lilBro.stopWandering() }
     }
@@ -270,7 +269,7 @@ struct SettingsWindowView: View {
                              initialSection: selection.requestedAPISection ?? .models)
                 .onAppear { selection.requestedAPISection = nil }
         case .hotkeys:
-            HotkeysSettingsView()
+            HotkeysSettingsView(focusedRow: selection.focusedRow)
         case .permissions:
             SettingsPermissionsView(viewModel: permissionsViewModel)
         case .notes:
@@ -391,6 +390,9 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
     @Published var shownFeature: AppFeature?
+    /// The row Lil Bro led to (`LilBroRow.id`): its tab scrolls to it while
+    /// it is set. Any other tab choice clears it.
+    @Published var focusedRow: String?
     /// The part of Keys & models to open on next (API keys from a feature's
     /// screen); Keys & models takes it once and clears it.
     @Published var requestedAPISection: APIAndModelsSection?
@@ -423,7 +425,15 @@ final class SettingsWindowSelection: ObservableObject {
         // A link to the old Agents or Notifications tab opens the Agent's or
         // Notify's own screen.
         if availableTab == .features { shownFeature = tab.featureScreen }
+        focusedRow = nil
         selectedTab = availableTab
+    }
+
+    /// Opens a row's tab scrolled to that row (Lil Bro's lead).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
+    func focus(_ row: LilBroRow) {
+        if selectedTab != row.tab.resolved { select(row.tab) }
+        focusedRow = row.id
     }
 
     /// Opens a feature from the Features list: its own screen when it has one,

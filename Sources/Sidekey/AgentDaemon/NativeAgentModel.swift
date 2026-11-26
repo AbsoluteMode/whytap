@@ -147,8 +147,15 @@ struct NativeAgentModel {
                 request = try NativeAgentHTTP.request(url: URL(string: "https://api.openai.com/v1/responses")!, key: key, body: body,
                                                       timeout: Self.directTimeout)
             case .anthropic:
+                // The tools and the system prompt (about 15k tokens with
+                // Anthropic's search tool) are the same on every request of a
+                // turn and across turns: one cache breakpoint after them lets
+                // later requests read them instead of processing them again.
+                // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
                 var body: [String: Any] = [
-                    "model": model, "system": system, "messages": messages, "max_tokens": outputLimit,
+                    "model": model,
+                    "system": [["type": "text", "text": system, "cache_control": ["type": "ephemeral"]]],
+                    "messages": messages, "max_tokens": outputLimit,
                     "tools": tools.map { tool -> [String: Any] in
                         var result: [String: Any] = ["name": tool["name"]!, "description": tool["description"]!, "input_schema": tool["parameters"]!]
                         if let strict = tool["strict"] as? Bool { result["strict"] = strict }

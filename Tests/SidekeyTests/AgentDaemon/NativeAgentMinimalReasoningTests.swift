@@ -123,11 +123,10 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(accepted.usage?.thinking, 0)
     }
 
-    /// Claude Sonnet 5.5 cannot take `disabled`. Without the provider's
-    /// search it gets `between_tools`; in a turn with that search it keeps
-    /// its own thinking at low effort, because with `between_tools` it
-    /// repeats finish_answer after a search.
-    func testSonnetGetsBetweenToolsOnlyInATurnWithoutProviderSearch() async throws {
+    /// Claude Sonnet 5.5 cannot take `disabled`: it gets `between_tools`
+    /// with and without the provider's search (its own default thinking
+    /// held the first byte about 9 s on a weather question, 2026-11-26).
+    func testSonnetGetsBetweenToolsWithAndWithoutProviderSearch() async throws {
         let plain = try await run("160 умножить на 120", anthropic("claude-sonnet-5-5", search: false), [
             json(["stop_reason": "end_turn", "content": [["type": "text", "text": "19 200"]]])
         ])
@@ -143,8 +142,9 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         ])
         XCTAssertEqual(searching.store.status, .ready, searching.store.errorMessage ?? "")
         XCTAssertEqual(searching.bodies.map(effort), ["low", "low"])
-        XCTAssertEqual(searching.bodies.map(thinking), [nil, nil])
-        XCTAssertNil(searching.diagnostics.last?.thinking)
+        XCTAssertEqual(searching.bodies.map(thinking), ["between_tools", "between_tools"])
+        XCTAssertTrue(toolTypes(searching.bodies[0]).contains("web_search_20250305"))
+        XCTAssertEqual(searching.diagnostics.last?.thinking, .betweenTools)
     }
 
     /// The shared table decides per model: Claude Sonnet 5 turns thinking
@@ -476,7 +476,7 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
         XCTAssertEqual(result.bodies.count, 3)
         XCTAssertEqual(result.bodies.map { toolTypes($0).contains("web_search_20250305") }, [true, false, false])
-        XCTAssertEqual(result.bodies.map(thinking), [nil, "between_tools", "between_tools"])
+        XCTAssertEqual(result.bodies.map(thinking), ["between_tools", "between_tools", "between_tools"])
         XCTAssertEqual(result.bodies.map(effort), ["low", "low", "low"])
     }
 
@@ -550,5 +550,59 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         let routed = try await run("hi", options, [upstream, json(routerFinal("Hello."))])
         XCTAssertEqual(routed.store.streamingText, "Hello.")
         XCTAssertEqual(routed.bodies.count, 2)
+    }
+
+    /// 2026-11-26: Claude Sonnet 5.5 with `between_tools` after a search
+    /// may write finish_answer more than once; the first valid call is the
+    /// answer and the turn ends with it. A batch mixing finish_answer with
+    /// another tool still fails, and so do only invalid finish_answer calls.
+    func testRepeatedFinishAnswerTakesTheFirstValidCall() async throws {
+        func use(_ id: String, _ input: [String: Any], name: String = "finish_answer") -> [String: Any] {
+            ["type": "tool_use", "id": id, "name": name, "input": input]
+        }
+        let invalid: [String: Any] = ["status": "answered", "answer": "", "sources": [], "actions": []]
+        let repeated = try await run("погода в спб", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", invalid), use("f2", finish("Около −2°, ясно.")),
+                                                         use("f3", finish("Second copy."))]]),
+            json(anthropicFinal("never")),
+        ])
+        XCTAssertEqual(repeated.store.status, .ready, repeated.store.errorMessage ?? "")
+        XCTAssertEqual(repeated.store.streamingText, "Около −2°, ясно.")
+        XCTAssertEqual(repeated.bodies.count, 1, "the turn ends on the first valid answer")
+
+        let mixed = try await run("hi", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", finish("Hi.")), use("t1", ["path": NSNull()], name: "list_directory")]]),
+        ])
+        XCTAssertEqual(mixed.store.status, .failed)
+        let none = try await run("hi", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", invalid), use("f2", invalid)]]),
+        ])
+        XCTAssertEqual(none.store.status, .failed)
+    }
+
+    /// 2026-11-26: Claude copied its search citation tags into the answer
+    /// (`(cite index="1-9">` with no closing tag). They are removed on
+    /// Claude turns, the cited words kept; code and other providers stay.
+    func testClaudeCitationTagsAreRemovedFromTheAnswer() async throws {
+        let answer = "Около −2°.\n\n- <cite index=\"1-9\">Днём −3…0°, без осадков.</cite>\n- `<cite index=\"1\">` stays in code."
+        let result = try await run("погода в спб", anthropic("claude-sonnet-5-5"), [json(anthropicFinal(answer))])
+        XCTAssertEqual(result.store.streamingText, "Около −2°.\n\n- Днём −3…0°, без осадков.\n- `<cite index=\"1\">` stays in code.")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("a <cite>b</cite> c"), "a b c")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<citeX> and <citation>"), "<citeX> and <citation>")
+        let openAI = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("<cite index=\"1\">kept</cite>"))])
+        XCTAssertEqual(openAI.store.streamingText, "<cite index=\"1\">kept</cite>")
+    }
+
+    /// The tools and system prompt are one prompt-cache prefix on every
+    /// direct Anthropic request; OpenAI and OpenRouter bodies are unchanged.
+    func testAnthropicSystemPromptIsMarkedForThePromptCache() async throws {
+        let result = try await run("hi", anthropic("claude-haiku-5-5"), [json(anthropicFinal("Hello."))])
+        let system = try XCTUnwrap(result.bodies.first?["system"] as? [[String: Any]])
+        XCTAssertEqual(system.count, 1)
+        XCTAssertEqual(system[0]["type"] as? String, "text")
+        XCTAssertTrue((system[0]["text"] as? String)?.contains("finish_answer") == true)
+        XCTAssertEqual((system[0]["cache_control"] as? [String: Any])?["type"] as? String, "ephemeral")
+        let direct = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("Hello."))])
+        XCTAssertTrue(direct.bodies.first?["instructions"] is String)
     }
 }

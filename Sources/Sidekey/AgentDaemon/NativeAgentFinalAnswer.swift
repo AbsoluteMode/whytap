@@ -49,9 +49,14 @@ struct NativeAgentFinalAnswer {
 
     /// `openAICitations`: the turn ran on OpenAI (directly or an `openai/`
     /// model on OpenRouter), whose built-in search can leave its citation
-    /// markup in the text; other providers' output is never touched.
-    init(arguments: [String: Any], openAICitations: Bool = true) throws {
-        let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
+    /// markup in the text. `anthropicCitations`: the turn ran on a Claude
+    /// model, which after its web search can copy its citation tags
+    /// (`<cite index="1-9">`) into finish_answer. Other output is never touched.
+    init(arguments: [String: Any], openAICitations: Bool = true, anthropicCitations: Bool = false) throws {
+        let clean: (String) -> String = {
+            let text = openAICitations ? Self.withoutProviderCitationMarks($0) : $0
+            return anthropicCitations ? Self.withoutCitationTags(text) : text
+        }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
               let answer = arguments["answer"] as? String,
@@ -132,6 +137,30 @@ struct NativeAgentFinalAnswer {
         }
         return result as String
     }
+
+    /// Claude's web search citation tags copied into an answer:
+    /// `<cite index="1-9">` and `</cite>` are removed and the cited words
+    /// kept, outside literal spans (code, quotes) as for OpenAI's marks.
+    /// WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+    static func withoutCitationTags(_ text: String) -> String {
+        guard text.contains("cite"), let regex = citationTag else { return text }
+        let string = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: string.length))
+        // The tag's own quotes are not literal text: spans are found with
+        // each tag replaced by letters (spaces could make indented code).
+        let masked = NSMutableString(string: text)
+        for match in matches { masked.replaceCharacters(in: match.range, with: String(repeating: "x", count: match.range.length)) }
+        let literal = literalRanges(in: masked as String)
+        var result = text as NSString
+        for match in matches.reversed() {
+            guard !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) else { continue }
+            result = result.replacingCharacters(in: match.range, with: "") as NSString
+        }
+        return result as String
+    }
+
+    private static let citationTag = try? NSRegularExpression(
+        pattern: #"</cite>|<cite(?:\s+index="[0-9,\- ]*")?\s*>"#)
 
     private static let citationMarkup = try? NSRegularExpression(
         pattern: "(?:^|[ \\t]+)(\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201})(?=$|[\\s.,;:!?)\\]])",

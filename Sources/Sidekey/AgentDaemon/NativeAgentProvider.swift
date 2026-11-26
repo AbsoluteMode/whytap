@@ -186,7 +186,7 @@ final class NativeAgentProvider: CLIProvider {
                 guard options.openCodeProvider == .anthropic, model.plainTextReply,
                       let plain = try? NativeAgentFinalAnswer(arguments: ["status": "answered", "answer": text,
                                                                          "sources": [], "actions": []],
-                                                              openAICitations: false)
+                                                              openAICitations: false, anthropicCitations: true)
                 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 completion = plain
             } else if calls.count == 1, calls[0].name == NativeAgentFinalAnswer.toolName, model.pendingSearch {
@@ -197,14 +197,20 @@ final class NativeAgentProvider: CLIProvider {
             } else if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
                 // Reject a mixed batch before executing it: a final response
                 // cannot know whether a sibling write/command will succeed.
-                guard calls.count == 1 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-                do {
-                    completion = try NativeAgentFinalAnswer(
-                        arguments: calls[0].arguments,
-                        openAICitations: options.openCodeProvider == .openAI
-                            || (options.openCodeProvider == .openRouter && options.model?.lowercased().hasPrefix("openai/") == true))
+                // Several finish_answer calls alone (Claude Sonnet 5.5 with
+                // between_tools after a search has repeated it): the first
+                // valid one is the answer and the turn ends there.
+                // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+                guard calls.allSatisfy({ $0.name == NativeAgentFinalAnswer.toolName }) else {
+                    throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted)
                 }
-                catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                let modelID = options.model?.lowercased() ?? ""
+                let openAI = options.openCodeProvider == .openAI || (options.openCodeProvider == .openRouter && modelID.hasPrefix("openai/"))
+                let claude = options.openCodeProvider == .anthropic || (options.openCodeProvider == .openRouter && modelID.hasPrefix("anthropic/"))
+                guard let first = calls.lazy.compactMap({
+                    try? NativeAgentFinalAnswer(arguments: $0.arguments, openAICitations: openAI, anthropicCitations: claude)
+                }).first else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                completion = first
             } else {
                 completion = nil
             }
@@ -297,7 +303,8 @@ final class NativeAgentProvider: CLIProvider {
     Finish after all tools have completed. Free text outside finish_answer is not a final answer.
     Simple timeless questions need no evidence tools; finish directly. Search the web for current external facts,
     normally one search and at most two; cite the supporting URLs. Without web search, say so
-    briefly instead of inventing recent facts.
+    briefly instead of inventing recent facts. Write the answer as plain prose: no <cite> tags
+    or citation markup; the pages go into finish_answer.sources.
     You have a dedicated workspace with AGENTS.md for concise durable preferences and facts.
     Its relevant contents are supplied at the start; no bootstrap command or directory scan
     is needed. Save useful new facts there only when file edits are enabled. Never save secrets.

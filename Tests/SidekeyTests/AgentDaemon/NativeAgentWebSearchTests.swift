@@ -54,6 +54,13 @@ final class NativeAgentWebSearchTests: XCTestCase {
         }.flatMap { $0 }.filter { if case .link = $0 { return true }; return false }
     }
 
+    /// The Anthropic system prompt: one text block marked for the prompt cache.
+    static func systemText(_ body: [String: Any]) -> String {
+        guard let blocks = body["system"] as? [[String: Any]], blocks.count == 1,
+              (blocks[0]["cache_control"] as? [String: Any])?["type"] as? String == "ephemeral" else { return "" }
+        return blocks[0]["text"] as? String ?? ""
+    }
+
     func finalText(_ events: [AgentSSEEvent]) -> String? {
         events.compactMap { if case .finalAnswer(let text) = $0 { return text }; return nil }.first
     }
@@ -202,7 +209,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         let tools = try XCTUnwrap(try body(0)["tools"] as? [[String: Any]])
         XCTAssertFalse(tools.contains { $0["type"] as? String == "web_search_20250305" })
         XCTAssertTrue(tools.contains { $0["name"] as? String == "web_search" && $0["input_schema"] != nil })
-        XCTAssertTrue((try body(0)["system"] as? String)?.contains("(Tavily)") == true)
+        XCTAssertTrue(Self.systemText(try body(0)).contains("(Tavily)"))
     }
 
     // MARK: - Anthropic without Tavily
@@ -245,7 +252,7 @@ final class NativeAgentWebSearchTests: XCTestCase {
         XCTAssertEqual(server["max_uses"] as? Int, 2)
         XCTAssertFalse(tools.contains { $0["name"] as? String == "web_search" && $0["input_schema"] != nil },
                        "No Tavily function beside the provider tool")
-        XCTAssertTrue((first["system"] as? String)?.contains("built-in web_search tool") == true)
+        XCTAssertTrue(Self.systemText(first).contains("built-in web_search tool"))
         // The paused content goes back verbatim, encrypted state included.
         let second = try body(1)
         let replayed = try XCTUnwrap((second["messages"] as? [[String: Any]])?.last)

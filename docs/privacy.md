@@ -40,8 +40,9 @@ are verifiable rather than slogans.
 - A coding tool with the Whytap plugin (Claude Code, Codex) reads your meeting
   notes and transcripts only after you answer Yes to Whytap's question for
   that tool, once per Mac. What it reads goes to that tool's model provider
-  under its own policy. Change the answer in Settings -> Integrations ->
-  Coding tools. The files themselves are ordinary files in your user account.
+  under its own policy. Turning the tool's switch on in Settings ->
+  Integrations -> Coding tools is the same Yes (it also adds Whytap's MCP
+  server to the tool); off is No. The files themselves are ordinary files in your user account.
 - Whycode (only a build signed with its Developer ID) can read the words of a
   Drop take while you dictate into Whycode itself, to show them in its own
   field, after you answer Yes to Whytap's question once. It never gets words

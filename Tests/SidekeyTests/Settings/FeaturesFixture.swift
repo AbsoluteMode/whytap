@@ -181,6 +181,7 @@ struct FeaturesFixture {
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
             featuresEnvironment: environment,
+            codingTools: .fixed(),
             lilBro: lilBro ?? LilBroController(selection: selection,
                                                preferences: LilBroPreferences(defaults: defaults),
                                                remote: LilBroFixedBrain(reply: .offline),

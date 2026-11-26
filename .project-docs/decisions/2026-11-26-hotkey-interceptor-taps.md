@@ -29,7 +29,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Hotkeys/HotkeyInterceptionTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-26-secure-input-holder.md]
+related: []
 ---
 
 # Whytap names the app whose event tap swallows a modifier shortcut
@@ -51,7 +51,7 @@ catch it: secure input was off, and the key never reached Whytap at all.
   keyDown only; Siri and SiriNCService hold active session filters on keyDown,
   keyUp and flagsChanged; ViewBridgeAuxiliary and an unbundled process hold
   listen-only taps; Whytap holds its own. The latency fields stayed at
-  implausible constants (2.1·10⁷ to 3.9·10⁹ µs) and say nothing about whether
+  implausible constants (about 2e7 to 4e9 microseconds) and say nothing about whether
   a tap handles events now; they are not used. Ids are not ordered.
 - **What the list cannot say:** what a filter does with an event, or which
   keys it cares about inside its mask. A layout switcher needs keyDown for

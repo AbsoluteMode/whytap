@@ -414,6 +414,8 @@ struct ToolboxSettingsView: View {
                 actionPane(tool, title: "Configure hotkeys") { selection.setHighlight(.tab(.hotkeys)) }
             case .notes:
                 actionPane(tool, title: "Open meeting notes") { selection.setHighlight(.tab(.notes)) }
+            case .help:
+                actionPane(tool, title: "Open Help Center") { NSWorkspace.shared.open(BuildConfig.helpCenterURL) }
             case .quit:
                 actionPane(tool, title: "Quit Whytap", action: deps.quitApplication)
             case .settings:

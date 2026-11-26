@@ -133,6 +133,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
+| Help links (Settings footer, Help window, Help tool) | `whytap.ai` and the Help Center `whytap.ai/help/` open in your browser; Whytap sends nothing itself | only when you click a link |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
 OpenAI speech uses the same OpenAI key as its language models. A dictation on

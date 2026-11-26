@@ -2,6 +2,8 @@
 """Exercise concurrency and recovery using disposable repositories only."""
 
 from concurrent.futures import ThreadPoolExecutor
+import importlib.util
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -685,6 +687,102 @@ class QueueTests(unittest.TestCase):
                           "--checks", "x", "--acceptance", "x", "--session", "worker",
                           "--depends-on", "https://github.com/example/app/pull/1")["ticket"]
         self.assertEqual((again["queued_at"], again["resubmits"]), (child["queued_at"], 0))
+
+    def stale_snapshot_blocks(self, ticket_id, started, head):
+        """Ask the helper's own head check, with a remote snapshot that started at
+        `started` and saw `head`, whether it would return this ticket."""
+        spec = importlib.util.spec_from_file_location("queue_helper", SCRIPT)
+        helper = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper)
+        db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
+        db.row_factory = sqlite3.Row
+        cwd = os.getcwd()
+        try:
+            os.chdir(self.repo)
+            ticket = db.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            return helper.block_moved_head(db, ticket, {"started": started,
+                                                        "heads": {1: head}})
+        finally:
+            os.chdir(cwd)
+            db.rollback()
+            db.close()
+
+    def test_every_way_a_head_reenters_review_refreshes_its_head_check(self):
+        """The class of re-entries (review item 2 on ticket 635): a set back to the
+        queue from blocked or in_progress, and the author's resubmission of a head
+        returned without review. Each keeps or ends its FIFO place as designed and
+        is never judged by a remote snapshot that started before it re-entered."""
+        elsewhere = self.change("elsewhere.txt", "pushed")
+
+        def blocked_by_builder():
+            ticket = self.enqueue(1)["ticket"]
+            self.call("claim")
+            self.update(ticket["id"], "blocked")
+            return ticket, lambda: self.update(ticket["id"], "queued"), False
+
+        def returned_from_in_progress():
+            ticket = self.enqueue(1)["ticket"]
+            self.call("claim")
+            return ticket, lambda: self.update(ticket["id"], "queued"), True
+
+        def returned_without_review():
+            parent = self.enqueue(3, head=self.change(content="parent"))["ticket"]
+            child = self.call("enqueue", "--pr", "https://github.com/example/app/pull/1",
+                              "--head", self.head, "--title", "Child", "--checks", "x",
+                              "--acceptance", "x", "--session", "worker", "--depends-on",
+                              "https://github.com/example/app/pull/3")["ticket"]
+            self.call("claim")
+            self.update(parent["id"], "blocked")
+            self.call("return-stale-dependencies", "--minutes", "0")
+            again = lambda: self.assertTrue(self.enqueue(1)["requeued"])  # drops --depends-on
+            return child, again, True
+
+        for scenario in (blocked_by_builder, returned_from_in_progress,
+                         returned_without_review):
+            with self.subTest(scenario.__name__):
+                (self.repo / ".git" / "exodia-build-queue.sqlite3").unlink(missing_ok=True)
+                self.call("configure", "--builder-thread", "builder")
+                ticket, reenter, keeps_place = scenario()
+                snapshot_started = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+                reenter()
+                after = self.ticket(ticket["id"])
+                self.assertEqual(after["status"], "queued")
+                self.assertEqual(after["queued_at"] == ticket["queued_at"], keeps_place)
+                self.assertGreater(after["submitted_at"], snapshot_started)
+                self.assertEqual(after["resubmits"], ticket["resubmits"])
+                self.assertFalse(self.stale_snapshot_blocks(ticket["id"], snapshot_started,
+                                                            elsewhere))
+                # A snapshot read after the re-entry still returns a moved head.
+                later = datetime.now(timezone.utc).isoformat(timespec="microseconds")
+                self.assertTrue(self.stale_snapshot_blocks(ticket["id"], later, elsewhere))
+
+    def test_only_a_head_returned_without_review_comes_back_by_resubmission(self):
+        """Review item 1 on ticket 635, and what stays idempotent."""
+        ticket = self.enqueue(1)["ticket"]
+        self.assertFalse(self.enqueue(1).get("requeued"))  # queued: idempotent
+        self.call("claim")
+        self.assertEqual(self.enqueue(1)["ticket"]["status"], "in_progress")
+        self.update(ticket["id"], "blocked")  # a builder reviewed and blocked this head
+        again = self.enqueue(1)
+        self.assertEqual((again["created"], again.get("requeued"), again["ticket"]["status"]),
+                         (False, None, "blocked"))
+        self.enqueue(1, session="other", ok=False)
+        # Returned by the moved-head check: the same head comes back to its place.
+        self.update(ticket["id"], "queued")
+        self.git("push", "-q", str(self.pulls), f"{self.change(content='moved')}:refs/pull/1/head")
+        self.call("check-heads")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "blocked")
+        self.enqueue(1, session="other", ok=False)  # never another session
+        back = self.enqueue(1)
+        self.assertEqual((back["requeued"], back["ticket"]["status"]), (True, "queued"))
+        self.assertEqual(back["ticket"]["auto_returned"], 0)
+        # A newer ticket of the PR exists: the old head never comes back.
+        self.git("push", "-q", "-f", str(self.pulls), f"{self.head}:refs/pull/1/head")
+        self.assertEqual(self.call("claim")["ticket"]["id"], ticket["id"])
+        self.update(ticket["id"], "blocked")
+        newer = self.enqueue(1, head=self.change(content="fix"))["ticket"]
+        self.assertTrue(newer["id"] > ticket["id"])
+        self.assertIsNone(self.enqueue(1).get("requeued"))
 
     def test_open_status_lists_open_work_and_its_history_only(self):
         old = self.enqueue(1)["ticket"]["id"]

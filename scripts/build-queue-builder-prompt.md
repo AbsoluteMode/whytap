@@ -65,13 +65,15 @@ holds it, leave the tickets queued and end your turn.
    gone. Before anything else establish what it reached: is its PR merged, does
    a signed candidate exist, was the app replaced, is the lock stale (owner PID
    dead and no build, test, packaging or install process alive)? Then continue
-   that ticket from the verified state. If the state cannot be established,
+   that ticket from the verified state; a candidate it left installs only
+   through "Each ticket" step 7, like any other. If the state cannot be established,
    set it `blocked` with the evidence and, when a clean retry is safe,
    `queued` again (it goes to the back of FIFO).
 3. For `retry_install` tickets a checked candidate is waiting only for a safe
    moment. Verify the candidate is still valid and still the right one (source
    SHA contains the ticket's change, signature, identity, higher
-   `CFBundleVersion`), then continue at the install step. A grouped install
+   `CFBundleVersion`), then continue at the install step (step 7: the same
+   gate as every install). A grouped install
    (note "install grouped") has no candidate yet: package one from current
    main, which contains every ticket of the group, and install it once.
    Before packaging, when `status` lists `protected_pending` tests, run them
@@ -210,7 +212,10 @@ holds it, leave the tickets queued and end your turn.
    ticket still lists `protected_pending` tests.
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
-   fresh `status: clear` allows it. Otherwise record
+   fresh `status: clear` allows it. That one gate also refuses a locked
+   screen or a session not in front (`screen_locked`,
+   `session_not_on_console`), so it covers a resumed candidate and a screen
+   that locked after packaging; there is no other way to the Quit. Otherwise record
    `set --status pending_install --retry-install --note <candidate evidence>`
    (for a group or an isolated PR, use `--install-first`; the helper keeps an
    existing `--install-first` or `--hold` anyway, a deferral never lifts it),

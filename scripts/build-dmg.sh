@@ -119,21 +119,8 @@ fi
 if [ "${EXODIA_LOCAL_INSTALL:-0}" = "1" ]; then
     INSTALLED_APP="${EXODIA_INSTALLED_APP:-/Applications/Whytap.app}"
     if [ -f "${INSTALLED_APP}/Contents/Info.plist" ]; then
-        if ! /usr/bin/python3 - "${INSTALLED_APP}/Contents/Info.plist" "${SHORT_VERSION}" \
-                "${BUILD_VERSION}" <<'PYINSTALLED'
-import plistlib, re, sys
-path, version, build = sys.argv[1:]
-with open(path, "rb") as handle:
-    info = plistlib.load(handle)
-def parts(value):
-    return tuple(int(n) for n in re.match(r"(\d+)\.(\d+)\.(\d+)", value).groups())
-installed_build = int(str(info.get("CFBundleVersion", "0")).strip() or 0)
-installed_version = str(info.get("CFBundleShortVersionString", "0.0.0"))
-if int(build) <= installed_build:
-    sys.exit(f"ERROR: local install build {build} is not higher than the installed {installed_build}")
-if re.match(r"\d+\.\d+\.\d+", installed_version) and parts(version) < parts(installed_version):
-    sys.exit(f"ERROR: local install version {version} is lower than the installed {installed_version}")
-PYINSTALLED
+        if ! /usr/bin/python3 "${PROJECT_DIR}/scripts/local-install-floor.py" \
+                "${INSTALLED_APP}/Contents/Info.plist" "${SHORT_VERSION}" "${BUILD_VERSION}"
         then
             exit 2
         fi

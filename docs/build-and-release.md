@@ -89,8 +89,10 @@ EXODIA_LOCAL_INSTALL=1 FLAVOR=prod BUILD_VERSION=<n> ./scripts/build-dmg.sh
 `<n>` follows feed ordering, as in `user-release.sh`: one more than the larger
 of the live appcast build and the installed `CFBundleVersion`. Before
 compiling, the script refuses a build number that is not higher, or a display
-version that is lower, than the installed app's (`EXODIA_INSTALLED_APP`,
-default `/Applications/Whytap.app`). It compiles the `arm64` slice only (the
+version that is lower by Semantic Versioning precedence (a prerelease is lower
+than its release), than the installed app's (`EXODIA_INSTALLED_APP`, default
+`/Applications/Whytap.app`; `scripts/local-install-floor.py`); a version it
+cannot compare is refused. It compiles the `arm64` slice only (the
 vendored Sparkle and MediaRemote frameworks keep their prebuilt slices), signs
 with the same identity, runs the same signature, designated-requirement and
 native `--installation-check` checks, adds `ExodiaLocalBuild` to `Info.plist`

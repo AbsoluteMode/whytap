@@ -623,7 +623,9 @@ Under the lock:
    reliable backup. Never inspect user content as part of a build check.
    Check for meetings immediately before a normal quit using
    `python3 scripts/build-queue-meeting-gate.py` from checked main. Only exit 0
-   with a fresh `status: clear` permits the next step; never reuse a cached
+   with a fresh `status: clear` permits the next step (the gate first
+   refuses a locked screen or a session not in front, so every Quit, including
+   a resumed candidate, happens while someone is at the Mac); never reuse a cached
    result or replace an error/timeout with an empty activity list. Whytap's
    own audio capture (a meeting, manual Notes, dictation, Subtitles), a call
    app's microphone or output, a browser microphone, an unknown microphone

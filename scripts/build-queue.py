@@ -171,6 +171,20 @@ def protected_tests(value):
     return sorted(set(tests))
 
 
+def reenter_review(db, ticket_id, keep_place, note):
+    """The one way an existing ticket's head re-enters review (`set --status queued`,
+    or the author resubmitting a head returned without review). Its FIFO place
+    (queued_at) is kept or moved to the end; its head-observation stamp
+    (submitted_at) is always now, so a remote snapshot started before the return
+    never judges it. Pending protected-data tests are validated again from the start."""
+    stamp = now()
+    db.execute("UPDATE tickets SET status='queued', note=?, updated_at=?, retry='', "
+               "auto_returned=0, protected_pending='[]', submitted_at=?, "
+               "queued_at=CASE WHEN ? THEN queued_at ELSE ? END WHERE id=?",
+               (note, stamp, stamp, int(keep_place), stamp, ticket_id))
+    event(db, ticket_id, "queued", note)
+
+
 def block_moved_head(db, ticket, snapshot):
     """A queued ticket whose PR head moved after submission goes back to its author
     before any builder reviews the old commit. True when it was returned. Only a
@@ -459,6 +473,23 @@ def run(args):
                 if (existing["source"], existing["session"], existing["host"]) != (
                         args.source, args.session, args.host):
                     raise ValueError("This PR/head already belongs to another session")
+                newest = db.execute("SELECT MAX(id) FROM tickets WHERE pr=?",
+                                    (args.pr,)).fetchone()[0]
+                if (existing["status"] == "blocked" and existing["auto_returned"]
+                        and existing["id"] == newest):
+                    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+                    # Returned without review (a stale dependency, a moved head): the
+                    # untouched head goes back to its place without spending the PR's
+                    # resubmission priority. A head a builder reviewed and blocked stays
+                    # blocked: its fix is a new head.
+                    db.execute("UPDATE tickets SET depends_on=?, dependencies=? WHERE id=?",
+                               (json.dumps(args.depends_on), args.dependencies,
+                                existing["id"]))
+                    reenter_review(db, existing["id"], True,
+                                   "Resubmitted by its author after a return without "
+                                   "review; keeps its place")
+                    return {"created": False, "requeued": True, "builder": config(db),
+                            "ticket": ticket_json(db, existing["id"])}
                 return {"created": False, "builder": config(db),
                         "ticket": ticket_json(db, existing["id"])}
             old = db.execute("SELECT * FROM tickets WHERE pr=? AND "
@@ -636,19 +667,14 @@ def run(args):
                 raise ValueError("#%d still has protected-data tests pending (%s): run them on "
                                  "main with an unlocked screen and record `protected-pending "
                                  "--passed` first" % (item["id"], ", ".join(pending)))
-            stamp = now()
-            # A ticket returned to the queue is validated again from the start.
-            clear_pending = args.status == "queued"
-            # A ticket requeued after a block goes to the end; one returned from
-            # in_progress without a block keeps its place (its queued_at).
-            requeued = args.status == "queued" and item["status"] != "in_progress"
+            if args.status == "queued":
+                # A ticket requeued after a block goes to the end; one returned from
+                # in_progress without a block keeps its place (its queued_at).
+                reenter_review(db, args.ticket, item["status"] == "in_progress", args.note)
+                return ticket_json(db, args.ticket)
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
-            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
-                       "queued_at=CASE WHEN ? THEN ? ELSE queued_at END, "
-                       "protected_pending=CASE WHEN ? THEN '[]' ELSE protected_pending END "
-                       "WHERE id=?",
-                       (args.status, args.note, stamp, retry, requeued, stamp, clear_pending,
-                        args.ticket))
+            db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=? WHERE id=?",
+                       (args.status, args.note, now(), retry, args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 

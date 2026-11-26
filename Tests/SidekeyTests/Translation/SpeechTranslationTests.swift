@@ -44,10 +44,11 @@ final class FakeSpeechTranslation: SpeechTranslationSession, @unchecked Sendable
 final class SpeechTranslationModelTests: XCTestCase {
     private func makeModel(
         translator: @escaping () async throws -> SpeechTranslationSession,
-        audio: FixtureSubtitleAudio = FixtureSubtitleAudio()
+        audio: FixtureSubtitleAudio = FixtureSubtitleAudio(),
+        stopDeadline: Duration = .seconds(10)
     ) -> LiveSubtitleModel {
         let model = LiveSubtitleModel(
-            flushInterval: .milliseconds(5), connectionTimeout: .seconds(5),
+            flushInterval: .milliseconds(5), connectionTimeout: .seconds(5), stopDeadline: stopDeadline,
             makeAudio: { audio },
             openTranslator: { _, _ in try await translator() }
         )
@@ -58,9 +59,14 @@ final class SpeechTranslationModelTests: XCTestCase {
 
     /// Returns as soon as the condition holds. The deadline only matters on a loaded
     /// Mac (the build queue saw load 317 on 14 cores), so it is generous.
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
+    // WHY: .project-docs/decisions/2026-11-26-test-suite-speed.md
+    /// A deadline that runs out fails the test: a wait that silently timed out
+    /// used to cost the whole deadline and then pass.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30,
+                      file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(condition(), "condition never became true", file: file, line: line)
     }
 
     func testRecordedSessionBecomesPairsAndStopWaitsForTheProviderClose() async throws {
@@ -185,7 +191,10 @@ final class SpeechTranslationModelTests: XCTestCase {
         model.stop()
         XCTAssertFalse(model.phase.isRunning)
         model.start()
-        try await wait(model.phase == .listening)
+        // Wait for the new session itself: its capture (the shared fixture,
+        // already ended) finishes at once, so `listening` can last less than
+        // one poll, and waiting for it used to run out the whole deadline.
+        try await wait(sessions.isEmpty)
         XCTAssertEqual(slow.closeCount, 1, "the old session is closed")
         XCTAssertTrue(sessions.isEmpty, "a new session was opened")
         XCTAssertTrue(model.lines.isEmpty)
@@ -214,7 +223,8 @@ final class SpeechTranslationModelTests: XCTestCase {
     func testAProviderThatNeverClosesIsBoundedByTheStopWatchdog() async throws {
         let session = FakeSpeechTranslation()
         session.closesOnEndInput = false
-        let model = makeModel(translator: { session })
+        // The product waits 10 s; the rule under test is the same at 200 ms.
+        let model = makeModel(translator: { session }, stopDeadline: .milliseconds(200))
         model.start()
         try await wait(model.phase == .listening)
         session.yieldRecorded(until: 6_000)

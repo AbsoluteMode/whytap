@@ -3,9 +3,9 @@ import XCTest
 
 @MainActor
 final class NotificationQueueTests: XCTestCase {
-    private func event(_ id: String) -> LocalNotificationEvent {
+    private func event(_ id: String, duration: TimeInterval = 2) -> LocalNotificationEvent {
         LocalNotificationEvent(id: id, source: "test", sourceName: "Test", title: "Event \(id)", body: "",
-            link: URL(string: "codex://threads/\(id)"), timestamp: Date(), customDuration: 2, customLogo: "codex")
+            link: URL(string: "codex://threads/\(id)"), timestamp: Date(), customDuration: duration, customLogo: "codex")
     }
 
     func testCardsKeepArrivalOrderIndividualLinksAndDuplicateProtection() async throws {
@@ -56,19 +56,20 @@ final class NotificationQueueTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let hub = LocalNotificationHub(directory: root)
-        _ = await hub.receive(event("first")); hub.setHovered(true)
-        _ = await hub.receive(event("second"))
-        try await Task.sleep(nanoseconds: 2_100_000_000)
+        // Half-second cards: the same rule as the default 2 s, a quarter of the wait.
+        _ = await hub.receive(event("first", duration: 0.5)); hub.setHovered(true)
+        _ = await hub.receive(event("second", duration: 0.5))
+        try await Task.sleep(nanoseconds: 600_000_000) // longer than the card's own time
         XCTAssertEqual(hub.current?.id, "first")
         hub.setHovered(false)
-        XCTAssertGreaterThan(hub.deadline?.timeIntervalSinceNow ?? 0, 1.8)
+        XCTAssertGreaterThan(hub.deadline?.timeIntervalSinceNow ?? 0, 0.4)
         // The expiry timer can fire late on a loaded Mac: wait for the turn, not a fixed time.
         let resumed = Date()
         while hub.current?.id != "second", Date().timeIntervalSince(resumed) < 30 {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTAssertEqual(hub.current?.id, "second")
-        XCTAssertGreaterThan(Date().timeIntervalSince(resumed), 1.5, "the first card kept its remaining time")
+        XCTAssertGreaterThan(Date().timeIntervalSince(resumed), 0.35, "the first card kept its remaining time")
         hub.setSuspended(true)
         XCTAssertEqual(hub.history.count, 2)
     }

@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SpeechTranslationTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-23-builder-queue-flaky-tests.md, 2026-11-23-silent-test-runs.md, 2026-11-24-windowless-test-runs.md, ../processes/shared-app-development.md]
+related: [2026-11-23-builder-queue-flaky-tests.md]
 ---
 
 # Test suite speed

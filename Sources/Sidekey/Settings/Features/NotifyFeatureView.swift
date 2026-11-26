@@ -42,8 +42,8 @@ struct NotifyFeatureView: View {
                 sources
                 promptCard
             }
-            Text("Click the speaker to choose a sound and hear it; crossed out means silent. Cards appear while "
-                 + "Whytap is open. Turning a source off keeps its setup and history.")
+            Text("Click the speaker to choose a sound and hear it; crossed out means silent. Clicking a meeting card "
+                 + "opens its notes. Cards appear while Whytap is open. Turning a source off keeps its setup and history.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)

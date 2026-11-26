@@ -414,7 +414,7 @@ actor ArtifactBackupStager {
         }
         let sources = paths.filter { $0.hasPrefix("workspace/notify/sources/") && $0.hasSuffix(".json") }
         if !sources.isEmpty {
-            notes.append("Restored notification sources arrive switched off. Turn the ones you want back on in Settings → Notifications.")
+            notes.append("Restored notification sources arrive switched off. Turn the ones you want back on in Settings → Features → Notify.")
             var external = 0
             for path in sources.sorted() {
                 let file = staged.appendingPathComponent(String(path.dropFirst("workspace/".count)))

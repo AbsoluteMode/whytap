@@ -24,7 +24,9 @@ final class LilBroInteractionTimingTests: XCTestCase {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
-        let lilBro = LilBroController(selection: selection, preferences: LilBroPreferences(defaults: fixture.defaults),
+        let preferences = LilBroPreferences(defaults: fixture.defaults)
+        preferences.answersFromWhytap = false
+        let lilBro = LilBroController(selection: selection, preferences: preferences,
                                       remote: nil, reduceMotion: { true })
         let size = NSSize(width: 960, height: 560)
         let host = NSHostingView(rootView: fixture.shell(selection: selection, lilBro: lilBro)

@@ -155,6 +155,14 @@ struct FeaturesFixture {
     }
 
     /// The whole Settings shell on `tab`.
+    /// Lil Bro's answers from whytap.ai are on by default; fixtures keep
+    /// them off so no test reaches the network.
+    private func offlinePreferences() -> LilBroPreferences {
+        let preferences = LilBroPreferences(defaults: defaults)
+        preferences.answersFromWhytap = false
+        return preferences
+    }
+
     func shell(selection: SettingsWindowSelection, lilBro: LilBroController? = nil) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
@@ -163,7 +171,7 @@ struct FeaturesFixture {
             privacyPreferences: PrivacyPreferences(defaults: defaults),
             featuresEnvironment: environment,
             lilBro: lilBro ?? LilBroController(selection: selection,
-                                               preferences: LilBroPreferences(defaults: defaults),
+                                               preferences: offlinePreferences(),
                                                reduceMotion: { true }))
     }
 

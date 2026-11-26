@@ -30,8 +30,10 @@ final class LilBroSmoothnessTests: XCTestCase {
     }
 
     private func moving(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection) -> LilBroController {
-        LilBroController(selection: selection, preferences: LilBroPreferences(defaults: fixture.defaults),
-                         remote: nil, reduceMotion: { false })
+        let preferences = LilBroPreferences(defaults: fixture.defaults)
+        preferences.answersFromWhytap = false
+        return LilBroController(selection: selection, preferences: preferences,
+                                remote: nil, reduceMotion: { false })
     }
 
     func test_his_steps_do_not_redraw_the_settings_window() async throws {

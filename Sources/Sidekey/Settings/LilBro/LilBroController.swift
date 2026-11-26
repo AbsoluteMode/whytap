@@ -3,8 +3,9 @@ import SwiftUI
 
 /// Whether the little guy runs around Settings (off leaves only the "Lil Bro"
 /// entry in the sidebar, which opens the same balloon), and whether his
-/// answers come from whytap.ai. Answers are off until the person turns them
-/// on in his balloon; until then he finds settings by name on this Mac.
+/// answers come from whytap.ai. Answers are on by default (the maintainer's
+/// decision, 2026-11-26); ⋯ turns them off, and then he finds settings by
+/// name on this Mac. A choice the person saved is kept.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 @MainActor
 final class LilBroPreferences: ObservableObject {
@@ -23,7 +24,7 @@ final class LilBroPreferences: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? false
+        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? true
     }
 }
 

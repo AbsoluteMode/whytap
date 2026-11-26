@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's opt-in answers from whytap.ai),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai, on by default),
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1566,16 +1566,15 @@ SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
+same balloon. Answers come from whytap.ai by default (`lilBro.answersFromWhytap`,
+on unless the person turned it off; the maintainer's decision of 2026-11-26).
+Turned off with ⋯, they come from LilBroLocalGuide (the feature catalog and tab
 names, on this Mac, no network; a keyword guide, not an English parser, whose
 contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
-there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon's one-line disclosure, full text under Details (LilBroOffer). It
-shows by itself only after a question this Mac did not understand, and there
-it is the whole reply (no "I only know…", no suggested questions); its
-button is "Turn on and ask" and also sends that question; ⋯ → Turn on
-answers only shows it;
-`lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
+there as its own task, see the decision's "Contract"); then a question it did
+not understand gets only the one-line disclosure, full text under Details
+(LilBroOffer), with "Turn on and ask", which turns answers on and sends that
+question; ⋯ → Turn on answers shows it with Not now. LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
 answered (questions asked while answers were off never leave the Mac, except
@@ -2700,15 +2699,16 @@ input layout, including live recording and previously saved non-English titles.
 
 ## Invariants
 
-1. **No Whytap-owned services, except Lil Bro's opt-in answers.** The app
-   never contacts a Whytap backend, has no account and sends no telemetry. The
-   one exception is Lil Bro in Settings: after the person presses "Turn on
-   answers" in his balloon, each question they ask him, the Settings screen
-   they are on and up to three earlier exchanges go to
+1. **No Whytap-owned services, except Lil Bro's answers.** The app never
+   contacts a Whytap backend, has no account and sends no telemetry. The one
+   exception is Lil Bro in Settings: each question the person asks him, the
+   Settings screen they are on and up to three earlier exchanges go to
    `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`); "Turn on and ask" turns answers on
-   and sends the one question this Mac did not understand; nothing is sent
-   before that or after they turn answers off. WHY:
+   checked by `LilBroRemoteBrainTests`). Answers are on by default (the
+   maintainer's decision of 2026-11-26); nothing is sent before a question,
+   and nothing after ⋯ → Turn off answers from whytap.ai. Turned off, "Turn
+   on and ask" turns them on again and sends the one question this Mac did
+   not understand. WHY:
    .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
    Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this

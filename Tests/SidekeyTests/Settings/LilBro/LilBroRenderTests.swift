@@ -12,6 +12,7 @@ final class LilBroRenderTests: XCTestCase {
                             mascot: Bool = true, remote: LilBroBrain? = nil) -> LilBroController {
         let preferences = LilBroPreferences(defaults: fixture.defaults)
         preferences.mascotVisible = mascot
+        preferences.answersFromWhytap = false
         return LilBroController(selection: selection, preferences: preferences,
                                 remote: remote ?? Offline(), reduceMotion: { true },
                                 sleep: { _ in await Task.yield() })

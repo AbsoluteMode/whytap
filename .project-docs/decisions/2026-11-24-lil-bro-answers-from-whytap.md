@@ -1,8 +1,8 @@
 ---
 id: lil-bro-answers-from-whytap-2026-11-24
 type: decision
-title: Lil Bro may ask whytap.ai, the first Whytap server the app talks to, only after the person turns it on
-summary: The "no Whytap servers" invariant gets one exception. After the person presses Turn on answers in Lil Bro's balloon, each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5 while it is tried out (claude-haiku-5-5 before). Off by default, turned off from the same balloon; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
+title: Lil Bro asks whytap.ai, the first Whytap server the app talks to, unless the person turns it off
+summary: The "no Whytap servers" invariant gets one exception. Unless the person turned answers off in Lil Bro's ⋯ menu (on by default since 2026-11-26, the maintainer's decision), each question they ask him, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5 while it is tried out (claude-haiku-5-5 before). On by default since REV 8, turned off from ⋯; no keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
 status: confirmed
 tags: [settings, lil-bro, privacy, network, invariant, ask]
 canonical_for: [lil-bro-answers]
@@ -37,7 +37,19 @@ invariant said so.
   `https://whytap.ai/api/ask/lilbro` (server: AbsoluteMode/whytap-landing,
   `ask/lilbro.py`). It is the only place in `Sources/` that calls a whytap.ai
   API; a test fails if another file does.
-- **Off by default.** Nothing is sent until the person presses **Turn on
+- **On by default (REV 8, 2026-11-26, the maintainer's product decision).**
+  Asked "Turn on whytap.ai answers by default, without the consent button?",
+  the maintainer answered "Yes, by default". This replaces the builder's
+  ticket-606 requirement that the disclosure precede any sending. Each
+  question the person asks Lil Bro goes to whytap.ai unless they turned
+  answers off; nothing is sent before a question or by opening Settings.
+  ⋯ → Turn off answers from whytap.ai (also next to the greeting, before the
+  first question) stops it, and the saved choice is kept. What is sent and
+  kept stays readable in docs/privacy.md and, while answers are off, under
+  Details of the card. No card, "I only know…" or suggested questions on the
+  default path: a question goes to the model, with the thinking dots while
+  it answers.
+- **Before REV 8: off by default.** Nothing was sent until the person pressed **Turn on
   answers** on the disclosure in his balloon, under the text: each question
   then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen and up to
   three earlier whytap.ai questions with its answers, sent again; whytap.ai
@@ -151,3 +163,4 @@ invariant said so.
 2026-11-24 · step 2 PR: feature/lil-bro-answers
 2026-11-26 · REV 4 (one-line disclosure, Sonnet): feature/lil-bro-smooth
 2026-11-26 · REV 7 (only the card when not understood): feature/lil-bro-unknown
+2026-11-26 · REV 8 (on by default): feature/lil-bro-unknown

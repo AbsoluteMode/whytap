@@ -54,11 +54,13 @@ final class LilBroControllerTests: XCTestCase {
 
     private func make(selection given: SettingsWindowSelection? = nil,
                       brain: LilBroBrain? = nil, remote: LilBroBrain? = nil, mascot: Bool = true,
+                      answers: Bool = false,
                       reduceMotion: Bool = false,
                       sleep: ((TimeInterval) async -> Void)? = nil) -> LilBroController {
         let selection = given ?? SettingsWindowSelection()
         let preferences = LilBroPreferences(defaults: defaults)
         preferences.mascotVisible = mascot
+        preferences.answersFromWhytap = answers
         let controller = LilBroController(selection: selection, preferences: preferences, local: brain,
                                           remote: remote ?? Remote(.unavailable),
                                           reduceMotion: { reduceMotion }, sleep: sleep ?? { _ in await Task.yield() })
@@ -145,8 +147,10 @@ final class LilBroControllerTests: XCTestCase {
     }
 
     func test_closing_while_he_is_on_his_way_stops_him_cleanly() async {
+        let off = LilBroPreferences(defaults: defaults)
+        off.answersFromWhytap = false
         let slow = LilBroController(selection: SettingsWindowSelection(),
-                                    preferences: LilBroPreferences(defaults: defaults), local: nil, remote: Remote(.unavailable),
+                                    preferences: off, local: nil, remote: Remote(.unavailable),
                                     reduceMotion: { false },
                                     sleep: { try? await Task.sleep(nanoseconds: UInt64($0 * 1e9)) })
         let (spots, blocks) = map()
@@ -233,11 +237,32 @@ final class LilBroControllerTests: XCTestCase {
 
     // MARK: Answers from whytap.ai (step 2)
 
-    func test_nothing_goes_to_whytap_until_answers_are_turned_on() async {
+    /// REV 8 (the maintainer's decision, 2026-11-26): answers are on by
+    /// default; a choice the person saved is kept.
+    func test_answers_are_on_by_default_and_a_saved_choice_is_kept() async {
+        let fresh = UserDefaults(suiteName: "lilbro-default-\(UUID().uuidString)")!
+        XCTAssertTrue(LilBroPreferences(defaults: fresh).answersFromWhytap, "on by default")
+        LilBroPreferences(defaults: fresh).answersFromWhytap = false
+        XCTAssertFalse(LilBroPreferences(defaults: fresh).answersFromWhytap, "turned off stays off")
+
+        let answer = LilBroAnswer(paragraphs: ["Drop types what you say."], destination: .feature(.drop))
+        let remote = Remote(.answer(answer))
+        let preferences = LilBroPreferences(defaults: UserDefaults(suiteName: "lilbro-default-\(UUID().uuidString)")!)
+        let controller = LilBroController(selection: SettingsWindowSelection(), preferences: preferences,
+                                          local: nil, remote: remote, reduceMotion: { true },
+                                          sleep: { _ in await Task.yield() })
+        XCTAssertTrue(remote.asked.isEmpty, "nothing is sent before a question")
+        controller.ask("can I talk instead of typing")
+        await until { !remote.asked.isEmpty }
+        XCTAssertEqual(remote.asked.first?.text, "can I talk instead of typing", "no card first: the question goes out")
+        XCTAssertFalse(controller.consentShown)
+    }
+
+    func test_nothing_goes_to_whytap_while_answers_are_off() async {
         let remote = Remote(.unavailable)
         let selection = SettingsWindowSelection()
         let controller = make(selection: selection, remote: remote, reduceMotion: true)
-        XCTAssertFalse(controller.answersFromWhytap, "off by default")
+        XCTAssertFalse(controller.answersFromWhytap)
         controller.ask("how do I dictate")
         await until { controller.bubble == .full && !controller.isBusy }
         XCTAssertTrue(remote.asked.isEmpty)

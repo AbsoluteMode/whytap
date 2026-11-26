@@ -4,7 +4,8 @@ import Foundation
 /// three earlier exchanges go to Ask's Lil Bro endpoint, which answers with
 /// claude-sonnet-5-5 and names one place from the app's own catalog.
 ///
-/// Used only after the person turns answers on in his balloon. Nothing else is
+/// Used for each question unless the person turned answers off in ⋯ (on by
+/// default since 2026-11-26, the maintainer's decision). Nothing else is
 /// sent: no keys, no dictated text, no settings, no identifier of this Mac.
 /// The server keeps the question text 90 days without an address or visitor.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md

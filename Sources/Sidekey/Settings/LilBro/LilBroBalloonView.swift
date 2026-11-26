@@ -115,23 +115,21 @@ struct LilBroBalloonView: View {
                                   decline: controller.declineProposal)
             }
             offer(after: reply)
-        } else if controller.answersFromWhytap {
-            // Where questions go stays one click away, under (i).
-            paragraph(LilBroCopy.greetingAnswers)
-            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
         } else {
-            paragraph(LilBroCopy.greeting)
-            LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
+            // No question yet: the balloon shows only when ⋯ asked for the
+            // disclosure; otherwise there is just the reply field.
             offer(after: nil)
         }
     }
 
-    /// The disclosure where it belongs: after the greeting or an unknown
-    /// reply, or anywhere once ⋯ asked for it — then with Not now. One line
-    /// and its button; the full text under Details.
+    /// The disclosure where it belongs: after a question this Mac could not
+    /// answer, until answers were first turned on, or anywhere once ⋯ asked
+    /// for it — then with Not now. One line and its button; the full text
+    /// under Details.
     @ViewBuilder private func offer(after reply: LilBroReply?) -> some View {
         let asks = controller.turnOnAsks
         switch LilBroOffer.placement(after: reply, answersOn: controller.answersFromWhytap,
+                                     everOn: controller.preferences.answersEverOn,
                                      consentShown: controller.consentShown) {
         case .none:
             EmptyView()
@@ -299,13 +297,15 @@ struct LilBroOffer: View {
     enum Placement: Equatable { case none, turnOn, turnOnOrNotNow }
     static let id = "lilBro.offer"
 
-    /// Answers off: after the greeting (nil) or an unknown reply it offers
-    /// Turn on answers; once ⋯ asked for it, it shows after any reply, with
-    /// Not now.
-    static func placement(after reply: LilBroReply?, answersOn: Bool, consentShown: Bool) -> Placement {
+    /// Answers off: after a question this Mac could not answer it offers
+    /// Turn on answers, only until answers were first turned on; once ⋯
+    /// asked for it, it shows after any reply, with Not now. Never before a
+    /// question by itself.
+    static func placement(after reply: LilBroReply?, answersOn: Bool, everOn: Bool = false,
+                          consentShown: Bool) -> Placement {
         guard !answersOn else { return .none }
         if consentShown { return .turnOnOrNotNow }
-        return reply == nil || reply?.isUnknown == true ? .turnOn : .none
+        return reply?.isUnknown == true && !everOn ? .turnOn : .none
     }
 
     /// The buttons it shows, in order.
@@ -535,7 +535,6 @@ struct LilBroReplyField: View {
     static let height: CGFloat = 30
     @ObservedObject var controller: LilBroController
     @FocusState private var focused: Bool
-    @State private var info = false
     /// What is typed lives here: a key press redraws this field only, not
     /// Lil Bro, his balloon or the window.
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
@@ -559,16 +558,6 @@ struct LilBroReplyField: View {
             LilBroIconButton(systemName: "arrow.up", label: "Send", size: 20, glyph: 10,
                              style: canSend ? .accent : .off) { send() }
                 .disabled(!canSend)
-            LilBroIconButton(systemName: "info", label: "Where questions go", size: 18, glyph: 9, style: .filled) {
-                info.toggle()
-            }
-            .popover(isPresented: $info, arrowEdge: .top) {
-                Text(controller.answersFromWhytap ? LilBroCopy.answersNote : LilBroCopy.localNote)
-                    .font(.system(size: 12))
-                    .frame(width: 220, alignment: .leading)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(10)
-            }
         }
         .padding(.leading, 12)
         .padding(.trailing, 5)

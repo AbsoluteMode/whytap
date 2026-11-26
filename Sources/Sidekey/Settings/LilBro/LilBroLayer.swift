@@ -89,11 +89,18 @@ struct LilBroLayer: View {
         let maxHeight = LilBroBalloonLayout.maxHeight(feet: controller.feet, bounds: bounds,
                                                       fieldHeight: LilBroReplyField.height)
         return LilBroBalloonStage(anchor: anchor, bounds: bounds) {
-            LilBroBalloonView(controller: controller, maxHeight: maxHeight)
-            LilBroReplyField(controller: controller)
-            // Over the balloon, so its edge does not cross the tail.
-            ForEach(LilBroBalloonLayout.Tail.allCases, id: \.self) { tail in
-                LilBroBalloonTail(tail: tail)
+            VStack(alignment: .leading, spacing: 6) {
+                // Before the first question: one line of greeting over the field.
+                if !controller.showsBalloon { LilBroGreetingLine(text: controller.greeting) }
+                LilBroReplyField(controller: controller)
+            }
+            // Before the first question only the greeting and the field show.
+            if controller.showsBalloon {
+                LilBroBalloonView(controller: controller, maxHeight: maxHeight)
+                // Over the balloon, so its edge does not cross the tail.
+                ForEach(LilBroBalloonLayout.Tail.allCases, id: \.self) { tail in
+                    LilBroBalloonTail(tail: tail)
+                }
             }
         }
     }
@@ -115,12 +122,14 @@ struct LilBroBalloonStage: Layout {
         proposal.replacingUnspecifiedDimensions(by: bounds.size)
     }
 
-    /// Subviews: the balloon, the field, then four tails (down, up, left, right).
+    /// Subviews: the field, then the balloon and four tails (down, up, left,
+    /// right) once there is a balloon.
     func placeSubviews(in rect: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let tails = LilBroBalloonLayout.Tail.allCases.count
-        guard subviews.count == tails + 2 else { return }
-        let balloonView = subviews[0], fieldView = subviews[1]
-        let size = balloonView.sizeThatFits(ProposedViewSize(width: LilBroBalloonView.width, height: nil))
+        guard subviews.count == 1 || subviews.count == tails + 2 else { return }
+        let fieldView = subviews[0]
+        let balloonView = subviews.count > 1 ? subviews[1] : nil
+        let size = balloonView?.sizeThatFits(ProposedViewSize(width: LilBroBalloonView.width, height: nil)) ?? .zero
         let fieldSize = fieldView.sizeThatFits(.unspecified)
         let layout: LilBroBalloonLayout
         switch anchor {
@@ -129,15 +138,16 @@ struct LilBroBalloonStage: Layout {
         case .entry(let entry):
             layout = .above(entry: entry, balloon: size, field: fieldSize, bounds: bounds)
         }
-        #if DEBUG
-        LilBroLayer.balloonPlaces.append(layout.balloon)
-        #endif
         func place(_ view: LayoutSubview, _ frame: CGRect) {
             view.place(at: CGPoint(x: rect.minX + frame.minX - bounds.minX, y: rect.minY + frame.minY - bounds.minY),
                        proposal: ProposedViewSize(frame.size))
         }
-        place(balloonView, layout.balloon)
         place(fieldView, layout.field)
+        guard let balloonView else { return }
+        #if DEBUG
+        LilBroLayer.balloonPlaces.append(layout.balloon)
+        #endif
+        place(balloonView, layout.balloon)
         for (index, tail) in LilBroBalloonLayout.Tail.allCases.enumerated() {
             place(subviews[2 + index], tail == layout.tail ? layout.tailFrame : .zero)
         }
@@ -281,6 +291,26 @@ struct LilBroLadderView: View {
         }
         .frame(width: 12, height: max(0, height))
         .accessibilityHidden(true)
+    }
+}
+
+/// His one-line greeting over the reply field when the balloon opens.
+struct LilBroGreetingLine: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(MacSettingsTheme.text)
+            .lineLimit(1)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 6)
+            .background(RoundedRectangle(cornerRadius: 11, style: .continuous).fill(MacSettingsTheme.bgCard))
+            .overlay(RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.75))
+            .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
+            .fixedSize()
+            .accessibilityLabel("Lil Bro: \(text)")
     }
 }
 

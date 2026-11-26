@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import XCTest
 @testable import Sidekey
@@ -77,6 +78,9 @@ final class LilBroInteractionTimingTests: XCTestCase {
         let editor = try XCTUnwrap(field.currentEditor() as? NSTextView)
         SettingsWindowView.shellEvaluations = 0
         LilBroLayer.evaluations = 0
+        var published = 0
+        let watch = lilBro.objectWillChange.sink { published += 1 }
+        defer { watch.cancel() }
         var typing: [Double] = []
         for character in "how do i use meeting notes" {
             typing.append(apply { editor.insertText(String(character), replacementRange: editor.selectedRange()) })
@@ -85,6 +89,7 @@ final class LilBroInteractionTimingTests: XCTestCase {
         XCTAssertEqual(field.stringValue, "how do i use meeting notes")
         XCTAssertEqual(SettingsWindowView.shellEvaluations, 0, "typing never redraws the window")
         XCTAssertEqual(LilBroLayer.evaluations, 0, "typing redraws the field only, not Lil Bro or his balloon")
+        XCTAssertEqual(published, 0, "a key press changes nothing in Lil Bro: no search, no save, no request")
         // A frame at 60 Hz; offscreen on an M-series Mac these take about 1 ms.
         XCTAssertLessThan(median(hover), 16)
         XCTAssertLessThan(median(typing), 16)

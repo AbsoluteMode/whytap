@@ -301,15 +301,19 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertFalse(controller.answersFromWhytap)
     }
 
-    /// Where the disclosure shows and with which buttons: after the greeting
-    /// and an unknown reply it offers Turn on answers (one line, full text
-    /// under Details); asked for from ⋯ it shows after any reply, the
-    /// unknown one too, with Not now.
+    /// Where the disclosure shows and with which buttons: never by itself
+    /// before a question; after an unknown reply it offers Turn on answers
+    /// (one line, full text under Details) until answers were first turned
+    /// on; asked for from ⋯ it shows after any reply, with Not now.
     func test_the_disclosure_always_has_not_now_when_the_menu_asked_for_it() {
         let answer = LilBroReply.answer(LilBroAnswer(paragraphs: ["Hi"]))
         let unknown = LilBroReply.unknown(suggestions: [])
-        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: nil, answersOn: false, consentShown: false), .none)
         XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, consentShown: false), .turnOn)
+        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: false), .none,
+                       "turned on once, the balloon does not offer it again by itself")
+        XCTAssertEqual(LilBroOffer.placement(after: unknown, answersOn: false, everOn: true, consentShown: true),
+                       .turnOnOrNotNow)
         XCTAssertEqual(LilBroOffer.placement(after: answer, answersOn: false, consentShown: false), .none)
         for reply in [nil, answer, unknown, .offline] as [LilBroReply?] {
             XCTAssertEqual(LilBroOffer.placement(after: reply, answersOn: false, consentShown: true), .turnOnOrNotNow)
@@ -324,7 +328,6 @@ final class LilBroControllerTests: XCTestCase {
         // The disclosure says what is sent again and kept.
         XCTAssertTrue(LilBroCopy.offer.contains("earlier whytap.ai questions with its answers, sent again"))
         XCTAssertTrue(LilBroCopy.offer.contains("90 days"))
-        XCTAssertTrue(LilBroCopy.answersNote.contains("earlier whytap.ai questions and answers"))
     }
 
     func test_after_an_unknown_reply_the_menu_shows_the_disclosure_with_not_now() async {
@@ -873,5 +876,27 @@ final class LilBroControllerTests: XCTestCase {
         controller.turnOnAnswers()
         for _ in 0..<20 { await Task.yield() }
         XCTAssertTrue(remote.asked.isEmpty)
+    }
+
+    /// Opened before any question: only the reply field, no balloon; the
+    /// balloon comes with the first answer. Turned on once, answers are
+    /// remembered as offered, also after turning them off.
+    func test_first_open_is_only_the_field_and_the_offer_waits_for_an_unknown_question() async {
+        let controller = make(reduceMotion: true)
+        controller.toggleFromSidebar()
+        XCTAssertTrue(controller.isOpen)
+        XCTAssertFalse(controller.showsBalloon, "only the greeting line and the field")
+        XCTAssertEqual(controller.greeting, LilBroCopy.greetings[0])
+        controller.toggleFromSidebar()
+        controller.toggleFromSidebar()
+        XCTAssertEqual(controller.greeting, LilBroCopy.greetings[1], "a different line each opening")
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertTrue(controller.showsBalloon)
+        XCTAssertFalse(controller.preferences.answersEverOn)
+        controller.turnOnAnswers()
+        controller.turnOffAnswers()
+        XCTAssertTrue(controller.preferences.answersEverOn)
+        XCTAssertTrue(LilBroPreferences(defaults: defaults).answersEverOn, "remembered")
     }
 }

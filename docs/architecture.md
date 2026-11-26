@@ -1553,8 +1553,10 @@ without observing it, so his steps redraw only his layer and sidebar entry,
 never the window. A click catches him and opens his balloon (variant C) with
 the reply field at his feet; LilBroBalloonStage (a Layout) measures both and
 places them with the tail in one pass through LilBroBalloonLayout, inside the
-window at every edge. The balloon shows a short answer and one action; the
-rest waits behind More (`showMore`). Asked where something is, he runs to the sidebar row and then the
+window at every edge. Opened before any question, only a one-line greeting in
+his slang (`LilBroCopy.greetings`, in turn) and the reply field show
+(`showsBalloon`); the balloon comes with the first answer and shows a short
+answer and one action, the rest behind More (`showMore`). Asked where something is, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
@@ -1564,13 +1566,16 @@ same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
 names, on this Mac, no network; a keyword guide, not an English parser, whose
 contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
 there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon's one-line disclosure, full text under Details (LilBroOffer; after
-a question this Mac did not understand the button is "Turn on and ask" and
-also sends that question; ⋯ → Turn on answers only shows it;
+the balloon's one-line disclosure, full text under Details (LilBroOffer). It
+shows by itself only after a question this Mac did not understand and only
+until answers were first turned on (`lilBro.answersEverOn`); there the
+button is "Turn on and ask" and also sends that question; ⋯ → Turn on
+answers only shows it;
 `lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered (questions asked while answers were off never leave the Mac), with
+answered (questions asked while answers were off never leave the Mac, except
+the one question a person sends with Turn on and ask), with
 redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
 claude-sonnet-5-5 while it is tried out), which returns sentences, points, follow-ups and one place;

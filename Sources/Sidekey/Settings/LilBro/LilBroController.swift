@@ -11,19 +11,30 @@ final class LilBroPreferences: ObservableObject {
     static let shared = LilBroPreferences()
     static let mascotKey = "lilBro.mascotVisible"
     static let answersKey = "lilBro.answersFromWhytap"
+    static let answersEverOnKey = "lilBro.answersEverOn"
 
     private let defaults: UserDefaults
     @Published var mascotVisible: Bool {
         didSet { defaults.set(mascotVisible, forKey: Self.mascotKey) }
     }
     @Published var answersFromWhytap: Bool {
-        didSet { defaults.set(answersFromWhytap, forKey: Self.answersKey) }
+        didSet {
+            defaults.set(answersFromWhytap, forKey: Self.answersKey)
+            if answersFromWhytap { answersEverOn = true }
+        }
+    }
+    /// Answers were turned on at least once: after that the balloon no longer
+    /// offers them by itself (⋯ still does).
+    private(set) var answersEverOn: Bool {
+        didSet { defaults.set(answersEverOn, forKey: Self.answersEverOnKey) }
     }
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         mascotVisible = defaults.object(forKey: Self.mascotKey) as? Bool ?? true
-        answersFromWhytap = defaults.object(forKey: Self.answersKey) as? Bool ?? false
+        let on = defaults.object(forKey: Self.answersKey) as? Bool ?? false
+        answersFromWhytap = on
+        answersEverOn = on || defaults.bool(forKey: Self.answersEverOnKey)
     }
 }
 
@@ -133,6 +144,18 @@ final class LilBroController: ObservableObject {
     var mascotVisible: Bool { preferences.mascotVisible }
     var answersFromWhytap: Bool { preferences.answersFromWhytap }
     var isOpen: Bool { bubble != .closed }
+    /// Opened before any question, only the reply field shows: no greeting,
+    /// no suggestions, no disclosure. The balloon appears with the first
+    /// answer (or when ⋯ asked for the disclosure).
+    var showsBalloon: Bool { !turns.isEmpty || consentShown }
+    /// The line he greets with over the field, a different one each opening.
+    private(set) var greeting = LilBroCopy.greetings[0]
+    private var opened = 0
+
+    private func nextGreeting() {
+        greeting = LilBroCopy.greetings[opened % LilBroCopy.greetings.count]
+        opened += 1
+    }
     var isBusy: Bool { busy }
 
     /// The pose to draw: a wave while the pointer is over him at rest.
@@ -170,7 +193,9 @@ final class LilBroController: ObservableObject {
         guard let proposal else { return }
         if currentFeature == proposal.feature,
            pressables.contains(where: { $0.isSameStep(as: proposal) && $0.hasButton }) {
-            proposalSteps = requiredSteps(on: proposal.feature).count
+            let steps = requiredSteps(on: proposal.feature).count
+            // Unchanged steps publish nothing: the rows report on every layout.
+            if proposalSteps != steps { proposalSteps = steps }
         } else {
             dropProposal()
         }
@@ -251,6 +276,7 @@ final class LilBroController: ObservableObject {
             await sleep(reduceMotion() ? 0 : 0.44)
             guard !Task.isCancelled else { return }
             setPose(.idle)
+            nextGreeting()
             bubble = .full
             job = nil
         }
@@ -266,6 +292,7 @@ final class LilBroController: ObservableObject {
     private func openBalloon() {
         cancelJob()
         setPose(.idle)
+        nextGreeting()
         bubble = .full
     }
 
@@ -773,18 +800,21 @@ final class LilBroController: ObservableObject {
 
 /// Lil Bro's fixed words, in one place for the view and the tests.
 enum LilBroCopy {
-    static let greeting = "Hi, I’m Lil Bro. Ask where anything is — I’ll open it."
-    static let greetingAnswers = "Hi, I’m Lil Bro. Ask anything about Whytap — I’ll open the right setting."
+    /// His greeting over the field, one per opening, in turn.
+    static let greetings = [
+        "Wassup bro? What we setting up?",
+        "Yo! What you looking for?",
+        "Sup bro, where we headed?",
+        "Hey hey. What's the move?",
+    ]
     /// The disclosure folded to one line; the full text is under Details.
     static let offerLine = "Real answers come from whytap.ai (Claude Sonnet 5.5)."
     /// After a question this Mac did not understand.
     static let offerLineUnknown = "whytap.ai (Claude Sonnet 5.5) understands questions in any language."
     static let turnOnAndAsk = "Turn on and ask"
-    static let localNote = "Answers come from this Mac: I find settings by name."
     /// Said once, before anything is sent, with the button that turns answers on.
     static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Sonnet 5.5) with the Settings screen you’re on and up to three of your earlier whytap.ai questions with its answers, sent again. whytap.ai keeps each question, those earlier questions and answers, and its reply for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
-    static let answersNote = "Questions go to whytap.ai (Claude Sonnet 5.5) with the screen you’re on and up to three earlier whytap.ai questions and answers; it keeps them 90 days. Keys and dictated text stay on your Mac."
     static let notNow = "Not now"
     static let unknown = "I only know Settings by name. Try one of these:"
     static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"

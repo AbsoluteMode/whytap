@@ -59,7 +59,11 @@ invariant said so.
   The keyword guide stays the path while answers are off or offline. After a
   question this Mac did not understand, the line says whytap.ai understands
   any language and the button is **Turn on and ask**: that press turns answers
-  on and sends that one question; earlier questions stay on this Mac. ⋯ → Turn off answers from
+  on and sends that one question; earlier questions stay on this Mac.
+- **Offered only when it helps (REV 5).** The balloon opens with only the
+  reply field; the one-line disclosure shows by itself only after a question
+  this Mac could not answer, and only until answers were first turned on
+  (`lilBro.answersEverOn`). ⋯ → Turn on answers still shows it any time. ⋯ → Turn off answers from
   whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
 - **What is sent:** the question normalised as the server's
   `clean_question` does — split by Unicode scalar on Python's whitespace set

@@ -81,7 +81,7 @@ struct SecureInputHolderView: View {
         if let app = badge.app, let image = NSRunningApplication(processIdentifier: app.pid)?.icon {
             Image(nsImage: image).resizable().interpolation(.high)
         } else {
-            Image(systemName: "lock.fill")
+            Image(systemName: badge.fallbackSymbol)
                 .resizable().scaledToFit()
                 .foregroundStyle(.white)
                 .padding(2)
@@ -95,7 +95,7 @@ struct SecureInputHolderView: View {
 /// accepts the mouse eats clicks where its content does not hit-test).
 // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
 @MainActor
-final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
+final class SecureInputHolderPanel: NSPanel, HotkeyBlockerBadgeSurface {
     /// Created on the first badge, so launching Whytap makes no window.
     private static var instance: SecureInputHolderPanel?
     static var shared: SecureInputHolderPanel {
@@ -149,6 +149,10 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
     deinit { NotificationCenter.default.removeObserver(self) }
 
     var isShowing: Bool { model.badge != nil }
+
+    /// Called when a shaken, non-persistent badge fades on its own, so the
+    /// badge stack can bring back the badge it covered.
+    var onSelfDismiss: (() -> Void)?
 
     @objc private func screenDidChange() {
         guard model.badge != nil else { return }
@@ -231,7 +235,12 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
             DispatchQueue.main.asyncAfter(deadline: .now() + 1, execute: work)
             return
         }
-        if persistent { model.emphasized = false } else { dismiss() }
+        if persistent {
+            model.emphasized = false
+        } else {
+            dismiss()
+            onSelfDismiss?()
+        }
     }
 
     private func reposition() {

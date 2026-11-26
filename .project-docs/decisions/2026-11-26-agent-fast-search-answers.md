@@ -55,13 +55,14 @@ model, Claude Sonnet 5.5, and Anthropic's own web search (the default).
   Claude turn that ran the search (direct or `anthropic/` on OpenRouter), an
   opening tag with Anthropic's result index (`index="1-9"`) and then
   `</cite>` are removed from the answer prose, keeping the cited words,
-  outside code and quotes. Insert and Copy payloads and an ordinary HTML
-  `<cite>` stay literal.
+  outside code and quotes. Insert and Copy payloads, an ordinary HTML
+  `<cite>` and Markdown-escaped tags (`\<cite ...>`) stay literal.
 - **Text after the search is the answer.** When a response ran its search,
   holds the results and ends (end_turn) with text and no tool call, the text
   after the last result (without the preamble before the search) is the
   answer. Before, a second request asked for `finish_answer`; in a live pair it
-  took 3.2 s more. A result deferred from an earlier response still gets that
+  took 3.2 s more. Text that is only a sources heading or links is not an
+  answer: that response still gets the completion request. A result deferred from an earlier response still gets that
   request. The system prompt asks for `finish_answer` in the same response.
 - **A simple factual question gets 1-3 sentences**, without a table, list or
   callout (system prompt and the `answer` description). Answers to the weather
@@ -115,7 +116,10 @@ after a refused search). After the builder's review of queue ticket 643
 pending search waited for it; a malformed `finish_answer` beside a valid one
 on OpenAI (either order), OpenRouter and Anthropic; HTML `<cite>` in Insert and
 Copy kept; no breakpoint on the first accepted request after a refused search.
-The new tests fail on the previous head (11 assertions). `NativeAgentLowEffortTests` and
+The new tests fail on the previous head (11 assertions). After the builder's review of
+ticket 653: escaped tags kept literal; a sources heading, a translated heading
+or links alone after the search continue to `finish_answer`, prose with a link
+is still one request (16 new assertions fail on the previous head). `NativeAgentLowEffortTests` and
 `NativeAgentWebSearchTests` updated for the system block.
 
 After the maintainer asked for the cause of the remaining gap, pairs of the

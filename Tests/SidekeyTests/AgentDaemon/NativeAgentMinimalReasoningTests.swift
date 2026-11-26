@@ -604,6 +604,16 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("`<cite index=\"1-2\">` and <cite>Walden</cite>"),
                        "`<cite index=\"1-2\">` and <cite>Walden</cite>", "an indexed tag in code does not pair")
         XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"1-2\">a <cite>W</cite> b</cite>"), "a <cite>W</cite> b")
+        // Builder review, queue #653: Markdown-escaped tags are literal text.
+        for literal in ["\\<cite index=\"1-2\">a\\</cite>", "\\<cite index=\"1-2\">a</cite>", "x \\</cite> y"] {
+            XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags(literal), literal)
+        }
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("\\\\<cite index=\"1-2\">a</cite>"), "\\\\a",
+                       "an escaped backslash does not escape the tag")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"1-2\">C:\\Users\\</cite>"), "C:\\Users\\",
+                       "a backslash ending the cited text does not keep the provider's closing tag")
+        XCTAssertFalse(NativeAgentFinalAnswer.answersAfterSearch("<https://example.com/spb>"))
+        XCTAssertTrue(NativeAgentFinalAnswer.answersAfterSearch("Около −2° <https://example.com/spb>"))
         var html = finish("The tag is below <cite index=\"1-1\">here</cite>.")
         html["insert_text"] = "<p><cite>Walden</cite> <cite index=\"1-1\">kept</cite></p>"
         html["actions"] = [["type": "copy", "text": "<cite>Walden</cite>", "description": "HTML"]]
@@ -731,6 +741,25 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         ])
         XCTAssertEqual(empty.store.streamingText, "Около −2°.")
         XCTAssertEqual(empty.bodies.count, 2, "no text after the result: finish_answer is asked for")
+
+        // Builder review, queue #653: a sources heading or links alone after
+        // the search are not an answer; the turn asks for finish_answer.
+        for reply in ["Sources", "# Sources", "Источники", "Links for verification", "[Погода](https://example.com/spb)",
+                      "Источники:\n- [Погода](https://example.com/spb)"] {
+            let sourceOnly = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+                json(["stop_reason": "end_turn", "content": [search, result, ["type": "text", "text": reply]]]),
+                json(anthropicFinal("Около −2°.")),
+            ])
+            XCTAssertEqual(sourceOnly.store.status, .ready, reply)
+            XCTAssertEqual(sourceOnly.store.streamingText, "Около −2°.", reply)
+            XCTAssertEqual(sourceOnly.bodies.count, 2, reply)
+        }
+        let withLink = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "end_turn", "content": [search, result,
+                                                         ["type": "text", "text": "Около −2°, ясно ([Погода](https://example.com/spb))."]]]),
+        ])
+        XCTAssertEqual(withLink.store.status, .ready, withLink.store.errorMessage ?? "")
+        XCTAssertEqual(withLink.bodies.count, 1, "prose with a link is an answer")
 
         let pending = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
             json(["stop_reason": "end_turn", "content": [search, ["type": "text", "text": "Жду результатов."]]]),

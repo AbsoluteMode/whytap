@@ -435,10 +435,11 @@ struct NativeAgentModel {
             // gets a completion request) and no tool call, that text (after
             // the last result, without the preamble before the search) is the
             // answer: no second request asking for
-            // finish_answer (about 3 s). WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+            // finish_answer (about 3 s). A sources heading or links alone are
+            // not an answer: that response still gets the completion request. WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
             if response["stop_reason"] as? String == "end_turn", calls.isEmpty, !unknownBlock,
                !requested.isEmpty, requested == answered,
-               !textAfterSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+               NativeAgentFinalAnswer.answersAfterSearch(textAfterSearch) {
                 text = textAfterSearch
                 plainTextReply = true
                 webWork = false

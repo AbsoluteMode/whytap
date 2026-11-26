@@ -158,7 +158,20 @@ struct NativeAgentFinalAnswer {
         // Tags pair in order: a `</cite>` is removed only when it closes an
         // indexed tag that was removed; a plain HTML `<cite>` keeps its own.
         var open: [Bool] = [], removed: [NSRange] = []
+        // A Markdown backslash escape (`\\<cite ...>`) makes a tag literal text.
+        func escaped(_ range: NSRange) -> Bool {
+            var count = 0, index = range.location - 1
+            while index >= 0, string.character(at: index) == 0x5C { count += 1; index -= 1 }
+            return count % 2 == 1
+        }
         for match in matches where !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+            if escaped(match.range) {
+                if match.range(at: 1).location != NSNotFound || match.range(at: 2).location != NSNotFound { open.append(false) }
+                // A closing tag after an indexed tag comes from the provider:
+                // a backslash before it is the end of the cited text.
+                else if let indexed = open.popLast(), indexed { removed.append(match.range) }
+                continue
+            }
             if match.range(at: 1).location != NSNotFound { open.append(true); removed.append(match.range) }
             else if match.range(at: 2).location != NSNotFound { open.append(false) }
             else if let indexed = open.popLast(), indexed { removed.append(match.range) }
@@ -265,6 +278,16 @@ struct NativeAgentFinalAnswer {
     static func invalid(actionsAttempted: Bool = false) -> NativeAgentError {
         .message("The model didn’t provide a valid structured answer."
             + (actionsAttempted ? actionWarning : " Try again."))
+    }
+
+    /// Text a Claude turn ended with after its own search: an answer only
+    /// when it says more than a sources heading or links (the search's pages
+    /// count as sources; a Markdown autolink `<https://...>` is a link too),
+    /// after its citation tags are removed.
+    static func answersAfterSearch(_ text: String) -> Bool {
+        let prose = withoutCitationTags(text).trimmingCharacters(in: .whitespacesAndNewlines)
+        let withoutAutolinks = prose.replacingOccurrences(of: #"<https?://[^\s<>]+>"#, with: "", options: [.regularExpression, .caseInsensitive])
+        return !prose.isEmpty && prose.count <= 32_000 && hasAnswerContent(withoutAutolinks, hasSources: true)
     }
 
     /// A conservative format check, not a semantic verifier. Rejects URL lists

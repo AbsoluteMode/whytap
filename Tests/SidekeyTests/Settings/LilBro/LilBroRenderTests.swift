@@ -9,10 +9,9 @@ import XCTest
 @MainActor
 final class LilBroRenderTests: XCTestCase {
     private func controller(_ fixture: FeaturesFixture, _ selection: SettingsWindowSelection,
-                            mascot: Bool = true, remote: LilBroBrain? = nil, answers: Bool = true) -> LilBroController {
+                            mascot: Bool = true, remote: LilBroBrain? = nil) -> LilBroController {
         let preferences = LilBroPreferences(defaults: fixture.defaults)
         preferences.mascotVisible = mascot
-        preferences.answersFromWhytap = answers
         return LilBroController(selection: selection, preferences: preferences,
                                 remote: remote ?? LilBroFixedBrain(), reduceMotion: { true },
                                 sleep: { _ in await Task.yield() })
@@ -108,38 +107,18 @@ final class LilBroRenderTests: XCTestCase {
         XCTAssertEqual(lilBro.bubble, .full)
     }
 
-    /// Answers already on: the greeting has ⋯, so they can be turned off
-    /// before a question is sent.
-    func test_with_answers_on_the_greeting_offers_turning_them_off() async throws {
+    /// REV 13: answers always come from whytap.ai. The greeting's ⋯ only
+    /// hides the little guy or closes; there is no switch and no card that
+    /// turns answers on.
+    func test_the_greeting_has_no_answers_switch() async throws {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
         let lilBro = controller(fixture, selection)
-        lilBro.turnOnAnswers()
-        try await render(fixture, selection, lilBro, name: "greeting-answers-on-light") {
+        try await render(fixture, selection, lilBro, name: "greeting-options-light") {
             lilBro.toggleFromSidebar()
         }
-        XCTAssertFalse(lilBro.showsBalloon)
-        XCTAssertTrue(lilBro.answersFromWhytap)
-        lilBro.turnOffAnswers()
-        XCTAssertFalse(lilBro.answersFromWhytap)
-    }
-
-    /// Answers turned off: a question gets only the card that turns them on
-    /// and sends it; no scripted answer, no suggestions.
-    func test_answers_off_he_shows_only_turn_on_and_ask() async throws {
-        let fixture = try await FeaturesFixture(.freshInstall)
-        defer { fixture.cleanUp() }
-        let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection, answers: false)
-        try await render(fixture, selection, lilBro, name: "answers-off-light") {
-            lilBro.toggleFromSidebar()
-            lilBro.ask("как изменить хоткей рекорда")
-            await self.until { lilBro.bubble == .full && !lilBro.isBusy }
-        }
-        XCTAssertEqual(lilBro.turns.last?.reply, .answersOff)
-        XCTAssertTrue(lilBro.turnOnAsks)
-        XCTAssertNil(selection.shownFeature, "nothing opened")
+        XCTAssertFalse(lilBro.showsBalloon, "before a question only the greeting and the field")
     }
 
     func test_hidden_he_answers_from_the_sidebar_entry() async throws {
@@ -157,16 +136,9 @@ final class LilBroRenderTests: XCTestCase {
         let fixture = try await FeaturesFixture(.freshInstall)
         defer { fixture.cleanUp() }
         let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection, remote: Offline(), answers: false)
-        try await render(fixture, selection, lilBro, name: "offer-light") {
-            lilBro.toggleFromSidebar()
-            // The greeting's small link: the whole disclosure, on request.
-            lilBro.askToTurnOnAnswers()
-        }
-        XCTAssertTrue(lilBro.consentShown)
-        XCTAssertFalse(lilBro.answersFromWhytap, "the link only shows the disclosure")
-        lilBro.turnOnAnswers()
+        let lilBro = controller(fixture, selection, remote: Offline())
         try await render(fixture, selection, lilBro, name: "offline-light") {
+            lilBro.toggleFromSidebar()
             lilBro.ask("how do I dictate")
             await self.until { lilBro.bubble == .full && !lilBro.isBusy }
         }
@@ -237,21 +209,6 @@ final class LilBroRenderTests: XCTestCase {
         }
         XCTAssertNotNil(lilBro.map.visible(.row(close.id)))
         XCTAssertEqual(lilBro.target, lilBro.map.visible(.row(close.id)))
-    }
-
-    /// ⋯ → What is sent to whytap.ai, before the first question: the text
-    /// and OK, nothing to confirm.
-    func test_details_while_answers_are_on() async throws {
-        let fixture = try await FeaturesFixture(.freshInstall)
-        defer { fixture.cleanUp() }
-        let selection = SettingsWindowSelection()
-        let lilBro = controller(fixture, selection)
-        try await render(fixture, selection, lilBro, name: "details-on-light") {
-            lilBro.toggleFromSidebar()
-            lilBro.showDetails()
-        }
-        XCTAssertTrue(lilBro.showsBalloon)
-        XCTAssertTrue(lilBro.answersFromWhytap)
     }
 
     /// Builder review of #493 (ticket 627), in the real window without the

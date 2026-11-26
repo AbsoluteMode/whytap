@@ -94,8 +94,8 @@ struct LilBroLayer: View {
                 if !controller.showsBalloon {
                     HStack(spacing: 8) {
                         LilBroGreetingLine(text: controller.greeting)
-                        // Answers on: turning them off must not wait for a question.
-                        if controller.answersFromWhytap { LilBroOptionsMenu(controller: controller, standalone: true) }
+                        // Hiding the little guy must not wait for a question.
+                        LilBroOptionsMenu(controller: controller, standalone: true)
                     }
                 }
                 LilBroReplyField(controller: controller)

@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai, on by default),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's answers from whytap.ai),
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -1574,8 +1574,8 @@ opens the tab, `SettingsWindowSelection.focus(row)` scrolls the tab to it
 (HotkeysSettingsView tags its rows with lilBroRow), and he stands on that row
 and outlines it; without the little guy only the outline shows. The outline
 is the led row's current place (`leadRow`): gone while it is scrolled away,
-back when it returns, ended with the focus (another tab, Clear, Turn off
-answers, a new question, closing). With the little guy he waits at home while
+back when it returns, ended with the focus (another tab, Clear, a new
+question, closing). With the little guy he waits at home while
 it is away and is back on it when it returns. A row he cannot show (the
 person left the tab meanwhile, even while it was still laying out, or it
 never reports) outlines nothing, leaves their tab and is not said to be
@@ -1589,24 +1589,18 @@ SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
 never a synthetic click. While the balloon is open he stands still; he goes
 home only after it is closed. The ⋯ menu hides the little guy
 (LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers from whytap.ai are on by default (`lilBro.answersFromWhytap`,
-on unless the person turned it off; the maintainer's decision of 2026-11-26).
-Turned off with ⋯, nothing is sent: a question gets only the one-line
-disclosure, full text under Details (LilBroOffer), with "Turn on and ask",
-which turns answers on and sends that question; ⋯ → Turn on answers shows it
-with Not now. Turning answers off stops a question on its way and any
-guiding (the reply is ignored, nothing opens; that question gets Turn on and
-ask); Clear ends a pending question too, and closing drops one that has no
-reply yet. While answers are on, ⋯ → What is sent to whytap.ai shows the same
-text with OK, also before the first question. A question under the server's
+same balloon. Every question goes to whytap.ai: there is no switch to turn
+answers off and no "What is sent" item (REV 13, the maintainer's decision of
+2026-11-26: Lil Bro works only through Sonnet; a `lilBro.answersFromWhytap`
+saved by builds 1770–1772 is ignored). Clear ends a pending question and any
+guiding (the reply is ignored, nothing opens), and closing drops one that has
+no reply yet. A question under the server's
 three characters is not sent (`tooShort`). LilBroRemoteBrain posts the
 question (cut to the server's 300 Unicode scalars), the screen (`tab` or
 `tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered (questions asked while answers were off never leave the Mac, except
-the one question a person sends with Turn on and ask), with
-redirects refused, to
+answered, with redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-sonnet-5-5 while it is tried out), which returns sentences, points and,
+claude-sonnet-5-5), which returns sentences, points and,
 only when the person asked to go or set something up, one place (a feature,
 tab, row `{row, tab}` from LilBroRows.swift, or API keys); an id the app does
 not have is dropped, and an unknown row falls back to its tab. No internet or a timeout is offline, 429 or a
@@ -2728,11 +2722,9 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
    exception is Lil Bro in Settings: each question the person asks him, the
    Settings screen they are on and up to three earlier exchanges go to
    `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`). Answers are on by default (the
-   maintainer's decision of 2026-11-26); nothing is sent before a question,
-   and nothing after ⋯ → Turn off answers from whytap.ai. Turned off, "Turn
-   on and ask" turns them on again and sends the one question this Mac did
-   not understand. WHY:
+   checked by `LilBroRemoteBrainTests`). There is no switch to turn this
+   off (REV 13, the maintainer's decision of 2026-11-26: Lil Bro works only
+   through Sonnet); nothing is sent before a question. WHY:
    .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
    Other network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this

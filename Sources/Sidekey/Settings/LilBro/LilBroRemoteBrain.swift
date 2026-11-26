@@ -5,8 +5,8 @@ import Foundation
 /// claude-sonnet-5-5 and names a place from the app's own catalog only when
 /// the person asked to go there or set something up.
 ///
-/// Used for each question unless the person turned answers off in ⋯ (on by
-/// default since 2026-11-26, the maintainer's decision). Nothing else is
+/// Used for every question; there is no switch to turn it off (REV 13, the
+/// maintainer's decision: Lil Bro works only through Sonnet). Nothing else is
 /// sent: no keys, no dictated text, no settings, no identifier of this Mac.
 /// The server keeps the question text 90 days without an address or visitor.
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md

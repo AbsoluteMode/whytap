@@ -499,9 +499,12 @@ final class SonioxRealtimeTranslateAdapterTests: XCTestCase {
 /// form from the one stream, and a broken socket keeps them and names it.
 @MainActor
 final class SonioxSubtitlesModelTests: XCTestCase {
-    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30) async throws {
+    /// A deadline that runs out fails the test instead of passing late.
+    private func wait(_ condition: @autoclosure () -> Bool, seconds: Double = 30,
+                      file: StaticString = #filePath, line: UInt = #line) async throws {
         let deadline = Date().addingTimeInterval(seconds)
         while !condition(), Date() < deadline { try await Task.sleep(for: .milliseconds(5)) }
+        XCTAssertTrue(condition(), "condition never became true", file: file, line: line)
     }
 
     private func makeModel(_ transport: StubWebSocketTransport, audio: FixtureSubtitleAudio) -> LiveSubtitleModel {

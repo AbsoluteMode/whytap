@@ -372,10 +372,11 @@ final class LilBroController: ObservableObject {
             case .answer(let answer):
                 // A place only when the model said the person asked for it.
                 if let destination = answer.destination {
-                    let arrived = await guide(to: destination)
+                    let lead = lead(to: destination)
+                    let arrived = await guide(to: lead.destination)
                     // Said only once the place is really open.
                     guard !Task.isCancelled else { return }
-                    if arrived { turns[index].opened = destination.title }
+                    if arrived { turns[index].opened = lead.opened }
                 } else if mascotVisible {
                     // Answered in words: he stays where he is.
                     setPose(.idle)
@@ -418,6 +419,21 @@ final class LilBroController: ObservableObject {
         let press: @MainActor () -> Void
     }
 
+    /// Where he really leads for an answer and what he then says he opened.
+    /// Case, Notify and Monitor act as their pane opens (Case asks for
+    /// Touch ID, Notify marks notices read, Monitor polls servers), so he
+    /// never opens them: he outlines All tools, and the person clicks the
+    /// tool there (builder ticket 658). Their pane already open is shown as
+    /// any other.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder ticket 658)
+    func lead(to destination: LilBroDestination) -> (destination: LilBroDestination, opened: String) {
+        if case .row(let row) = destination, let tool = row.tool, tool.paneActsOnOpen,
+           !row.isShown(on: selection.lilBroScreen), let tools = LilBroRow.named("toolbox.allTools") {
+            return (.row(tools), "\(tools.title): click \(row.title) there to open it")
+        }
+        return (destination, destination.title)
+    }
+
     func stops(for destination: LilBroDestination) -> [Stop] {
         let selection = selection
         switch destination {
@@ -433,32 +449,31 @@ final class LilBroController: ObservableObject {
             if selection.selectedTab == tab.resolved, tab.resolved != .features || selection.shownFeature == nil { return [] }
             return [Stop(spot: .tab(tab.resolved)) { selection.select(tab) }]
         case .apiKeys:
-            return [Stop(spot: .tab(.apiAndModels)) { selection.showAPIKeys() }]
+            guard let keys = LilBroRow.named("apiAndModels.apiKeys") else { return [] }
+            return stops(for: .row(keys))
         case .row(let row):
             // The tab's sidebar row, or the way to the feature's screen, as a
             // person would click them; the row itself is scrolled to and
             // outlined after it opens (REV 14).
             if let feature = row.feature { return stops(for: .feature(feature)) }
             if row.isShown(on: selection.lilBroScreen) { return [] }
-            // A Toolbox pane opens with its tool: its tile when Toolbox is
-            // open, otherwise from Features (Toolbox's home).
+            // From another tab: the sidebar row that opens the tab first
+            // (Features for Toolbox, General for Backup and Integrations).
+            let tab = row.tab.resolved
+            var stops: [Stop] = []
+            if selection.selectedTab != tab {
+                stops.append(Stop(spot: .tab(tab.sidebarHome)) { selection.select(row.tab) })
+            }
+            // Then, as a person would, a Toolbox tool's tile or a Keys &
+            // models section's tab at the top; Keys & models opens on Models
+            // (builder tickets 651, 658).
             if let tool = row.tool {
-                let spot: LilBroSpot = selection.selectedTab == .toolbox ? .part(row.screen) : .tab(row.tab.sidebarHome)
-                return [Stop(spot: spot) { selection.focus(tool) }]
+                stops.append(Stop(spot: .part(row.screen)) { selection.focus(tool) })
+            } else if let section = row.apiSection,
+                      selection.selectedTab == tab ? selection.apiSection != section : section != .models {
+                stops.append(Stop(spot: .part(row.screen)) { selection.apiSection = section })
             }
-            // A part of Keys & models: its tab at the top when Keys & models
-            // is open (builder ticket 651).
-            if let section = row.apiSection {
-                if selection.selectedTab == .apiAndModels {
-                    return [Stop(spot: .part(row.screen)) { selection.apiSection = section }]
-                }
-                return [Stop(spot: .tab(.apiAndModels)) {
-                    selection.select(.apiAndModels)
-                    selection.apiSection = section
-                }]
-            }
-            if selection.selectedTab == row.tab.resolved { return [] }
-            return [Stop(spot: .tab(row.tab.resolved)) { selection.select(row.tab) }]
+            return stops
         }
     }
 
@@ -495,9 +510,10 @@ final class LilBroController: ObservableObject {
         }
         bubble = .tag("On my way…")
         // Where the window is as far as he knows; a click of the person's
-        // own during his run or punch changes it, and then he presses
-        // nothing more (builder review of #493, ticket 631).
-        var expected = place
+        // own during his run or punch changes it, even one that comes back
+        // to where it was, and then he presses nothing more (builder review
+        // of #493, tickets 631 and 658).
+        var expected = selection.changes
         for stop in stops {
             guard !Task.isCancelled else { return false }
             if let rect = await visibleSpot(stop.spot) {
@@ -507,7 +523,7 @@ final class LilBroController: ObservableObject {
                 await punch(rect)
             }
             guard !Task.isCancelled else { return false }
-            guard place == expected else {
+            guard selection.changes == expected else {
                 // The person went somewhere themselves: their choice stays.
                 if row != nil, selection.focusedRow == row?.id { selection.focusedRow = nil }
                 feet = map.homeStand
@@ -515,8 +531,13 @@ final class LilBroController: ObservableObject {
                 return false
             }
             stop.press()
+            expected = selection.changes
             await settle()
-            expected = place
+        }
+        guard selection.changes == expected else {
+            feet = map.homeStand
+            setPose(.idle)
+            return false
         }
         guard !Task.isCancelled else { return false }
         let landing = await landing(for: destination)
@@ -530,8 +551,9 @@ final class LilBroController: ObservableObject {
         await walk(to: LilBroPlanner.perch(on: block))
         guard !Task.isCancelled else { return false }
         if let row {
-            // Left its screen while he ran there: nothing to outline.
-            guard leadIsActive(row), let now = map.visible(.row(row.id)) else {
+            // Left its screen while he ran there, or went away and back:
+            // nothing to outline.
+            guard selection.changes == expected, leadIsActive(row), let now = map.visible(.row(row.id)) else {
                 if selection.focusedRow == row.id { selection.focusedRow = nil }
                 feet = map.homeStand
                 setPose(.idle)
@@ -543,7 +565,7 @@ final class LilBroController: ObservableObject {
         } else {
             // The person went elsewhere while he walked to the card: he
             // outlines nothing on their screen.
-            guard place == expected, map.platforms.contains(block) else {
+            guard selection.changes == expected, map.platforms.contains(block) else {
                 feet = map.homeStand
                 setPose(.idle)
                 return true
@@ -553,19 +575,6 @@ final class LilBroController: ObservableObject {
         holding = true
         setPose(.point)
         return true
-    }
-
-    /// The window's place as far as guiding goes: tab, feature screen, Keys
-    /// & models section and Toolbox pane. The person's change of any of
-    /// them during his run stops it (builder ticket 651).
-    private struct Place: Equatable {
-        let tab: SettingsWindowTab
-        let feature: AppFeature?
-        let screen: String
-    }
-
-    private var place: Place {
-        Place(tab: selection.selectedTab, feature: selection.shownFeature, screen: selection.lilBroScreen)
     }
 
     /// Where he stands and what he outlines once the place is open: the row

@@ -50,7 +50,7 @@ struct ToolboxSettingsView: View {
         _vocabVM = StateObject(wrappedValue: IslandVocabularyViewModel(
             vocabulary: deps.vocabulary()))
         _fillerVM = StateObject(wrappedValue: IslandFillerViewModel())
-        _caseVM = StateObject(wrappedValue: CaseViewModel(service: .shared))
+        _caseVM = StateObject(wrappedValue: deps.caseViewModel?() ?? CaseViewModel(service: .shared))
         _dropMode = State(initialValue: deps.currentDropMode())
         _selectedInputLanguage = State(initialValue: deps.currentLanguage())
         _selectedOutputLanguage = State(initialValue: deps.currentTargetLanguage())
@@ -393,7 +393,9 @@ struct ToolboxSettingsView: View {
             case .dropMode:
                 dropModePane
             case .notifs:
-                NotifyHoverPanel(showsBackButton: false, onBack: {})
+                NotifyHoverPanel(hub: deps.notifyHub, supervisor: deps.notifySupervisor,
+                                 meetingNotifications: deps.meetingNotifications,
+                                 showsBackButton: false, onBack: {})
                     .settingsIslandPreview()
             case .clipboard:
                 ToolboxHistoryPane(deps: deps)
@@ -419,7 +421,7 @@ struct ToolboxSettingsView: View {
                 .lilBroCatalogRow("Open " + HoverToolRegistry.info(for: tool).title)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             case .monitor:
-                MonitorHoverPanel(onBack: { selectedTool = nil })
+                MonitorHoverPanel(store: deps.monitor, onBack: { selectedTool = nil })
                     .settingsIslandPreview()
             case .translate, .subtitles:
                 ToolboxTranslationPane(mode: tool == .translate ? .text : .subtitles, deps: deps,

@@ -1,5 +1,6 @@
 import AppKit
 import AVFoundation
+import CryptoKit
 import FluidAudio
 import SwiftUI
 import XCTest
@@ -52,6 +53,13 @@ struct FeaturesFixture {
     let hoverStore: HoverLayoutStore
     let notifySupervisor: NotifyScriptSupervisor
     let monitor: MonitorStore
+    /// Toolbox's Notify pane reads this archive, never the person's.
+    let notifyHub: LocalNotificationHub
+    /// Toolbox's Case pane: an empty temporary Case behind an authenticator
+    /// that counts and declines, never Touch ID.
+    let caseAuthenticator = CountingCaseAuthenticator()
+    /// Every poll Toolbox's Monitor pane makes; none reaches a server.
+    let monitorCalls = MonitorCalls()
     let files: URL
     let clipboard = CopiedText()
     private let suite: String
@@ -117,8 +125,13 @@ struct FeaturesFixture {
         hub.setSuspended(true)
         hoverStore = HoverLayoutStore(defaults: defaults)
         notifySupervisor = NotifyScriptSupervisor(directory: notifyRoot, hub: hub)
+        notifyHub = hub
+        let calls = monitorCalls
         monitor = MonitorStore(root: files.appendingPathComponent("Monitor", isDirectory: true),
-                               collector: { _ in throw CancellationError() })
+                               collector: { _ in
+                                   await MainActor.run { calls.count += 1 }
+                                   throw CancellationError()
+                               })
         let clipboard = clipboard
         environment = FeaturesEnvironment(
             dropMode: { dropMode },
@@ -154,6 +167,37 @@ struct FeaturesFixture {
         var texts: [String] = []
     }
 
+    /// Toolbox's panes on this fixture's temporary Case, Notify and Monitor
+    /// (builder ticket 658).
+    var toolboxDeps: ToolboxDeps {
+        var deps = ToolboxDeps()
+        let vault = CaseVaultService(store: CaseVaultStore(fileURL: files.appendingPathComponent("case.vault")),
+                                     keyProvider: NoCaseKey())
+        let authenticator = caseAuthenticator
+        deps.caseViewModel = { CaseViewModel(service: vault, authenticator: authenticator) }
+        deps.notifyHub = notifyHub
+        deps.notifySupervisor = notifySupervisor
+        deps.meetingNotifications = environment.meetingNotifications
+        deps.monitor = monitor
+        return deps
+    }
+
+    final class CountingCaseAuthenticator: CaseAuthenticating {
+        private(set) var calls = 0
+        func authenticate(reason: String) async throws {
+            calls += 1
+            throw CaseAuthenticationError.denied
+        }
+    }
+
+    final class MonitorCalls {
+        var count = 0
+    }
+
+    private struct NoCaseKey: CaseVaultKeyProviding {
+        func readOrCreateKey() throws -> SymmetricKey { throw CaseAuthenticationError.denied }
+    }
+
     /// The whole Settings shell on `tab`.
     /// Lil Bro always asks whytap.ai; fixtures answer with a fixed "offline"
     /// reply so no test reaches the network.
@@ -162,7 +206,7 @@ struct FeaturesFixture {
                backup: BackupViewModel? = nil) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
-            selection: selection, agentModeViewModel: agent,
+            selection: selection, agentModeViewModel: agent, toolboxDeps: toolboxDeps,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
             featuresEnvironment: environment,

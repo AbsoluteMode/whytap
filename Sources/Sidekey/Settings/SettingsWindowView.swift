@@ -311,7 +311,7 @@ struct SettingsWindowView: View {
             EmptyView()
         case .toolbox:
             ToolboxSettingsView(
-                hoverStore: HoverLayoutStore.shared,
+                hoverStore: featuresEnvironment?.hoverStore ?? .shared,
                 selection: selection,
                 deps: toolboxDeps
             )
@@ -401,14 +401,18 @@ private struct SettingsNotesUnavailableView: View {
 
 @MainActor
 final class SettingsWindowSelection: ObservableObject {
-    @Published var selectedTab: SettingsWindowTab
+    @Published var selectedTab: SettingsWindowTab {
+        didSet { if selectedTab != oldValue { changes += 1 } }
+    }
     @Published var notesController: MeetingsContentController?
     /// The feature row Keys & models scrolls to and highlights; the tab clears it once shown.
     @Published var focusedFeature: AIFeature?
     /// The tool Toolbox selects on appear (a `whytap://tool/` link); Toolbox clears it.
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
-    @Published var shownFeature: AppFeature?
+    @Published var shownFeature: AppFeature? {
+        didSet { if shownFeature != oldValue { changes += 1 } }
+    }
     /// The row Lil Bro led to (`LilBroRow.id`): its tab scrolls to it while
     /// it is set. Any other tab choice clears it.
     @Published var focusedRow: String?
@@ -417,12 +421,18 @@ final class SettingsWindowSelection: ObservableObject {
     /// opens API keys. Changing it ends a Lil Bro lead to another part.
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 15, builder ticket 651)
     @Published var apiSection: APIAndModelsSection = .models {
-        didSet { if apiSection != oldValue { dropRowOffScreen() } }
+        didSet { if apiSection != oldValue { changes += 1; dropRowOffScreen() } }
     }
     /// The Toolbox tool whose pane is shown; nil shows the placeholder.
     @Published var toolboxTool: HoverTool? {
-        didSet { if toolboxTool != oldValue { dropRowOffScreen() } }
+        didSet { if toolboxTool != oldValue { changes += 1; dropRowOffScreen() } }
     }
+    /// Counts every change of tab, feature screen, Keys & models section and
+    /// Toolbox tool. Lil Bro notes it after each press of his own; any other
+    /// change during his run is the person's, even one that comes back to
+    /// where it started, and ends his lead (builder ticket 658).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder ticket 658)
+    private(set) var changes = 0
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?

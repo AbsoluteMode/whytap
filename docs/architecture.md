@@ -1571,8 +1571,13 @@ Hold brightness), he opens its tab, feature screen, Keys & models section
 focuses it and the pane scrolls it to the middle (a tall row to its top), and
 he stands on that row and outlines it. The screen he and the rows name
 (`lilBroScreen`) includes the Keys & models section and the Toolbox tool
-(`apiAndModels/keys`, `toolbox/vocab`; `apiSection`, `toolboxTool`), so a
-person's own section or tool change during his run ends it. Rows find their
+(`apiAndModels/keys`, `toolbox/vocab`; `apiSection`, `toolboxTool`). From
+another tab he presses the sidebar row first, then the section's tab or the
+tool's tile. `SettingsWindowSelection.changes` counts every tab, feature,
+section and tool change, so any change of the person's during his run ends
+it, even one that comes back. Case, Notify and Monitor act as their pane
+opens (`HoverTool.paneActsOnOpen`): he leads to All tools and the person
+clicks the tool (builder ticket 658). Rows find their
 catalog entry themselves: `MacRow`, `HotkeySettingRow`,
 `ConcreteSettingPicker`, the feature shortcut rows, Hover's tool rows and
 the Keys & models rows call `lilBroCatalogRow(title)`, which looks the title

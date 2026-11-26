@@ -28,4 +28,13 @@ struct ToolboxDeps {
     var setLanguage: (AppLanguage?) -> Void = { _ in }
     /// Persist a new output language.
     var setTargetLanguage: (AppLanguage?) -> Void = { _ in }
+    /// The Case, Notify and Monitor behind those panes; nil is the app's own.
+    /// Tests pass temporary ones and a fake authenticator, so drawing a pane
+    /// never asks for Touch ID, marks the person's notices read or polls
+    /// their servers (builder ticket 658).
+    var caseViewModel: (@MainActor () -> CaseViewModel)?
+    var notifyHub: LocalNotificationHub?
+    var notifySupervisor: NotifyScriptSupervisor?
+    var meetingNotifications: MeetingReadyNotifications?
+    var monitor: MonitorStore?
 }

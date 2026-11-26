@@ -266,3 +266,12 @@ struct LilBroRow: Hashable {
     private static let byPlace = Dictionary(catalog.map { (Place(screen: $0.screen, title: $0.title), $0) },
                                             uniquingKeysWith: { first, _ in first })
 }
+
+extension HoverTool {
+    /// A tool whose pane does something as soon as it opens: Case asks for
+    /// Touch ID, Notify marks the notices read, Monitor polls the servers.
+    /// Lil Bro never opens these panes himself (builder ticket 658). The
+    /// other panes only read what they show.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (builder ticket 658)
+    var paneActsOnOpen: Bool { [.caseVault, .notifs, .monitor].contains(self) }
+}

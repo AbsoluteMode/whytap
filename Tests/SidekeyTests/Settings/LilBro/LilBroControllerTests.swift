@@ -237,7 +237,8 @@ final class LilBroControllerTests: XCTestCase {
         XCTAssertEqual(controller.stops(for: .feature(.drop)).map(\.spot), [.feature(.drop)])
         selection.open(.drop)
         XCTAssertTrue(controller.stops(for: .feature(.drop)).isEmpty, "already there")
-        XCTAssertEqual(controller.stops(for: .apiKeys).map(\.spot), [.tab(.apiAndModels)])
+        XCTAssertEqual(controller.stops(for: .apiKeys).map(\.spot), [.tab(.apiAndModels), .part("apiAndModels/keys")],
+                       "the sidebar row, then the API keys tab (builder ticket 658)")
         let record = LilBroRow.named("hotkeys.meetingRecord")!
         XCTAssertEqual(controller.stops(for: .row(record)).map(\.spot), [.tab(.hotkeys)], "the tab first")
         selection.select(.hotkeys)
@@ -250,7 +251,8 @@ final class LilBroControllerTests: XCTestCase {
         selection.open(.drop)
         XCTAssertTrue(controller.stops(for: .row(duck)).isEmpty, "already on Drop: only the scroll")
         let hold = LilBroRow.named("toolbox.holdBrightness")!
-        XCTAssertEqual(controller.stops(for: .row(hold)).map(\.spot), [.tab(.features)], "Toolbox opens with its tool")
+        XCTAssertEqual(controller.stops(for: .row(hold)).map(\.spot), [.tab(.features), .part("toolbox/brightness")],
+                       "Toolbox from Features, then the tool's tile")
     }
 
     // MARK: Answers from whytap.ai

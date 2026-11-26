@@ -286,12 +286,13 @@ every event and reads only which modifiers are down; Accessibility, no Input
 Monitoring), sees the physical press first. When Whytap's `NSEvent` shortcut
 monitors never see that key held, `HotkeyInterceptionGuard` reads
 `CGGetEventTapList` and names the other app's enabled active flagsChanged
-filter: its logo shakes in the same pill right of the island and stays
-dimmed; hovering reads "Punto Switcher is intercepting Right Option — change
-the key in one of the apps". Whytap's own, Apple's and listen-only taps are
-never named; with no candidate nothing is shown. The logo leaves when that
-app's filter is gone, when the key reaches Whytap again or when the key is no
-longer a Whytap shortcut. A remap below the taps (Karabiner, `hidutil`),
+filter: its logo shakes in the same pill right of the island, at full
+strength, for about 3 s, then hides; it never stays dimmed. Every new lost
+press shows it again and restarts the time. Hovering reads "Punto Switcher
+is intercepting Right Option — change the key in one of the apps". Whytap's
+own, Apple's and listen-only taps are never named; with no candidate nothing
+is shown. While Secure Input's dimmed logo is up, the shake covers it for
+those 3 s and it returns. A remap below the taps (Karabiner, `hidutil`),
 Carbon combos and hold-Space are not covered.
 [Decision](../.project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md).
 

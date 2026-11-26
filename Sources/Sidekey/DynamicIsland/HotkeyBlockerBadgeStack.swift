@@ -11,7 +11,8 @@ protocol HotkeyBlockerBadgeSurface: SecureInputHolderPresenting {
 /// Input and an app intercepting a Whytap shortcut with its own event tap.
 /// Each guard owns its slot and never dismisses the other's badge. The most
 /// recently presented badge is on screen; when it leaves, a persistent badge
-/// of the other slot comes back, dimmed.
+/// of the other slot comes back, dimmed. The interceptor's badge is always
+/// transient (about 3 s), so only Secure Input's dimmed logo ever comes back.
 // WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
 @MainActor
 final class HotkeyBlockerBadgeStack {
@@ -48,6 +49,10 @@ final class HotkeyBlockerBadgeStack {
     // MARK: - Slot operations
 
     fileprivate func present(_ badge: SecureInputHolderBadge, shake: Bool, persistent: Bool, from source: Source) {
+        // A transient badge covered by another one is over: it never comes back.
+        if let displayed, displayed != source, entries[displayed]?.persistent == false {
+            entries[displayed] = nil
+        }
         entries[source] = Entry(badge: badge, persistent: persistent)
         displayed = source
         resolvedSurface().present(badge, shake: shake, persistent: persistent)

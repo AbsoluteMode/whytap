@@ -286,7 +286,6 @@ final class HotkeyInterceptionTests: XCTestCase {
         let world = World(), probe = FakeProbe(), presenter = FakePresenter()
         world.taps = ordinaryTaps + [puntoTap]
         let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
 
         tapRightOption(guard_, world, delivered: false)
 
@@ -295,8 +294,8 @@ final class HotkeyInterceptionTests: XCTestCase {
         XCTAssertEqual(shown.badge.app, punto)
         XCTAssertEqual(shown.badge.label, "Punto Switcher is intercepting Right Option — change the key in one of the apps")
         XCTAssertTrue(shown.shake)
-        XCTAssertTrue(shown.persistent, "stays dimmed while Punto keeps its filter")
-        XCTAssertTrue(guard_.isPolling)
+        XCTAssertFalse(shown.persistent, "REV 1: shown about 3 s, then hidden; never left dimmed")
+        XCTAssertEqual(presenter.dismissals, 0, "the panel hides it on its own")
     }
 
     func testDeliveredPressShowsNothing() {
@@ -307,7 +306,6 @@ final class HotkeyInterceptionTests: XCTestCase {
         tapRightOption(guard_, world, delivered: true)
 
         XCTAssertTrue(presenter.presented.isEmpty, "Punto is running but did not take this key")
-        XCTAssertFalse(guard_.isPolling)
     }
 
     func testLostPressWithOnlyBenignTapsShowsNothing() {
@@ -331,48 +329,13 @@ final class HotkeyInterceptionTests: XCTestCase {
         XCTAssertTrue(presenter.presented.isEmpty)
     }
 
-    func testLogoLeavesWhenPuntoStopsFiltering() {
+    func testProbeStopsWhenNoModifierKeyIsAShortcut() {
         let world = World(), probe = FakeProbe(), presenter = FakePresenter()
         world.taps = ordinaryTaps + [puntoTap]
         let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
-        tapRightOption(guard_, world, delivered: false)
-
-        guard_.poll()
-        XCTAssertEqual(presenter.dismissals, 0, "Punto still filters")
-
-        world.taps = ordinaryTaps // Punto quit or disabled its tap
-        guard_.poll()
-        XCTAssertEqual(presenter.dismissals, 1)
-        XCTAssertNil(guard_.blamed)
-        XCTAssertFalse(guard_.isPolling)
-    }
-
-    func testLogoLeavesWhenTheKeyArrivesAgain() {
-        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
-        world.taps = ordinaryTaps + [puntoTap]
-        let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
-        tapRightOption(guard_, world, delivered: false)
-
-        // The person moved Punto's switch key: Right Option reaches Whytap.
-        tapRightOption(guard_, world, delivered: true)
-
-        XCTAssertEqual(presenter.dismissals, 1)
-        XCTAssertNil(guard_.blamed)
-    }
-
-    func testLogoLeavesWhenTheKeyIsNoLongerAShortcut() {
-        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
-        world.taps = ordinaryTaps + [puntoTap]
-        let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
-        tapRightOption(guard_, world, delivered: false)
 
         world.watched = [.rightCommand] // Google search switched off
         guard_.handleDelivered(rawFlags: noModifiers, at: world.uptime)
-
-        XCTAssertEqual(presenter.dismissals, 1)
         XCTAssertTrue(probe.isRunning, "Right Command is still watched")
 
         world.watched = []
@@ -391,31 +354,45 @@ final class HotkeyInterceptionTests: XCTestCase {
         XCTAssertTrue(presenter.presented.isEmpty, "Punto may own Right Option when Whytap does not use it")
     }
 
-    func testShakesAreThrottledButEachPressCanShake() {
+    func testEveryLostPressShowsTheLogoAgain() {
         let world = World(), probe = FakeProbe(), presenter = FakePresenter()
         world.taps = ordinaryTaps + [puntoTap]
         let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
 
         tapRightOption(guard_, world, delivered: false)
         tapRightOption(guard_, world, delivered: false)
-        XCTAssertEqual(presenter.presented.count, 2, "presses 1 s apart both shake")
-
-        // Two presses decided within 0.6 s.
+        // Two quick presses: each one presents again, which restarts the
+        // panel's ~3 s.
         let t = world.uptime
         guard_.handlePhysical(rawFlags: rightOptionDown, at: t)
         guard_.handlePhysical(rawFlags: noModifiers, at: t + 0.05)
         guard_.handlePhysical(rawFlags: rightOptionDown, at: t + 0.1)
         guard_.handlePhysical(rawFlags: noModifiers, at: t + 0.15)
         world.advance(to: t + 1)
-        XCTAssertEqual(presenter.presented.count, 3)
+
+        XCTAssertEqual(presenter.presented.count, 4)
+        XCTAssertTrue(presenter.presented.allSatisfy { $0.shake && !$0.persistent })
+        XCTAssertEqual(guard_.lastBadge?.app, punto)
+    }
+
+    func testProbeHeadCheckRunsFromDeliveredChangesAtMostEveryTenSeconds() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        world.taps.append(EventTapRecord(id: 31, location: .hid, isActiveFilter: true, enabled: true,
+                                         tappingPID: puntoPID, eventsOfInterest: keysAndModifiers))
+        guard_.handleDelivered(rawFlags: noModifiers, at: world.uptime)
+        XCTAssertEqual(probe.starts, 1, "checked at the first change, before Punto's tap")
+
+        world.uptime += HotkeyInterceptionGuard.headCheckInterval
+        guard_.handleDelivered(rawFlags: noModifiers, at: world.uptime)
+        XCTAssertEqual(probe.starts, 2, "moved back in front of Punto's new HID filter")
     }
 
     func testHoldIsReportedWithoutWaitingForTheRelease() {
         let world = World(), probe = FakeProbe(), presenter = FakePresenter()
         world.taps = ordinaryTaps + [puntoTap]
         let guard_ = started(world, probe, presenter)
-        defer { guard_.stopPollingForTesting() }
 
         guard_.handlePhysical(rawFlags: rightOptionDown, at: world.uptime)
         world.advance(to: world.uptime + HotkeyInterceptionDetector.holdDecision + 0.01)
@@ -571,6 +548,33 @@ final class HotkeyBlockerBadgeStackTests: XCTestCase {
         XCTAssertEqual(surface.shown, punto)
         XCTAssertFalse(secure.isShowing)
         XCTAssertTrue(interception.isShowing)
+    }
+
+    func testTransientInterceptorOverSecureInputThenDimmedLogoReturns() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        secure.present(dia, shake: false, persistent: true)
+        interception.present(punto, shake: true, persistent: false)
+        XCTAssertEqual(surface.shown, punto)
+        surface.fadeByItself() // ~3 s later
+        XCTAssertEqual(surface.shown, dia, "#488's dimmed logo is unchanged")
+        XCTAssertFalse(interception.isShowing)
+    }
+
+    func testCoveredTransientBadgeNeverComesBack() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        interception.present(punto, shake: true, persistent: false)
+        secure.present(dia, shake: true, persistent: true)
+        XCTAssertFalse(interception.isShowing)
+        secure.dismiss()
+        XCTAssertNil(surface.shown)
     }
 
     func testInterceptorBadgeFallsBackToAKeyboardSymbol() {

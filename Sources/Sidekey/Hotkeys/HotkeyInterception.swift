@@ -107,13 +107,6 @@ enum HotkeyInterceptorClassifier {
         Set(taps.filter { $0.location == .hid && $0.filtersModifiers && $0.tappingPID != ownPID }.map(\.id))
     }
 
-    static func isStillIntercepting(_ pids: Set<pid_t>, in taps: [EventTapRecord], frontmostPID: pid_t?) -> Bool {
-        taps.contains { tap in
-            pids.contains(tap.tappingPID) && tap.filtersModifiers
-                && (tap.tappedPID == 0 || tap.tappedPID == frontmostPID)
-        }
-    }
-
     static func message(for apps: [SecureInputApp], key: HotkeyModifierKey) -> String {
         let names: String
         switch apps.count {

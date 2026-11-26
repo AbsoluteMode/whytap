@@ -10,9 +10,9 @@ import os.log
 /// The signal is exact, not a guess: Whytap's HID-level probe saw the key go
 /// down, and Whytap's shortcut monitors never saw it held. Only then is the
 /// tap list read, and the app owning an enabled active `flagsChanged` filter
-/// (not Apple's, not Whytap's) gets its logo beside the island, shaking. The
-/// dimmed logo stays until that app's filter is gone, or a press of the key
-/// reaches Whytap again.
+/// (not Apple's, not Whytap's) gets its logo beside the island, shaking, for
+/// about 3 s; then it hides. Every new lost press shows it again and restarts
+/// the time. It never stays dimmed.
 // WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
 @MainActor
 final class HotkeyInterceptionGuard {
@@ -36,8 +36,9 @@ final class HotkeyInterceptionGuard {
         makePresenter: { HotkeyBlockerBadgeStack.shared.presenter(for: .interception) }
     )
 
-    static let pollInterval: TimeInterval = 2
-    static let minimumShakeInterval: TimeInterval = 0.6
+    /// How often a delivered modifier change may re-read the tap list to keep
+    /// the probe in front of a newly installed HID filter.
+    static let headCheckInterval: TimeInterval = 10
     /// A tap that cannot be created (no Accessibility) is retried this late.
     static let probeRetryInterval: TimeInterval = 30
     /// A decision that ran this late found a busy main thread: the delivered
@@ -58,9 +59,9 @@ final class HotkeyInterceptionGuard {
     /// Other processes' HID modifier filters when the probe was installed.
     private var probeBaseline: Set<UInt32> = []
     private var probeRetryAt: TimeInterval?
-    private(set) var blamed: (key: HotkeyModifierKey, pids: Set<pid_t>, badge: SecureInputHolderBadge)?
-    private var lastShake: TimeInterval?
-    private var pollTimer: Timer?
+    /// The last badge shown, for diagnostics and tests; it hides by itself.
+    private(set) var lastBadge: SecureInputHolderBadge?
+    private var lastHeadCheck: TimeInterval?
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var launchObserver: NSObjectProtocol?
@@ -105,6 +106,11 @@ final class HotkeyInterceptionGuard {
     func handleDelivered(rawFlags: UInt64, at time: TimeInterval) {
         detector.delivered(rawFlags: rawFlags, at: time)
         syncProbe()
+        let now = system.uptime()
+        if lastHeadCheck.map({ now - $0 >= Self.headCheckInterval }) ?? true {
+            lastHeadCheck = now
+            keepProbeAtHead()
+        }
     }
 
     /// A hardware `flagsChanged` the probe saw, before any session tap.
@@ -117,17 +123,6 @@ final class HotkeyInterceptionGuard {
         for press in ended {
             schedule(press, due: now + HotkeyInterceptionDetector.decisionDelay)
         }
-    }
-
-    /// Re-reads the tap list while a logo is up: it leaves when its app's
-    /// filter does, or when the key stops being a Whytap shortcut.
-    func poll() {
-        keepProbeAtHead()
-        guard let blamed else { return }
-        let stillWatched = system.watchedKeys().contains(blamed.key)
-        let stillThere = HotkeyInterceptorClassifier.isStillIntercepting(
-            blamed.pids, in: system.tapList(), frontmostPID: system.frontmostPID())
-        if !stillWatched || !stillThere { clearBadge(reason: stillWatched ? "tap_gone" : "key_unbound") }
     }
 
     /// Reinstalls the probe when another app put a HID modifier filter in
@@ -162,12 +157,7 @@ final class HotkeyInterceptionGuard {
 
     private func decide(_ press: HotkeyInterceptionDetector.Press) {
         guard let verdict = detector.decide(press, now: system.uptime()) else { return }
-        switch verdict {
-        case .delivered(let key):
-            if blamed?.key == key { clearBadge(reason: "key_arrived") }
-        case .blocked(let key):
-            reportBlocked(key)
-        }
+        if case .blocked(let key) = verdict { reportBlocked(key) }
     }
 
     private func reportBlocked(_ key: HotkeyModifierKey) {
@@ -180,31 +170,21 @@ final class HotkeyInterceptionGuard {
             os_log("hotkey_press_lost interceptor=none", log: Self.log, type: .info)
             return
         }
-        let now = system.uptime()
-        if let lastShake, now - lastShake < Self.minimumShakeInterval { return }
-        lastShake = now
         let badge = SecureInputHolderBadge(app: first,
                                            message: HotkeyInterceptorClassifier.message(for: candidates, key: key))
-        blamed = (key, Set(candidates.map(\.pid)), badge)
-        presenter.present(badge, shake: true, persistent: true)
+        lastBadge = badge
+        // Transient: shaken and highlighted, then hidden by the panel about
+        // 3 s later. A new lost press presents again, which restarts that
+        // time. WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
+        presenter.present(badge, shake: true, persistent: false)
         os_log("hotkey_press_lost interceptor=%{private}@ candidates=%{public}d", log: Self.log, type: .info,
                first.bundleID ?? first.name, candidates.count)
-        updatePolling()
-    }
-
-    private func clearBadge(reason: String) {
-        guard blamed != nil else { return }
-        blamed = nil
-        presenter.dismiss()
-        os_log("hotkey_interceptor_cleared reason=%{public}@", log: Self.log, type: .info, reason)
-        updatePolling()
     }
 
     /// Installs the probe while a modifier shortcut exists, removes it
-    /// otherwise; a logo for a key that is no longer a shortcut leaves.
+    /// otherwise.
     private func syncProbe() {
         let watched = system.watchedKeys()
-        if let blamed, !watched.contains(blamed.key) { clearBadge(reason: "key_unbound") }
         if watched.isEmpty {
             if probe.isRunning {
                 probe.stop()
@@ -231,24 +211,6 @@ final class HotkeyInterceptionGuard {
         probeRetryAt = installed ? nil : system.uptime() + Self.probeRetryInterval
     }
 
-    private func updatePolling() {
-        if blamed != nil, pollTimer == nil {
-            let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.poll() }
-            }
-            timer.tolerance = 0.5
-            RunLoop.main.add(timer, forMode: .common)
-            pollTimer = timer
-        } else if blamed == nil {
-            pollTimer?.invalidate()
-            pollTimer = nil
-        }
-    }
-
-    #if DEBUG
-    var isPolling: Bool { pollTimer != nil }
-    func stopPollingForTesting() { pollTimer?.invalidate(); pollTimer = nil }
-    #endif
 }
 
 extension HotkeyInterceptionGuard {

@@ -3,7 +3,9 @@ import Combine
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer }
+    /// `moreTools` (the More rows) and `moreToggle` (the footer chevron) take
+    /// clicks together with `tile`: they are on screen with the grid.
+    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer, moreTools, moreToggle }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
@@ -12,6 +14,7 @@ struct IslandHoverHitTargetID: Hashable {
     private enum Control: Hashable {
         case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction)
         case deliveryFailure(DeliveryFailureAction), tableDisclosure(UUID), modal(ModalAction)
+        case moreToolsToggle
     }
     let surface: Surface
     private let control: Control
@@ -24,6 +27,9 @@ struct IslandHoverHitTargetID: Hashable {
     init(back destination: String) { surface = .navigation; control = .back(destination) }
     init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
     init(modal action: ModalAction) { surface = .navigation; control = .modal(action) }
+    /// The footer chevron that shows and hides the More tools section.
+    static let moreToolsToggle = IslandHoverHitTargetID(surface: .moreToggle, control: .moreToolsToggle)
+    private init(surface: Surface, control: Control) { self.surface = surface; self.control = control }
     /// While a modal question is shown, only its own buttons take clicks.
     var isModal: Bool { if case .modal = control { return true }; return false }
 }
@@ -165,8 +171,14 @@ final class IslandHoverHitBridge: ObservableObject {
     var settlingTool: HoverTool? { reorderPhase.state == .settling ? reorderPhase.tool : nil }
     /// Counts lifts, so an older landing never ends a newer one.
     var reorderGeneration: Int { reorderPhase.generation }
-    /// The drawer stays open through the drag and its landing.
-    var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil }
+    /// The drawer stays open through the drag and its landing, while a
+    /// tool's context menu is open, and after the island's tools changed
+    /// until the person clicks outside or comes back and leaves again.
+    var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil || showsToolMenu || editHold.holdsDrawer }
+    /// A tool's context menu (Remove from Hover / Add to Hover) is open.
+    @Published private(set) var showsToolMenu = false
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+    @Published private(set) var editHold = IslandHoverEditHold()
     /// The floating tile's picture and place, drawn above the drawer's clip.
     let stage = IslandHoverReorderStage()
     /// The tile pressed at mouse-down that may still become a drag, kept
@@ -200,6 +212,8 @@ final class IslandHoverHitBridge: ObservableObject {
 
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
+        // The drawer closed: nothing is left to hold open.
+        if !enabled, !showsToolMenu { editHold.release() }
         if !enabled, tracking.captured?.id.surface != .agentAnswer { cancelPress() }
         // The drawer closed for another reason (an agent, a meeting): the
         // order reached so far is already saved.
@@ -220,6 +234,64 @@ final class IslandHoverHitBridge: ObservableObject {
         dragCandidate = nil
         pressedID = nil
         finishReorder()
+    }
+
+    // MARK: - Pin / unpin from the drawer
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+
+    /// Takes a tool out of the island; neighbours slide into its place.
+    @discardableResult
+    func unpin(_ tool: HoverTool) -> Bool {
+        guard reorder == nil, let store = layoutStore else { return false }
+        var changed = false
+        withAnimation(Self.reorderAnimation) { changed = store.unpin(tool) }
+        if changed { editHold.edited() }
+        return changed
+    }
+
+    /// Adds a tool from More at the end of the island, before Settings.
+    @discardableResult
+    func pin(_ tool: HoverTool) -> Bool {
+        guard reorder == nil, let store = layoutStore else { return false }
+        var changed = false
+        withAnimation(Self.reorderAnimation) { changed = store.pin(tool) }
+        if changed { editHold.edited() }
+        return changed
+    }
+
+    /// The tool a right-click or Control-click at `point` is about: a tile
+    /// or a More row. Nothing while a tool is lifted.
+    func contextMenuTarget(at point: CGPoint, in window: NSWindow, allowed: Bool) -> IslandHoverHitTargetID? {
+        guard reorder == nil, allowed else { return nil }
+        return snapshots(in: window, allowsHover: true, allowsAnswer: false)
+            .first { ($0.id.surface == .tile || $0.id.surface == .moreTools) && $0.frame.contains(point) }?.id
+    }
+
+    /// The menu takes the pointer to another window; the drawer must not
+    /// read that as the pointer leaving.
+    func toolMenuWillOpen() {
+        cancelPress()
+        showsToolMenu = true
+        editHold.edited()
+    }
+
+    /// Whatever the menu did, the pointer has not come back yet.
+    func toolMenuDidClose() {
+        showsToolMenu = false
+        editHold.edited()
+    }
+
+    /// The pointer is (or is not) over the island and its drawer.
+    func notePointer(inside: Bool) {
+        var next = editHold
+        next.pointer(inside: inside)
+        if next != editHold { editHold = next }
+    }
+
+    /// A click outside the drawer (or Escape) ends the hold.
+    func noteOutsideClick() {
+        guard !showsToolMenu, editHold.holdsDrawer else { return }
+        editHold.release()
     }
 
     // MARK: - Press-and-drag reorder
@@ -408,7 +480,14 @@ final class IslandHoverHitBridge: ObservableObject {
         let surface = view.targetID.surface
         if surface == .agentAnswer { return allowsAnswer }
         return allowsHover && view.targetContext == context
-            && (surface == .update || surface == .deliveryFailure || (enabled && surface == activeSurface))
+            && (surface == .update || surface == .deliveryFailure
+                || (enabled && (surface == activeSurface || Self.isCompanion(surface, of: activeSurface))))
+    }
+
+    /// Surfaces on screen together with the tool grid.
+    static func isCompanion(_ surface: IslandHoverHitTargetID.Surface,
+                            of active: IslandHoverHitTargetID.Surface) -> Bool {
+        active == .tile && (surface == .moreTools || surface == .moreToggle)
     }
 
     func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) -> Bool {

@@ -26,7 +26,7 @@ struct HoverFeatureView: View {
 
     static let about = "Small tools that open when you hover the notch. The island shows them in this order, "
         + "left to right, row by row. To change the order, hold a tool in the island and drag it; "
-        + "switch off the ones you don’t need here. "
+        + "switch off the ones you don’t need here, or right-click one in the island. "
         + "Search all tools in the island still finds a tool that is off, and its shortcut keeps working."
 
     var body: some View {
@@ -123,7 +123,7 @@ struct HoverToolLayout: Equatable {
 
     init(slots: [HoverTool]) {
         inIsland = slots.filter { $0 != .settings }
-        offIsland = HoverTool.allCases.filter { $0 != .settings && !slots.contains($0) }
+        offIsland = HoverLayoutStore.unpinnedTools(from: slots)
     }
 
     static func countText(_ count: Int) -> String {
@@ -143,7 +143,7 @@ struct HoverToolLayout: Equatable {
     /// A switched-on tool joins the end of the island, before Settings.
     @MainActor
     func set(_ tool: HoverTool, on: Bool, in store: HoverLayoutStore) {
-        if on { store.placeTool(tool, at: store.lockSlotIndex) } else { store.removeTool(tool) }
+        if on { store.pin(tool) } else { store.unpin(tool) }
     }
 
     /// One place up (-1), down (+1), or to the top (`Int.min`).

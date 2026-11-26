@@ -287,6 +287,9 @@ struct IslandView: View {
     /// a repeat press extends the window instead of inheriting the old timer.
     @State private var programmaticExpansionCollapseGeneration = 0
     @State private var selectedLanguage: AppLanguage?
+    /// The drawer's More tools section is open; it closes with the drawer.
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+    @State private var hoverMoreToolsExpanded = false
 
     /// Hover band height for a panel mode. History renders ~267pt of
     /// content (mode row + 5 visible rows + hint) — far taller than the
@@ -298,11 +301,14 @@ struct IslandView: View {
     static func hoverPanelHeight(
         for mode: IslandHoverPanelMode,
         musicActive: Bool,
-        toolCount: Int = HoverLayoutStore.columns
+        toolCount: Int = HoverLayoutStore.columns,
+        moreTools: Int? = nil
     ) -> CGFloat {
         let base: CGFloat
         switch mode {
-        case .controls, .monitor, .notifications:
+        case .controls:
+            base = IslandDropModeControl.controlsHoverPanelHeight(toolCount: toolCount, moreTools: moreTools)
+        case .monitor, .notifications:
             base = IslandDropModeControl.controlsHoverPanelHeight(toolCount: toolCount)
         case .tasks:
             base = IslandDropModeControl.detachedPanelGap + TodoHoverView.contentHeight
@@ -334,8 +340,14 @@ struct IslandView: View {
         Self.hoverPanelHeight(
             for: hoverPanelMode,
             musicActive: hoverNowPlaying != nil,
-            toolCount: hoverStore.slots.count
+            toolCount: hoverStore.slots.count,
+            moreTools: moreToolsCount(for: hoverPanelMode)
         )
+    }
+
+    /// Rows in the expanded More section (only over the tool grid).
+    private func moreToolsCount(for mode: IslandHoverPanelMode) -> Int? {
+        hoverMoreToolsExpanded && mode == .controls ? hoverStore.unpinnedTools.count : nil
     }
 
     /// The drawer itself, below the gap or the music strip.
@@ -1169,6 +1181,7 @@ struct IslandView: View {
                             targetLanguage: targetLanguage,
                             meetingRecordingActive: appState.meetingRecordingActive,
                             panelMode: $hoverPanelMode,
+                            moreToolsExpanded: $hoverMoreToolsExpanded,
                             hoverHitBridge: hoverHitBridge,
                             onSearchFocusChange: { focused in
                                 hoverSearchFocused = focused
@@ -1248,6 +1261,11 @@ struct IslandView: View {
                                 && !(hoverPanelMode == .calendar && appState.calendarHoverConnectionActive),
                             onDismiss: dismissHoverMenu
                         ))
+                        // After removing or adding a tool, a click outside ends the hold.
+                        .background(IslandHoverMenuDismissObserver(
+                            enabled: hoverHitBridge.editHold.holdsDrawer && !hoverHitBridge.showsToolMenu,
+                            onDismiss: { hoverHitBridge.noteOutsideClick() }
+                        ))
                         // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
                         // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
                         .islandHoverGlassSurface()
@@ -1255,6 +1273,12 @@ struct IslandView: View {
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.
                             guard case .active(let location) = phase else { return }
+                            // The pointer moves over the drawer's final frame after an
+                            // edit: from now on leaving it closes the drawer as usual.
+                            if hoverHitBridge.editHold.holdsDrawer,
+                               Self.releasesHeldHoverZone(pointerY: location.y, drawerHeight: hoverDrawerHeight) {
+                                hoverHitBridge.notePointer(inside: true)
+                            }
                             guard hoverPanelHeightHold != nil,
                                   Self.releasesHeldHoverZone(pointerY: location.y, drawerHeight: hoverDrawerHeight)
                             else { return }
@@ -1383,8 +1407,19 @@ struct IslandView: View {
         // The gate (ROO-259 bug B) requires the visible pill to OPEN but either
         // region to STAY open, so the drawer's fading hover band can't re-open a
         // closed drawer before the cursor reaches the pill.
-        .onChange(of: pillHovering) { _, _ in recomputeMouseExpanded() }
-        .onChange(of: panelHovering) { _, _ in recomputeMouseExpanded() }
+        // After an edit in the drawer the hold waits for the pointer to come
+        // back and leave again (WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md).
+        .onChange(of: pillHovering) { _, _ in
+            hoverHitBridge.notePointer(inside: pillHovering || panelHovering)
+            recomputeMouseExpanded()
+        }
+        .onChange(of: panelHovering) { _, _ in
+            hoverHitBridge.notePointer(inside: pillHovering || panelHovering)
+            recomputeMouseExpanded()
+        }
+        .onChange(of: hoverMoreToolsExpanded) { _, _ in
+            onHoverPanelBandHeightChange(activeHoverPanelHeight)
+        }
         // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
         .onChange(of: hoverHitBridge.holdsDrawer) { _, _ in recomputeMouseExpanded() }
         .onChange(of: appState.screenshotPreparing) { _, preparing in
@@ -1441,7 +1476,8 @@ struct IslandView: View {
                 Self.hoverPanelHeight(
                     for: mode,
                     musicActive: hoverNowPlaying != nil,
-                    toolCount: hoverStore.slots.count
+                    toolCount: hoverStore.slots.count,
+                    moreTools: moreToolsCount(for: mode)
                 )
             }
             // WHY: .project-docs/decisions/2026-10-18-brightness-tool.md
@@ -1493,6 +1529,7 @@ struct IslandView: View {
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
             if !expanded {
+                hoverMoreToolsExpanded = false
                 appState.dropTargetsHoverEditor = false
                 hoverSearchFocused = false
                 hoverPanelGlance = false
@@ -2562,6 +2599,9 @@ private struct IslandDropModeHoverPanel: View {
     let targetLanguage: AppLanguage?
     let meetingRecordingActive: Bool
     @Binding var panelMode: IslandHoverPanelMode
+    /// The More tools section below the footer (owned by IslandView, whose
+    /// drawer height and hover band grow with it).
+    @Binding var moreToolsExpanded: Bool
     @ObservedObject var hoverHitBridge: IslandHoverHitBridge
     let onSearchFocusChange: (Bool) -> Void
     let onVocabularyFocusChange: (Bool) -> Void
@@ -2628,6 +2668,8 @@ private struct IslandDropModeHoverPanel: View {
     /// `body` never blocks on disk I/O during the island's per-frame
     /// re-render. WHY: docs/decisions/2026-06-24-island-history-off-main.md
     @State private var historyCardsCache: [HistoryStripCard] = []
+    /// A tool just added from More: the grid scrolls to it when it overflows.
+    @State private var revealedTool: HoverTool?
 
     var body: some View {
         ZStack {
@@ -2759,10 +2801,18 @@ private struct IslandDropModeHoverPanel: View {
             hoverHitBridge.setEnabled(false)
             setSearchFocus(false)
         }
-        .onChange(of: hoverStore.slots) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
+        .onChange(of: hoverStore.slots) { old, new in
+            hoverHitBridge.setContext(hitTargetContext)
+            if let added = new.first(where: { !old.contains($0) }) { revealedTool = added }
+            // A removed tile or an added row leaves no stale description.
+            if !hoverHitBridge.isReordering { hoveredTool = nil }
+        }
+        .onChange(of: moreToolsExpanded) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: hoverHitBridge.reorderPhase) { _, phase in reorderPhaseChanged(phase) }
         .onChange(of: mode) { _, _ in hoverHitBridge.setContext(hitTargetContext) }
         .onChange(of: searchQuery) { _, _ in
+            // Search covers every tool; More gives way to its results.
+            if IslandHoverToolSearch.isFiltering(searchQuery) { moreToolsExpanded = false }
             hoverHitBridge.setSurface(hitTargetSurface)
             hoverHitBridge.setContext(hitTargetContext)
             selectedSearchIndex = 0
@@ -2814,6 +2864,7 @@ private struct IslandDropModeHoverPanel: View {
                 // between search and description. Hints overlay the top edge;
                 // they never consume height or move a row on hover.
                 IslandHoverGlassControlsContainer {
+                    ScrollViewReader { gridScroll in
                     ScrollView(.vertical) {
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: IslandHoverControlsLayout.columnSpacing),
                                                  count: HoverLayoutStore.columns), spacing: IslandHoverControlsLayout.rowSpacing) {
@@ -2847,6 +2898,14 @@ private struct IslandDropModeHoverPanel: View {
                                         if isHovering, !tool.isComingSoon { hoveredTool = tool }
                                         else if hoveredTool == tool { hoveredTool = nil }
                                     }
+                                    // Right-click / Control-click opens the same choice
+                                    // (IslandPanel.sendEvent); VoiceOver gets it here.
+                                    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+                                    .accessibilityActions {
+                                        if HoverLayoutStore.canUnpin(tool) {
+                                            Button("Remove from Hover") { hoverHitBridge.unpin(tool) }
+                                        }
+                                    }
                             }
                         }
                         .padding(.horizontal, IslandHoverControlsLayout.horizontalInset)
@@ -2856,6 +2915,14 @@ private struct IslandDropModeHoverPanel: View {
                     .frame(height: IslandHoverControlsLayout.gridHeight(toolCount: hoverStore.slots.count))
                     // Measure the clipped viewport, never the entire scrolling grid.
                     .islandHoverHitRegion(bridge: hoverHitBridge, surface: .tile)
+                    .onChange(of: revealedTool) { _, tool in
+                        guard let tool else { return }
+                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                            gridScroll.scrollTo(tool, anchor: .bottom)
+                        }
+                        revealedTool = nil
+                    }
+                    }
                 }
                 .onPreferenceChange(IslandHoverTileFramesKey.self) { tileFrames = $0 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -2888,13 +2955,58 @@ private struct IslandDropModeHoverPanel: View {
                     .padding(.leading, 16)
                     .padding(.trailing, 8)
                 Spacer()
+                if showsMoreToolsToggle {
+                    IslandHoverMoreToolsToggle(
+                        expanded: moreToolsExpanded,
+                        showsTitle: descriptionTool == nil,
+                        bridge: hoverHitBridge,
+                        hitContext: hitTargetContext,
+                        action: toggleMoreTools
+                    )
+                    .padding(.trailing, 10)
+                }
             }
             .frame(height: IslandHoverControlsLayout.descriptionHeight)
+            .islandHoverHitRegion(bridge: hoverHitBridge, surface: .moreToggle)
+
+            if showsMoreToolsSection {
+                IslandHoverMoreToolsSection(
+                    tools: hoverStore.unpinnedTools,
+                    panelWidth: panelWidth,
+                    bridge: hoverHitBridge,
+                    hitContext: hitTargetContext,
+                    onHover: { tool, inside in
+                        if inside { hoveredTool = tool } else if hoveredTool == tool { hoveredTool = nil }
+                    }
+                )
+                .transition(.opacity)
+            }
         }
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: moreToolsExpanded)
+    }
+
+    // MARK: - More tools
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+
+    /// Over the grid only; hidden when every tool is already in the island,
+    /// unless the section is open (it then says so and still closes here).
+    private var showsMoreToolsToggle: Bool {
+        !IslandHoverToolSearch.isFiltering(searchQuery)
+            && (moreToolsExpanded || !hoverStore.unpinnedTools.isEmpty)
+    }
+
+    private var showsMoreToolsSection: Bool {
+        moreToolsExpanded && !IslandHoverToolSearch.isFiltering(searchQuery)
+    }
+
+    private func toggleMoreTools() {
+        // The footer stays where it is: the section opens and closes below
+        // the chevron, so a second click under the same pointer closes it.
+        moreToolsExpanded.toggle()
     }
 
     private var hitTargetContext: String {
-        "\(panelMode)|\(searchQuery)|\(mode)|" + hoverStore.slots.map(\.rawValue).joined(separator: ",")
+        "\(panelMode)|\(searchQuery)|\(mode)|\(moreToolsExpanded)|" + hoverStore.slots.map(\.rawValue).joined(separator: ",")
     }
 
     private var hitTargetSurface: IslandHoverHitTargetID.Surface {

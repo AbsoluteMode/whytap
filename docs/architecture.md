@@ -1614,6 +1614,25 @@ until release (saveLayout); a cancel restores the screen only; any Settings
 Sync reload (externalReloads) ends the drag. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
+Island pin/unpin and More tools: a right-click or Control-click on a tile is
+found geometrically in IslandPanel.sendEvent (IslandHoverHitBridge
+.contextMenuTarget) and pops a native NSMenu (IslandHoverToolMenu): Remove from
+Hover, or a disabled "Settings always stays in Hover"; VoiceOver has the same
+action on the tile. The footer keeps the description on the left and
+IslandHoverMoreToolsToggle on the right ("More tools" with nothing hovered).
+It opens IslandHoverMoreToolsSection below the footer: HoverLayoutStore
+.unpinnedTools in catalog order, three per row, three visible rows then
+scrolling; a click or "Add to Hover" calls HoverLayoutStore.pin (end of the
+island, before Settings) and the grid scrolls to it. Its rows and chevron are
+hit surfaces .moreTools/.moreToggle, accepted together with .tile; the band
+grows with the section (controlsHoverPanelHeight moreTools). The chevron is
+hidden when every tool is in the island; search and drawer close collapse the
+section. After a removal, an addition and while the menu is open the drawer is
+held (IslandHoverEditHold in IslandHoverHitBridge.holdsDrawer) until a click
+outside or Escape (IslandHoverMenuDismissObserver), or until the pointer is
+seen over the island or the drawer's final frame and then leaves. WHY:
+.project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).

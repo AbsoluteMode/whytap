@@ -17,16 +17,20 @@ final class NativeAgentProvider: CLIProvider {
     private let reasoningRefusals: SmartReasoningRefusals
     private let workspace: () throws -> URL
     private let appControl: @MainActor () -> NativeAgentAppControl.Handler?
+    /// Read tools of connected sources. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+    private let sources: @MainActor () -> AgentSourceCatalog?
 
     init(keys: ProviderKeyStore = ProviderKeyStore(), http: NativeAgentHTTP = NativeAgentHTTP(),
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
          appControl: @escaping @MainActor () -> NativeAgentAppControl.Handler? = { NativeAgentAppControl.installed },
+         sources: @escaping @MainActor () -> AgentSourceCatalog? = { NativeAgentSources.installed?() },
          usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
          diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record,
          reasoningRefusals: SmartReasoningRefusals = NativeAgentEffort.refusals) {
         self.keys = keys; self.http = http; self.workspace = workspace; self.usageSink = usageSink
         self.reasoningRefusals = reasoningRefusals
         self.appControl = appControl
+        self.sources = sources
         self.diagnosticsSink = diagnosticsSink
     }
 
@@ -105,10 +109,12 @@ final class NativeAgentProvider: CLIProvider {
         // an honest "no web search". WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
         let tavilyConnected = keys.read(account: TavilySearch.keychainAccount) != nil
         var search = NativeAgentWebSearch.resolve(options: options, tavilyConnected: tavilyConnected)
+        let catalog = sources()
         let baseSystem = Self.systemPrompt + "\nWorkspace: \(directory.path)\n"
             + WhytapCustomizationContext.promptInstructions + "\n"
             + WhytapCustomizationContext.notificationInstructions
             + (appControl == nil ? "" : "\n" + NativeAgentAppControl.instructions)
+            + (catalog.map { "\n" + NativeAgentSources.prompt($0) } ?? "")
         var model = NativeAgentModel(options: options, key: key, system: baseSystem + "\n" + search.promptLine,
                                      history: history, prompt: prompt, http: http, usageSink: usageSink,
                                      diagnosticsSink: diagnosticsSink)
@@ -119,9 +125,18 @@ final class NativeAgentProvider: CLIProvider {
         // Completion is one validated tool object, never free text beside cards.
         // The terminal tool also works on endpoints without response_format.
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
-        var definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
-                                                                 appControl: appControl != nil,
-                                                                 tavilySearch: search == .tavily)
+        // After a source result (taint), writes, commands and web access leave
+        // the catalog for the rest of the turn. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+        var tainted = false
+        func catalogNow() -> [[String: Any]] {
+            var tools = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions && !tainted,
+                                                               appControl: appControl != nil,
+                                                               tavilySearch: search == .tavily && !tainted)
+            if tainted { tools.removeAll { $0["name"] as? String == "fetch_url" } }
+            if let catalog { tools.insert(NativeAgentSources.definition(catalog), at: max(0, tools.count - 1)) }
+            return tools
+        }
+        var definitions = catalogNow()
         var actionsAttempted = false
         var accepted = false
         // Confirmed Whytap changes, shown by the app above the model's answer.
@@ -152,9 +167,7 @@ final class NativeAgentProvider: CLIProvider {
                     search = .refused
                     model.builtInSearch = false
                     model.system = baseSystem + "\n" + search.promptLine
-                    definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
-                                                                         appControl: appControl != nil,
-                                                                         tavilySearch: search == .tavily)
+                    definitions = catalogNow()
                     (text, calls) = try await model.next(tools: definitions, structuredCompletion: true)
                 }
                 accepted = true
@@ -246,15 +259,29 @@ final class NativeAgentProvider: CLIProvider {
             for call in calls {
                 try Task.checkCancellation()
                 let appOperation = appControl == nil ? nil : NativeAgentAppControl.operation(of: call)
-                continuation.yield(.toolExecuting(tool: call.name, label: appOperation.map { NativeAgentAppControl.label($0.name) }
-                                                  ?? Self.label(call.name)))
+                let label = call.name == NativeAgentSources.toolName ? NativeAgentSources.label(call, catalog: catalog)
+                    : appOperation.map { NativeAgentAppControl.label($0.name) } ?? Self.label(call.name)
+                continuation.yield(.toolExecuting(tool: call.name, label: label))
                 let appWrite = appOperation?.writes == true
+                let refused = tainted && NativeAgentSources.blockedAfterSourceRead(call, appWrite: appWrite)
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
-                if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
-                if appWrite { actionsAttempted = true }
+                if !refused, options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
+                if !refused, appWrite { actionsAttempted = true }
                 let result: NativeAgentToolResult
-                if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
+                if refused { result = .init(text: NativeAgentSources.taintRefusal) }
+                else if call.name == NativeAgentSources.toolName {
+                    if let catalog {
+                        let (sourceResult, read) = await NativeAgentSources.execute(call, catalog: catalog)
+                        result = sourceResult
+                        if read, !tainted {
+                            tainted = true
+                            // The provider's own search is an exit too.
+                            model.builtInSearch = false
+                        }
+                    } else { result = .init(text: "Tool failed: no sources are connected.") }
+                }
+                else if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
                 else if call.name == "web_search", search != .tavily {
                     // Tavily is offered only when the model has no search of its
                     // own; a call to the absent function never reaches Tavily.
@@ -273,6 +300,7 @@ final class NativeAgentProvider: CLIProvider {
                 results.append((call, result))
             }
             model.append(results: results)
+            if tainted { definitions = catalogNow() }
         }
         throw NativeAgentError.message("The agent reached its step limit. Try a smaller task.")
     }

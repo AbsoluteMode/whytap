@@ -52,6 +52,21 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
         }
     }
 
+    /// Agent sources carry tool results, arguments and secrets: that code
+    /// writes nothing to the log at all. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+    func test_agentSourcesNeverLog() throws {
+        let files = ["MCPValue", "MCPError", "MCPProcess", "MCPTransport", "MCPClient", "SourceModel",
+                     "SourceToolClassifier", "MiniTOML", "MCPConfigImporter", "FolderSource", "SourcePresets",
+                     "SourcesController"].map { "Sources/Sidekey/Assistant/Connections/\($0).swift" }
+            + ["Sources/Sidekey/AgentDaemon/NativeAgentSources.swift"]
+        for relativePath in files {
+            let source = try readProjectFile(relativePath)
+            for call in ["os_log(", "Logger(", "NSLog(", "print(", "OSLog(", "debugPrint("] {
+                XCTAssertFalse(source.contains(call), "\(relativePath): \(call)")
+            }
+        }
+    }
+
     func test_guardedPathsNeverLogPromptOrContent() throws {
         for relativePath in Self.guardedFiles {
             let source = try readProjectFile(relativePath)

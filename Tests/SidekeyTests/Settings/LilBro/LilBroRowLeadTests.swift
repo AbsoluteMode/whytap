@@ -251,6 +251,90 @@ final class LilBroLeadRouteTests: XCTestCase {
         }
     }
 
+    /// Builder ticket 663: with Reduce Motion or the little guy hidden he
+    /// presses at once and then waits for the screen. The person leaves and
+    /// comes back to that very place during that wait, or during his final
+    /// walk to a tab, a feature or API keys: their choice stays, nothing is
+    /// focused, outlined or said opened.
+    func test_a_change_away_and_back_while_the_screen_settles_or_on_the_final_walk_ends_the_lead() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "LilBroRoute-\(UUID().uuidString)"))
+        for (mascot, reduceMotion) in [(true, true), (false, false), (false, true), (true, false)] {
+            for id in ["apiAndModels.apiKeys", "toolbox.filler", "drop.lowerOtherAudio"] {
+                let row = try XCTUnwrap(LilBroRow.named(id))
+                let selection = SettingsWindowSelection(selectedTab: .hotkeys)
+                let preferences = LilBroPreferences(defaults: defaults)
+                preferences.mascotVisible = mascot
+                var changed = false
+                let brain = Brain()
+                brain.reply = .answer(LilBroAnswer(paragraphs: ["Here."], destination: .row(row)))
+                let guide = LilBroController(selection: selection, preferences: preferences, remote: brain,
+                                              reduceMotion: { reduceMotion }, sleep: { _ in
+                    // Once he has opened the row's screen: away, then back there themselves.
+                    if !changed, row.isShown(on: selection.lilBroScreen) {
+                        changed = true
+                        selection.select(.hotkeys)
+                        if let feature = row.feature { selection.open(feature) }
+                        else if let tool = row.tool { selection.focus(tool) }
+                        else { selection.select(row.tab); if let section = row.apiSection { selection.apiSection = section } }
+                    }
+                    await Task.yield()
+                })
+                let box = CGRect(x: 260, y: 150, width: 180, height: 40)
+                guide.update(bounds: CGRect(x: 0, y: 0, width: 960, height: 560))
+                guide.update(spots: [.home: CGRect(x: 18, y: 470, width: 160, height: 45),
+                                     .pane: CGRect(x: 210, y: 30, width: 750, height: 500), .row(id): box])
+                guide.update(blocks: [box])
+                guide.ask("Where is this setting?")
+                for _ in 0..<4000 where guide.isBusy { await Task.yield() }
+                let label = "\(id), mascot \(mascot), reduce motion \(reduceMotion)"
+                XCTAssertTrue(changed, label)
+                XCTAssertFalse(guide.isBusy, label)
+                XCTAssertTrue(row.isShown(on: selection.lilBroScreen), "their choice stays: \(label)")
+                XCTAssertNil(selection.focusedRow, label)
+                XCTAssertNil(guide.target, label)
+                XCTAssertNil(guide.turns.last?.opened, label)
+            }
+        }
+        let others: [(LilBroDestination, (SettingsWindowSelection) -> Bool)] = [
+            (.tab(.apiAndModels), { $0.selectedTab == .apiAndModels }),
+            (.feature(.drop), { $0.shownFeature == .drop }),
+            (.apiKeys, { $0.selectedTab == .apiAndModels && $0.apiSection == .keys }),
+        ]
+        for (destination, reached) in others {
+            for reduceMotion in [false, true] {
+                let selection = SettingsWindowSelection(selectedTab: .hotkeys)
+                let preferences = LilBroPreferences(defaults: defaults)
+                preferences.mascotVisible = true
+                var guide: LilBroController?
+                var changed = false
+                let brain = Brain()
+                brain.reply = .answer(LilBroAnswer(paragraphs: ["Here."], destination: destination))
+                let controller = LilBroController(selection: selection, preferences: preferences, remote: brain,
+                                                  reduceMotion: { reduceMotion }, sleep: { _ in
+                    // During his final walk (or, without motion, while it settles): Permissions.
+                    if !changed, reached(selection), reduceMotion || guide?.segment != nil {
+                        changed = true
+                        selection.select(.permissions)
+                    }
+                    await Task.yield()
+                })
+                guide = controller
+                controller.update(bounds: CGRect(x: 0, y: 0, width: 960, height: 560))
+                controller.update(spots: [.home: CGRect(x: 18, y: 470, width: 160, height: 45),
+                                          .pane: CGRect(x: 210, y: 30, width: 750, height: 500)])
+                controller.update(blocks: [CGRect(x: 260, y: 150, width: 180, height: 40)])
+                controller.ask("Where is this setting?")
+                for _ in 0..<4000 where controller.isBusy { await Task.yield() }
+                let label = "\(destination), reduce motion \(reduceMotion)"
+                XCTAssertTrue(changed, label)
+                XCTAssertEqual(selection.selectedTab, .permissions, label)
+                XCTAssertNil(controller.target, label)
+                XCTAssertNil(controller.turns.last?.opened, label)
+                guide = nil
+            }
+        }
+    }
+
     /// Asked where Case, Notify or Monitor is, he outlines All tools and
     /// opens none of them: no Touch ID request, no notice marked read, no
     /// server polled until the person clicks the tool themselves.

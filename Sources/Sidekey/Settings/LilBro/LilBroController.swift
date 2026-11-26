@@ -491,13 +491,18 @@ final class LilBroController: ObservableObject {
         guard mascotVisible, !reduceMotion() else {
             guard !Task.isCancelled else { return false }
             stops.forEach { $0.press() }
+            // Any change after his presses is the person's, even one that
+            // comes back to where he went (builder ticket 663).
+            let expected = selection.changes
             await settle()
             guard !Task.isCancelled else { return false }
+            guard selection.changes == expected else { return personMoved(row) }
             // Without the little guy only a row he was asked about is
             // outlined; he never moves.
             guard mascotVisible || row != nil else { return true }
-            let block = await landing(for: destination)
+            let block = await landing(for: destination, expected: expected)
             guard !Task.isCancelled else { return false }
+            guard selection.changes == expected else { return personMoved(row) }
             guard let block else { return row == nil }
             if let row { leadRow = row }
             target = block
@@ -523,25 +528,17 @@ final class LilBroController: ObservableObject {
                 await punch(rect)
             }
             guard !Task.isCancelled else { return false }
-            guard selection.changes == expected else {
-                // The person went somewhere themselves: their choice stays.
-                if row != nil, selection.focusedRow == row?.id { selection.focusedRow = nil }
-                feet = map.homeStand
-                setPose(.idle)
-                return false
-            }
+            // The person went somewhere themselves: their choice stays.
+            guard selection.changes == expected else { return personMoved(row) }
             stop.press()
             expected = selection.changes
             await settle()
         }
-        guard selection.changes == expected else {
-            feet = map.homeStand
-            setPose(.idle)
-            return false
-        }
+        guard selection.changes == expected else { return personMoved(row) }
         guard !Task.isCancelled else { return false }
-        let landing = await landing(for: destination)
+        let landing = await landing(for: destination, expected: expected)
         guard !Task.isCancelled else { return false }
+        guard selection.changes == expected else { return personMoved(row) }
         guard let block = landing else {
             // A row he could not show: back at home, nothing claimed.
             if row != nil { feet = map.homeStand }
@@ -565,7 +562,8 @@ final class LilBroController: ObservableObject {
         } else {
             // The person went elsewhere while he walked to the card: he
             // outlines nothing on their screen.
-            guard selection.changes == expected, map.platforms.contains(block) else {
+            guard selection.changes == expected else { return personMoved(row) }
+            guard map.platforms.contains(block) else {
                 feet = map.homeStand
                 setPose(.idle)
                 return true
@@ -580,7 +578,7 @@ final class LilBroController: ObservableObject {
     /// Where he stands and what he outlines once the place is open: the row
     /// he was asked about, scrolled into view, or the screen's first block.
     // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
-    private func landing(for destination: LilBroDestination) async -> CGRect? {
+    private func landing(for destination: LilBroDestination, expected: Int) async -> CGRect? {
         guard case .row(let row) = destination else { return firstPaneBlock() }
         // The person's tab wins: if they left the row's tab while it opened,
         // the lead ends here and their choice stays (builder review of #493,
@@ -592,15 +590,30 @@ final class LilBroController: ObservableObject {
         // card instead.
         var last: CGRect?
         for _ in 0..<30 {
-            guard leadIsActive(row) else { return nil }
+            guard selection.changes == expected, leadIsActive(row) else { return nil }
             let rect = map.visible(.row(row.id))
             if let rect, rect == last, map.platforms.contains(rect) { return rect }
             last = rect
             await sleep(0.05)
             if Task.isCancelled { return nil }
         }
-        guard leadIsActive(row) else { return nil }
+        guard selection.changes == expected, leadIsActive(row) else { return nil }
         return map.visible(.row(row.id))
+    }
+
+    /// The person chose a place themselves while he led: their choice stays,
+    /// nothing he led to is focused or outlined, and he does not say he
+    /// opened it (builder tickets 631, 658, 663).
+    private func personMoved(_ row: LilBroRow?) -> Bool {
+        if let row, selection.focusedRow == row.id { selection.focusedRow = nil }
+        leadRow = nil
+        target = nil
+        holding = false
+        if mascotVisible {
+            feet = map.homeStand
+            setPose(.idle)
+        }
+        return false
     }
 
     /// The first block of the screen now in the pane.

@@ -86,6 +86,9 @@ final class SecureInputGuard {
     /// happened before that moment caused the switch, whatever order the
     /// two callbacks were delivered in, and voids its evidence.
     private var pendingEvidence: [Int: (evidence: Bool?, activationUptime: TimeInterval)] = [:]
+    /// When the last click physically happened; its activation may still be
+    /// in flight, so the app in `lastFront` may already be leaving.
+    private var lastClickUptime: TimeInterval?
     private var nextSwitchID = 0
     private var lastShake: Date?
     private(set) var persistentBadge: SecureInputHolderBadge?
@@ -146,7 +149,8 @@ final class SecureInputGuard {
         // Every modifier change on the Mac lands here; it costs one flag read.
         let on = system.isSecureInputEnabled()
         if chord.contains(.command), !heldChord.contains(.command) {
-            commandSample = (on, lastFront?.pid, nil)
+            let clickInFlight = lastClickUptime.map { system.uptime() - $0 <= Self.commandReleaseWindow } ?? false
+            commandSample = clickInFlight ? nil : (on, lastFront?.pid, nil)
         } else if !chord.contains(.command), heldChord.contains(.command), let sample = commandSample {
             commandSample = (sample.on && on, sample.frontPID, now)
         }
@@ -181,6 +185,7 @@ final class SecureInputGuard {
     func handleMouseDown(eventUptime: TimeInterval? = nil) {
         commandSample = nil
         let time = eventUptime ?? system.uptime()
+        lastClickUptime = max(lastClickUptime ?? time, time)
         for (id, pending) in pendingEvidence where time <= pending.activationUptime {
             pendingEvidence[id] = (nil, pending.activationUptime)
         }

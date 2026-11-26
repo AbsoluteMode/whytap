@@ -101,9 +101,13 @@ the app the person switched to.
    event time (`NSEvent.timestamp`), never where: a click that physically
    happened before an activation was handled caused that switch, so it voids
    the evidence the switch captured even when the activation callback was
-   delivered first; a later click in the new app does not. A remembered app
-   that comes back to front is forgotten, since it may let go unseen while in
-   front; leaving it again needs new evidence. A chord still in its 0.3 s
+   delivered first; a later click in the new app does not. A ⌘ pressed within
+   0.5 s after a click gives no reading, since that click's activation may
+   still be in flight and the app Whytap thinks is in front may be leaving.
+   A remembered app that comes back to front is forgotten, since it may let
+   go unseen while in front, and that switch gives no evidence against the
+   app left (its ON read was the known holder's); leaving it again needs new
+   evidence. A chord still in its 0.3 s
    window, like a switch still settling, belongs to the episode it began in:
    an OFF read in between discards it. A click or Dock
    switch, with or without ⌘ held, has no evidence, so nobody is named: an
@@ -206,7 +210,10 @@ fixes it, and the test Cmd-Tab now releases ⌘ before the switch. The fourth
 pass (ticket #617) found an activation delivered before the click that caused
 it still using ⌘ evidence, a holder back in front kept across an unseen
 release, and a chord queued before an OFF shaking the next episode; point 3
-now covers all three with scenarios that fail on the previous head.
+now covers all three with scenarios that fail on the previous head. A second
+independent review then found Cmd-Tab back to the remembered holder blaming
+the app left, and ⌘ pressed while a click's activation was in flight; both
+are in point 3, with scenarios.
 
 ## Rejected
 

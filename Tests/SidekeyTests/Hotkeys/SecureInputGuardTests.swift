@@ -384,6 +384,34 @@ final class SecureInputGuardTests: XCTestCase {
                           "Dia's earlier episode is never reused")
     }
 
+    func testCmdTabBackToTheRememberedHolderNeverBlamesTheAppLeft() {
+        stickDiaBehindTelegram()
+        cmdTab(to: dia)               // ON read in Telegram is Dia's own
+        settle()
+        XCTAssertNotEqual(guardian.persistentBadge, SecureInputHolderBadge(app: telegram))
+        XCTAssertNil(guardian.persistentBadge, "Dia, in front, is the holder now")
+        press(.option)
+        XCTAssertNotEqual(presenter.presented.last?.badge, SecureInputHolderBadge(app: telegram))
+    }
+
+    func testCommandPressedWhileAClicksActivationIsInFlightGivesNoEvidence() {
+        switchApp(to: dia)
+        settle()
+        world.now += 2
+        guardian.handleMouseDown()            // click on Terminal...
+        world.secureOn = true                 // ...which turns Secure Keyboard Entry on
+        world.now += 0.03
+        guardian.handleFlagsChanged(.command) // ⌘V before the activation arrives
+        world.now += 0.03
+        let terminal = SecureInputApp(pid: 600, name: "Terminal", bundleID: "com.apple.Terminal")
+        world.running.insert(terminal.pid)
+        switchApp(to: terminal)
+        guardian.handleFlagsChanged([])
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "Dia was never read ON in front")
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
     func testAttemptQueuedBeforeAnOffNeverShakesTheNextEpisode() {
         stickDiaBehindTelegram()
         guardian.handleFlagsChanged(.option)

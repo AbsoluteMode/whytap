@@ -214,7 +214,9 @@ holds it, leave the tickets queued and end your turn.
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. That one gate also refuses a locked
    screen or a session not in front (`screen_locked`,
-   `session_not_on_console`), so it covers a resumed candidate and a screen
+   `session_not_on_console`; only typed flags count, anything else is unknown)
+   and audio samples older than 5 seconds at the verdict
+   (`audio_evidence_stale_at_verdict`), so it covers a resumed candidate and a screen
    that locked after packaging; there is no other way to the Quit. Otherwise record
    `set --status pending_install --retry-install --note <candidate evidence>`
    (for a group or an isolated PR, use `--install-first`; the helper keeps an

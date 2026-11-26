@@ -83,16 +83,28 @@ the app the person switched to.
    A bare key or Space produces no event at all and cannot be noticed; the
    dimmed logo below covers that case when the holder is in the background.
 3. **Track the holder ourselves.** `SecureInputHolderTracker` remembers the
-   app the person left when secure input was still on 0.4 s after the switch
-   (time for a well-behaved app to release). The frontmost app is the holder
-   instead when its focused element is a password field (Accessibility role
-   `AXSecureTextField`, read with a 0.2 s timeout and only when it decides
-   between the two), or when no switch happened since secure input came on.
+   app the person left when secure input was on while that app was still in
+   front and still on 0.4 s after the switch (time for a well-behaved app to
+   release). "While still in front" comes from the modifier change that
+   starts Cmd-Tab (⌘ goes down before the switch); a mouse switch uses the
+   reading at activation. So an app that turns secure input on as it comes
+   forward (Terminal's Secure Keyboard Entry, a focused key field) never makes
+   the app left behind look guilty. The frontmost app is the holder instead
+   when its focused element is a password field (Accessibility role
+   `AXSecureTextField`, both calls with a 0.2 s timeout, asked only on an
+   attempt or a switch and never by the 1 s check; Whytap's own windows are
+   read in-process), and then the remembered app is forgotten; or when no
+   switch happened since secure input came on.
 4. **Show it next to the island.** A non-activating panel to the right of the
    island shows a black capsule with the holder's logo
-   (`NSRunningApplication.icon`). A failed attempt plays the macOS
-   wrong-password shake and brings it to full strength; when the holder is
-   the frontmost app the badge fades after 2.8 s. A background holder keeps a
+   (`NSRunningApplication.icon`). The window is exactly the pill (a circle,
+   growing rightward on hover to fit the label), because a window that
+   accepts the mouse eats clicks wherever its content does not hit-test; the
+   shake moves the window frame, as the login window does. A failed attempt
+   plays the macOS wrong-password shake and brings it to full strength; when
+   the holder is the frontmost app the badge fades after 2.8 s. Typing in the
+   frontmost app's own password field (⌥ letters, a ⌘ chord of a hold-combo
+   Drop) shakes nothing. A background holder keeps a
    dimmed logo there until secure input ends; a 1 s check runs only in that
    state. Hovering shows one line: "Dia holds secure input — close its
    password field". Reduce Motion replaces the shake with the brightness
@@ -109,16 +121,22 @@ Logs carry the holder's bundle ID as private data and never keys or chords.
 
 ## Tested
 
-`SecureInputGuardTests` (20 scenarios): no secure input; background holder
+`SecureInputGuardTests` (23 scenarios): no secure input; background holder
 after Cmd-Tab (dimmed logo, then shake); frontmost holder (shake, no poll);
-password field in the frontmost app wins over the remembered one;
-Accessibility asked only when it decides; holder releases (poll and on a
+password field in the frontmost app wins over the remembered one and the 1 s
+check keeps that verdict; typing in the front password field never shakes;
+an app turning secure input on as it comes forward does not blame the app
+left; Accessibility asked only on attempts and switches, never by the 1 s
+check; no 1 s check for a holder that quit; holder releases (poll and on a
 modifier press); holder quits while secure input stays (lock); an app that
 releases while being left is never blamed; switching back to the holder;
 Whytap's own field, in front and remembered; a shortcut that arrived; ⌘/⌃
 chords; long holds; shake throttling; blocked chords from the configuration
 including a hold-combo Drop; chord conversions; Carbon arrival recorded even
-when suppressed.
+when suppressed. An independent review of the first version found the
+click-eating panel margin, the blame of the app left behind, the 1 s check
+undoing the Accessibility verdict and shakes while typing a password; all four
+are fixed above and covered by the scenarios.
 
 ## Rejected
 

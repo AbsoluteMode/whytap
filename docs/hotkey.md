@@ -264,7 +264,9 @@ A background app that keeps secure input gets a dimmed logo there until it lets
 go. The holder is the app the person left while secure input stayed on,
 unless the frontmost app has a focused password field; macOS's
 `kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
-own password fields show nothing; an unknown or quit holder shows a lock.
+own password fields show nothing, nor does typing in the frontmost app's
+password field; an unknown or quit holder shows a lock. The badge window is
+exactly the pill, so menu-bar clicks beside it pass through.
 A bare key or Space leaves no event, so only the dimmed logo covers it.
 [Decision](../.project-docs/decisions/2026-11-26-secure-input-holder.md).
 

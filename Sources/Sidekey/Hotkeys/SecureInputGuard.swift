@@ -61,6 +61,10 @@ final class SecureInputGuard {
     private var tracker = SecureInputHolderTracker()
     private var detector = SecureInputAttemptDetector()
     private var lastFront: SecureInputApp?
+    /// Secure input as last read on a modifier change, and who was in front.
+    /// Cmd-Tab always starts with ⌘ down while the old app is still in front.
+    private var lastSample: (on: Bool, frontPID: pid_t?, at: Date)?
+    static let sampleFreshness: TimeInterval = 1.5
     private var lastShake: Date?
     private(set) var persistentBadge: SecureInputHolderBadge?
     private var pollTimer: Timer?
@@ -101,13 +105,14 @@ final class SecureInputGuard {
 
     func handleFlagsChanged(_ chord: ModifierChord) {
         let now = system.now()
+        // Every modifier change on the Mac lands here; it costs one flag read.
+        let on = system.isSecureInputEnabled()
+        lastSample = (on, lastFront?.pid, now)
         guard chord.isEmpty else {
             _ = detector.flagsChanged(to: chord, at: now, lastHotkeyFire: nil, blockedChords: [])
             return
         }
-        // Every modifier release on the Mac lands here; with secure input off
-        // it costs one flag read.
-        guard system.isSecureInputEnabled() else {
+        guard on else {
             _ = detector.flagsChanged(to: [], at: now, lastHotkeyFire: nil, blockedChords: [])
             secureInputEnded()
             return
@@ -124,11 +129,22 @@ final class SecureInputGuard {
     func handleActivation(_ app: SecureInputApp?) {
         let previous = lastFront
         lastFront = app
-        system.afterSwitchSettles { [weak self] in self?.settleSwitch(from: previous, to: app) }
+        let now = system.now()
+        let wasOn: Bool
+        if let sample = lastSample, sample.frontPID == previous?.pid,
+           now.timeIntervalSince(sample.at) <= Self.sampleFreshness {
+            wasOn = sample.on // read while `previous` was still in front
+        } else {
+            wasOn = system.isSecureInputEnabled() // a mouse switch: best reading
+        }
+        system.afterSwitchSettles { [weak self] in
+            self?.settleSwitch(from: previous, to: app, wasOnBeforeSwitch: wasOn)
+        }
     }
 
-    func settleSwitch(from previous: SecureInputApp?, to current: SecureInputApp?) {
-        tracker.didSwitch(from: previous, to: current, secureInputOn: system.isSecureInputEnabled())
+    func settleSwitch(from previous: SecureInputApp?, to current: SecureInputApp?, wasOnBeforeSwitch: Bool) {
+        tracker.didSwitch(from: previous, to: current, wasOnBeforeSwitch: wasOnBeforeSwitch,
+                          secureInputOn: system.isSecureInputEnabled())
         refresh()
     }
 
@@ -165,6 +181,9 @@ final class SecureInputGuard {
         var frontHasSecureField = false
         if askAccessibility, let candidate = tracker.staleCandidate, let front, candidate.pid != front.pid {
             frontHasSecureField = system.focusedElementIsSecure(front.pid)
+            // The verdict sticks: the 1 s check must not bring the
+            // remembered app back while the front field holds secure input.
+            if frontHasSecureField { tracker.forgetCandidate() }
         }
         return tracker.resolve(secureInputOn: on, front: front, frontHasSecureField: frontHasSecureField,
                                ownPID: system.ownPID, isRunning: system.isRunning)
@@ -179,6 +198,13 @@ final class SecureInputGuard {
             return
         case .ownApp:
             os_log("secure_input_attempt holder=self", log: Self.log, type: .info)
+            return
+        case .app(let app, inBackground: false) where system.focusedElementIsSecure(app.pid):
+            // The person is typing in this app's password field: ⌥ letters
+            // and the like are not a shortcut that failed.
+            dismissPersistent()
+            updatePolling()
+            os_log("secure_input_attempt holder=front_password_field", log: Self.log, type: .info)
             return
         case .app(let app, let inBackground):
             badge = SecureInputHolderBadge(app: app)
@@ -215,6 +241,13 @@ final class SecureInputGuard {
     /// A 1 s check runs only while a background holder is remembered, so
     /// the badge leaves as soon as secure input does.
     private func updatePolling() {
+        if let candidate = tracker.staleCandidate, !system.isRunning(candidate.pid), persistentBadge == nil {
+            // A quit app cannot be shown; a modifier release still notices
+            // when secure input ends.
+            pollTimer?.invalidate()
+            pollTimer = nil
+            return
+        }
         let needed = tracker.staleCandidate != nil || persistentBadge != nil
         if needed, pollTimer == nil {
             let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
@@ -262,19 +295,34 @@ extension SecureInputGuard {
     /// Whether the app's focused element is a password field. Reads only the
     /// element's role, never its value; a short timeout keeps a busy app
     /// from stalling the main thread.
-    nonisolated static func focusedElementIsSecure(pid: pid_t) -> Bool {
+    static func focusedElementIsSecure(pid: pid_t) -> Bool {
+        // Whytap's own windows are read in-process: an Accessibility call to
+        // ourselves from the main thread could only time out.
+        if pid == ProcessInfo.processInfo.processIdentifier { return ownFocusIsSecure() }
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.2)
         var focused: CFTypeRef?
         guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
               let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return false }
         let element = focused as! AXUIElement
+        AXUIElementSetMessagingTimeout(element, 0.2)
         for attribute in [kAXSubroleAttribute, kAXRoleAttribute] {
             var value: CFTypeRef?
             if AXUIElementCopyAttributeValue(element, attribute as CFString, &value) == .success,
                (value as? String) == (kAXSecureTextFieldSubrole as String) {
                 return true
             }
+        }
+        return false
+    }
+}
+
+extension SecureInputGuard {
+    static func ownFocusIsSecure() -> Bool {
+        guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+        if responder is NSSecureTextField { return true }
+        if let editor = responder as? NSTextView, editor.isFieldEditor, editor.delegate is NSSecureTextField {
+            return true
         }
         return false
     }

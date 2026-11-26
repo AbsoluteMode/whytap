@@ -91,6 +91,17 @@ final class SecureInputGuardTests: XCTestCase {
         world.now += 1
     }
 
+    /// Cmd-Tab as macOS delivers it: ⌘ goes down while the old app is still
+    /// in front, the new app activates, ⌘ comes up.
+    private func cmdTab(to app: SecureInputApp, newAppTurnsSecureInputOn: Bool = false) {
+        guardian.handleFlagsChanged(.command)
+        world.now += 0.2
+        if newAppTurnsSecureInputOn { world.secureOn = true }
+        switchApp(to: app)
+        guardian.handleFlagsChanged([])
+        world.now += 0.1
+    }
+
     /// Dia focuses a password field, then the person Cmd-Tabs to Telegram
     /// and Dia never releases secure input.
     private func stickDiaBehindTelegram() {
@@ -98,7 +109,7 @@ final class SecureInputGuardTests: XCTestCase {
         guardian.handleActivation(dia)
         settle()
         world.secureOn = true
-        switchApp(to: telegram)
+        cmdTab(to: telegram)
         settle()
     }
 
@@ -142,30 +153,65 @@ final class SecureInputGuardTests: XCTestCase {
         XCTAssertFalse(guardian.isPolling)
     }
 
-    func testFrontmostPasswordFieldWinsOverRememberedBackgroundApp() {
+    func testFrontmostPasswordFieldWinsAndTheOneSecondCheckKeepsThatVerdict() {
         stickDiaBehindTelegram()
         world.front = onePassword
         world.secureFieldPIDs = [onePassword.pid]
-        press(.option)
-        XCTAssertEqual(presenter.presented.last,
-                       .init(badge: SecureInputHolderBadge(app: onePassword), shake: true, persistent: false))
-        XCTAssertEqual(world.axQueries.last, onePassword.pid)
+        press(.option) // ⌥ while typing a 1Password password
+        XCTAssertEqual(presenter.presented.count, 1, "typing in a password field is not a failed shortcut")
+        XCTAssertEqual(presenter.dismissals, 1, "Dia is no longer blamed")
+        XCTAssertNil(guardian.persistentBadge)
+
+        guardian.refresh(askAccessibility: false)
+        guardian.refresh(askAccessibility: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the 1 s check must not bring Dia back")
+        XCTAssertFalse(guardian.isPolling)
     }
 
-    func testAccessibilityIsAskedOnlyWhenItDecidesTheHolder() {
+    func testTypingInTheFrontAppsPasswordFieldNeverShakes() {
         world.front = dia
         world.secureOn = true
+        world.secureFieldPIDs = [dia.pid]
         press(.option)
+        press([.option, .shift])
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testAccessibilityIsNotAskedWithoutAnAttemptOrASwitch() {
+        world.front = dia
+        world.secureOn = true
+        press(.command)
         XCTAssertTrue(world.axQueries.isEmpty)
+        press(.option)
+        XCTAssertEqual(world.axQueries, [dia.pid])
+    }
+
+    func testAppTurningSecureInputOnAsItComesForwardDoesNotBlameTheAppLeft() {
+        let safari = SecureInputApp(pid: 500, name: "Safari", bundleID: "com.apple.Safari")
+        world.running.insert(safari.pid)
+        let terminal = SecureInputApp(pid: 600, name: "Terminal", bundleID: "com.apple.Terminal")
+        world.running.insert(terminal.pid)
+        switchApp(to: safari)
+        settle()
+        cmdTab(to: terminal, newAppTurnsSecureInputOn: true) // Secure Keyboard Entry
+        settle()
+        XCTAssertTrue(presenter.presented.isEmpty, "no dimmed Safari logo")
+        XCTAssertNil(guardian.persistentBadge)
+
+        press(.option)
+        XCTAssertEqual(presenter.presented, [
+            .init(badge: SecureInputHolderBadge(app: terminal), shake: true, persistent: false)
+        ])
     }
 
     func testOneSecondCheckNeverQueriesAccessibility() {
         stickDiaBehindTelegram()
+        world.front = onePassword
         let queries = world.axQueries.count
         guardian.refresh(askAccessibility: false)
         guardian.refresh(askAccessibility: false)
         XCTAssertEqual(world.axQueries.count, queries)
-        XCTAssertNotNil(guardian.persistentBadge)
+        XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
     }
 
     // MARK: - Holder gone
@@ -195,6 +241,8 @@ final class SecureInputGuardTests: XCTestCase {
         guardian.refresh()
         XCTAssertEqual(presenter.dismissals, 1, "no dim logo for an app that is gone")
 
+        XCTAssertFalse(guardian.isPolling, "no 1 s check for an app that is gone")
+
         press(.option)
         XCTAssertEqual(presenter.presented.last,
                        .init(badge: SecureInputHolderBadge(app: nil), shake: true, persistent: false))
@@ -209,8 +257,7 @@ final class SecureInputGuardTests: XCTestCase {
         switchApp(to: telegram)
         world.secureOn = false // Dia let go while losing focus
         settle()
-        world.secureOn = true // later Telegram's own password field
-        world.secureFieldPIDs = [telegram.pid]
+        world.secureOn = true // later Telegram turns secure input on itself
         press(.option)
         XCTAssertEqual(presenter.presented, [
             .init(badge: SecureInputHolderBadge(app: telegram), shake: true, persistent: false)

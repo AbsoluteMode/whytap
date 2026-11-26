@@ -152,13 +152,27 @@ struct SecureInputHolderTracker {
 
     /// Called shortly after the frontmost app changed from `previous`, once
     /// the app that lost focus had the chance to release secure input.
-    mutating func didSwitch(from previous: SecureInputApp?, to current: SecureInputApp?, secureInputOn: Bool) {
+    /// `wasOnBeforeSwitch` is secure input while `previous` was still in
+    /// front: an app that turns it on as it comes forward (Terminal's Secure
+    /// Keyboard Entry, a focused key field) must not make the app left
+    /// behind look guilty.
+    mutating func didSwitch(
+        from previous: SecureInputApp?,
+        to current: SecureInputApp?,
+        wasOnBeforeSwitch: Bool,
+        secureInputOn: Bool
+    ) {
         guard secureInputOn else { staleCandidate = nil; return }
-        guard staleCandidate == nil, let previous, previous.pid != current?.pid else { return }
+        guard wasOnBeforeSwitch, staleCandidate == nil,
+              let previous, previous.pid != current?.pid else { return }
         staleCandidate = previous
     }
 
     mutating func secureInputObservedOff() { staleCandidate = nil }
+
+    /// The frontmost app's focused password field explains secure input, or
+    /// the remembered app has quit: stop blaming it.
+    mutating func forgetCandidate() { staleCandidate = nil }
 
     func resolve(
         secureInputOn: Bool,

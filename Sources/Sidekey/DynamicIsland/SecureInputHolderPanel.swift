@@ -1,12 +1,12 @@
 import AppKit
+import Combine
+import QuartzCore
 import SwiftUI
 
 /// State of the Secure Input holder badge to the right of the island.
 @MainActor
 final class SecureInputHolderModel: ObservableObject {
     @Published var badge: SecureInputHolderBadge?
-    /// Bumped once per shake; drives the keyframe animation.
-    @Published var shakeCount = 0
     /// Full strength right after a blocked attempt; dimmed otherwise.
     @Published var emphasized = false
     @Published var hovered = false
@@ -14,67 +14,63 @@ final class SecureInputHolderModel: ObservableObject {
     @Published var height: CGFloat = 32
 }
 
-/// The macOS wrong-password shake, as horizontal offsets in points.
+/// The macOS wrong-password shake, as horizontal offsets in points. The
+/// window itself moves, as the login window does, so the panel can stay
+/// exactly the size of the pill.
 enum SecureInputShake {
     static let offsets: [CGFloat] = [-9, 9, -7, 7, -4, 4, 0]
-    static let step: TimeInterval = 0.055
-    static var duration: TimeInterval { step * Double(offsets.count) }
+    static let duration: TimeInterval = 0.4
+}
+
+enum SecureInputHolderMetrics {
+    static let iconSide: CGFloat = 20
+    static let labelSpacing: CGFloat = 8
+    static let labelFont = NSFont.systemFont(ofSize: 12, weight: .medium)
+
+    static func horizontalPadding(height: CGFloat) -> CGFloat { (height - iconSide) / 2 }
+
+    /// A circle when collapsed; on hover it grows rightward to fit the label.
+    static func pillWidth(label: String?, height: CGFloat) -> CGFloat {
+        guard let label else { return height }
+        let text = (label as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up) + 2
+        return height + labelSpacing + text
+    }
 }
 
 struct SecureInputHolderView: View {
     @ObservedObject var model: SecureInputHolderModel
-    let onRect: (CGRect) -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    private static let iconSide: CGFloat = 20
 
     var body: some View {
-        ZStack(alignment: .topLeading) {
+        ZStack(alignment: .leading) {
             if let badge = model.badge {
-                pill(badge)
-                    .background(GeometryReader { geometry in
-                        let rect = geometry.frame(in: .named("secure-input-panel"))
-                        Color.clear.onAppear { onRect(rect) }
-                            .onChange(of: rect) { _, value in onRect(value) }
-                    })
-                    .transition(.opacity)
+                pill(badge).transition(.opacity)
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .coordinateSpace(name: "secure-input-panel")
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .animation(.easeOut(duration: 0.18), value: model.badge)
         .ignoresSafeArea()
     }
 
     private func pill(_ badge: SecureInputHolderBadge) -> some View {
-        let still = reduceMotion
-        return HStack(spacing: 8) {
+        HStack(spacing: SecureInputHolderMetrics.labelSpacing) {
             icon(badge)
-                .frame(width: Self.iconSide, height: Self.iconSide)
+                .frame(width: SecureInputHolderMetrics.iconSide, height: SecureInputHolderMetrics.iconSide)
             if model.hovered {
                 Text(badge.label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(Font(SecureInputHolderMetrics.labelFont))
                     .foregroundStyle(.white)
                     .lineLimit(1)
                     .fixedSize()
                     .transition(.opacity)
             }
         }
-        .padding(.horizontal, (model.height - Self.iconSide) / 2)
+        .padding(.horizontal, SecureInputHolderMetrics.horizontalPadding(height: model.height))
+        .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: model.height)
         .background(Capsule(style: .continuous).fill(Color.black))
         .opacity(model.emphasized || model.hovered ? 1 : 0.7)
         .animation(.easeOut(duration: 0.15), value: model.hovered)
         .animation(.easeOut(duration: 0.2), value: model.emphasized)
-        .keyframeAnimator(initialValue: CGFloat(0), trigger: model.shakeCount) { content, offset in
-            content.offset(x: still ? 0 : offset)
-        } keyframes: { _ in
-            KeyframeTrack {
-                for offset in SecureInputShake.offsets {
-                    LinearKeyframe(offset, duration: SecureInputShake.step)
-                }
-            }
-        }
         .onHover { model.hovered = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(badge.label)
@@ -93,35 +89,28 @@ struct SecureInputHolderView: View {
     }
 }
 
-private final class SecureInputHostingView<Content: View>: NSHostingView<Content> {
-    var interactiveRect: NSRect = .zero
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        guard interactiveRect.contains(point) else { return nil }
-        return super.hitTest(point)
-    }
-}
-
 /// A non-activating badge with the Secure Input holder's logo, just to the
-/// right of the island. It never takes focus and only the pill itself
-/// receives the mouse (for the hover label).
+/// right of the island. It never takes focus. The window is exactly the
+/// pill, so it never swallows a menu-bar click beside it (a window that
+/// accepts the mouse eats clicks where its content does not hit-test).
 // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
 @MainActor
 final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
     static let shared = SecureInputHolderPanel()
 
     static let gapFromIsland: CGFloat = 6
-    static let panelWidth: CGFloat = 380
     /// How long a shaken badge stays at full strength (or at all, when the
-    /// holder is the frontmost app) before it fades.
+    /// holder is not stuck in the background) before it fades.
     static let emphasisDuration: TimeInterval = 2.8
 
     private let model = SecureInputHolderModel()
-    private var host: SecureInputHostingView<SecureInputHolderView>!
     private var persistent = false
     private var fadeWork: DispatchWorkItem?
+    private var hoverObservation: AnyCancellable?
 
     private init() {
-        let frame = Self.frame(on: IslandScreenResolver.currentDescriptor())
+        let screen = IslandScreenResolver.currentDescriptor()
+        let frame = Self.frame(on: screen, width: Self.islandHeight(on: screen))
         super.init(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
         isReleasedWhenClosed = false
         isOpaque = false; backgroundColor = .clear; hasShadow = false; isMovable = false
@@ -129,18 +118,14 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
         appearance = NSAppearance(named: .darkAqua)
         collectionBehavior = [.canJoinAllApplications, .canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         level = .screenSaver
-        let host = SecureInputHostingView(rootView: SecureInputHolderView(model: model, onRect: { _ in }))
-        self.host = host
-        host.rootView = SecureInputHolderView(model: model, onRect: { [weak self] rect in
-            guard let self else { return }
-            self.host.interactiveRect = NSRect(
-                x: rect.minX, y: self.host.isFlipped ? rect.minY : self.host.bounds.height - rect.maxY,
-                width: rect.width, height: rect.height)
-        })
+        let host = NSHostingView(rootView: SecureInputHolderView(model: model))
         host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: frame.size)
         host.autoresizingMask = [.width, .height]
         contentView = host
+        hoverObservation = model.$hovered.removeDuplicates().dropFirst().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.reposition() }
+        }
     }
 
     override var canBecomeKey: Bool { false }
@@ -152,12 +137,12 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
     }
 
     /// Top-flush with the island, starting just past its right edge.
-    static func frame(on screen: IslandScreenDescriptor) -> NSRect {
+    static func frame(on screen: IslandScreenDescriptor, width: CGFloat) -> NSRect {
         let island = IslandFrameLayout.islandFrame(on: screen)
         let height = islandHeight(on: screen)
         let x = island.maxX + gapFromIsland
-        let width = max(height, min(panelWidth, screen.frame.maxX - x))
-        return NSRect(x: x, y: island.maxY - height, width: width, height: height)
+        let fitted = max(height, min(width, screen.frame.maxX - x))
+        return NSRect(x: x, y: island.maxY - height, width: fitted, height: height)
     }
 
     // MARK: SecureInputHolderPresenting
@@ -165,8 +150,8 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
     func present(_ badge: SecureInputHolderBadge, shake: Bool, persistent: Bool) {
         self.persistent = persistent
         sharingType = PrivacyPreferences.shared.screenshotProtectionEnabled ? .none : .readOnly
-        reposition()
         model.badge = badge
+        reposition()
         ignoresMouseEvents = false
         orderFrontRegardless()
         fadeWork?.cancel()
@@ -175,7 +160,7 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
             return
         }
         model.emphasized = true
-        model.shakeCount += 1
+        shakeWindow()
         let work = DispatchWorkItem { [weak self] in self?.endEmphasis() }
         fadeWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.emphasisDuration, execute: work)
@@ -188,13 +173,27 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
         model.badge = nil
         model.emphasized = false
         model.hovered = false
-        host.interactiveRect = .zero
         ignoresMouseEvents = true
         // Let the fade play before the window leaves.
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
             guard let self, self.model.badge == nil else { return }
             self.orderOut(nil)
         }
+    }
+
+    private func shakeWindow() {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let origin = frame.origin
+        let path = CGMutablePath()
+        path.move(to: origin)
+        for dx in SecureInputShake.offsets {
+            path.addLine(to: CGPoint(x: origin.x + dx, y: origin.y))
+        }
+        let animation = CAKeyframeAnimation()
+        animation.path = path
+        animation.duration = SecureInputShake.duration
+        animations = ["frameOrigin": animation]
+        animator().setFrameOrigin(origin)
     }
 
     private func endEmphasis() {
@@ -210,9 +209,10 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
 
     private func reposition() {
         let screen = IslandScreenResolver.currentDescriptor()
-        model.height = Self.islandHeight(on: screen)
-        let frame = Self.frame(on: screen)
-        setFrame(frame, display: false)
-        host.frame = NSRect(origin: .zero, size: frame.size)
+        let height = Self.islandHeight(on: screen)
+        model.height = height
+        let label = model.hovered ? model.badge?.label : nil
+        let frame = Self.frame(on: screen, width: SecureInputHolderMetrics.pillWidth(label: label, height: height))
+        setFrame(frame, display: true)
     }
 }

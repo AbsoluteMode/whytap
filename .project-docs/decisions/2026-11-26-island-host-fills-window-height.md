@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHostFillsWindowTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-22-island-beside-system-island.md]
+related: []
 ---
 
 # The island's hosting view fills the window height

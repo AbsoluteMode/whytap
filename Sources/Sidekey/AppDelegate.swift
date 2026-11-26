@@ -1349,6 +1349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
+                    SecureInputHolderPanel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -1444,6 +1445,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHelpHotkey()
         registerToolHotkeys()
         registerMeetingRecordHotkey()
+        // Points at the app holding Secure Input when a shortcut cannot arrive.
+        SecureInputGuard.shared.start()
         // Brightness keys install their tap only when switched on in Settings -> Toolbox.
         BrightnessKeys.shared.start(showStrip: { [weak self] in self?.showBrightnessGlance() })
         guard hotkey == nil else { return }

@@ -8,11 +8,23 @@ bundle runs as `xcrun xctest -XCTest <classes>` in N processes at once. Classes
 are split deterministically (committed class times, greedy, ties by name; an
 unknown class weighs the median) and the split is checked against
 `swift test --list-tests` before anything runs, so a new class is never lost.
-A failing test is rerun alone, serially, before it counts. Any problem of the
-sharding itself (no list, no bundle, a crashed shard, a count mismatch) falls
-back to the serial `swift test`. Exit 0: all passed; 1: a test failed (also
-after its rerun); 2: the suite could not run. The summary JSON is the last line.
-Only Python's standard library is required.
+Every run (each shard, the serial fallback, each rerun) is judged by one
+function, `account`: the named final XCTest summary ("All tests" or "Selected
+tests", with or without a skipped count), every expected test identity with
+exactly one terminal result, the summary consistent with those results and
+the process exit consistent with the failures. Any problem of the sharding
+itself (no list, no bundle, a shard that does not account for its tests)
+falls back to the serial `swift test`, which must account for the whole
+listed suite (or at least one test without a list). A failing test is rerun
+alone; the rerun counts only when that exact test ran alone and passed.
+
+Exit 0: every test passed the first time. 1: a test failed (also after its
+rerun). 2: the suite could not run or did not account for itself (an exit
+without a failing test, missing tests, no summary). 3: no real failure, but
+`failed_then_passed_alone` is not empty: the builder decides by the workflow
+rule (an isolated pass waives a failure only when the test file and the code
+under test are unchanged); the runner never waives it. The summary JSON is the
+last line. Only Python's standard library is required.
 """
 
 import argparse
@@ -29,7 +41,9 @@ import time
 TIMES = Path(__file__).resolve().with_name("test-shard-times.json")
 LISTED = re.compile(r"^(\w+)\.(\w+)/(\w+)$")
 CASE = re.compile(r"Test Case '-\[(\w+)\.(\w+) (\w+)\]' (passed|failed|skipped)")
-EXECUTED = re.compile(r"Executed (\d+) tests?, with (\d+) failures?")
+FINAL_SUITE = re.compile(r"Test Suite '(All tests|Selected tests)' (passed|failed) at ")
+SUMMARY = re.compile(r"^\s*Executed (\d+) tests?, with (?:(\d+) tests? skipped and )?"
+                     r"(\d+) failures? \((\d+) unexpected\)")
 PROTECTED = "Protected data is unavailable"
 
 
@@ -104,48 +118,106 @@ def check_split(classes, plan):
 
 
 def parse(log):
+    """What an XCTest log says: each test's terminal results, the named final summary
+    (the last "All tests"/"Selected tests" suite, never a class or bundle total) and
+    the tests skipped for protected data."""
     text = Path(log).read_text(errors="replace")
-    failed, protected = set(), set()
-    for match in CASE.finditer(text):
-        if match[4] == "failed":
-            failed.add(f"{match[1]}.{match[2]}/{match[3]}")
-    for line in text.splitlines():
+    results, protected, final = {}, set(), None
+    lines = text.splitlines()
+    for index, line in enumerate(lines):
+        case = CASE.search(line)
+        if case:
+            results.setdefault(f"{case[1]}.{case[2]}/{case[3]}", []).append(case[4])
         if PROTECTED in line:
             match = re.search(r"-\[(\w+)\.(\w+) (\w+)\]", line)
             if match:
                 protected.add(f"{match[1]}.{match[2]}/{match[3]}")
-    executed = [int(m[1]) for m in EXECUTED.finditer(text)]
-    # The last summary line is the whole run's ("All tests" / "Selected tests").
-    return {"executed": executed[-1] if executed else None, "failed": sorted(failed),
-            "protected_skipped": sorted(protected)}
+        if FINAL_SUITE.search(line):
+            summary = next((SUMMARY.match(after) for after in lines[index + 1:index + 3]
+                            if SUMMARY.match(after)), None)
+            final = None if summary is None else {
+                "executed": int(summary[1]), "skipped": int(summary[2] or 0),
+                "failures": int(summary[3])}
+    return {"results": results, "final": final, "protected_skipped": sorted(protected)}
 
 
-def run_shard(index, classes, bundle, work):
+def account(log, code, expected=None):
+    """The one judgement of a run. `expected`: the exact test identities it must
+    run, or None (unknown: at least one test). Returns executed, failed, skipped,
+    protected_skipped and `problems` (empty when the run accounts for itself)."""
+    parsed = parse(log)
+    results, final, problems = parsed["results"], parsed["final"], []
+    if final is None:
+        problems.append("no final XCTest summary")
+    twice = sorted(t for t, r in results.items() if len(r) != 1)
+    if twice:
+        problems.append("tests with more than one result: " + ", ".join(twice[:5]))
+    terminal = {t: r[-1] for t, r in results.items()}
+    failed = sorted(t for t, r in terminal.items() if r == "failed")
+    skipped = sorted(t for t, r in terminal.items() if r == "skipped")
+    if expected is not None:
+        missing, extra = sorted(set(expected) - set(terminal)), sorted(set(terminal) - set(expected))
+        if missing:
+            problems.append(f"{len(missing)} expected tests have no result: "
+                            + ", ".join(missing[:5]))
+        if extra:
+            problems.append(f"{len(extra)} unexpected tests ran: " + ", ".join(extra[:5]))
+    if not terminal:
+        problems.append("no test ran")
+    if final is not None:
+        if final["executed"] != len(terminal):
+            problems.append(f"the summary says {final['executed']} tests, the log shows "
+                            f"{len(terminal)}")
+        if final["failures"] != len(failed) and not (final["failures"] > len(failed) > 0):
+            # Several failures of one test count once per assertion: only a summary
+            # with failures and no failed test, or the reverse, is inconsistent.
+            problems.append(f"the summary says {final['failures']} failures, the log shows "
+                            f"{len(failed)} failed tests")
+        if final["skipped"] != len(skipped):
+            problems.append(f"the summary says {final['skipped']} skipped, the log shows "
+                            f"{len(skipped)}")
+    if code != 0 and not failed:
+        problems.append(f"the process exited {code} without a failed test")
+    if code == 0 and failed:
+        problems.append("the process exited 0 with failed tests")
+    return {"executed": len(terminal), "failed": failed, "skipped": len(skipped),
+            "protected_skipped": parsed["protected_skipped"], "problems": problems}
+
+
+def run_shard(index, classes, bundle, work, expected):
     log = work / f"shard-{index + 1}.log"
     log.write_text("")
     started = time.monotonic()
     code = run(["xcrun", "xctest", "-XCTest", ",".join(classes), str(bundle)], log)
     return {"shard": index + 1, "classes": len(classes), "exit": code,
-            "seconds": round(time.monotonic() - started, 1), "log": str(log), **parse(log)}
+            "seconds": round(time.monotonic() - started, 1), "log": str(log),
+            **account(log, code, expected)}
 
 
 def rerun(test, work):
-    """A failed test alone, serially: True when it passes."""
-    log = work / "reruns.log"
+    """A failed test alone, serially: True only when exactly that test ran alone and
+    passed (a filter matching nothing also exits 0)."""
     module_class, name = test.split("/")
-    return run(["swift", "test", "--skip-build", "--filter",
-                f"^{re.escape(module_class)}/{re.escape(name)}$"], log) == 0
+    log = work / ("rerun-" + re.sub(r"[^\w.-]", "_", test) + ".log")
+    log.write_text("")
+    code = run(["swift", "test", "--skip-build", "--filter",
+                f"^{re.escape(module_class)}/{re.escape(name)}$"], log)
+    result = account(log, code, [test])
+    return not result["problems"] and not result["failed"] and result["skipped"] == 0
 
 
-def serial(work, reason):
+def serial(work, reason, classes=None):
+    """The whole suite in one `swift test`: it must account for every listed test,
+    or (without a list) for a nonempty run."""
     log = work / "serial.log"
     log.write_text("")
     started = time.monotonic()
     code = run(["swift", "test", "--skip-build"], log)
-    result = parse(log)
+    expected = None if classes is None else [
+        f"{module_class}/{test}" for module_class, tests in classes.items() for test in tests]
+    result = account(log, code, expected)
     return {"mode": "serial", "fallback_reason": reason, "exit": code,
-            "seconds": round(time.monotonic() - started, 1), "log": str(log), **result,
-            "passed": code == 0}
+            "seconds": round(time.monotonic() - started, 1), "log": str(log), **result}
 
 
 def main():
@@ -182,8 +254,7 @@ def main():
         if args.plan:
             print(json.dumps({"plan": None, "reason": reason}))
             return 2
-        summary = serial(work, reason)
-        return finish(work, summary)
+        return finish(work, serial(work, reason))
     plan, weights = split(classes, args.shards, load_times(args.times))
     problem = check_split(classes, plan)
     total = sum(len(t) for t in classes.values())
@@ -193,39 +264,40 @@ def main():
         return 0 if not problem else 2
     bundle = bundle_path()
     if problem or bundle is None:
-        return finish(work, serial(work, problem or "no single .xctest bundle"))
+        return finish(work, serial(work, problem or "no single .xctest bundle", classes))
     with ThreadPoolExecutor(max_workers=args.shards) as pool:
-        shards = list(pool.map(lambda i: run_shard(i, plan[i], bundle, work),
-                               range(args.shards)))
-    executed = [s["executed"] for s in shards]
-    if any(e is None for e in executed) or sum(executed) != total:
-        # A crashed or incomplete shard is not a verdict on the PR: run it serially.
-        return finish(work, serial(work, f"shards executed {executed} of {total} listed tests"))
-    failed = sorted({t for s in shards for t in s["failed"]})
-    real = [t for t in failed if not rerun(t, work)]
+        shards = list(pool.map(lambda i: run_shard(i, plan[i], bundle, work, [
+            f"{c}/{t}" for c in plan[i] for t in classes[c]]), range(args.shards)))
+    broken = [f"shard {s['shard']}: " + "; ".join(s["problems"]) for s in shards if s["problems"]]
+    if broken:
+        # A shard that does not account for its tests is not a verdict on the PR: the
+        # serial suite runs, and must account for every listed test itself.
+        return finish(work, serial(work, " | ".join(broken), classes))
     summary = {"mode": f"{args.shards} shards", "tests": total, "shards": shards,
-               "seconds": max(s["seconds"] for s in shards),
-               "failed_then_passed_alone": [t for t in failed if t not in real],
-               "failed": real, "protected_skipped": sorted(
-                   {t for s in shards for t in s["protected_skipped"]}),
-               "passed": not real}
+               "executed": sum(s["executed"] for s in shards),
+               "seconds": max(s["seconds"] for s in shards), "problems": [],
+               "failed": sorted({t for s in shards for t in s["failed"]}),
+               "protected_skipped": sorted({t for s in shards for t in s["protected_skipped"]})}
     return finish(work, summary)
 
 
 def finish(work, summary):
-    if summary.get("mode") == "serial" and summary.get("failed"):
-        # The serial run already is the baseline; still rerun each failure alone.
-        real = [t for t in summary["failed"] if not rerun(t, work)]
-        summary["failed_then_passed_alone"] = [t for t in summary["failed"] if t not in real]
-        summary["failed"] = real
-        summary["passed"] = not real and summary["executed"] is not None
-    elif summary.get("mode") == "serial" and summary["exit"] != 0:
-        summary["passed"] = False  # a crash or a build failure without a test name
+    """Rerun each failure alone, then the verdict and the exit code (see the module
+    docstring). A run that did not account for itself never passes."""
+    first = summary.get("failed", [])
+    real = [t for t in first if not rerun(t, work)]
+    summary["failed_then_passed_alone"] = [t for t in first if t not in real]
+    summary["failed"] = real
+    summary["passed"] = not summary.get("problems") and not real
+    # Never waived here: the builder applies the workflow rule (exit 3).
+    summary["waiver_needed"] = bool(summary["passed"] and summary["failed_then_passed_alone"])
     (work / "summary.json").write_text(json.dumps(summary, indent=2) + "\n")
     print(json.dumps(summary))
-    if summary.get("passed"):
-        return 0
-    return 1 if summary.get("failed") else 2
+    if summary.get("problems"):
+        return 2
+    if real:
+        return 1
+    return 3 if summary["failed_then_passed_alone"] else 0
 
 
 if __name__ == "__main__":

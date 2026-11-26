@@ -126,9 +126,13 @@ holds it, leave the tickets queued and end your turn.
    shards at once, checks that they cover exactly `swift test --list-tests`,
    reruns every failed test alone, and falls back to the serial `swift test`
    by itself when sharding cannot run (`mode`, `fallback_reason`). Read
-   `build/test-shards/summary.json`: exit 0 passed, 1 `failed` lists the tests
-   that failed again alone, 2 the suite could not run (a build error or a
-   crash: read the logs it names). A test in `failed_then_passed_alone` whose
+   `build/test-shards/summary.json`: exit 0 every test passed the first time,
+   1 `failed` lists the tests that failed again alone, 2 the suite could not
+   run or did not account for itself (`problems`: a build error, a crash, an
+   exit without a failed test such as an after-suite guard, missing tests,
+   no final summary; read the logs it names; never a pass), 3 no real
+   failure but `failed_then_passed_alone` is not empty: the runner never
+   waives it, you decide by this rule. A test in `failed_then_passed_alone` whose
    file or code under test the candidate changes is still a finding. Any
    other test there failed only beside the others: it is not a finding: go on with the ticket, append the test, ticket and
    date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git common directory, and name it

@@ -421,7 +421,11 @@ queue survives downtime.
    class shards of the built test bundle at once, a split fixed by the
    committed class times and checked against `swift test --list-tests`, every
    failed test rerun alone, and the serial `swift test` as the fallback when
-   sharding cannot run (see the
+   sharding cannot run. Every run must account for itself: the named final
+   XCTest summary, every expected test with one result, an exit consistent
+   with the failures; otherwise it never passes (exit 2). A rerun counts only
+   when exactly that test ran alone and passed, and an isolated pass ends in
+   exit 3, never 0, so the rule below decides (see the
    [test shards decision](../decisions/2026-11-26-builder-test-shards.md)).
    A failed test whose file and code under test the candidate does not change
    is rerun alone (`swift test --filter <Class>/<test>`), not with a second

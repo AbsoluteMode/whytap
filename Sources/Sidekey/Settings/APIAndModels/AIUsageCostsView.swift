@@ -167,6 +167,8 @@ struct AIUsageCostsView: View {
     @ObservedObject var model: AIUsageCostsViewModel
     @State private var periodHovered = false
     @FocusState private var periodFocused: Bool
+    /// One open "Models used" detail for the whole table.
+    @StateObject private var modelsHover = AIUsageModelsHoverController()
     let now: () -> Date
     init(model: AIUsageCostsViewModel, now: @escaping () -> Date = Date.init) { self.model = model; self.now = now }
     private var interval: DateInterval? { model.period.interval(now: now(), start: model.start, end: model.end) }
@@ -242,6 +244,7 @@ struct AIUsageCostsView: View {
         }
         .foregroundStyle(MacSettingsTheme.text)
         .task { await refresh() }
+        .onDisappear { modelsHover.send(.escape); modelsHover.stop() }
         .onChange(of: model.period) { _, _ in Task { await refresh() } }
         .onChange(of: model.start) { _, _ in Task { await refresh() } }
         .onChange(of: model.end) { _, _ in Task { await refresh() } }
@@ -269,10 +272,11 @@ struct AIUsageCostsView: View {
             }.font(.system(size: 11.5)).foregroundStyle(MacSettingsTheme.text2).padding(.horizontal, 18).padding(.vertical, 10)
             divider
             ForEach(rows) { row in
-                AIUsageFeatureCostRow(row: row)
+                AIUsageFeatureCostRow(row: row, hover: modelsHover)
                 if row.id != rows.last?.id { divider }
             }
         }
+        .onChange(of: rows.map(\.id)) { _, ids in modelsHover.retain(rows: ids) }
     }
     private var divider: some View { Rectangle().fill(MacSettingsTheme.rowSeparator).frame(height: 0.5) }
     private func refresh() async { if let interval { await model.load(interval) } }
@@ -331,17 +335,12 @@ struct AIUsageControlStyle: ButtonStyle {
 @MainActor
 private struct AIUsageFeatureCostRow: View {
     let row: AIUsageCostRow
+    @ObservedObject var hover: AIUsageModelsHoverController
     @Environment(\.isEnabled) private var isEnabled
-    @State private var shown = false
-    @State private var hovered = false
-    @State private var pinned = false
-    /// The pointer is over the open detail, which may cover part of the row.
-    @State private var overPopover = false
-    @State private var closeTask: Task<Void, Never>?
     @FocusState private var focused: Bool
     var body: some View {
         HStack(spacing: 12) {
-            Button(action: togglePinned) {
+            Button { hover.send(.clicked(row.id)) } label: {
                 HStack(spacing: 9) {
                     Text(row.title).font(.system(size: 13, weight: .medium))
                     Text("\(row.models.count) \(row.models.count == 1 ? "model" : "models")")
@@ -350,53 +349,39 @@ private struct AIUsageFeatureCostRow: View {
                 .padding(.vertical, 5).contentShape(Rectangle())
             }
             .buttonStyle(AIUsageControlStyle(hovered: false, focused: focused)).focused($focused)
-            .accessibilityLabel("\(row.title), \(row.models.count) models used. Show model costs")
+            .accessibilityLabel("\(row.title), \(row.models.count) \(row.models.count == 1 ? "model" : "models") used")
+            .accessibilityHint("Shows model costs")
             .onChange(of: focused) { _, value in
-                if value { shown = true } else { scheduleClose() }
+                hover.send(value ? .focused(row.id) : .unfocused(row.id))
             }
             // Anchored to the name, so the detail opens beside it wherever on
-            // the row the pointer is.
-            .popover(isPresented: $shown, arrowEdge: .trailing) {
+            // the row the pointer is. Its binding reads the table's one open
+            // row, so this popover only ever shows this row's models.
+            .popover(isPresented: Binding(
+                get: { hover.isPresented(row.id) },
+                set: { if !$0 { hover.send(.dismissedBySystem(row.id)) } }
+            ), arrowEdge: .trailing) {
                 AIUsageModelsPopover(row: row)
-                    .onHover { inside in
-                        overPopover = inside
-                        closeTask?.cancel()
-                        if !inside { scheduleClose() }
-                    }
-                    .onExitCommand { shown = false; pinned = false }
+                    .background(AIUsageHoverProbeView { hover.registerDetail($0) })
+                    .onHover { hover.send($0 ? .pointerEnteredDetail : .pointerExitedDetail) }
+                    .onExitCommand { hover.send(.escape) }
             }
             Spacer(minLength: 0)
             AIUsagePriceLabel(events: row.events)
         }
         .font(.system(size: 13)).monospacedDigit().padding(.horizontal, 18).padding(.vertical, 10)
-        .background(isEnabled && (hovered || shown) ? MacSettingsTheme.hover : .clear)
+        .background(isEnabled && hover.state.highlighted(row.id) ? MacSettingsTheme.hover : .clear)
+        .background(AIUsageHoverProbeView { hover.register(row: row.id, view: $0) })
         // The whole row is the target: its empty middle and its price open
         // the detail too, and a click anywhere pins it.
         .contentShape(Rectangle())
         .onHover { inside in
-            let inside = inside && isEnabled
-            hovered = inside
-            closeTask?.cancel()
-            if inside { shown = true } else { scheduleClose() }
+            guard isEnabled else { return }
+            hover.send(inside ? .pointerEnteredRow(row.id) : .pointerExitedRow(row.id))
         }
-        .onTapGesture { if isEnabled { togglePinned() } }
-        .onChange(of: isEnabled) { _, enabled in
-            if !enabled { shown = false; hovered = false; overPopover = false; closeTask?.cancel() }
-        }
-        .onChange(of: shown) { _, value in if !value { pinned = false; overPopover = false } }
-        .onExitCommand { shown = false; pinned = false }
-        .onDisappear { closeTask?.cancel() }
-    }
-    private func togglePinned() {
-        pinned.toggle(); shown = pinned
-    }
-    private func scheduleClose() {
-        closeTask?.cancel()
-        closeTask = Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(180))
-            guard !Task.isCancelled, !hovered, !overPopover, !focused, !pinned else { return }
-            shown = false
-        }
+        .onTapGesture { if isEnabled { hover.send(.clicked(row.id)) } }
+        .onChange(of: isEnabled) { _, enabled in if !enabled { hover.send(.disabled) } }
+        .onExitCommand { hover.send(.escape) }
     }
 }
 

@@ -37,9 +37,12 @@ until the tool had already connected.
   command and the canonical `whytap` MCP entry, as Case → Connect and the
   onboarding do); once the tool has a `whytap` entry it can start, Yes is
   recorded in `HarnessAccessStore`, the same answer the island's question
-  stores. An entry the person wrote is left as it is and counts when it has a
-  command or URL; `null`, `{}` or Codex's `enabled = false` is left as it is
-  but does not count. If no usable entry is there after setup, no Yes is
+  stores. An entry the person wrote is left as it is and counts when the tool
+  can start it, checked per transport: Claude Code stdio needs a non-blank
+  command and string arguments, `http`/`sse` an http(s) URL; Codex needs
+  `enabled` not false and a non-blank stdio command or a `streamable_http`
+  http(s) URL. `null`, `{}`, a blank command, a bad URL, a URL without its
+  type or an unknown type is left as it is but does not count. If no usable entry is there after setup, no Yes is
   recorded and the row says what failed. An answer given while setup runs (a
   No in the island) is newer and stays.
 - **Off** records No at once. The MCP entry stays: without a Yes the gate
@@ -85,7 +88,11 @@ The builder's review of ticket 671 found five classes of faults (a Yes not
 revocable without the tool or entry, an On overwriting a newer No, unusable
 entries counted as connected, a stale answer after the seal went or a late
 save, an old presence read replacing a newer one). `CodingToolsRegressionTests`
-holds the builder's seven reproducers and one for the new row lines.
+holds the builder's seven reproducers and one for the new row lines. Its
+review of ticket 672 found entries still counted with a blank command, a bad
+URL or fields of the wrong transport; `CodingToolsTransportShapeTests` holds
+its two shape fixtures and checks that On records no Yes for such entries and
+leaves the files as they are.
 
 Not checked in a running app: Connect against the real `claude` and `codex`
 CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).

@@ -182,6 +182,8 @@ final class CodingToolsRegressionTests: XCTestCase {
         pendingRead?.resume(returning: .installed(configured: false))
         await refresh.value
         XCTAssertTrue(tools.isConnected(.claudeCode))
+        XCTAssertEqual(tools.presence[.claudeCode], .installed(configured: true), "the older read was dropped")
+        XCTAssertTrue(tools.subtitle(.claudeCode).hasPrefix("Connected."))
     }
 }
 

@@ -39,12 +39,48 @@ enum WhytapMCPEntry {
     static let legacyName = "case"
     static let legacyArguments = ["case", "mcp"]
 
-    /// A JSON entry a client can start: a command or a URL. `null` and `{}`
-    /// are left as they are but serve nothing.
-    static func isUsable(_ entry: Any?) -> Bool {
+    /// A Claude Code entry it can start, by its transport: stdio (`type`
+    /// missing or "stdio") needs a command and, if set, a list of string
+    /// arguments; "http" and "sse" need an http(s) URL. Anything else (`null`,
+    /// `{}`, a blank command, a URL without its type, an unknown type) is left
+    /// as it is but serves nothing.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    static func claudeCanStart(_ entry: Any?) -> Bool {
         guard let object = entry as? [String: Any] else { return false }
-        func filled(_ key: String) -> Bool { (object[key] as? String).map { !$0.isEmpty } ?? false }
-        return filled("command") || filled("url")
+        switch object["type"] {
+        case nil, is NSNull:
+            return isStdio(object)
+        case let type as String where type == "stdio":
+            return isStdio(object)
+        case let type as String where type == "http" || type == "sse":
+            return isWebURL(object["url"])
+        default:
+            return false
+        }
+    }
+
+    /// A Cursor entry it can start: a command (with string arguments) or an
+    /// http(s) URL; Cursor tells them apart without a type.
+    static func cursorCanStart(_ entry: Any?) -> Bool {
+        guard let object = entry as? [String: Any] else { return false }
+        return isStdio(object) || isWebURL(object["url"])
+    }
+
+    static func isStdio(_ object: [String: Any]) -> Bool {
+        guard let command = object["command"] as? String,
+              !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
+        switch object["args"] {
+        case nil, is NSNull: return true
+        case let list as [Any]: return list.allSatisfy { $0 is String }
+        default: return false
+        }
+    }
+
+    static func isWebURL(_ value: Any?) -> Bool {
+        guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              let url = URL(string: text), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", !(url.host ?? "").isEmpty else { return false }
+        return true
     }
 }
 
@@ -304,7 +340,7 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
 
     /// A user-scope `whytap` entry with a command or URL is in `~/.claude.json`
     /// (read only).
-    func isConfigured() -> Bool { WhytapMCPEntry.isUsable((try? userServers())?[WhytapMCPEntry.name]) }
+    func isConfigured() -> Bool { WhytapMCPEntry.claudeCanStart((try? userServers())?[WhytapMCPEntry.name]) }
 
     func install(helperPath: String) throws {
         // Read both files first: a broken one stops before anything changes.
@@ -429,11 +465,20 @@ enum CodexMCPEntry: Equatable {
         }
     }
 
-    /// `enabled = false`: Codex keeps the entry but does not start it.
-    static func isTurnedOff(_ output: CaseCommandOutput) -> Bool {
+    /// An entry Codex can start: not `enabled = false`, and by its transport
+    /// a stdio command (blank is not one) with string arguments, or a
+    /// streamable HTTP server with an http(s) URL. Other shapes are left as
+    /// they are but serve nothing.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    static func canStart(_ output: CaseCommandOutput) -> Bool {
         guard let object = try? JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
-              let enabled = object["enabled"], isBoolean(enabled) else { return false }
-        return !isTrue(enabled)
+              let transport = object["transport"] as? [String: Any] else { return false }
+        if let enabled = object["enabled"], isBoolean(enabled), !isTrue(enabled) { return false }
+        switch transport["type"] as? String {
+        case "stdio": return WhytapMCPEntry.isStdio(transport)
+        case "streamable_http": return WhytapMCPEntry.isWebURL(transport["url"])
+        default: return false
+        }
     }
 
     private static func isBoolean(_ value: Any?) -> Bool {
@@ -476,7 +521,7 @@ struct CodexCaseConnector: CaseClientConnector {
         else { return false }
         switch CodexMCPEntry.parse(output, name: WhytapMCPEntry.name) {
         case .absent, .uncertain: return false
-        case .stdio, .customized, .other: return !CodexMCPEntry.isTurnedOff(output)
+        case .stdio, .customized, .other: return CodexMCPEntry.canStart(output)
         }
     }
 
@@ -551,7 +596,7 @@ struct CursorCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { appInstalled() }
 
     func isConfigured() -> Bool {
-        WhytapMCPEntry.isUsable(((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name])
+        WhytapMCPEntry.cursorCanStart(((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name])
     }
 
     func install(helperPath: String) throws {

@@ -426,7 +426,21 @@ class WatcherTests(unittest.TestCase):
     def state(self):
         return json.loads((self.root / "whytap-build-queue-watcher-state.json").read_text())
 
-    def test_locked_screen_waits_without_backoff_and_starts_after_unlock(self):
+    def test_locked_screen_still_runs_validation_but_not_installs(self):
+        # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        result = self.watcher("run")
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertIn("screen locked: validation and merge only", result.stdout + result.stderr)
+        self.assertEqual(self.statuses(), {1: "done"})
+        self.assertEqual(self.watcher("environment", "--for", "suite").returncode, 0)
+        self.assertEqual(self.watcher("environment", ok=False).returncode, 3)
+        self.configure_watcher(validate_while_locked=False)
+        self.assertEqual(self.watcher("environment", "--for", "suite", ok=False).returncode, 3)
+
+    def test_locked_screen_waits_without_backoff_when_validation_must_wait_too(self):
+        self.configure_watcher(validate_while_locked=False)
         self.enqueue(1)
         self.set_environment(screen_locked=True)
         self.watcher("run")
@@ -478,14 +492,14 @@ class WatcherTests(unittest.TestCase):
         mirror = self.base / "orchestrator" / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.watcher("run")
         raised = [a for a in self.alerts() if a["state"] == "raised"]
         self.assertEqual([a["condition"] for a in raised], ["environment_wait"])
-        self.assertIn("screen locked", raised[0]["detail"])
-        self.set_environment(screen_locked=False)
+        self.assertIn("load 317", raised[0]["detail"])
+        self.set_environment(load=1)
         self.watcher("run")
         self.assertEqual([(a["state"], a["condition"]) for a in self.alerts()],
                          [("raised", "environment_wait"), ("cleared", "environment_wait")])
@@ -550,7 +564,7 @@ class WatcherTests(unittest.TestCase):
         mirror = blocker / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.assertEqual([a["state"] for a in self.alerts()], ["raised"])
@@ -626,7 +640,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.watchdog_state()["undelivered_since"],
                          "2026-01-01T00:00:00.700000+00:00")
         self.configure_watcher(undelivered_minutes=-1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         before, after = self.enqueue(1), self.enqueue(2)
         db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
         for ticket, stamp in ((before, "00:00:00.400000"), (after, "00:00:00.800000")):
@@ -943,6 +957,45 @@ def load_tests(loader, _tests, _pattern):
         if name.startswith(("test_activat",)):
             suite.addTest(ActivationTests(name))
     return suite
+
+
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    def test_a_ticket_whose_dependency_stays_blocked_is_returned_without_a_session(self):
+        self.configure_watcher(stale_dependency_minutes=0)
+        (self.control / "noop").touch()
+        parent = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        self.watcher("run")
+        self.assertEqual(self.statuses()[child], "blocked")
+        self.assertEqual(self.sessions(), [])
+
+    def test_notes_keep_their_tail_and_the_archive_keeps_every_older_line(self):
+        self.configure_watcher(notes_max_bytes=4000)
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        notes.write_text("".join(f"first {n:03}\n" for n in range(500)))
+        self.enqueue(1)
+        self.watcher("run")
+        kept = notes.read_text().splitlines()
+        self.assertEqual((len(kept), kept[-1]), (120, "first 499"))
+        self.assertEqual(archive.read_text().splitlines(),
+                         [f"first {n:03}" for n in range(380)])
+        # A second rotation appends; one that has nothing older to move changes nothing.
+        with notes.open("a") as output:
+            output.write("".join(f"second {n:03}\n" for n in range(400)))
+        self.enqueue(2)
+        self.watcher("run")
+        self.assertEqual(notes.read_text().splitlines()[-1], "second 399")
+        older = archive.read_text().splitlines()
+        self.assertEqual((older[0], older[379], older[380]), ("first 000", "first 379",
+                                                              "first 380"))
+        self.assertEqual(len(older) + 120, 900)
+        notes.write_text("x" * 5000 + "\n")
+        self.enqueue(3)
+        self.watcher("run")
+        self.assertEqual(archive.read_text().splitlines(), older)
+        self.assertEqual(len(notes.read_text()), 5001)
 
 
 if __name__ == "__main__":

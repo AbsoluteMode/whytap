@@ -118,12 +118,66 @@ def unmet_dependencies(db, ticket):
     return waiting
 
 
+# WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+STALE_DEPENDENCY_MINUTES = 120
+RESUBMIT_PRIORITY_LIMIT = 2  # resubmissions after a block that keep the PR's place
+
+
+def age_minutes(stamp, at=None):
+    try:
+        then = datetime.fromisoformat(stamp)
+    except (TypeError, ValueError):
+        return 0.0
+    return ((at or datetime.now(timezone.utc)) - then).total_seconds() / 60
+
+
+def return_stale_dependencies(db, minutes=STALE_DEPENDENCY_MINUTES):
+    """Model-free: a queued ticket whose dependency PR has been blocked or cancelled
+    for longer than `minutes` goes back to its author instead of waiting for days.
+    Returns the returned ticket IDs."""
+    returned = []
+    for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
+                           "ORDER BY queued_at, id").fetchall():
+        for pr in json.loads(item["depends_on"] or "[]"):
+            latest = db.execute("SELECT id, status, updated_at FROM tickets WHERE pr=? "
+                                "ORDER BY id DESC LIMIT 1", (pr,)).fetchone()
+            if (latest and latest["status"] in ("blocked", "cancelled")
+                    and age_minutes(latest["updated_at"]) > minutes):
+                note = (f"Returned without review: dependency {pr} has been {latest['status']} "
+                        f"(ticket #{latest['id']}) for over {minutes // 60} h. Resubmit once it "
+                        f"is merged through the queue, or drop --depends-on if it is no "
+                        f"longer needed.")
+                # auto_returned: a resubmission keeps its place without spending the
+                # PR's resubmission priority (nothing was wrong with the PR itself).
+                db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=?, "
+                           "auto_returned=1 WHERE id=?", (note, now(), item["id"]))
+                event(db, item["id"], "blocked", note,
+                      deliver=item["source"] in ("codex", "claude"))
+                returned.append(item["id"])
+                break
+    return returned
+
+
+def protected_tests(value):
+    """A JSON list of test names (Module.Class/test or Class/test), or a ValueError."""
+    try:
+        tests = json.loads(value)
+    except ValueError:
+        tests = None
+    if not isinstance(tests, list) or not all(
+            isinstance(t, str) and re.fullmatch(r"[\w.]+/\w+", t) for t in tests):
+        raise ValueError("--tests is a JSON list of test names like "
+                         "\"SidekeyTests.PlannerExternalChangesTests/testName\"")
+    return sorted(set(tests))
+
+
 def block_moved_head(db, ticket, snapshot):
     """A queued ticket whose PR head moved after submission goes back to its author
     before any builder reviews the old commit. True when it was returned. Only a
     ticket queued before the remote read started is judged: one submitted (or
     requeued) while the read was in flight may be newer than the snapshot."""
-    if not snapshot or ticket["queued_at"] >= snapshot["started"]:
+    submitted = ticket["submitted_at"] or ticket["queued_at"]
+    if not snapshot or submitted >= snapshot["started"]:
         return False
     current = snapshot["heads"].get(pr_number(ticket["pr"]))
     if not current or current == ticket["head"]:
@@ -135,8 +189,8 @@ def block_moved_head(db, ticket, snapshot):
         return False
     note = (f"The PR head moved after submission: this ticket is {ticket['head']}, the PR "
             f"is now {current}. Review that commit and enqueue it with --head {current}.")
-    db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
-               (note, now(), ticket["id"]))
+    db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=?, auto_returned=1 "
+               "WHERE id=?", (note, now(), ticket["id"]))
     # No builder wrote this: the next builder delivers it from `events --pending`,
     # whatever the author's harness (Harness Link reaches codex and claude).
     event(db, ticket["id"], "blocked", note, deliver=ticket["source"] in ("codex", "claude"))
@@ -279,6 +333,21 @@ def database():
             # 1 = the PR changes what reaches the app (counted at submission); older
             # tickets count as runtime.
             db.execute("ALTER TABLE tickets ADD COLUMN runtime INTEGER NOT NULL DEFAULT 1")
+        columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+        for column, sql in (
+                # Resubmissions after a block that kept the PR's place (at most two).
+                ("resubmits", "INTEGER NOT NULL DEFAULT 0"),
+                # When this head was submitted; a kept place reuses an older queued_at.
+                ("submitted_at", "TEXT NOT NULL DEFAULT ''"),
+                # 1 = returned without a model (moved head, blocked dependency).
+                ("auto_returned", "INTEGER NOT NULL DEFAULT 0"),
+                # JSON list: tests skipped behind a locked screen that must pass on
+                # main before this ticket's install (and before it is done).
+                ("protected_pending", "TEXT NOT NULL DEFAULT '[]'")):
+            if column not in columns:
+                db.execute(f"ALTER TABLE tickets ADD COLUMN {column} {sql}")
+                if column == "submitted_at":
+                    db.execute("UPDATE tickets SET submitted_at=queued_at")
         yield db
         db.commit()
     finally:
@@ -311,6 +380,7 @@ def ticket_json(db, ticket):
     result = dict(row(db, ticket))
     result["acceptance"] = json.loads(result["acceptance"])
     result["depends_on"] = json.loads(result.get("depends_on") or "[]")
+    result["protected_pending"] = json.loads(result.get("protected_pending") or "[]")
     if result["status"] == "queued":
         result["waiting_for"] = unmet_dependencies(db, row(db, ticket))
         result["position"] = db.execute(
@@ -404,20 +474,41 @@ def run(args):
                                     "('queued', 'blocked', 'in_progress')", (dependency,)):
                     if args.pr in json.loads(t["depends_on"]):
                         raise ValueError(dependency + " already depends on this PR")
+            # Read before the supersede below changes its status.
+            previous = db.execute("SELECT * FROM tickets WHERE pr=? ORDER BY id DESC LIMIT 1",
+                                  (args.pr,)).fetchone()
             for t in old:
                 db.execute("UPDATE tickets SET status='superseded', updated_at=? WHERE id=?",
                            (now(), t["id"]))
                 event(db, t["id"], "superseded", "Replaced by a newly reviewed commit")
             stamp = now()
+            # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+            # A fix after a block keeps the PR's earlier place, at most
+            # RESUBMIT_PRIORITY_LIMIT times; a return without a model (moved head,
+            # blocked dependency) keeps it without spending that priority.
+            queued_at, resubmits, place = stamp, 0, ""
+            if previous and previous["status"] == "blocked" and previous["queued_at"] < stamp:
+                if previous["auto_returned"]:
+                    queued_at, resubmits = previous["queued_at"], previous["resubmits"]
+                    place = "; keeps the place of #%d (returned without review)" % previous["id"]
+                elif previous["resubmits"] < RESUBMIT_PRIORITY_LIMIT:
+                    queued_at, resubmits = previous["queued_at"], previous["resubmits"] + 1
+                    place = "; resubmission %d of %d keeps the place of #%d" % (
+                        resubmits, RESUBMIT_PRIORITY_LIMIT, previous["id"])
+                else:
+                    resubmits = previous["resubmits"]
+                    place = ("; goes to the end: the PR already used %d priority resubmissions"
+                             % RESUBMIT_PRIORITY_LIMIT)
             cursor = db.execute(
                 "INSERT INTO tickets(pr,head,title,source,session,host,checks,acceptance,"
-                "dependencies,depends_on,runtime,queued_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "dependencies,depends_on,runtime,resubmits,queued_at,submitted_at,updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
                  args.checks, json.dumps(args.acceptance), args.dependencies,
-                 json.dumps(args.depends_on), int(args.runtime), stamp, stamp))
+                 json.dumps(args.depends_on), int(args.runtime), resubmits, queued_at,
+                 stamp, stamp))
             event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
-                  "checks at submission: " + args.documentation_checks)
+                  "checks at submission: " + args.documentation_checks + place)
             return {"created": True, "builder": config(db),
                     "documentation_checks": args.documentation_checks,
                     "delivery": "inbox_only" if args.source == "other" else "harness_link",
@@ -429,10 +520,25 @@ def run(args):
             if args.ticket:
                 query += " WHERE id=?"
                 params = (args.ticket,)
+            elif args.open:
+                # Open work, plus every earlier ticket of the same PRs (the history a
+                # re-block needs), instead of the whole archive.
+                query += (" WHERE pr IN (SELECT pr FROM tickets WHERE status IN "
+                          "('queued', 'in_progress', 'pending_install'))")
             query += " ORDER BY queued_at, id"
+            tickets = [ticket_json(db, t[0]) for t in db.execute(query, params).fetchall()]
+            if args.open and not args.ticket:
+                for t in tickets:
+                    if t["status"] in ("done", "superseded", "cancelled", "blocked") \
+                            and len(t["note"]) > 600:
+                        t["note"] = t["note"][:600] + " [...] (status --ticket %d)" % t["id"]
             return {"builder": config(db), "install_boundary": install_boundary(db),
-                    "tickets": [ticket_json(db, t[0])
-                    for t in db.execute(query, params).fetchall()]}
+                    "protected_pending": sorted({
+                        name for t in db.execute(
+                            "SELECT protected_pending FROM tickets WHERE status IN "
+                            "('in_progress', 'pending_install', 'blocked')")
+                        for name in json.loads(t[0] or "[]")}),
+                    "tickets": tickets}
 
         if args.command == "claim":
             require_builder(db, args.actor)
@@ -463,6 +569,40 @@ def run(args):
             return {"claimed": False, "active": None, "returned_moved_heads": returned,
                     "waiting_for_dependencies": waiting, "held_for_install": held}
 
+        if args.command == "return-stale-dependencies":
+            require_builder(db, args.actor)
+            return {"returned": return_stale_dependencies(db, args.minutes)}
+
+        if args.command == "protected-pending":
+            # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+            # Tests skipped behind a locked screen are recorded on the ticket before the
+            # merge, so an interrupted session, a deferred install or a group keeps them.
+            require_builder(db, args.actor)
+            if bool(args.tests) == bool(args.passed):
+                raise ValueError("Give either --tests (skipped) or --passed (ran on main)")
+            item = row(db, args.ticket)
+            if item["status"] not in ("in_progress", "pending_install"):
+                raise ValueError("Protected-data tests are recorded on an in_progress or "
+                                 "pending_install ticket; #%d is %s" % (item["id"], item["status"]))
+            pending = set(json.loads(item["protected_pending"] or "[]"))
+            if args.passed:
+                if not args.note:
+                    raise ValueError("--passed needs --note with the run's evidence")
+                passed = set(protected_tests(args.passed))
+                pending -= passed
+                text = "Protected-data tests passed on main: " + ", ".join(sorted(passed)) + \
+                       ". " + args.note
+            else:
+                added = set(protected_tests(args.tests))
+                pending |= added
+                text = ("Protected-data tests skipped behind a locked screen, pending before "
+                        "the install: " + ", ".join(sorted(added)) +
+                        (". " + args.note if args.note else ""))
+            db.execute("UPDATE tickets SET protected_pending=?, updated_at=? WHERE id=?",
+                       (json.dumps(sorted(pending)), now(), item["id"]))
+            event(db, item["id"], item["status"], text)
+            return ticket_json(db, item["id"])
+
         if args.command == "check-heads":
             require_builder(db, args.actor)
             if not args.remote_heads:
@@ -491,14 +631,24 @@ def run(args):
                 # deferral never lets other runtime work pass it. Automatic stays
                 # first; anything else waits for a person.
                 retry = "first" if retry == "meeting" else "hold"
+            pending = json.loads(item["protected_pending"] or "[]")
+            if args.status == "done" and pending:
+                raise ValueError("#%d still has protected-data tests pending (%s): run them on "
+                                 "main with an unlocked screen and record `protected-pending "
+                                 "--passed` first" % (item["id"], ", ".join(pending)))
             stamp = now()
+            # A ticket returned to the queue is validated again from the start.
+            clear_pending = args.status == "queued"
             # A ticket requeued after a block goes to the end; one returned from
             # in_progress without a block keeps its place (its queued_at).
             requeued = args.status == "queued" and item["status"] != "in_progress"
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
             db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=?, "
-                       "queued_at=CASE WHEN ? THEN ? ELSE queued_at END WHERE id=?",
-                       (args.status, args.note, stamp, retry, requeued, stamp, args.ticket))
+                       "queued_at=CASE WHEN ? THEN ? ELSE queued_at END, "
+                       "protected_pending=CASE WHEN ? THEN '[]' ELSE protected_pending END "
+                       "WHERE id=?",
+                       (args.status, args.note, stamp, retry, requeued, stamp, clear_pending,
+                        args.ticket))
             event(db, args.ticket, args.status, args.note)
             return ticket_json(db, args.ticket)
 
@@ -546,7 +696,19 @@ def main():
     enqueue.add_argument("--host", default="local")
     status = commands.add_parser("status")
     status.add_argument("--ticket", type=int)
+    status.add_argument("--open", action="store_true",
+                        help="only open work and the earlier tickets of the same PRs")
     commands.add_parser("claim")
+    stale = commands.add_parser("return-stale-dependencies",
+                                help="Return queued tickets whose dependency stays blocked")
+    stale.add_argument("--minutes", type=int, default=STALE_DEPENDENCY_MINUTES)
+    protected = commands.add_parser(
+        "protected-pending", help="Record protected-data tests skipped behind a locked "
+                                  "screen, or that they passed")
+    protected.add_argument("--ticket", type=int, required=True)
+    protected.add_argument("--tests", help="JSON list of skipped test names to add")
+    protected.add_argument("--passed", help="JSON list of test names that passed on main")
+    protected.add_argument("--note", default="")
     commands.add_parser("check-heads", help="Return queued tickets whose PR head moved")
     update = commands.add_parser("set")
     update.add_argument("--ticket", type=int, required=True)

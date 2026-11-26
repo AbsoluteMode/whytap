@@ -524,7 +524,8 @@ class QueueTests(unittest.TestCase):
         self.git("push", "-q", str(self.pulls), f"{moved}:refs/pull/1/head")
         db = sqlite3.connect(self.repo / ".git" / "exodia-build-queue.sqlite3")
         # Submitted after the remote read started (the snapshot may predate it).
-        db.execute("UPDATE tickets SET queued_at='2999-01-01T00:00:00+00:00' WHERE id=?", (ticket,))
+        db.execute("UPDATE tickets SET submitted_at='2999-01-01T00:00:00+00:00' WHERE id=?",
+                   (ticket,))
         db.commit()
         db.close()
         self.assertEqual(self.call("check-heads")["returned_moved_heads"], [])
@@ -641,6 +642,116 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.call("claim")["held_for_install"], [queued])
         self.update(ticket, "done")
         self.assertFalse(self.call("status")["install_boundary"])
+
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    def change(self, name="Sources/App/Window.swift", content="ui"):
+        self.git("checkout", "-q", "--detach", self.head)
+        return self.commit({name: content})
+
+    def test_resubmission_after_a_block_keeps_its_place_twice(self):
+        places = []
+        ticket = self.enqueue(1)["ticket"]
+        other = self.enqueue(2)["ticket"]["id"]
+        for round_ in range(3):
+            self.assertEqual(self.call("claim")["ticket"]["id"], ticket["id"])
+            self.update(ticket["id"], "blocked")
+            ticket = self.enqueue(1, head=self.change(f"Sources/App/Fix{round_}.swift"))["ticket"]
+            places.append((ticket["position"], ticket["resubmits"]))
+        self.assertEqual(places, [(1, 1), (1, 2), (2, 2)])  # the third goes behind #2
+        events = self.call("events", "--ticket", str(ticket["id"]))
+        self.assertIn("goes to the end", events[-1]["note"])
+        self.assertEqual(self.call("claim")["ticket"]["id"], other)
+
+    def test_a_ticket_whose_dependency_stays_blocked_goes_back_to_its_author(self):
+        parent = self.enqueue(1)["ticket"]["id"]
+        child = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                          "--head", self.head, "--title", "Child", "--checks", "x",
+                          "--acceptance", "x", "--session", "worker",
+                          "--depends-on", "https://github.com/example/app/pull/1")["ticket"]
+        self.call("claim")
+        self.update(parent, "blocked")
+        self.assertEqual(self.call("return-stale-dependencies")["returned"], [])  # under 2 h
+        self.assertEqual(self.call("return-stale-dependencies", "--minutes", "0")["returned"],
+                         [child["id"]])
+        returned = self.ticket(child["id"])
+        self.assertEqual(returned["status"], "blocked")
+        self.assertIn("dependency", returned["note"])
+        self.assertEqual(self.call("events", "--pending", "--ticket", str(child["id"]))[-1]
+                         ["status"], "blocked")
+        self.call("return-stale-dependencies", actor="worker", ok=False)
+        # A return without a model keeps the place and spends no resubmission priority.
+        again = self.call("enqueue", "--pr", "https://github.com/example/app/pull/2",
+                          "--head", self.change(content="again"), "--title", "Child",
+                          "--checks", "x", "--acceptance", "x", "--session", "worker",
+                          "--depends-on", "https://github.com/example/app/pull/1")["ticket"]
+        self.assertEqual((again["queued_at"], again["resubmits"]), (child["queued_at"], 0))
+
+    def test_open_status_lists_open_work_and_its_history_only(self):
+        old = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(old), "--status", "done", "--note", "n" * 2000)
+        history = self.enqueue(2)["ticket"]["id"]
+        self.call("claim")
+        self.call("set", "--ticket", str(history), "--status", "blocked", "--note", "b" * 2000)
+        current = self.enqueue(2, head=self.change())["ticket"]["id"]
+        listed = self.call("status", "--open")["tickets"]
+        self.assertEqual([t["id"] for t in listed], [history, current])
+        self.assertLess(len(listed[0]["note"]), 700)
+        self.assertEqual(len(self.call("status")["tickets"]), 3)
+        self.assertEqual(len(self.call("status", "--ticket", str(history))["tickets"][0]["note"]),
+                         2000)
+
+    def test_stale_head_snapshot_ignores_a_priority_resubmission(self):
+        old = self.enqueue(1, self.change(content="first"))["ticket"]
+        self.call("claim")
+        self.update(old["id"], "blocked")
+        self.git("push", "-q", str(self.pulls), f"{old['head']}:refs/pull/1/head")
+        new = self.enqueue(1, self.change(content="revised"))["ticket"]
+        self.assertEqual(new["queued_at"], old["queued_at"])  # kept its place
+        self.git("push", "-q", "-f", str(self.pulls), f"{new['head']}:refs/pull/1/head")
+        self.assertEqual(self.call("claim")["ticket"]["id"], new["id"])
+        self.assertGreater(self.ticket(new["id"])["submitted_at"], old["queued_at"])
+
+    def test_protected_tests_skipped_behind_a_lock_survive_until_they_pass(self):
+        names = ["SidekeyTests.PlannerExternalChangesTests/testMigration",
+                 "WhytapCaseKitTests.TodoCommandTests/testLockedFile"]
+        ticket = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", "[1]", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), ok=False)  # neither mode
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names),
+                  actor="worker", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names))
+        # Merged behind the lock: the install waits; a deferral and a recovery keep them.
+        self.call("set", "--ticket", str(ticket), "--status", "pending_install",
+                  "--retry-install", "--note", "merged; install waits for an unlocked screen")
+        self.call("set", "--ticket", str(ticket), "--status", "pending_install",
+                  "--install-first", "--note", "meeting gate busy")
+        self.assertEqual(self.call("status")["protected_pending"], names)
+        refused = self.call("set", "--ticket", str(ticket), "--status", "done", "--note", "x",
+                            ok=False)
+        self.assertIn("protected-data tests pending", refused["error"])
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[:1]),
+                  ok=False)  # evidence required
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[:1]),
+                  "--note", "swift test --filter, unlocked")
+        self.assertEqual(self.ticket(ticket)["protected_pending"], names[1:])
+        self.call("set", "--ticket", str(ticket), "--status", "done", "--note", "x", ok=False)
+        self.call("protected-pending", "--ticket", str(ticket), "--passed", json.dumps(names[1:]),
+                  "--note", "swift test --filter, unlocked")
+        self.update(ticket, "done")
+        self.assertEqual(self.call("status")["protected_pending"], [])
+        self.call("protected-pending", "--ticket", str(ticket), "--tests", json.dumps(names),
+                  ok=False)  # only open tickets
+
+    def test_a_ticket_returned_to_the_queue_drops_its_pending_tests(self):
+        ticket = self.enqueue(1)["ticket"]["id"]
+        self.call("claim")
+        self.call("protected-pending", "--ticket", str(ticket), "--tests",
+                  '["SidekeyTests.A/testB"]')
+        self.call("set", "--ticket", str(ticket), "--status", "queued", "--note", "load")
+        self.assertEqual(self.ticket(ticket)["protected_pending"], [])  # validated again
+
 
 if __name__ == "__main__":
     unittest.main()

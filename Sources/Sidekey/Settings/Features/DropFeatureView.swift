@@ -18,6 +18,7 @@ struct DropFeatureView: View {
     private let environment: FeaturesEnvironment
 
     @State private var language: AppLanguage?
+    @State private var targetLanguage: AppLanguage?
     @State private var volumeDuck = false
     @State private var autoStop = false
 
@@ -34,6 +35,7 @@ struct DropFeatureView: View {
         _shortcut = StateObject(wrappedValue: shortcutEditor
             ?? FeatureShortcutEditor(hotkey: .dropVoice, preferences: environment.hotkeys))
         _language = State(initialValue: environment.language())
+        _targetLanguage = State(initialValue: environment.targetLanguage())
         _volumeDuck = State(initialValue: environment.volumeDuck.isEnabled)
         _autoStop = State(initialValue: environment.autoStop.isEnabled)
     }
@@ -72,6 +74,7 @@ struct DropFeatureView: View {
 
     private func reload() {
         language = environment.language()
+        targetLanguage = environment.targetLanguage()
         volumeDuck = environment.volumeDuck.isEnabled
         autoStop = environment.autoStop.isEnabled
     }
@@ -158,6 +161,23 @@ struct DropFeatureView: View {
                     .accessibilityLabel("Language you speak")
                 }
                 MacRowSeparator()
+                // Smart's output language lived only in the island (Output Lang).
+                // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+                MacRow(title: Self.writesInTitle, subtitle: Self.writesInSubtitle(mode: snapshot.dropMode)) {
+                    MacPopup(
+                        items: [.init(value: "", label: Self.writesInOff)]
+                            + AppLanguage.all.map { .init(value: $0.code, label: $0.displayName) },
+                        selection: Binding(
+                            get: { targetLanguage?.code ?? "" },
+                            set: { code in
+                                let chosen = AppLanguage.all.first { $0.code == code }
+                                targetLanguage = chosen
+                                environment.setTargetLanguage(chosen)
+                            })
+                    )
+                    .accessibilityLabel(Self.writesInTitle)
+                }
+                MacRowSeparator()
                 MacRow(title: "Lower other audio while speaking",
                        subtitle: "Lowers built-in-speaker volume while you record voice, restores after. External outputs (USB/Bluetooth DACs) are never touched.") {
                     MacSwitch(isOn: Binding(get: { volumeDuck }, set: {
@@ -182,6 +202,17 @@ struct DropFeatureView: View {
                     }), isEnabled: gesture == .tap, label: "Stop Drop automatically")
                 }
             }
+        }
+    }
+
+    static let writesInTitle = "Language Drop writes in"
+    static let writesInOff = "As spoken"
+
+    /// The output language is Smart's: Fast types what was said.
+    static func writesInSubtitle(mode: TranscriptionMode) -> String {
+        switch mode {
+        case .smart: return "Smart writes what you said in this language. As spoken keeps your own."
+        case .fast: return "Used in Smart mode. Fast types the language you spoke."
         }
     }
 

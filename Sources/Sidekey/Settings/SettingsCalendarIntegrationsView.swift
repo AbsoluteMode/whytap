@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 
-/// Settings → Integrations → Calendars: Calendar on this Mac is the one way to
+/// Settings → Features → Calendar → Calendars: Calendar on this Mac is the one way to
 /// connect calendars; Google, Outlook and the rest come through Internet
 /// Accounts. Accounts connected directly by an earlier build keep working and
 /// are listed with Disconnect; the direct sign-in code stays but is not offered.

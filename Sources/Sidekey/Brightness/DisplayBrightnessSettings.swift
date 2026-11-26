@@ -1,11 +1,13 @@
 import SwiftUI
 
-/// Settings -> Toolbox -> Display: Hold, Extra and Brightness keys for the island
+/// Settings -> Features -> Display: Hold, Extra and Brightness keys for the island
 /// display, without opening the island. It reads the display when it appears and then follows
 /// the controller's display notifications. Opening Settings starts no polling; an enabled
-/// Hold or Extra owns its own timer independently of the Settings window.
+/// Hold or Extra owns its own timer independently of the Settings window. (Until 2026-11-26
+/// this was the Toolbox -> Display pane, `ToolboxDisplayPane`.)
+// WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
 @MainActor
-struct ToolboxDisplayPane: View {
+struct DisplayBrightnessSettings: View {
     static let noExtraText = "This display has no extra brightness."
     /// Replaces the Brightness keys description while macOS refuses the keys.
     static let keysRefusedText = "Needs Accessibility. Allow it in Permissions."

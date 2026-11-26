@@ -165,7 +165,7 @@ Data-use policies depend on the selected provider and its account settings.
 - Post Event (part of Accessibility on current macOS): the synthetic
   Command-V used to paste.
 - Calendars: only after **Allow access to calendars** in Calendar or Settings ->
-  Integrations (the published 2.2.26 build shows Calendar as Soon and asks for
+  Features -> Calendar (the published 2.2.26 build shows Calendar as Soon and asks for
   nothing). macOS requires full event access to read the Mac's calendars;
   Whytap only reads events. Google, Outlook and other accounts come from System
   Settings -> Internet Accounts; Whytap no longer offers direct provider sign-in.

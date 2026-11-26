@@ -83,6 +83,8 @@ struct SettingsWindowView: View {
             },
             language: toolboxDeps.currentLanguage,
             setLanguage: toolboxDeps.setLanguage,
+            targetLanguage: toolboxDeps.currentTargetLanguage,
+            setTargetLanguage: toolboxDeps.setTargetLanguage,
             volumeDuck: otherVolumeDuckConfig,
             openHoverPanel: toolboxDeps.openHoverPanel,
             agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),

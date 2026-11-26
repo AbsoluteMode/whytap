@@ -12,7 +12,14 @@ enum AppFeature: String, CaseIterable, Identifiable {
     case googleSearch
     case translateSubtitles
     case screenshots
+    /// History: what you copied, dictated and asked the Agent (island tool History).
+    // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+    case history
+    /// Display: the island's brightness, Extra and the brightness keys.
+    case display
     case todo
+    /// Calendar: today's events from the calendars of this Mac.
+    case calendar
     case caseVault = "case"
     /// The island's hover tools: which ones show and in what order.
     case hover
@@ -30,6 +37,9 @@ enum AppFeature: String, CaseIterable, Identifiable {
         case .translateSubtitles: return .translate
         case .screenshots: return .screenshot
         case .todo: return .tasks
+        case .history: return .clipboard
+        case .display: return .brightness
+        case .calendar: return .calendar
         case .caseVault: return .caseVault
         case .notify: return .notifs
         case .monitor: return .monitor
@@ -49,7 +59,8 @@ enum AppFeature: String, CaseIterable, Identifiable {
         case .meetings: return "record.circle"
         case .googleSearch: return "magnifyingglass"
         case .hover: return "square.grid.2x2"
-        case .translateSubtitles, .screenshots, .todo, .caseVault, .notify, .monitor: return "questionmark"
+        case .translateSubtitles, .screenshots, .history, .display, .todo, .calendar, .caseVault, .notify, .monitor:
+            return "questionmark"
         }
     }
 }
@@ -84,6 +95,11 @@ enum FeatureHotkey: Hashable {
     case googleText
     case googleVoice
     case meetingRecord
+    /// The links under an Agent answer: paste, open, next, previous.
+    case agentLinkInsert
+    case agentLinkOpen
+    case agentLinkNext
+    case agentLinkPrevious
     case tool(HoverTool)
 
     var label: String {
@@ -95,6 +111,10 @@ enum FeatureHotkey: Hashable {
         case .googleText: return "Type a search"
         case .googleVoice: return "Say a search"
         case .meetingRecord: return "Start or stop taking notes"
+        case .agentLinkInsert: return "Paste the chosen link"
+        case .agentLinkOpen: return "Open the chosen link"
+        case .agentLinkNext: return "Next link"
+        case .agentLinkPrevious: return "Previous link"
         case .tool(.translate): return "Open Translate"
         case .tool(.subtitles): return "Start Subtitles"
         case .tool(.screenshot): return "Capture an area"
@@ -102,6 +122,9 @@ enum FeatureHotkey: Hashable {
         case .tool(.monitor): return "Open Monitor"
         case .tool(.tasks): return "Open To-do"
         case .tool(.caseVault): return "Open Case"
+        case .tool(.clipboard): return "Open History"
+        case .tool(.brightness): return "Open Display"
+        case .tool(.calendar): return "Open Calendar"
         case .tool(let tool): return HoverToolRegistry.info(for: tool).title
         }
     }
@@ -116,6 +139,10 @@ enum FeatureHotkey: Hashable {
         case .googleText: return configuration.googleSearchTextShortcut
         case .googleVoice: return configuration.googleSearchVoiceShortcut
         case .meetingRecord: return configuration.meetingRecordShortcut
+        case .agentLinkInsert: return configuration.usefulLinksInsertShortcut
+        case .agentLinkOpen: return configuration.usefulLinksOpenShortcut
+        case .agentLinkNext: return configuration.usefulLinksNextShortcut
+        case .agentLinkPrevious: return configuration.usefulLinksPreviousShortcut
         case .tool(let tool): return configuration.toolShortcuts[tool]
         }
     }
@@ -128,7 +155,8 @@ enum FeatureHotkey: Hashable {
                 shortcut: configuration.dropVoiceShortcut, gesture: configuration.dropVoiceGesture)
         case .agentVoice: return configuration.agentVoiceGesture
         case .googleVoice: return configuration.googleSearchVoiceGesture
-        case .agentText, .agentClose, .googleText, .meetingRecord, .tool: return .tap
+        case .agentText, .agentClose, .googleText, .meetingRecord, .agentLinkInsert, .agentLinkOpen,
+             .agentLinkNext, .agentLinkPrevious, .tool: return .tap
         }
     }
 
@@ -136,7 +164,8 @@ enum FeatureHotkey: Hashable {
     var isVoice: Bool {
         switch self {
         case .dropVoice, .agentVoice, .googleVoice: return true
-        case .agentText, .agentClose, .googleText, .meetingRecord, .tool: return false
+        case .agentText, .agentClose, .googleText, .meetingRecord, .agentLinkInsert, .agentLinkOpen,
+             .agentLinkNext, .agentLinkPrevious, .tool: return false
         }
     }
 }
@@ -345,6 +374,9 @@ struct FeatureSetupSnapshot: Equatable {
     var notifySources = 0
     /// Dashboards Monitor lists: custom snapshots plus Server status once set up.
     var monitorDashboards = 0
+    /// Calendar shows at least one calendar: this Mac's calendars are on
+    /// and readable, or an account connected directly by an earlier build.
+    var calendarConnected = false
 
     func modelStatus(_ feature: AIFeature) -> ModelRowStatus { models[feature] ?? .notSet }
 }
@@ -412,7 +444,11 @@ enum FeatureCatalog {
             return FeatureInfo(
                 feature: feature, name: "Agent", kind: "Quick tasks on your Mac",
                 line: "Ask for a quick task by text or voice: it finds, converts, copies and changes settings.",
-                video: .agent, hotkeys: [.agentText, .agentVoice, .agentClose],
+                // The link keys work while an answer shows links; they were
+                // only in Hotkeys before.
+                // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+                video: .agent, hotkeys: [.agentText, .agentVoice, .agentClose,
+                                         .agentLinkInsert, .agentLinkOpen, .agentLinkNext, .agentLinkPrevious],
                 activation: .userSwitch, place: .screen,
                 about: "A helper for quick jobs on your Mac. Use its shortcut to type a request, or its voice shortcut to say it. "
                     + "The answer appears in the island; links and files in it can be opened or pasted.",
@@ -466,6 +502,26 @@ enum FeatureCatalog {
                 about: "Pick an area of the screen, draw arrows and text on it, blur anything private, "
                     + "then copy or save it. In the island it is called Shot.",
                 clipCaption: "Shot, drag over an area, blur the private details, add an arrow, copy.")
+        // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+        case .history:
+            return FeatureInfo(
+                feature: feature, name: "History", kind: "Island tool",
+                line: "What you copied, dictated and asked the Agent, ready to paste again.",
+                video: nil, hotkeys: [.tool(.clipboard)],
+                activation: .islandTools([.clipboard]), place: .screen,
+                about: "Everything you copy, every dictation and the Agent’s answers, kept on this Mac. "
+                    + "Open it in the island, find an item and paste it again. "
+                    + "What password managers mark as secret is not kept.",
+                clipCaption: "History in the island, an older copy found and pasted again.")
+        case .display:
+            return FeatureInfo(
+                feature: feature, name: "Display", kind: "Island tool",
+                line: "Screen brightness from the island, with Extra above the usual maximum.",
+                video: nil, hotkeys: [.tool(.brightness)],
+                activation: .islandTools([.brightness]), place: .screen,
+                about: "A brightness slider in the island. On a display that can go brighter, Extra goes past "
+                    + "the usual maximum. Whytap can also hold the level you set and take over the brightness keys.",
+                clipCaption: "Display in the island, the slider up to the top, then Extra.")
         case .todo:
             return FeatureInfo(
                 feature: feature, name: "To-do", kind: "Island tool",
@@ -480,6 +536,15 @@ enum FeatureCatalog {
                     "Ask Claude Code or Codex: “Turn my last call into tasks”",
                 ],
                 examplesTitle: "Ways to add tasks")
+        case .calendar:
+            return FeatureInfo(
+                feature: feature, name: "Calendar", kind: "Island tool",
+                line: "Today’s events in the island, from the calendars of this Mac.",
+                video: nil, hotkeys: [.tool(.calendar)],
+                activation: .islandTools([.calendar]), place: .screen,
+                about: "Today’s events in the island, from the calendars this Mac already has: iCloud, Google, "
+                    + "Outlook and any account in Internet Accounts. Whytap only reads them.",
+                clipCaption: "Calendar in the island, today’s events, one opened for its details.")
         case .caseVault:
             return FeatureInfo(
                 feature: feature, name: "Case", kind: "Secrets for coding agents",
@@ -611,7 +676,13 @@ enum FeatureCatalog {
             ]
         // Nothing to grant or pay for: the island draws them, and Notify's
         // and Monitor's sources are local programs the person's agent writes.
-        case .todo, .caseVault, .hover, .notify, .monitor:
+        case .display:
+            return [
+                FeatureRequirement(kind: .permission(.keyboard), title: FeaturePermission.keyboard.title,
+                                   detail: "Only for Brightness keys. The slider in the island works without it.",
+                                   optional: true),
+            ]
+        case .history, .todo, .calendar, .caseVault, .hover, .notify, .monitor:
             return []
         }
     }
@@ -732,7 +803,9 @@ enum FeatureCatalog {
 
     static func isOn(_ feature: AppFeature, snapshot: FeatureSetupSnapshot) -> Bool {
         switch feature {
-        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor: return true
+        case .drop, .translateSubtitles, .screenshots, .history, .display, .todo, .calendar, .caseVault,
+             .hover, .notify, .monitor:
+            return true
         case .agent: return snapshot.agentOn
         case .meetings: return snapshot.meetingsOn
         case .googleSearch: return snapshot.googleOn
@@ -749,6 +822,11 @@ enum FeatureCatalog {
         // WHY: .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
         if feature == .notify { return snapshot.notifySources > 0 ? .ready(note: nil) : .notSetUp([]) }
         if feature == .monitor { return snapshot.monitorDashboards > 0 ? .ready(note: nil) : .notSetUp([]) }
+        // Calendar is quiet until it shows a calendar, and while it is closed.
+        // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+        if feature == .calendar {
+            return CalendarAvailability.isOpen && snapshot.calendarConnected ? .ready(note: nil) : .notSetUp([])
+        }
         let missing = checks.filter(\.isBlocking)
         guard missing.isEmpty else {
             // An island tool the person never set up is not a problem to
@@ -845,6 +923,9 @@ enum FeatureCatalog {
             case .unmet(_, .openInputMonitoring):
                 return "\(subject) can’t hear its shortcut until you allow Input Monitoring."
             default:
+                if feature == .display {
+                    return "Brightness keys need Keyboard control. The slider in the island works without it."
+                }
                 return feature == .drop ? "Drop can’t type into other apps until you allow Keyboard control."
                     : "\(subject) can’t paste its results until you allow Keyboard control."
             }

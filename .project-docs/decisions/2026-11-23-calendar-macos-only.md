@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/CalendarMacOnlyTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-22-calendar-release.md]
+related: [2026-11-22-calendar-release.md, 2026-11-26-every-feature-in-features.md]
 ---
 
 # Calendar connects only through the calendars of this Mac

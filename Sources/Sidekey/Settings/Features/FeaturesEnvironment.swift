@@ -19,6 +19,10 @@ struct FeaturesEnvironment {
     var setDropMode: (TranscriptionMode) -> Void
     var language: () -> AppLanguage?
     var setLanguage: (AppLanguage?) -> Void
+    /// Smart's output language (the island's Output Lang); nil keeps the
+    /// language spoken.
+    var targetLanguage: () -> AppLanguage?
+    var setTargetLanguage: (AppLanguage?) -> Void
     var volumeDuck: VolumeDuckConfig
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
@@ -43,11 +47,16 @@ struct FeaturesEnvironment {
     var copyText: (String) -> Void
     /// Starts Shot's capture, as its island tool does.
     var openScreenshot: () -> Void
+    /// Calendar's sources, shown and changed on its screen.
+    // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+    var calendarConnections: CalendarConnections
 
     init(dropMode: @escaping () -> TranscriptionMode = { .fast },
          setDropMode: @escaping (TranscriptionMode) -> Void = { _ in },
          language: @escaping () -> AppLanguage? = { nil },
          setLanguage: @escaping (AppLanguage?) -> Void = { _ in },
+         targetLanguage: @escaping () -> AppLanguage? = { nil },
+         setTargetLanguage: @escaping (AppLanguage?) -> Void = { _ in },
          volumeDuck: VolumeDuckConfig? = nil,
          autoStop: DropAutoStopPreferences? = nil,
          openHoverPanel: @escaping (HoverInlinePanel) -> Void = { _ in },
@@ -59,6 +68,7 @@ struct FeaturesEnvironment {
          setGoogle: @escaping (Bool) -> Void = { _ in },
          agentSettings: AgentSettingsStore? = nil,
          openScreenshot: @escaping () -> Void = {},
+         calendarConnections: CalendarConnections? = nil,
          supportsOnDevice: Bool = OnDeviceSpeechModelStore.isSupportedHost,
          onDevice: OnDeviceSpeechModelController? = nil,
          hotkeys: HotkeyPreferences? = nil,
@@ -79,6 +89,8 @@ struct FeaturesEnvironment {
         self.setDropMode = setDropMode
         self.language = language
         self.setLanguage = setLanguage
+        self.targetLanguage = targetLanguage
+        self.setTargetLanguage = setTargetLanguage
         self.volumeDuck = volumeDuck ?? VolumeDuckConfig()
         self.autoStop = autoStop ?? .shared
         self.openHoverPanel = openHoverPanel
@@ -90,6 +102,7 @@ struct FeaturesEnvironment {
         self.notifySupervisor = notifySupervisor ?? .shared
         self.meetingNotifications = meetingNotifications ?? .shared
         self.openScreenshot = openScreenshot
+        self.calendarConnections = calendarConnections ?? .shared
         self.notificationSounds = notificationSounds ?? .shared
         self.monitor = monitor ?? FeaturesEnvironment.sharedMonitor
         self.notifyRoot = notifyRoot
@@ -101,15 +114,28 @@ struct FeaturesEnvironment {
     static let sharedMonitor = MonitorStore()
 
     /// Fires when the number of Notify sources or available Monitor dashboards
-    /// changes. Each snapshot reads provider keys on the main thread, so a
-    /// reread with the same counts leaves it alone.
+    /// changes, or Calendar starts or stops showing a calendar. Each snapshot
+    /// reads provider keys on the main thread, so a reread with the same
+    /// values leaves it alone.
     // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
     var snapshotCountChanges: AnyPublisher<Void, Never> {
-        notifySupervisor.$sources.map(\.count).removeDuplicates()
-            .combineLatest(monitor.$availableDashboardCount)
+        let calendar = calendarConnections
+        let calendarShown = calendar.$appleEnabled
+            .combineLatest(calendar.$appleAccessOff, calendar.$accounts.map(\.isEmpty))
+            .map { enabled, accessOff, noAccounts in Self.calendarConnected(appleEnabled: enabled, appleAccessOff: accessOff,
+                                                                             hasAccounts: !noAccounts) }
+            .removeDuplicates()
+        return notifySupervisor.$sources.map(\.count).removeDuplicates()
+            .combineLatest(monitor.$availableDashboardCount, calendarShown)
             .dropFirst()
             .map { _ in () }
             .eraseToAnyPublisher()
+    }
+
+    /// Calendar shows a calendar: this Mac's are on and readable, or an
+    /// account an earlier build connected directly is still there.
+    nonisolated static func calendarConnected(appleEnabled: Bool, appleAccessOff: Bool, hasAccounts: Bool) -> Bool {
+        (appleEnabled && !appleAccessOff) || hasAccounts
     }
 
     static func copyToClipboard(_ text: String) {
@@ -152,7 +178,11 @@ extension FeatureSetupSnapshot {
             meetingsOn: environment.meetingsOn(),
             googleOn: environment.googleOn(),
             notifySources: environment.notifySupervisor.sources.count,
-            monitorDashboards: environment.monitor.availableDashboardCount
+            monitorDashboards: environment.monitor.availableDashboardCount,
+            calendarConnected: FeaturesEnvironment.calendarConnected(
+                appleEnabled: environment.calendarConnections.appleEnabled,
+                appleAccessOff: environment.calendarConnections.appleAccessOff,
+                hasAccounts: !environment.calendarConnections.accounts.isEmpty)
         )
     }
 

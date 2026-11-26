@@ -444,7 +444,7 @@ struct CalendarHoverView: View {
                 }
                 internetAccountsHint
                 if !connections.accounts.isEmpty {
-                    Text("Accounts connected directly: Settings → Integrations.")
+                    Text("Accounts connected directly: Settings → Features → Calendar.")
                         .font(.system(size: 11)).foregroundStyle(.white.opacity(0.76)).padding(.horizontal, 2)
                 }
             }.padding(3)

@@ -95,13 +95,9 @@ final class BackupRenderTests: XCTestCase {
         await model.connectGitHub(token: "synthetic-token")
         XCTAssertTrue(model.canUseGitHubBackup)
         let disconnected = makeIsolatedModel(temporaryRoot: root.appendingPathComponent("disconnected"), session: session)
-        let calendarSuite = "test.backup-calendar-render." + UUID().uuidString
-        let calendarDefaults = try XCTUnwrap(UserDefaults(suiteName: calendarSuite))
-        defer { calendarDefaults.removePersistentDomain(forName: calendarSuite) }
-        let calendars = CalendarConnections(defaults: calendarDefaults)
         try render(hosted(SettingsBackupView(model: disconnected)), size: NSSize(width: 760, height: 500),
                    to: directory.appendingPathComponent("backup-disconnected.png"))
-        try render(hosted(SettingsIntegrationsView(model: disconnected, calendarConnections: calendars)), size: NSSize(width: 760, height: 500),
+        try render(hosted(SettingsIntegrationsView(model: disconnected)), size: NSSize(width: 760, height: 500),
                    to: directory.appendingPathComponent("integrations-disconnected.png"))
         await model.backupEverything()
         model.hideRecoveryCode()
@@ -121,7 +117,7 @@ final class BackupRenderTests: XCTestCase {
         }
         try render(hosted(SettingsBackupView(model: model)), size: NSSize(width: 760, height: 500),
                    to: directory.appendingPathComponent("backup-connected.png"))
-        try render(hosted(SettingsIntegrationsView(model: model, calendarConnections: calendars)), size: NSSize(width: 760, height: 500),
+        try render(hosted(SettingsIntegrationsView(model: model)), size: NSSize(width: 760, height: 500),
                    to: directory.appendingPathComponent("integrations-connected.png"))
         model.recoveryCode = try ConfigBackupArchive.recoveryCode(for: Data(repeating: 0xAB, count: 32))
         try render(hosted(SettingsBackupView(model: model)), size: NSSize(width: 760, height: 500),

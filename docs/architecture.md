@@ -1023,9 +1023,10 @@ Brightness inside hover:
   and Extra; cooling does not restart them. A display change, lost readback or
   quit ends Hold; the target never transfers or persists. WHY:
   .project-docs/decisions/2026-10-28-brightness-hold.md
-  Settings -> Toolbox -> Display (ToolboxDisplayPane) holds Hold brightness,
-  Extra and Brightness keys without a slider; it reads the display on appear,
-  starts no polling of its own and scrolls in the 188 pt Toolbox area. Brightness keys
+  Settings -> Features -> Display (DisplayBrightnessSettings, until 2026-11-26
+  the Toolbox pane ToolboxDisplayPane) holds Hold brightness, Extra and
+  Brightness keys without a slider; it reads the display on appear and starts
+  no polling of its own. Brightness keys
   are off by default and saved. BrightnessKeyEventTap, a head-insert session
   tap for system-defined events on a SpaceHoldMonitor.TapThread, takes the
   brightness key presses from macOS, so its indicator does not show: sixteenth
@@ -1446,7 +1447,8 @@ AgentOtherSection is only the shared switch logic and words. WHY:
 
 Settings is being rebuilt around features, in steps. FeatureCatalog
 (Settings/Features) is the list of features as data: for each AppFeature (Drop,
-Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots) its
+Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots,
+History, Display, To-do, Calendar, Case, Hover, Notify, Monitor) its
 name, one phrase, bundled clip if any, shortcuts (FeatureHotkey, keys read live
 from HotkeyConfiguration), how it is turned on, where its settings are shown
 today, and its requirements (a model route, a macOS permission, the OpenAI key
@@ -1504,7 +1506,9 @@ stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
 Keys & models on API keys; the sidebar entry still opens Models), Allow,
 Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
-Mode, Language you speak, Lower other audio and Stop Drop automatically (off
+Mode, Language you speak, Language Drop writes in (Smart's output language,
+PrivacyPreferences.targetLanguage through FeaturesEnvironment.targetLanguage,
+the island's Output Lang), Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
 island editors. The same switches remain in the island. Every
 feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
@@ -1523,7 +1527,9 @@ the switch (FeatureSwitchModel) writes the same flag as Other and the island
 through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
 connects the native Agent first (AgentOtherSection.turn) and moves only once
 it is on, otherwise the card says why. The Agent screen adds Allow file edits
-and commands and things to ask; Meeting Notes adds the note-ready notification
+and commands and things to ask, and its shortcuts include the four keys of the
+links under an answer (FeatureHotkey.agentLink*, the usefulLinks* fields
+Hotkeys edits); Meeting Notes adds the note-ready notification
 and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
 setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
 Features). Translate & Subtitles, Screenshots, To-do (AppFeature.todo) and
@@ -1534,6 +1540,22 @@ Translate and Subtitles in their Toolbox panes, Shot's capture
 (FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
 Case need nothing and read Ready. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
+
+History (AppFeature.history, tool clipboard), Display (display, tool
+brightness) and Calendar (calendar, tool calendar) were island tiles only and
+are features with screens too: their Open shortcut and a "Use it" row that
+opens the island panel. Display's settings are DisplayBrightnessSettings
+(Hold brightness, Extra, Brightness keys; formerly the Toolbox pane, which now
+only offers Open Display settings) and it lists Keyboard control as optional,
+for Brightness keys. Calendar's screen holds SettingsCalendarIntegrationsView
+(moved out of Integrations, which keeps GitHub and Coding tools) and is Ready
+once it shows a calendar (FeatureSetupSnapshot.calendarConnected: this Mac's
+calendars on and readable, or an account an earlier build connected; never
+while CalendarAvailability is closed), otherwise quietly Not set up;
+snapshotCountChanges also follows that value. History needs nothing. Hover's
+row chevron leads a tool to its feature's screen (HoverFeatureView.feature(for:);
+Drop's tiles to Drop, Record and Notes to Meeting Notes), else to Toolbox. WHY:
+.project-docs/decisions/2026-11-26-every-feature-in-features.md
 
 Hover, Notify and Monitor are features with their own screens too. Hover
 (HoverFeatureView) lists the island's tools in HoverLayoutStore order with
@@ -1941,7 +1963,7 @@ hover bubble. WHY:
 A compact day switcher and Connect (Calendars once connected) stay in Hover; the
 Calendars page shows the access state, the Mac's calendars with ticks, and
 connection errors and Retry. Allow access starts the macOS permission prompt
-directly, using the same CalendarConnectionFlow as Settings → Integrations. No
+directly, using the same CalendarConnectionFlow as Settings → Features → Calendar. No
 intermediate form, account-name field, Advanced app setup or Whytap account is
 shown.
 Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime

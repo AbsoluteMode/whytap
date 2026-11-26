@@ -65,10 +65,14 @@ final class SecureInputGuard {
     private var tracker = SecureInputHolderTracker()
     private var detector = SecureInputAttemptDetector()
     private var lastFront: SecureInputApp?
-    /// Secure input as last read on a modifier change, and who was in front.
-    /// Cmd-Tab always starts with ⌘ down while the old app is still in front.
-    private var lastSample: (on: Bool, frontPID: pid_t?, at: Date)?
-    static let sampleFreshness: TimeInterval = 1.5
+    /// The modifiers held right now, from the last `flagsChanged`.
+    private var heldChord: ModifierChord = []
+    /// Secure input read when ⌘ went down, and who was in front then.
+    /// Cmd-Tab is the only switch that happens while ⌘ is still held, so this
+    /// reading is evidence about the app left behind, and nothing else is.
+    private var commandDownSample: (on: Bool, frontPID: pid_t?)?
+    /// Bumped by every OFF read; a pending switch that saw one is void.
+    private var offGeneration = 0
     private var lastShake: Date?
     private(set) var persistentBadge: SecureInputHolderBadge?
     /// A badge was presented and not yet dismissed by the guard; only then
@@ -114,7 +118,12 @@ final class SecureInputGuard {
         let now = system.now()
         // Every modifier change on the Mac lands here; it costs one flag read.
         let on = system.isSecureInputEnabled()
-        lastSample = (on, lastFront?.pid, now)
+        if chord.contains(.command), !heldChord.contains(.command) {
+            commandDownSample = (on, lastFront?.pid)
+        } else if !chord.contains(.command) {
+            commandDownSample = nil
+        }
+        heldChord = chord
         // A confirmed OFF, on a press or a release, ends every attribution.
         if !on { secureInputEnded() }
         guard chord.isEmpty else {
@@ -137,22 +146,27 @@ final class SecureInputGuard {
     func handleActivation(_ app: SecureInputApp?) {
         let previous = lastFront
         lastFront = app
-        let now = system.now()
-        // Only a reading taken while `previous` was still in front is
-        // evidence; a mouse or Dock switch has none, and then nobody is named.
+        // Only Cmd-Tab gives evidence: ⌘ still held, read when it went down
+        // with `previous` in front. A mouse or Dock switch names nobody.
         var wasOn: Bool?
-        if let sample = lastSample, sample.frontPID == previous?.pid,
-           now.timeIntervalSince(sample.at) <= Self.sampleFreshness {
+        if heldChord.contains(.command), let sample = commandDownSample, sample.frontPID == previous?.pid {
             wasOn = sample.on
         }
+        let generation = offGeneration
         system.afterSwitchSettles { [weak self] in
-            self?.settleSwitch(from: previous, to: app, wasOnBeforeSwitch: wasOn)
+            guard let self else { return }
+            // An OFF seen since the switch means the app left let go.
+            let evidence = self.offGeneration == generation ? wasOn : false
+            self.settleSwitch(from: previous, to: app, wasOnBeforeSwitch: evidence)
         }
     }
 
     func settleSwitch(from previous: SecureInputApp?, to current: SecureInputApp?, wasOnBeforeSwitch: Bool?) {
-        tracker.didSwitch(from: previous, to: current, wasOnBeforeSwitch: wasOnBeforeSwitch,
-                          secureInputOn: system.isSecureInputEnabled())
+        guard system.isSecureInputEnabled() else {
+            secureInputEnded()
+            return
+        }
+        tracker.didSwitch(from: previous, to: current, wasOnBeforeSwitch: wasOnBeforeSwitch, secureInputOn: true)
         refresh()
     }
 
@@ -188,7 +202,8 @@ final class SecureInputGuard {
         // Ask Accessibility only when it decides between the remembered
         // background app and the frontmost one.
         var frontHasSecureField = false
-        if askAccessibility, let candidate = tracker.staleCandidate, let front, candidate.pid != front.pid {
+        let decides = tracker.unverifiedSwitch || (tracker.staleCandidate.map { $0.pid != front?.pid } ?? false)
+        if askAccessibility, decides, let front {
             frontHasSecureField = system.focusedElementIsSecure(front.pid)
             // The verdict sticks: the 1 s check must not bring the
             // remembered app back while the front field holds secure input.
@@ -204,6 +219,7 @@ final class SecureInputGuard {
         let persistent: Bool
         switch holder {
         case .none:
+            secureInputEnded() // the read during resolution saw OFF
             return
         case .ownApp:
             os_log("secure_input_attempt holder=self", log: Self.log, type: .info)
@@ -235,6 +251,7 @@ final class SecureInputGuard {
     /// Secure input is off: no badge may keep claiming otherwise, whether
     /// dimmed, shaken or held open by the pointer.
     private func secureInputEnded() {
+        offGeneration &+= 1
         tracker.secureInputObservedOff()
         if persistentBadge != nil || badgeMayBeShowing {
             persistentBadge = nil

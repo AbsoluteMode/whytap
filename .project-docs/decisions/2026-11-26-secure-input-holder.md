@@ -86,18 +86,23 @@ the app the person switched to.
 3. **Track the holder ourselves.** `SecureInputHolderTracker` remembers the
    app the person left when secure input was on while that app was still in
    front and still on 0.4 s after the switch (time for a well-behaved app to
-   release). "While still in front" comes from the modifier change that
-   starts Cmd-Tab (⌘ goes down before the switch). A mouse or Dock switch has
-   no such reading, so nobody is named: an attempt shows the lock. Any OFF
-   read, on a modifier press or release or by the 1 s check, forgets every
-   remembered holder. So an app that turns secure input on as it comes
-   forward (Terminal's Secure Keyboard Entry, a focused key field) never makes
-   the app left behind look guilty. The frontmost app is the holder instead
-   when its focused element is a password field (Accessibility role
-   `AXSecureTextField`, both calls with a 0.2 s timeout, asked only on an
-   attempt or a switch and never by the 1 s check; Whytap's own windows are
-   read in-process), and then the remembered app is forgotten; or when no
-   switch happened since secure input came on.
+   release). The only evidence of "while still in front" is Cmd-Tab: the
+   switch happens while ⌘ is still held, and the reading taken when that ⌘
+   went down (with the old app in front) is used, however long the switcher
+   stays open. A finished ⌘ press followed by a click, a mouse or Dock switch
+   has no evidence, so nobody is named: an attempt shows the lock. Any OFF
+   read (a modifier press or release, the settling read, the read while
+   resolving an attempt, the 1 s check) forgets every remembered holder,
+   voids a switch still settling and dismisses every badge. So an app that
+   turns secure input on as it comes forward (Terminal's Secure Keyboard
+   Entry, a focused key field) never makes the app left behind look guilty.
+   The frontmost app is the holder instead when its focused element is a
+   password field (Accessibility role `AXSecureTextField`, both calls with a
+   0.2 s timeout, asked on an attempt or a switch whenever a remembered or
+   unknown owner is in question, never by the 1 s check; Whytap's own windows
+   are read in-process), and then nothing remembered is kept; or when no
+   switch happened since secure input came on. Right ⌘ / Right ⌥ presses of
+   Whytap's own gestures count as arrived shortcuts.
 4. **Show it next to the island.** A non-activating panel to the right of the
    island shows a black capsule with the holder's logo
    (`NSRunningApplication.icon`). The window is exactly the pill (a circle,
@@ -135,7 +140,7 @@ Logs carry the holder's bundle ID as private data and never keys or chords.
 ## Tested
 
 `SecureInputGuardTests` (28 scenarios) and `SecureInputHolderPanelTests` (4): no secure input; background holder
-after Cmd-Tab (dimmed logo, then shake); frontmost holder (shake, no poll);
+after Cmd-Tab (dimmed logo, then shake); frontmost holder (no shake, no poll);
 password field in the frontmost app wins over the remembered one and the 1 s
 check keeps that verdict; typing in the front password field never shakes;
 an app turning secure input on as it comes forward does not blame the app
@@ -156,7 +161,12 @@ with no shortcut pressed; a shaken badge outlived secure input; a visible
 badge missed the screenshot-protection switch and display changes. Points 3
 to 6 above answer them, each with a scenario (mouse switch, OFF while a
 modifier is down, bare ⌥ in the stuck state, front holder never shakes,
-confirmed OFF removes a shaken lock, protection and display while up).
+confirmed OFF removes a shaken lock, protection and display while up). Its
+second pass (ticket #614) found a click within 1.5 s of an unrelated ⌘ press
+still used as evidence, an OFF before the settle not voiding it, the unknown
+owner skipping the front-field check (other apps and Whytap's own key field)
+and an OFF read while resolving an attempt leaving the badge up; point 3 now
+covers each, with a scenario apiece.
 
 ## Rejected
 

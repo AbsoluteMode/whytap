@@ -81,6 +81,10 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
                 self?.cancelHoldTimer()
             },
             onHotkeyKeyHeldChanged: { key, isHeld in
+                // Right ⌘ / Right ⌥ belong to Whytap's own gestures: the
+                // Secure Input badge must not count them as a blocked chord.
+                // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
+                if isHeld { HotkeyFireRecorder.noteFired() }
                 Task { @MainActor in
                     AppState.shared.setHotkeyModifierKey(key, held: isHeld)
                 }

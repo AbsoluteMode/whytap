@@ -16,6 +16,8 @@ final class SecureInputGuardTests: XCTestCase {
 
     private final class World {
         var secureOn = false
+        /// Reads served before `secureOn`, to script a change mid-handling.
+        var scriptedReads: [Bool] = []
         var front: SecureInputApp?
         var secureFieldPIDs = Set<pid_t>()
         var running = Set<pid_t>()
@@ -50,7 +52,7 @@ final class SecureInputGuardTests: XCTestCase {
         let world = world!
         let presenter = presenter!
         let system = SecureInputGuard.System(
-            isSecureInputEnabled: { world.secureOn },
+            isSecureInputEnabled: { world.scriptedReads.isEmpty ? world.secureOn : world.scriptedReads.removeFirst() },
             frontmostApp: { world.front },
             focusedElementIsSecure: { pid in world.axQueries.append(pid); return world.secureFieldPIDs.contains(pid) },
             isRunning: { world.running.contains($0) },
@@ -225,6 +227,84 @@ final class SecureInputGuardTests: XCTestCase {
         XCTAssertEqual(presenter.presented, [
             .init(badge: SecureInputHolderBadge(app: nil), shake: true, persistent: false)
         ])
+    }
+
+    func testMouseSwitchRightAfterAnUnrelatedCommandPressNamesNobody() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        press(.command, for: 0.1) // ⌘C in Dia, released
+        switchApp(to: telegram)   // then a click on Telegram
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "a finished ⌘ press is not Cmd-Tab")
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testCmdTabHeldLongWhileChoosingStillCountsAsEvidence() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command)
+        world.now += 6 // browsing the app switcher
+        switchApp(to: telegram)
+        guardian.handleFlagsChanged([])
+        settle()
+        XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
+    }
+
+    func testOffSeenBeforeTheSwitchSettlesVoidsItsEvidence() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        cmdTab(to: telegram)        // evidence: ON while Dia was in front
+        world.secureOn = false
+        press(.shift)               // OFF read before the 0.4 s settle
+        world.secureOn = true       // something turns it on again
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "Dia let go; it must not be named")
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testOffAtTheSettleReadDismissesEverything() {
+        stickDiaBehindTelegram()
+        cmdTab(to: onePassword)
+        world.secureOn = false
+        settle()
+        XCTAssertEqual(presenter.dismissals, 1)
+        XCTAssertNil(guardian.persistentBadge)
+        XCTAssertFalse(guardian.isPolling)
+    }
+
+    func testUnknownOwnerStillHonoursThePasswordFieldInFront() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        switchApp(to: onePassword) // mouse: ownership unknown
+        settle()
+        world.secureFieldPIDs = [onePassword.pid]
+        press(.option)             // ⌥ typed in 1Password's field
+        XCTAssertTrue(presenter.presented.isEmpty, "the field in front explains secure input")
+        XCTAssertEqual(world.axQueries.last, onePassword.pid, "asked at the attempt")
+    }
+
+    func testUnknownOwnerWithWhytapsOwnKeyFieldInFrontShowsNothing() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        switchApp(to: whytap)       // clicked Whytap Settings, key field focused
+        settle()
+        world.secureFieldPIDs = [ownPID]
+        press(.option)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testOffReadWhileResolvingAnAttemptDismissesTheVisibleBadge() {
+        stickDiaBehindTelegram()
+        world.scriptedReads = [true, true, false] // ⌥ down, ⌥ up: ON; resolving: OFF
+        press(.option)
+        XCTAssertEqual(presenter.dismissals, 1)
+        XCTAssertNil(guardian.persistentBadge)
+        XCTAssertFalse(guardian.isPolling)
     }
 
     func testOffSeenWhileAModifierIsDownForgetsTheRememberedApp() {

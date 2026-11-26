@@ -116,15 +116,17 @@ final class CaseClientSetup: CaseClientConfiguring {
         }.value
     }
 
-    /// Whether `client` is on this Mac and already has a `whytap` MCP entry it
-    /// can start (`isConfigured`).
-    /// Read only: nothing is written and no client setting changes.
+    /// Whether `client` is on this Mac, and its `whytap` MCP entry compared
+    /// with the one Connect writes for this app's helper. Read only: nothing is
+    /// written and no client setting changes.
     // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
-    func presence(of client: CaseKnownClient) async -> (installed: Bool, configured: Bool) {
-        guard let connector = connectors[client] else { return (false, false) }
+    func presence(of client: CaseKnownClient) async -> (installed: Bool, entry: WhytapEntryState) {
+        guard let connector = connectors[client] else { return (false, .none) }
+        // Without the helper no entry can be Whytap's own for this app.
+        let helperPath = helperURL?.path ?? ""
         return await Task.detached {
-            let installed = connector.isInstalled()
-            return (installed, installed && connector.isConfigured())
+            guard connector.isInstalled() else { return (false, .none) }
+            return (true, connector.whytapEntry(helperPath: helperPath))
         }.value
     }
 

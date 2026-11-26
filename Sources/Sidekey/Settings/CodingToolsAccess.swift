@@ -19,7 +19,11 @@ final class CodingToolsAccess: ObservableObject {
     enum Presence: Equatable {
         case checking
         case notInstalled
+        /// On this Mac; `configured`: its `whytap` entry is exactly Whytap's.
         case installed(configured: Bool)
+        /// On this Mac with a `whytap` entry Whytap did not write (or cannot
+        /// read). Whytap does not judge whether it works and leaves it alone.
+        case customEntry
     }
 
     /// What Settings asks of the Mac. Tests pass fixed answers; nothing here
@@ -32,7 +36,12 @@ final class CodingToolsAccess: ObservableObject {
         static func live(setup: CaseClientSetup = .live()) -> Probe {
             Probe(presence: { client in
                 let found = await setup.presence(of: client)
-                return found.installed ? .installed(configured: found.configured) : .notInstalled
+                guard found.installed else { return .notInstalled }
+                switch found.entry {
+                case .none: return .installed(configured: false)
+                case .ours: return .installed(configured: true)
+                case .custom: return .customEntry
+                }
             }, connect: { client in
                 await setup.connect(client.identity).problems
             })
@@ -154,6 +163,10 @@ final class CodingToolsAccess: ObservableObject {
         switch presence[tool] ?? .checking {
         case .checking:
             line = "Checking whether \(name) is on this Mac…"
+        case .customEntry:
+            line = isConnected(tool)
+                ? "Allowed to use Whytap. \(name) has its own whytap MCP entry, which Whytap leaves as it is. Turn off to take the access back."
+                : "\(name) has its own whytap MCP entry, which Whytap leaves as it is. Remove it in \(name) to connect here, or answer Yes when \(name) asks for access."
         case .notInstalled:
             line = isConnected(tool)
                 ? "Not found on this Mac, but still allowed to use Whytap. Turn off to take that back."

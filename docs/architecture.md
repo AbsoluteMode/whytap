@@ -2051,21 +2051,18 @@ place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
 with no suspension before the action. Settings -> Integrations -> Coding tools always
 lists Claude Code and Codex (CodingToolsAccess, presence read through
-CaseClientSetup.presence: installed, and a `whytap` MCP entry the client can
-start, isConfigured, checked per transport the way the client reads it:
-Claude Code stdio (no type or "stdio") needs a non-blank command, "http"/"sse"
-an http(s) URL with a port of 1-65535, and a field that is there needs its type
-(`null` is not left out; args a string list, env and headers string maps;
-WhytapMCPEntry.claudeCanStart); Codex needs enabled not false and a non-blank
-stdio command or a streamable_http URL of the same kind (CodexMCPEntry.canStart,
-on Codex's normalized JSON, where unset args read `null`); everything else does
-not count), one switch each. The switch is the gate's answer (decision == allow),
+CaseClientSetup.presence: installed, and CaseClientConnector.whytapEntry
+compares the `whytap` entry with what Connect writes for this app's helper:
+none, ours or custom; Whytap does not judge someone else's entry), one switch
+each. A custom entry (another path, arguments, env, a URL, null, `{}`, Codex
+enabled = false, an unreadable file) shows as the person's own: switch off
+and not switchable without a Yes, no Yes recorded, entry left as it is. The switch is the gate's answer (decision == allow),
 so a Yes can always be turned off, also when the tool is not found or its entry
 is gone; the line under it says what is missing. Without a Yes a tool that is
 not found is grey, "Not installed on this Mac". On runs the same client setup
 as Case -> Connect and the onboarding (CaseClientSetup.connect: the `whytap`
-command and the canonical MCP entry; a person's own usable `whytap` entry is
-left as it is and counts) and, once a usable entry is there and no answer was
+command and the canonical MCP entry) and, once Whytap's own entry is there and
+no answer was
 recorded meanwhile (HarnessAccessStore.revision), records Yes; Connected means
 entry plus Yes. Off records No and leaves the entry. Refresh re-reads the
 effective answer (loadIfNeeded: a Yes whose seal is gone disappears), the view

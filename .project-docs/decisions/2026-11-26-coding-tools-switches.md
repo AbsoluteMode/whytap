@@ -35,19 +35,19 @@ until the tool had already connected.
   `CaseCallerResolver.knownAIApps`).
 - One switch per tool. **On**: `CaseClientSetup.connect` (the `whytap`
   command and the canonical `whytap` MCP entry, as Case → Connect and the
-  onboarding do); once the tool has a `whytap` entry it can start, Yes is
+  onboarding do); once the tool has Whytap's own `whytap` entry, Yes is
   recorded in `HarnessAccessStore`, the same answer the island's question
-  stores. An entry the person wrote is left as it is and counts when the tool
-  can start it, checked per transport the way the tool reads it: Claude Code
-  stdio needs a non-blank command, `http`/`sse` an http(s) URL with a port of
-  1–65535, and every field that is there its type (`null` is not "left out";
-  arguments a list of strings, `env` and `headers` maps of strings); Codex
-  needs `enabled` not false and a non-blank stdio command or a
-  `streamable_http` URL of the same kind. `null`, `{}`, a blank command, a bad
-  URL or port, a URL without its type, a field of the wrong type or an unknown
-  type is left as it is but does not count. If no usable entry is there after setup, no Yes is
-  recorded and the row says what failed. An answer given while setup runs (a
-  No in the island) is newer and stays.
+  stores. An answer given while setup runs (a No in the island) is newer and
+  stays.
+- **Only Whytap's own entry counts.** The client's `whytap` entry is compared
+  with what Connect writes for this app's helper
+  (`CaseClientConnector.whytapEntry`: none, ours, custom). Any other entry,
+  working or not (another path or build, other arguments, env, a URL, `null`,
+  `{}`, Codex's `enabled = false`, a file that cannot be read), is the
+  person's: the row says so, the switch stays off and cannot be turned on,
+  no Yes is recorded and the entry is left as it is
+  (2026-11-21-one-whytap-mcp-server). The person can remove it to connect
+  here or answer Yes when the tool asks in the island.
 - **Off** records No at once. The MCP entry stays: without a Yes the gate
   refuses the tool, exactly as after a No in the island, and turning it back
   on needs no rewrite.
@@ -56,7 +56,7 @@ until the tool had already connected.
   what is missing. Otherwise the row says Connected (entry and Yes), Not
   connected, Checking, Connecting, or "Not installed on this Mac" with a
   disabled switch. Presence is read without writing (`CaseClientSetup.presence`:
-  the client's locator and its read-only `isConfigured`), off the main thread,
+  the client's locator and its read-only `whytapEntry`), off the main thread,
   when Integrations appears and when Whytap becomes active again; a read that
   started before a newer one was applied is dropped. Each refresh re-reads the
   answer that applies (a Yes whose seal is gone no longer shows), and the row
@@ -72,6 +72,12 @@ until the tool had already connected.
   Integrations; one switch is both steps the person means by "connect".
 - Recording Yes only after the entry exists keeps "Connected" true: a tool
   with access and no server would never reach Whytap.
+- Whytap does not judge someone else's entry. Tickets 671, 672 and 673 each
+  came back with a new shape of a person's entry that the tool cannot start
+  but Whytap counted (blank commands, bad URLs and ports, `null` fields, env
+  and headers that are not strings). Re-implementing Claude Code's and Codex's
+  config schemas is a race Whytap cannot finish; comparing with the one entry
+  Whytap writes is exact and needs no update when the tools change.
 - The gate honours a Yes whatever the local checks find, so the switch must
   follow the gate: a Yes the person cannot see or take back is worse than a
   row that says the server is missing.
@@ -91,14 +97,12 @@ The builder's review of ticket 671 found five classes of faults (a Yes not
 revocable without the tool or entry, an On overwriting a newer No, unusable
 entries counted as connected, a stale answer after the seal went or a late
 save, an old presence read replacing a newer one). `CodingToolsRegressionTests`
-holds the builder's seven reproducers and one for the new row lines. Its
-review of ticket 672 found entries still counted with a blank command, a bad
-URL or fields of the wrong transport; `CodingToolsTransportShapeTests` holds
-its two shape fixtures and checks that On records no Yes for such entries and
-leaves the files as they are. Ticket 673 added explicit `null` fields, env and
-headers that are not strings and ports past 65535, all refused by Claude
-Code's own `claude mcp get`; `CodingToolsClaudeSchemaTests` holds that fixture,
-Codex's `null` arguments (still valid) and the URL checks.
+holds the builder's seven reproducers and one for the new row lines. Tickets
+672 and 673 found more entry shapes counted as connected; instead of a schema
+per tool, `CodingToolsEntryTests` checks that only Whytap's own entry is ours
+for Claude Code, Codex and Cursor, that every shape the builder reported is
+custom, that On then records no Yes, writes nothing and leaves the file as it
+was, and that a Yes given with a custom entry can be taken back.
 
 Not checked in a running app: Connect against the real `claude` and `codex`
 CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).
@@ -109,5 +113,10 @@ CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).
 - Removing the MCP entry on Off: it would edit the person's client settings
   to do what the gate already does.
 - Hiding a tool that is not installed: a grey row says what is missing.
+- Checking each transport the way Claude Code and Codex read their configs
+  (tickets 672–673): a copy of two schemas that keep changing, and every
+  missed field a false Connected.
+- Replacing a custom entry on On: Whytap leaves the person's entry as it is
+  (2026-11-21-one-whytap-mcp-server).
 
 2026-11-26 · ORCH-TASK 116 (Coding tools)

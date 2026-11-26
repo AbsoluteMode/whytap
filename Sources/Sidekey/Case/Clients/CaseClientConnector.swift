@@ -14,10 +14,11 @@ protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
-    /// A `whytap` MCP entry the client can start is in its settings, Whytap's
-    /// or the person's own (read only). An empty, null or turned-off entry is
-    /// not: it stays as it is, but it serves nothing.
-    func isConfigured() -> Bool
+    /// The client's `whytap` MCP entry compared with what `install` writes for
+    /// `helperPath` (read only). Whytap does not judge someone else's entry:
+    /// anything but its own is `.custom`.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    func whytapEntry(helperPath: String) -> WhytapEntryState
     /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
     /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
     /// read for certain, throws `.configuredManually` or `.unreadableConfig`
@@ -32,69 +33,21 @@ protocol CaseClientConnector {
     func uninstall(helperPath: String?) throws
 }
 
+/// A client's `whytap` MCP entry: none, exactly the one Whytap writes for
+/// this app's helper, or anything else (the person's own, another build's,
+/// one that cannot be read).
+enum WhytapEntryState: Equatable, Sendable {
+    case none
+    case ours
+    case custom
+}
+
 /// The entry Connect writes, and the Case-only entry earlier builds wrote.
 enum WhytapMCPEntry {
     static let name = "whytap"
     static let arguments = ["mcp"]
     static let legacyName = "case"
     static let legacyArguments = ["case", "mcp"]
-
-    /// A Claude Code entry it can start, checked the way Claude Code reads its
-    /// config: stdio (`type` left out or "stdio") needs a non-blank command,
-    /// "http" and "sse" an http(s) URL. A field that is there must have its
-    /// type: `null` is not "left out" (`type`, `args`, `env`, `headers`,
-    /// `headersHelper`), `args` is a list of strings, `env` and `headers` map
-    /// strings to strings. Anything else is left as it is but serves nothing.
-    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
-    static func claudeCanStart(_ entry: Any?) -> Bool {
-        guard let object = entry as? [String: Any] else { return false }
-        switch object["type"] {
-        case nil:
-            return isStdio(object) && isStringMap(object, "env")
-        case let type as String where type == "stdio":
-            return isStdio(object) && isStringMap(object, "env")
-        case let type as String where type == "http" || type == "sse":
-            return isWebURL(object["url"]) && isStringMap(object, "headers")
-                && (object["headersHelper"] == nil || object["headersHelper"] is String)
-        default:
-            return false
-        }
-    }
-
-    /// A Cursor entry it can start: a command (with string arguments) or an
-    /// http(s) URL; Cursor tells them apart without a type.
-    static func cursorCanStart(_ entry: Any?) -> Bool {
-        guard let object = entry as? [String: Any] else { return false }
-        return isStdio(object) || isWebURL(object["url"])
-    }
-
-    /// A non-blank command and, when there, a list of string arguments.
-    static func isStdio(_ object: [String: Any]) -> Bool {
-        guard let command = object["command"] as? String,
-              !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return false }
-        switch object["args"] {
-        case nil: return true
-        case let list as [Any]: return list.allSatisfy { $0 is String }
-        default: return false
-        }
-    }
-
-    /// Left out, or a table of strings (`null` is neither).
-    static func isStringMap(_ object: [String: Any], _ key: String) -> Bool {
-        guard let value = object[key] else { return true }
-        guard let map = value as? [String: Any] else { return false }
-        return map.values.allSatisfy { $0 is String }
-    }
-
-    /// An http(s) URL with a host and, when given, a port of 1–65535.
-    static func isWebURL(_ value: Any?) -> Bool {
-        guard let text = (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
-              let parts = URLComponents(string: text), let scheme = parts.scheme?.lowercased(),
-              scheme == "http" || scheme == "https", !(parts.host ?? "").isEmpty,
-              URL(string: text) != nil else { return false }
-        if let port = parts.port, !(1...65_535).contains(port) { return false }
-        return true
-    }
 }
 
 enum CaseClientConnectorError: Error, Equatable {
@@ -351,9 +304,15 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
         return object
     }
 
-    /// A user-scope `whytap` entry with a command or URL is in `~/.claude.json`
-    /// (read only).
-    func isConfigured() -> Bool { WhytapMCPEntry.claudeCanStart((try? userServers())?[WhytapMCPEntry.name]) }
+    /// A user-scope `whytap` entry exists in `~/.claude.json` (read only).
+    func isConfigured() -> Bool { (try? userServers())?[WhytapMCPEntry.name] != nil }
+
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        guard let servers = try? userServers() else { return .custom }
+        guard let entry = servers[WhytapMCPEntry.name] else { return .none }
+        return CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments)
+            ? .ours : .custom
+    }
 
     func install(helperPath: String) throws {
         // Read both files first: a broken one stops before anything changes.
@@ -478,27 +437,6 @@ enum CodexMCPEntry: Equatable {
         }
     }
 
-    /// An entry Codex can start: not `enabled = false`, and by its transport
-    /// a stdio command (blank is not one) with string arguments, or a
-    /// streamable HTTP server with an http(s) URL. Other shapes are left as
-    /// they are but serve nothing.
-    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
-    static func canStart(_ output: CaseCommandOutput) -> Bool {
-        guard let object = try? JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
-              let transport = object["transport"] as? [String: Any] else { return false }
-        if let enabled = object["enabled"], isBoolean(enabled), !isTrue(enabled) { return false }
-        switch transport["type"] as? String {
-        case "stdio":
-            // Codex's normalized answer reports unset arguments as `null`;
-            // its own parser has already refused arguments that aren't strings.
-            var stdio = transport
-            if stdio["args"] is NSNull { stdio["args"] = nil }
-            return WhytapMCPEntry.isStdio(stdio)
-        case "streamable_http": return WhytapMCPEntry.isWebURL(transport["url"])
-        default: return false
-        }
-    }
-
     private static func isBoolean(_ value: Any?) -> Bool {
         guard let value = value as AnyObject? else { return false }
         return CFGetTypeID(value) == CFBooleanGetTypeID()
@@ -533,13 +471,17 @@ struct CodexCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { locate() != nil }
 
     func isConfigured() -> Bool {
-        guard let codex = locate(),
-              let output = try? reader.read(executable: codex, arguments: ["mcp", "get", WhytapMCPEntry.name, "--json"],
-                                            environment: CaseClientEnvironment.make(home: home, executable: codex))
-        else { return false }
-        switch CodexMCPEntry.parse(output, name: WhytapMCPEntry.name) {
-        case .absent, .uncertain: return false
-        case .stdio, .customized, .other: return CodexMCPEntry.canStart(output)
+        guard let codex = locate() else { return false }
+        let current = entry(WhytapMCPEntry.name, codex: codex)
+        return current != .absent && current != .uncertain
+    }
+
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        guard let codex = locate() else { return .none }
+        switch entry(WhytapMCPEntry.name, codex: codex) {
+        case .absent: return .none
+        case .stdio(helperPath, WhytapMCPEntry.arguments): return .ours
+        default: return .custom
         }
     }
 
@@ -614,7 +556,17 @@ struct CursorCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { appInstalled() }
 
     func isConfigured() -> Bool {
-        WhytapMCPEntry.cursorCanStart(((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name])
+        ((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name] != nil
+    }
+
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        let root: [String: Any]?
+        do { root = try file.read() } catch { return .custom }
+        guard let servers = root?["mcpServers"] else { return .none }
+        guard let object = servers as? [String: Any] else { return .custom }
+        guard let entry = object[WhytapMCPEntry.name] else { return .none }
+        return CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments)
+            ? .ours : .custom
     }
 
     func install(helperPath: String) throws {

@@ -263,9 +263,11 @@ just right of the island and shakes when a blocked shortcut's chord is pressed
 secure input — close its password field". The key itself is never seen, so a
 bare ⌥ tap also shakes it; that approximation is limited to this stuck state.
 When the frontmost app holds secure input (its password field), nothing
-shakes. The background holder is the app the person left while secure input
-was on, read on the ⌘ that starts Cmd-Tab; a mouse or Dock switch gives no
-such reading and the badge shows a lock instead of a name. macOS's
+shakes. A chord is judged 0.3 s after its release, so a Right ⌥ Google tap or
+any other shortcut that did arrive is never blamed. The background holder is
+the app the person left while secure input was on, read on the ⌘ that starts
+Cmd-Tab (⌘ still held, no click since); a click or Dock switch gives no such
+reading and the badge shows a lock instead of a name. macOS's
 `kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
 own password fields show nothing. Once secure input is seen off, every badge
 leaves at once. The badge window is exactly the pill, follows the island's

@@ -48,6 +48,8 @@ final class SecureInputGuard {
         var now: @MainActor () -> Date
         /// Runs `work` once the app that lost focus had time to release.
         var afterSwitchSettles: (@escaping @MainActor () -> Void) -> Void
+        /// Runs `work` once a released chord's shortcut had time to arrive.
+        var afterArrivalWindow: (@escaping @MainActor () -> Void) -> Void
     }
 
     static let shared = SecureInputGuard(system: .live, makePresenter: { SecureInputHolderPanel.shared })
@@ -81,6 +83,8 @@ final class SecureInputGuard {
     private var pollTimer: Timer?
     private var globalMonitor: Any?
     private var localMonitor: Any?
+    private var mouseMonitor: Any?
+    private var localMouseMonitor: Any?
     private var activationObserver: NSObjectProtocol?
 
     init(system: System, makePresenter: @escaping () -> SecureInputHolderPresenting) {
@@ -101,6 +105,16 @@ final class SecureInputGuard {
         }
         localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
             self?.handleFlagsChanged(ModifierChord(eventFlags: event.modifierFlags))
+            return event
+        }
+        // Only that a click happened, never where: a click while ⌘ is held
+        // makes the next switch a click, not Cmd-Tab.
+        let clicks: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        mouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: clicks) { [weak self] _ in
+            MainActor.assumeIsolated { self?.handleMouseDown() }
+        }
+        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: clicks) { [weak self] event in
+            self?.handleMouseDown()
             return event
         }
         activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
@@ -126,28 +140,36 @@ final class SecureInputGuard {
         heldChord = chord
         // A confirmed OFF, on a press or a release, ends every attribution.
         if !on { secureInputEnded() }
-        guard chord.isEmpty else {
-            _ = detector.flagsChanged(to: chord, at: now, lastHotkeyFire: nil, blockedChords: [])
+        guard chord.isEmpty, on else {
+            _ = detector.flagsChanged(to: chord, at: now, blockedChords: [])
             return
         }
-        guard on else {
-            _ = detector.flagsChanged(to: [], at: now, lastHotkeyFire: nil, blockedChords: [])
+        guard let start = detector.flagsChanged(to: [], at: now, blockedChords: system.blockedChords()) else { return }
+        system.afterArrivalWindow { [weak self] in self?.evaluateAttempt(heldSince: start) }
+    }
+
+    /// Decided after the arrival window: a shortcut that arrived, through
+    /// Carbon or an accepted Right ⌘/⌥ gesture, in either observer order,
+    /// is never blamed on anyone.
+    func evaluateAttempt(heldSince start: Date) {
+        guard !SecureInputAttemptDetector.arrived(since: start, lastHotkeyFire: system.lastHotkeyFire()) else { return }
+        guard system.isSecureInputEnabled() else {
+            secureInputEnded()
             return
         }
-        let attempt = detector.flagsChanged(
-            to: [], at: now,
-            lastHotkeyFire: system.lastHotkeyFire(),
-            blockedChords: system.blockedChords()
-        )
-        guard attempt else { return }
-        reportBlockedAttempt(at: now)
+        reportBlockedAttempt(at: system.now())
+    }
+
+    func handleMouseDown() {
+        commandDownSample = nil
     }
 
     func handleActivation(_ app: SecureInputApp?) {
         let previous = lastFront
         lastFront = app
-        // Only Cmd-Tab gives evidence: ⌘ still held, read when it went down
-        // with `previous` in front. A mouse or Dock switch names nobody.
+        // Only a keyboard switch gives evidence: ⌘ still held, no click since
+        // it went down, read then with `previous` in front. A click or Dock
+        // switch, with or without ⌘ held, names nobody.
         var wasOn: Bool?
         if heldChord.contains(.command), let sample = commandDownSample, sample.frontPID == previous?.pid {
             wasOn = sample.on
@@ -252,6 +274,8 @@ final class SecureInputGuard {
     /// dimmed, shaken or held open by the pointer.
     private func secureInputEnded() {
         offGeneration &+= 1
+        // An OFF while ⌘ is still down: the app in front then was not holding.
+        if let sample = commandDownSample { commandDownSample = (false, sample.frontPID) }
         tracker.secureInputObservedOff()
         if persistentBadge != nil || badgeMayBeShowing {
             persistentBadge = nil
@@ -314,6 +338,11 @@ extension SecureInputGuard.System {
             now: Date.init,
             afterSwitchSettles: { work in
                 DispatchQueue.main.asyncAfter(deadline: .now() + SecureInputGuard.switchSettleDelay) {
+                    MainActor.assumeIsolated { work() }
+                }
+            },
+            afterArrivalWindow: { work in
+                DispatchQueue.main.asyncAfter(deadline: .now() + SecureInputAttemptDetector.arrivalWindow) {
                     MainActor.assumeIsolated { work() }
                 }
             }

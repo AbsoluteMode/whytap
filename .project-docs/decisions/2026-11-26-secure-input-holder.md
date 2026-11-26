@@ -73,36 +73,44 @@ the app the person switched to.
    hotkey with ⌘ or ⌃ already survives on Carbon. The hover label does not
    advertise that; the person learns which app to fix.
 2. **Notice the failed attempt from modifiers.** `flagsChanged` still arrives,
-   so `SecureInputAttemptDetector` treats "a chord of a blocked shortcut was
-   held for at most 3 s and released, and no Whytap shortcut arrived
-   meanwhile" as a possible failed attempt (see 5 for when it shakes).
-   Blocked chords come from the saved
-   configuration (`SecureInputBlockedShortcuts`): Option/Shift-only Carbon
-   combos, plus any modifiers of a hold-combo Drop (event tap). Every Carbon
-   and modifier-only shortcut records its arrival in `HotkeyFireRecorder`, even
-   when a gate then drops it, so a shortcut that worked is never blamed.
-   A bare key or Space produces no event at all and cannot be noticed; the
-   dimmed logo below covers that case when the holder is in the background.
+   so `SecureInputAttemptDetector` takes "a chord of a blocked shortcut was
+   held for at most 3 s and released" as a candidate, and 0.3 s after the
+   release (Google's Right ⌥ tap fires up to 0.12 s after it) treats it as a
+   possible failed attempt unless a Whytap shortcut arrived since the hold
+   began, with 0.05 s of slack because two observers of one modifier event
+   run in either order (see 5 for when it shakes). Blocked chords come from
+   the saved configuration (`SecureInputBlockedShortcuts`): Option/Shift-only
+   Carbon combos, plus any modifiers of a hold-combo Drop (event tap).
+   `HotkeyFireRecorder` records an arrival from every Carbon and
+   modifier-only shortcut, even when a gate then drops it, and from Right ⌘ /
+   Right ⌥ only when the gesture state machine accepts a gesture (a Right ⌥
+   cancelled by Shift records nothing). A bare key or Space produces no event
+   at all and cannot be noticed; the dimmed logo below covers that case when
+   the holder is in the background.
 3. **Track the holder ourselves.** `SecureInputHolderTracker` remembers the
    app the person left when secure input was on while that app was still in
    front and still on 0.4 s after the switch (time for a well-behaved app to
-   release). The only evidence of "while still in front" is Cmd-Tab: the
-   switch happens while ⌘ is still held, and the reading taken when that ⌘
-   went down (with the old app in front) is used, however long the switcher
-   stays open. A finished ⌘ press followed by a click, a mouse or Dock switch
-   has no evidence, so nobody is named: an attempt shows the lock. Any OFF
-   read (a modifier press or release, the settling read, the read while
-   resolving an attempt, the 1 s check) forgets every remembered holder,
-   voids a switch still settling and dismisses every badge. So an app that
-   turns secure input on as it comes forward (Terminal's Secure Keyboard
-   Entry, a focused key field) never makes the app left behind look guilty.
+   release). The only evidence of "while still in front" is a keyboard
+   switch: the reading taken when ⌘ went down with the old app in front, used
+   only if ⌘ is still held at the switch and no click happened since it went
+   down (Cmd-Tab, however long the switcher stays open, or ⌘H). The click
+   monitor notes only that a click happened, never where. A click or Dock
+   switch, with or without ⌘ held, has no evidence, so nobody is named: an
+   attempt shows the lock. Any OFF read (a modifier press or release, the
+   settling read, the reads when an attempt is decided and resolved, the 1 s
+   check) turns a held ⌘ reading into OFF, voids a switch still settling,
+   forgets every remembered holder and dismisses every badge. So an app that
+   turns secure input on as it comes forward after the old one let go
+   (Terminal's Secure Keyboard Entry, a focused key field) never makes the
+   app left behind look guilty. One case stays ambiguous and is accepted:
+   Cmd-Tab from an app that holds secure input to one that turns it on at
+   once, with no OFF in between that Whytap could read, names the app left.
    The frontmost app is the holder instead when its focused element is a
    password field (Accessibility role `AXSecureTextField`, both calls with a
    0.2 s timeout, asked on an attempt or a switch whenever a remembered or
    unknown owner is in question, never by the 1 s check; Whytap's own windows
    are read in-process), and then nothing remembered is kept; or when no
-   switch happened since secure input came on. Right ⌘ / Right ⌥ presses of
-   Whytap's own gestures count as arrived shortcuts.
+   switch happened since secure input came on.
 4. **Show it next to the island.** A non-activating panel to the right of the
    island shows a black capsule with the holder's logo
    (`NSRunningApplication.icon`). The window is exactly the pill (a circle,
@@ -166,7 +174,15 @@ second pass (ticket #614) found a click within 1.5 s of an unrelated ⌘ press
 still used as evidence, an OFF before the settle not voiding it, the unknown
 owner skipping the front-field check (other apps and Whytap's own key field)
 and an OFF read while resolving an attempt leaving the badge up; point 3 now
-covers each, with a scenario apiece.
+covers each, with a scenario apiece. Its third pass (ticket #615) found a click
+or Dock activation while an unrelated ⌘ was held taken for Cmd-Tab, an OFF
+read while ⌘ stayed down not voiding the held reading, and Right ⌘ / Right ⌥
+recorded at modifier-down rather than on an accepted gesture (a Shift-
+cancelled Right ⌥ hid a blocked ⌥⇧ shortcut; in the other observer order a
+real Google tap still shook). Points 2 and 3 now cover these: clicks void
+the evidence, OFF turns the held reading off, arrivals come from accepted
+gestures and are judged 0.3 s after the release with 0.05 s of slack;
+scenarios include the real gesture state machine.
 
 ## Rejected
 

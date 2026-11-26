@@ -25,6 +25,7 @@ final class SecureInputGuardTests: XCTestCase {
         var lastFire: Date?
         var blocked: Set<ModifierChord> = [.option]
         var pendingSettle: [@MainActor () -> Void] = []
+        var pendingAttempts: [@MainActor () -> Void] = []
         var axQueries: [pid_t] = []
     }
 
@@ -60,7 +61,8 @@ final class SecureInputGuardTests: XCTestCase {
             blockedChords: { world.blocked },
             lastHotkeyFire: { world.lastFire },
             now: { world.now },
-            afterSwitchSettles: { world.pendingSettle.append($0) }
+            afterSwitchSettles: { world.pendingSettle.append($0) },
+            afterArrivalWindow: { world.pendingAttempts.append($0) }
         )
         guardian = SecureInputGuard(system: system, makePresenter: { presenter })
     }
@@ -84,6 +86,13 @@ final class SecureInputGuardTests: XCTestCase {
         work.forEach { $0() }
     }
 
+    /// The 0.3 s arrival window ends.
+    private func endArrivalWindow() {
+        let work = world.pendingAttempts
+        world.pendingAttempts = []
+        work.forEach { $0() }
+    }
+
     /// Hold `chord` for `seconds`, as a person pressing ⌥F would; the letter
     /// itself is invisible under secure input.
     private func press(_ chord: ModifierChord, for seconds: TimeInterval = 0.2, hotkeyFires: Bool = false) {
@@ -92,6 +101,7 @@ final class SecureInputGuardTests: XCTestCase {
         if hotkeyFires { world.lastFire = world.now }
         world.now += seconds / 2
         guardian.handleFlagsChanged([])
+        endArrivalWindow()
         world.now += 1
     }
 
@@ -163,6 +173,7 @@ final class SecureInputGuardTests: XCTestCase {
         guardian.handleFlagsChanged(.option)
         world.now += 0.08
         guardian.handleFlagsChanged([])
+        endArrivalWindow()
         XCTAssertEqual(presenter.presented.last,
                        .init(badge: SecureInputHolderBadge(app: dia), shake: true, persistent: true))
     }
@@ -252,6 +263,58 @@ final class SecureInputGuardTests: XCTestCase {
         XCTAssertEqual(guardian.persistentBadge, SecureInputHolderBadge(app: dia))
     }
 
+    func testClickWhileCommandIsHeldIsNotCmdTab() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command) // ⌘ held for something else
+        guardian.handleMouseDown()            // then a click on Telegram or the Dock
+        switchApp(to: telegram)
+        guardian.handleFlagsChanged([])
+        settle()
+        XCTAssertNil(guardian.persistentBadge)
+        XCTAssertTrue(presenter.presented.isEmpty)
+
+        press(.option)
+        XCTAssertEqual(presenter.presented.last?.badge, SecureInputHolderBadge(app: nil), "unknown: the lock")
+    }
+
+    func testOffWhileCommandIsStillHeldVoidsItsSample() {
+        switchApp(to: dia)
+        settle()
+        world.secureOn = true
+        guardian.handleFlagsChanged(.command)            // ON read with Dia in front
+        world.secureOn = false
+        guardian.handleFlagsChanged([.command, .shift])  // OFF read, ⌘ still down
+        world.secureOn = true
+        switchApp(to: telegram)
+        guardian.handleFlagsChanged([])
+        settle()
+        XCTAssertNil(guardian.persistentBadge, "Dia let go before the switch")
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testShortcutArrivingAfterTheReleaseWithinTheWindowIsNotBlamed() {
+        stickDiaBehindTelegram()
+        guardian.handleFlagsChanged(.option)  // Right ⌥ for Google
+        world.now += 0.08
+        guardian.handleFlagsChanged([])
+        world.now += 0.12
+        world.lastFire = world.now            // the tap fires after its grace
+        endArrivalWindow()
+        XCTAssertEqual(presenter.presented.count, 1, "only the dim logo")
+    }
+
+    func testArrivalRecordedByAnObserverThatRanFirstStillCounts() {
+        stickDiaBehindTelegram()
+        world.lastFire = world.now - 0.01     // the gesture monitor saw the event first
+        guardian.handleFlagsChanged(.option)
+        world.now += 0.08
+        guardian.handleFlagsChanged([])
+        endArrivalWindow()
+        XCTAssertEqual(presenter.presented.count, 1)
+    }
+
     func testOffSeenBeforeTheSwitchSettlesVoidsItsEvidence() {
         switchApp(to: dia)
         settle()
@@ -300,7 +363,7 @@ final class SecureInputGuardTests: XCTestCase {
 
     func testOffReadWhileResolvingAnAttemptDismissesTheVisibleBadge() {
         stickDiaBehindTelegram()
-        world.scriptedReads = [true, true, false] // ⌥ down, ⌥ up: ON; resolving: OFF
+        world.scriptedReads = [true, true, true, false] // ⌥ down, ⌥ up, window end: ON; resolving: OFF
         press(.option)
         XCTAssertEqual(presenter.dismissals, 1)
         XCTAssertNil(guardian.persistentBadge)
@@ -460,12 +523,12 @@ final class SecureInputGuardTests: XCTestCase {
     func testRepeatedAttemptsShakeAtMostEveryMinimumInterval() {
         stickDiaBehindTelegram()
         world.now += 1
-        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([])
+        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([]); endArrivalWindow()
         world.now += 0.1
-        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([])
+        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([]); endArrivalWindow()
         XCTAssertEqual(presenter.presented.count, 2)
         world.now += SecureInputGuard.minimumShakeInterval
-        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([])
+        guardian.handleFlagsChanged(.option); guardian.handleFlagsChanged([]); endArrivalWindow()
         XCTAssertEqual(presenter.presented.count, 3)
     }
 
@@ -515,5 +578,45 @@ final class SecureInputGuardTests: XCTestCase {
         monitor.handleHotKeyEvent()
         XCTAssertNotNil(HotkeyFireRecorder.lastFire)
         HotkeyFireRecorder.resetForTesting()
+    }
+}
+
+/// Right ⌘ / Right ⌥ count as arrived only when the real gesture state
+/// machine accepts a gesture, wrapped exactly as `RightCmdGestureMonitor` does.
+@MainActor
+final class SecureInputRightModifierArrivalTests: XCTestCase {
+    private let rightOptionFlags: UInt64 = 0x40 | 0x080000
+    private let rightOptionShiftFlags: UInt64 = 0x40 | 0x080000 | 0x020000 | 0x02
+    private let noFlags: UInt64 = 0
+
+    private func machine() -> RightCmdGestureStateMachine {
+        let m = RightCmdGestureStateMachine(captureSnapshot: { nil }, configuration: .defaults)
+        let arrived = RightCmdGestureMonitor.recordingArrival
+        m.configure(
+            onSnapshot: { _ in }, onTap: arrived({}), onVoiceTap: arrived({}),
+            onHoldStart: arrived({}), onHoldEnd: {}, onCancel: {},
+            onScheduleThreshold: {}, onCancelThreshold: {},
+            onGoogleTextTap: arrived({}), onGoogleVoiceTap: arrived({}),
+            onGoogleHoldStart: arrived({}), onGoogleHoldEnd: {}, onGoogleCancel: {}
+        )
+        return m
+    }
+
+    override func setUp() { super.setUp(); HotkeyFireRecorder.resetForTesting() }
+    override func tearDown() { HotkeyFireRecorder.resetForTesting(); super.tearDown() }
+
+    func testRightOptionTapThatFiresGoogleCountsAsArrived() {
+        let m = machine()
+        _ = m.handle(.flagsChanged(rawFlags: rightOptionFlags))
+        _ = m.handle(.flagsChanged(rawFlags: noFlags))
+        XCTAssertNotNil(HotkeyFireRecorder.lastFire)
+    }
+
+    func testRightOptionCancelledByShiftRecordsNothing() {
+        let m = machine()
+        _ = m.handle(.flagsChanged(rawFlags: rightOptionFlags))
+        _ = m.handle(.flagsChanged(rawFlags: rightOptionShiftFlags)) // ⌥⇧ chord, not Google
+        _ = m.handle(.flagsChanged(rawFlags: noFlags))
+        XCTAssertNil(HotkeyFireRecorder.lastFire, "a blocked ⌥⇧ shortcut must still be noticed")
     }
 }

@@ -96,30 +96,40 @@ enum HotkeyFireRecorder {
 /// holder is not the frontmost app, when the keyboard is stuck anyway.
 struct SecureInputAttemptDetector {
     static let maximumHold: TimeInterval = 3
+    /// How long after the release a shortcut may still report that it
+    /// arrived (Google's Right ⌥ tap waits 0.12 s for a second press).
+    static let arrivalWindow: TimeInterval = 0.3
+    /// Two observers of the same modifier event run in either order.
+    static let arrivalTolerance: TimeInterval = 0.05
 
     private var heldSince: Date?
     private var peak: ModifierChord = []
 
-    /// Returns `true` when the release ends a likely failed attempt.
+    /// Returns when the hold began if the release ends a candidate attempt:
+    /// a blocked chord held at most `maximumHold`. Whether a shortcut arrived
+    /// meanwhile is decided `arrivalWindow` later with `arrived(since:...)`.
     mutating func flagsChanged(
         to chord: ModifierChord,
         at date: Date,
-        lastHotkeyFire: Date?,
         blockedChords: Set<ModifierChord>
-    ) -> Bool {
+    ) -> Date? {
         if !chord.isEmpty {
             if heldSince == nil { heldSince = date; peak = [] }
             peak.formUnion(chord)
-            return false
+            return nil
         }
-        guard let start = heldSince else { return false }
+        guard let start = heldSince else { return nil }
         let held = peak
         heldSince = nil
         peak = []
-        guard blockedChords.contains(held) else { return false }
-        guard date.timeIntervalSince(start) <= Self.maximumHold else { return false }
-        if let lastHotkeyFire, lastHotkeyFire >= start { return false }
-        return true
+        guard blockedChords.contains(held) else { return nil }
+        guard date.timeIntervalSince(start) <= Self.maximumHold else { return nil }
+        return start
+    }
+
+    static func arrived(since start: Date, lastHotkeyFire: Date?) -> Bool {
+        guard let lastHotkeyFire else { return false }
+        return lastHotkeyFire >= start.addingTimeInterval(-arrivalTolerance)
     }
 }
 

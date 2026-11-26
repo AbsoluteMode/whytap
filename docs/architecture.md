@@ -1416,9 +1416,7 @@ or Key not accepted notice reports the result. Failed checks keep the previous k
 Other selection menus use MacMenu/MacPopup: a 30 pt neutral control with 8 pt corners
 and one down chevron, retaining native menu tracking. Provider menus,
 Backup, display, account/key sheets and translation share this label; the
-screenshot toolbar uses its AppKit counterpart MacPopupButton. Notifications
-centers the menu and enable switch, moving Notification type into the adjacent
-question-mark tooltip/popover. Bindings and saved selections are unchanged.
+screenshot toolbar uses its AppKit counterpart MacPopupButton.
 WHY: .project-docs/decisions/2026-10-20-compact-selection-menus.md
 
 Settings rows explain themselves with a short subtitle that names no
@@ -1480,7 +1478,9 @@ sidebarHome row stays selected, and SettingsBackBar above it leads back
 Notify's list and is gone: like agentMode, the notifications id stays only
 for links, What's new and Lil Bro, and opens the Notify screen
 (SettingsWindowTab.featureScreen). WHY:
-.project-docs/decisions/2026-11-26-notifications-in-notify.md Drop has its own screen (DropFeatureView): the
+.project-docs/decisions/2026-11-26-notifications-in-notify.md
+
+Drop has its own screen (DropFeatureView): the
 lead follows Hold or Toggle; a Needs setup box names what does not work and
 carries the first action; the shortcut is recorded in place with the shared
 HotkeyRecordingSession and saved at once (FeatureShortcutEditor: a key another

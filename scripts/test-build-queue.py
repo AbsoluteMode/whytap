@@ -3,6 +3,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 import json
+import plistlib
 import os
 from pathlib import Path
 import sqlite3
@@ -30,6 +31,7 @@ class QueueTests(unittest.TestCase):
         self.git("-c", "user.name=Queue Test", "-c", "user.email=queue@example.invalid",
                  "commit", "--allow-empty", "-qm", "fixture")
         self.head = self.git("rev-parse", "HEAD").strip()
+        self.app = Path(self.temp.name) / "Applications" / "Whytap.app"  # never the real one
         self.pulls = Path(self.temp.name) / "pulls.git"  # GitHub's refs/pull/<n>/head
         subprocess.run(["git", "init", "-q", "--bare", str(self.pulls)], check=True)
         self.call("configure", "--builder-thread", "builder")
@@ -41,7 +43,7 @@ class QueueTests(unittest.TestCase):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
                                 env={**HERMETIC_ENV, "WHYTAP_BUILD_QUEUE_PULL_REMOTE": str(self.pulls),
-                                     **(env or {})})
+                                     "WHYTAP_INSTALLED_APP": str(self.app), **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -57,6 +59,8 @@ class QueueTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             if content is None:
                 path.unlink()
+            elif isinstance(content, bytes):
+                path.write_bytes(content)
             else:
                 path.write_text(content)
         self.git("add", "-A")
@@ -751,6 +755,280 @@ class QueueTests(unittest.TestCase):
                   '["SidekeyTests.A/testB"]')
         self.call("set", "--ticket", str(ticket), "--status", "queued", "--note", "load")
         self.assertEqual(self.ticket(ticket)["protected_pending"], [])  # validated again
+
+
+    # Preview lane and release batches.
+    # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md,
+    #      .project-docs/decisions/2026-11-26-release-batches.md
+    # Each scenario of the builder's workflow probe for ticket 628 has a test here.
+
+    def lane(self, **settings):
+        (self.repo / ".git" / "whytap-build-queue-builder.json").write_text(
+            json.dumps({"preview_lane": True, **settings}))
+        self.token = Path(self.temp.name) / "orchestrator-token"
+        self.token.write_text("t" * 40)
+        self.call("configure-orchestrator", "--orchestrator", "orchestrator",
+                  "--token-file", str(self.token))
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+
+    def install(self, members, build, base=""):
+        """What a verified install leaves: the app itself names its composition."""
+        plist = self.app / "Contents" / "Info.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        plist.write_bytes(plistlib.dumps({
+            "CFBundleVersion": str(build), "ExodiaSourceRevision": base or self.head,
+            "ExodiaBuildComposition": json.dumps({
+                "base": base or self.head,
+                "members": [{"ticket": t["id"], "head": t["head"]} for t in members]})}))
+
+    def preview(self, pr, head=None, session="worker", ok=True):
+        return self.call("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
+                         "--head", head or self.change(f"Sources/App/View{pr}.swift",
+                                                       f"struct View{pr} {{}}"),
+                         "--title", f"Preview {pr}", "--checks", "branch build",
+                         "--acceptance", "Open it; it does not lag", "--session", session,
+                         "--preview", ok=ok)
+
+    def train(self):
+        return [{"id": t["ticket"], "head": t["head"]} for t in self.call("status")["preview_train"]]
+
+    def previewed(self, pr, build):
+        """Claim, install (train + it) and record a preview as the preview session does."""
+        ticket = self.preview(pr)["ticket"]
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], ticket["id"])
+        self.install(self.train() + [ticket], build)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        return self.ticket(ticket["id"])
+
+    def decide(self, command, ticket, build, *extra, actor="orchestrator", ok=True, head=None):
+        args = ["--ticket", str(ticket["id"]), "--head", head or ticket["head"],
+                "--build", str(build), "--token-file", str(self.token), *extra]
+        if command == "approve":
+            args += ["--by", "owner: feature OK"]
+        return self.call(command, *args, "--note", "relayed", actor=actor, ok=ok)
+
+    def admit(self, files, mode=None):
+        self.git("checkout", "-q", "--detach", self.head)
+        head = self.commit(files)
+        if mode:
+            for name in files:
+                (self.repo / name).chmod(0o755)
+            self.git("add", "-A")
+            self.git("-c", "user.name=Q", "-c", "user.email=q@example.invalid", "commit",
+                     "-qm", "mode")
+            head = self.git("rev-parse", "HEAD").strip()
+        return self.call("preview-admit", "--base", self.head, "--commit", head)
+
+    def test_admission_accepts_only_preview_safe_kinds_of_input(self):  # 628 item 1
+        safe = self.admit({"Sources/App/Panel.swift": "struct Panel { let title = \"Hi\" }\n",
+                           "Resources/en.lproj/Main.strings": "\"a\" = \"b\";\n",
+                           "Resources/Icon.png": b"\x89PNG\r\n\x1a\nrest",
+                           "docs/note.md": "text\n"})
+        self.assertEqual(safe, {"admissible": True, "reasons": []})
+        for files in ({"Sources/App/Panel.swift": "func update() { PlannerSettings.shared.reset() }\n"},
+                      {"Sources/App/ImportedBundle.swift":
+                       "let panel = Bundle(url: candidateURL)?.principalClass\n"},
+                      {"Resources/ViewSupport.bin": b"binary\x00opaque"},
+                      {"Resources/Logo.svg": b"<svg>\x00</svg>"},
+                      {"Resources/Icon.png": "not a png"},
+                      {"Resources/Defaults.plist": "<plist/>"},
+                      {"scripts/tool.py": "print(1)\n"},
+                      {"Package.swift": "// swift-tools-version"}):
+            with self.subTest(files=list(files)):
+                self.assertFalse(self.admit(files)["admissible"])
+        # A changed line that calls an unchanged helper in the same file is judged with it.
+        self.git("checkout", "-q", "--detach", self.head)
+        base = self.commit({"Sources/App/Panel.swift":
+                            "func reset() { UserDefaults.standard.removeAll() }\n"})
+        head = self.commit({"Sources/App/Panel.swift":
+                            "func reset() { UserDefaults.standard.removeAll() }\nfunc tap() { reset() }\n"})
+        self.assertFalse(self.call("preview-admit", "--base", base, "--commit", head)["admissible"])
+        self.assertFalse(self.admit({"Sources/App/Run.swift": "struct Run {}\n"},
+                                    mode="755")["admissible"])
+        self.git("checkout", "-q", "--detach", self.head)
+        link = self.repo / "Resources" / "SupportLink.svg"
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to("../Outside")
+        self.git("add", "-A")
+        self.git("-c", "user.name=Q", "-c", "user.email=q@example.invalid", "commit", "-qm", "l")
+        self.assertFalse(self.call("preview-admit", "--base", self.head, "--commit",
+                                   self.git("rev-parse", "HEAD").strip())["admissible"])
+
+    def test_an_inadmissible_or_stacked_preview_goes_to_normal_validation(self):
+        self.lane()
+        unsafe = self.preview(1, self.change("Sources/App/Store.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        self.assertEqual(self.call("preview-claim")["moved_to_normal_lane"], [unsafe["id"]])
+        self.assertEqual(self.ticket(unsafe["id"])["lane"], "")
+        parent = self.previewed(2, 1801)
+        self.git("checkout", "-q", "--detach", parent["head"])
+        child = self.preview(3, self.commit({"Sources/App/Child.swift": "struct Child {}"}))
+        claim = self.call("preview-claim")  # built on an unmerged PR: never previewed
+        self.assertEqual(claim["moved_to_normal_lane"], [child["ticket"]["id"]])
+        self.assertIn("builds on open PRs", self.ticket(child["ticket"]["id"])["note"])
+
+    def test_the_builder_never_relays_the_owners_decisions(self):  # 628 item 2
+        self.lane()
+        self.call("configure-orchestrator", "--orchestrator", "builder", "--token-file",
+                  str(self.token), ok=False)
+        ticket = self.previewed(1, 1801)
+        self.decide("approve", ticket, 1801, actor="builder", ok=False)
+        self.decide("approve", ticket, 1801, actor="worker", ok=False)
+        self.call("approve", "--ticket", str(ticket["id"]), "--head", ticket["head"], "--build",
+                  "1801", "--by", "owner", "--note", "x", actor="orchestrator", ok=False)
+        self.decide("approve", ticket, 1801)
+        self.assertEqual(self.ticket(ticket["id"])["status"], "approved")
+
+    def test_every_preview_in_an_install_is_decided_against_that_build(self):  # 628 item 2
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)  # the app now carries both
+        self.assertEqual((self.ticket(first["id"])["preview_build"],
+                          self.ticket(second["id"])["preview_build"]), ("1802", "1802"))
+        self.decide("approve", first, 1801, ok=False)  # not what the owner runs now
+        self.decide("approve", first, 1802)
+        self.decide("reject", second, 1802, head=first["head"], ok=False)
+        self.install([], 1803)  # the app no longer carries it
+        self.decide("reject", second, 1803, ok=False)
+
+    def test_release_auto_needs_an_enabled_threshold_that_is_reached(self):  # 628 item 2
+        self.lane()
+        self.decide("approve", self.previewed(1, 1801), 1801)
+        self.call("release", "--auto", "--by", "auto", ok=False)  # trigger off by default
+        self.lane(release_after_approved=2)
+        self.call("release", "--auto", "--by", "auto", ok=False)  # one of two
+        self.lane(release_after_approved=1)
+        self.call("release", "--auto", "--by", "auto", actor="worker", ok=False)
+        self.assertEqual(self.call("release", "--auto", "--by", "auto")["batch"], 1)
+
+    def test_the_final_handoff_sees_a_later_hold_and_a_superseded_head(self):  # 628 item 3/4
+        self.lane()
+        ordinary = self.enqueue(9)["ticket"]
+        self.call("claim")
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        members = json.dumps([{"ticket": ticket["id"], "head": ticket["head"]}])
+        handoff = lambda build=1801: self.call("preview-handoff", "--base", self.head,
+                                               "--members", members, "--ticket",
+                                               str(ticket["id"]), "--build", str(build))
+        self.assertTrue(handoff()["clear"])
+        self.install([], 1801)  # another install got there first
+        self.assertIn("already build 1801", handoff()["problems"][0])
+        self.assertTrue(handoff(1802)["clear"])
+        self.call("set", "--ticket", str(ordinary["id"]), "--status", "pending_install",
+                  "--hold", "--note", "a person must act")
+        self.assertIn("waits for its install", handoff(1802)["problems"][0])
+        self.update(ordinary["id"], "done")
+        self.assertTrue(handoff(1802)["clear"])
+        fix = self.preview(1, self.change("Sources/App/View1.swift", "struct Fixed {}"))["ticket"]
+        self.assertFalse(handoff(1802)["clear"])  # the compiling head was replaced
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "queued", "--note", "stop")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "superseded")
+        self.assertEqual(fix["queued_at"], ticket["queued_at"])  # the fix keeps its place
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+
+    def test_a_recovered_preview_waits_behind_a_local_install(self):  # 628 item 3
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")  # its session then dies
+        merged = self.enqueue(9)["ticket"]
+        self.call("claim")
+        self.call("set", "--ticket", str(merged["id"]), "--status", "pending_install",
+                  "--install-first", "--note", "merged; gate busy")
+        held = self.call("preview-claim")
+        self.assertEqual((held["held_for_install"], held["active"]), ([merged["id"]], None))
+        self.assertEqual(self.ticket(ticket["id"])["status"], "queued")  # keeps its place
+
+    def test_a_historical_receipt_does_not_stop_previews(self):  # 628 item 6
+        self.lane()
+        receipt = self.enqueue(9)["ticket"]
+        self.call("claim")
+        self.call("set", "--ticket", str(receipt["id"]), "--status", "pending_install",
+                  "--note", "public release published; remote install unverified")
+        self.assertEqual(self.call("status")["local_install_blockers"], [])
+        ticket = self.preview(1)["ticket"]
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], ticket["id"])
+
+    def test_a_release_batch_respects_the_install_boundary(self):  # 628 item 3
+        self.lane()
+        self.decide("approve", self.previewed(1, 1801), 1801)
+        merged = self.enqueue(8)["ticket"]
+        self.assertEqual(self.call("claim")["ticket"]["id"], merged["id"])
+        self.call("set", "--ticket", str(merged["id"]), "--status", "pending_install", "--hold",
+                  "--note", "a person must act")
+        self.call("release", "--by", "owner: release", "--token-file", str(self.token),
+                  actor="orchestrator")
+        self.git("checkout", "-q", "--detach", self.head)
+        docs = self.enqueue(9, self.commit({"docs/x.md": "x"}))["ticket"]
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        claimed = self.call("claim")
+        self.assertEqual(claimed["ticket"]["id"], docs["id"])  # the batch waits, docs go
+
+    def test_installed_state_comes_from_the_app_itself(self):  # 628 item 4
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        self.install([ticket], 1801)  # swapped, then the session died before recording
+        fix = self.preview(1, self.change("Sources/App/View1.swift", "struct Fix {}"))["ticket"]
+        status = self.call("status")
+        self.assertEqual(status["installed_app"]["members"],
+                         [{"ticket": ticket["id"], "head": ticket["head"]}])
+        self.assertTrue(status["preview_rebuild"])  # it carries a head nobody wants now
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "late record")  # a newer ticket exists: superseded, not recorded
+        self.assertEqual(self.ticket(ticket["id"])["status"], "superseded")
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+        self.install([], 1802)
+        self.call("set", "--ticket", str(fix["id"]), "--status", "awaiting_approval", "--note",
+                  "not installed", ok=False)  # the app does not carry it
+
+    def test_a_release_batch_keeps_its_merge_order_and_checkpoints(self):  # 628 item 5
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)
+        self.decide("approve", second, 1802)  # approved out of FIFO order
+        self.decide("approve", first, 1802)
+        self.call("release", "--by", "owner: release", "--token-file", str(self.token),
+                  actor="orchestrator")
+        order = [t["id"] for t in self.call("claim")["tickets"]]
+        self.assertEqual(order, [first["id"], second["id"]])
+        again = self.call("claim")["active_batch"]  # after a restart: the same order
+        self.assertEqual([t["id"] for t in again["tickets"]], order)
+        self.call("set", "--ticket", str(first["id"]), "--status", "pending_install",
+                  "--install-first", "--note", "merged at abc; batch member 1 of 2")
+        self.assertEqual([t["id"] for t in self.call("claim")["active_batch"]["tickets"]],
+                         [second["id"]])  # the checkpoint: only the unmerged member remains
+        self.call("release", "--by", "again", "--token-file", str(self.token),
+                  actor="orchestrator", ok=False)  # one batch at a time
+
+    def test_a_moved_member_head_leaves_the_batch_and_the_others_go_on(self):  # 628 item 4
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)
+        self.decide("approve", first, 1802)
+        self.decide("approve", second, 1802)
+        self.call("release", "--by", "owner", "--token-file", str(self.token),
+                  actor="orchestrator")
+        self.git("push", "-q", str(self.pulls), f"{self.change('Sources/App/X.swift', 'x')}:"
+                 "refs/pull/1/head")
+        self.git("push", "-q", str(self.pulls), f"{second['head']}:refs/pull/2/head")
+        claimed = self.call("claim")
+        self.assertEqual(([t["id"] for t in claimed["tickets"]], claimed["returned_moved_heads"]),
+                         ([second["id"]], [first["id"]]))
+        self.assertNotIn(first["id"], [t["ticket"] for t in self.call("status")["preview_train"]])
+
+    def test_switching_the_lane_off_strands_nothing(self):  # 628 item 6
+        self.lane()
+        building = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        waiting = self.preview(2)["ticket"]
+        moved = self.call("preview-lane-off")["moved_to_normal_lane"]
+        self.assertEqual(sorted(moved), sorted([building["id"], waiting["id"]]))
+        self.assertEqual({self.ticket(t)["status"] for t in moved}, {"queued"})
+        (self.repo / ".git" / "whytap-build-queue-builder.json").write_text("{}")
+        later = self.preview(3)["ticket"]
+        self.assertEqual(later["lane"], "")
 
 
 if __name__ == "__main__":

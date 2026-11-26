@@ -41,6 +41,34 @@ with open(control / "sessions.log", "a") as output:
                              "cwd": os.getcwd()}) + "\n")
 if (control / "noop").exists():
     sys.exit(0)
+if '"lane": "preview"' in prompt:
+    with open(control / "previews.log", "a") as output:
+        output.write(json.dumps({"cwd": os.getcwd(), "lease": lease}) + "\n")
+    import plistlib
+    app = Path(os.environ["WHYTAP_INSTALLED_APP"]) / "Contents" / "Info.plist"
+    def install(members):
+        """What a verified install leaves behind: the app names its composition."""
+        build = 1800
+        if app.exists():
+            build = int(plistlib.loads(app.read_bytes())["CFBundleVersion"])
+        app.parent.mkdir(parents=True, exist_ok=True)
+        app.write_bytes(plistlib.dumps({"CFBundleVersion": str(build + 1),
+                                        "ExodiaBuildComposition": json.dumps(
+                                            {"base": "", "members": members})}))
+    while True:
+        claim = queue("preview-claim")
+        ticket = claim.get("ticket") or claim.get("active")
+        train = [{"ticket": t["ticket"], "head": t["head"]}
+                 for t in queue("status")["preview_train"]]
+        if ticket:
+            install(train + [{"ticket": ticket["id"], "head": ticket["head"]}])
+            queue("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "fake preview installed")
+        elif claim.get("rebuild"):
+            install(train)
+        else:
+            break
+    sys.exit(0)
 for ticket in queue("status")["tickets"]:
     if ticket["status"] == "pending_install" and ticket["retry"] in ("meeting", "first"):
         queue("set", "--ticket", str(ticket["id"]), "--status", "done", "--note", "installed")
@@ -126,7 +154,8 @@ class WatcherTests(unittest.TestCase):
         self.base = base
         self.env = {**os.environ, "FAKE_CONTROL": str(self.control), "FAKE_QUEUE": str(QUEUE),
                     "WHYTAP_WATCHER_LAUNCHCTL": str(base / "launchctl"),
-                    "WHYTAP_WATCHER_LAUNCH_AGENTS": str(base / "LaunchAgents")}
+                    "WHYTAP_WATCHER_LAUNCH_AGENTS": str(base / "LaunchAgents"),
+                    "WHYTAP_INSTALLED_APP": str(base / "Applications" / "Whytap.app")}
         self.env.pop("CODEX_THREAD_ID", None)
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
         self.pulls = base / "pulls.git"  # GitHub's refs/pull/<n>/head, locally
@@ -166,7 +195,8 @@ class WatcherTests(unittest.TestCase):
 
     def queue(self, *args, actor=None, ok=True):
         result = subprocess.run([sys.executable, str(QUEUE), "--actor", actor or self.builder,
-                                 *args], cwd=self.repo, capture_output=True, text=True)
+                                 *args], cwd=self.repo, env=self.env, capture_output=True,
+                                text=True)
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
 
@@ -653,6 +683,161 @@ class WatcherTests(unittest.TestCase):
         self.assertIn(f"undelivered:{after}", conditions)
         self.assertNotIn(f"undelivered:{before}", conditions)
 
+    # Preview lane (.project-docs/decisions/2026-11-26-preview-before-validation.md)
+
+    def preview_ticket(self, pr, name="Sources/App/Window.swift"):
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        self.git("checkout", "-q", "--detach", self.head)
+        (self.repo / name).parent.mkdir(parents=True, exist_ok=True)
+        (self.repo / name).write_text("ui " + str(pr))
+        self.git("add", "-A")
+        self.git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit", "-qm", "ui")
+        head = self.git("rev-parse", "HEAD").strip()
+        return self.queue("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
+                          "--head", head, "--title", "Preview", "--checks", "branch build",
+                          "--acceptance", "No lag", "--source", "claude", "--session", WORKER,
+                          "--preview")["ticket"]["id"]
+
+    def test_validation_watcher_starts_no_session_for_preview_tickets(self):
+        self.configure_watcher(preview_lane=True, preview_worktree=str(self.base / "preview"))
+        (self.control / "noop").touch()
+        self.preview_ticket(1)
+        self.watcher("run")
+        self.assertEqual(self.sessions(), [])
+
+    def test_disabled_lane_does_not_strand_a_submission(self):
+        ticket = self.preview_ticket(1)  # the lane is off: normal validation
+        self.watcher("run")
+        self.assertEqual(self.watcher("run-preview").returncode, 0)
+        self.assertFalse((self.control / "previews.log").exists())
+        self.assertEqual(self.statuses()[ticket], "done")
+
+    def orchestrator(self):
+        token = self.base / "orchestrator-token"
+        token.write_text("t" * 40)
+        self.queue("configure-orchestrator", "--orchestrator", "orchestrator",
+                   "--token-file", str(token))
+        return token
+
+    def test_activation_does_not_interrupt_active_preview(self):
+        import fcntl
+        self.configure_watcher(preview_lane=True)
+        with (self.root / "whytap-build-queue-preview.lock").open("w") as lease:
+            fcntl.flock(lease, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.watcher("activate", "--allow-local", "--no-preview-lane", ok=False)
+            self.watcher("deactivate", ok=False)
+        (self.root / "whytap-app.lock").mkdir()
+        error = self.watcher("activate", "--allow-local", ok=False).stderr
+        self.assertIn("app install", error)
+        self.assertFalse((self.control / "launchctl.log").exists())
+
+    def test_a_stacked_preview_goes_to_validation_and_then_back_to_its_author(self):
+        self.configure_watcher(preview_lane=True, preview_worktree=str(self.base / "preview"))
+        (self.control / "noop").touch()
+        parent = self.enqueue(9)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.preview_ticket(1)
+        with sqlite3.connect(self.root / "exodia-build-queue.sqlite3") as db:
+            db.execute("UPDATE tickets SET depends_on=? WHERE id=?",
+                       (json.dumps(["https://github.com/example/app/pull/9"]), child))
+        (self.control / "noop").unlink()
+        self.watcher("run-preview")  # a stacked preview is never previewed
+        ticket = self.queue("status", "--ticket", str(child))["tickets"][0]
+        self.assertEqual((ticket["status"], ticket["lane"]), ("queued", ""))
+        self.configure_watcher(stale_dependency_minutes=0)
+        (self.control / "noop").touch()
+        self.watcher("run")
+        self.assertEqual(self.statuses()[child], "blocked")
+
+    def test_a_ready_preview_alerts_the_orchestrator_and_notes_stay_small(self):
+        mirror = self.base / "orchestrator" / "alerts.jsonl"
+        self.configure_watcher(preview_lane=True, alerts_mirror=str(mirror),
+                               preview_worktree=str(self.base / "preview"), notes_max_bytes=100)
+        (self.root / "whytap-builder-notes").write_text("".join(f"line {n}\n" for n in range(500)))
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        # Only the validation lane trims the notes, under its own session lock.
+        self.assertEqual(len((self.root / "whytap-builder-notes").read_text().splitlines()), 500)
+        self.watcher("run")
+        ready = [a for a in self.alerts(mirror) if a["condition"] == f"ready_to_check:{preview}"]
+        self.assertEqual([a["state"] for a in ready], ["raised"])
+
+    def test_the_count_trigger_starts_one_release_batch(self):
+        self.configure_watcher(preview_lane=True, release_after_approved=1,
+                               preview_worktree=str(self.base / "preview"))
+        token = self.orchestrator()
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        (self.control / "noop").touch()
+        head = self.queue("status", "--ticket", str(preview))["tickets"][0]["head"]
+        self.queue("approve", "--ticket", str(preview), "--head", head, "--build", "1801",
+                   "--by", "owner: OK", "--note", "x", "--token-file", str(token),
+                   actor="orchestrator")
+        self.configure_watcher(preview_lane=True, release_after_approved=0,
+                               preview_worktree=str(self.base / "preview"))
+        self.watcher("run")  # the trigger is off: nothing starts
+        self.assertEqual(self.queue("status", "--ticket", str(preview))["tickets"][0]["batch"], 0)
+        self.configure_watcher(preview_lane=True, release_after_approved=1,
+                               preview_worktree=str(self.base / "preview"))
+        self.watcher("run")
+        ticket = self.queue("status", "--ticket", str(preview))["tickets"][0]
+        self.assertEqual(ticket["batch"], 1)
+
+    def test_a_preview_is_installed_while_a_validation_session_runs(self):
+        self.configure_watcher(preview_lane=True,
+                               preview_worktree=str(self.base / "preview"))
+        (self.control / "hold").touch()
+        self.enqueue(9)
+        running = self.start_watcher()
+        self.wait_for((self.control / "holding").exists, "the validation session to hold")
+        preview = self.preview_ticket(1)
+        self.watcher("run-preview")
+        self.assertEqual(self.statuses()[preview], "awaiting_approval")
+        sessions = self.lines("previews.log")
+        self.assertEqual(json.loads(sessions[0])["cwd"], str(self.base / "preview"))
+        self.assertTrue((self.root / "whytap-build-queue-preview-state.json").exists())
+        (self.control / "holding").unlink()
+        self.assertEqual(running.wait(timeout=30), 0)
+        self.assertEqual(self.statuses(), {1: "done", preview: "awaiting_approval"})
+        # The owner sends it back: the preview lane rebuilds the train without it.
+        token = self.orchestrator()
+        head = self.queue("status", "--ticket", str(preview))["tickets"][0]["head"]
+        self.queue("reject", "--ticket", str(preview), "--note", "lags", "--head", head,
+                   "--build", "1801", "--token-file", str(token), actor="orchestrator")
+        self.assertTrue(self.queue("status")["preview_rebuild"])
+        self.watcher("run-preview")
+        self.assertEqual(len(self.lines("previews.log")), 2)
+        status = self.queue("status")
+        self.assertFalse(status["preview_rebuild"])
+        self.assertEqual(status["installed_app"]["members"], [])
+
+    def test_activation_loads_the_preview_agent_only_when_asked(self):
+        token = self.base / "orchestrator-token"
+        token.write_text("t" * 40)
+        error = self.watcher("activate", "--allow-local", "--preview-lane", ok=False).stderr
+        self.assertIn("needs an orchestrator", error)
+        self.watcher("activate", "--allow-local", "--preview-lane", "--orchestrator", ACTOR,
+                     "--orchestrator-token-file", str(token), ok=False)
+        self.assertFalse((self.control / "launchctl.log").exists())  # refused before changes
+        self.assertNotIn("orchestrator", self.queue("status")["builder"])
+        self.watcher("activate", "--allow-local", "--preview-lane", "--orchestrator",
+                     "orchestrator", "--orchestrator-token-file", str(token))
+        agents = self.base / "LaunchAgents"
+        preview = agents / "ai.whytap.build-queue-preview.plist"
+        self.assertIn("<string>run-preview</string>", preview.read_text())
+        self.assertIn("<string>run</string>", (agents / "ai.whytap.build-queue-watcher.plist")
+                      .read_text())
+        self.assertTrue(json.loads((self.root / "whytap-build-queue-builder.json").read_text())
+                        ["preview_lane"])
+        self.watcher("deactivate")
+        self.assertEqual(list(agents.glob("*.plist")), [])
+        self.assertFalse(json.loads((self.root / "whytap-build-queue-builder.json").read_text())
+                         ["preview_lane"])
+        # A later --preview submission has no watcher: it goes to normal validation.
+        ticket = self.preview_ticket(1)
+        self.assertEqual(self.queue("status", "--ticket", str(ticket))["tickets"][0]["lane"], "")
+
     def test_a_moved_pr_head_goes_back_to_its_author_without_a_session(self):
         ticket = self.enqueue(1)
         moved = self.move_pr_head(1)
@@ -911,7 +1096,7 @@ class ActivationTests(WatcherTests):
 
     def merged_scripts(self, **changed):
         names = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
-                 "build-queue-watcher.plist.template")
+                 "build-queue-preview-prompt.md", "build-queue-watcher.plist.template")
         return {"scripts/" + n: changed.get(n, (SCRIPTS / n).read_bytes()) for n in names}
 
     def test_activation_refuses_scripts_that_differ_from_origin_main(self):

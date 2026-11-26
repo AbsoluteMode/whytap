@@ -1549,10 +1549,14 @@ opens the island panel. Display's settings are DisplayBrightnessSettings
 only offers Open Display settings) and it lists Keyboard control as optional,
 for Brightness keys. Calendar's screen holds SettingsCalendarIntegrationsView
 (moved out of Integrations, which keeps GitHub and Coding tools) and is Ready
-once it shows a calendar (FeatureSetupSnapshot.calendarConnected: this Mac's
-calendars on and readable, or an account an earlier build connected; never
-while CalendarAvailability is closed), otherwise quietly Not set up;
-snapshotCountChanges also follows that value. History needs nothing. Hover's
+once it shows a calendar (FeatureSetupSnapshot.calendarConnected: macAccess is
+ready, the same check as the Calendars card, or an account an earlier build
+connected; never while CalendarAvailability is closed), otherwise quietly Not
+set up. Saved access not checked yet, taken back or with no calendars is not
+Ready: Features Home calls prepareMacCalendars() on appear and on activation
+(no prompt, no events) and snapshotCountChanges follows the value. The open
+Drop screen rereads both languages on UserDefaults.didChangeNotification, so
+Output Lang changed in the island shows at once. History needs nothing. Hover's
 row chevron leads a tool to its feature's screen (HoverFeatureView.feature(for:);
 Drop's tiles to Drop, Record and Notes to Meeting Notes), else to Toolbox. WHY:
 .project-docs/decisions/2026-11-26-every-feature-in-features.md
@@ -1901,7 +1905,7 @@ ones for the current opening, then appear only in History. Native tooltips expos
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
 Calendar is released (2026-11-22): CalendarAvailability.shipped = true. The
 switch stays: false closes Calendar again as "Soon" (tile, search row, Toolbox
-pane and Integrations card show a Soon badge and are inert; HoverSlotRouter
+pane and the Calendars card on Settings -> Features -> Calendar show a Soon badge and are inert; HoverSlotRouter
 returns .comingSoon; CalendarConnections refuses connect/enable/refresh so macOS
 is never asked; saved shortcuts register no key; stored connections are kept).
 New surfaces, onboarding included, check CalendarAvailability.isOpen /
@@ -1924,7 +1928,8 @@ toward the hidden-calendar limit; inactive direct-connection entries make room. 
 saved or refused Apple connection when Calendar or Settings opens and when the
 app becomes active, so neither shows a stale answer.
 Since 2026-11-23 Calendar on this Mac is the only way to connect: Hover's
-Calendars page and Settings -> Integrations -> Calendars show
+Calendars page and Settings -> Features -> Calendar -> Calendars (Integrations
+until 2026-11-26) show
 CalendarConnections.macAccess (notAsked / refused / loading / noCalendars /
 ready), one Allow access button, the Mac's calendars grouped by EventKit source
 (macCalendarGroups) with a tick each (hiddenFeeds, apple: feeds only; Whytap's
@@ -2005,7 +2010,7 @@ does not create a settings version or full backup; subsequent backups capture th
 latest token, and restored sign-in can require reconnecting. No
 shared OAuth registrations are created by the app itself; the owner supplies
 registered native clients during packaging through configure-calendar-clients.py.
-Settings → Integrations lists Google Calendar, Outlook Calendar, Apple Calendar
+Until 2026-11-23 Settings → Integrations listed Google Calendar, Outlook Calendar, Apple Calendar
 and Zoom Calendar separately, with feature permissions and direct provider authorization.
 Shared Google and Zoom clients cannot start new browser sign-in until actual
 provider approval is recorded by the publicAccessApproved packaging string.

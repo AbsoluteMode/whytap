@@ -131,6 +131,8 @@ struct FeaturesFixture {
             defaults: defaults, oauth: CalendarOAuthClient(storage: PlannerMemoryCredentials()),
             apple: AppleCalendarAccess(status: { usual ? .fullAccess : .notDetermined }, request: { false },
                                        read: { _ in ([workFeed], []) }, list: { [workFeed] }))
+        // As Features Home does on appear: the access and the list, no events.
+        calendars.prepareMacCalendars()
         let clipboard = clipboard
         var environment = FeaturesEnvironment(
             dropMode: { dropMode },

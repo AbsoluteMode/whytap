@@ -69,12 +69,13 @@ final class EveryFeatureInFeaturesTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.status(for: .calendar, snapshot: snapshot), .notSetUp([]))
     }
 
-    func testCalendarShowsACalendarWhenThisMacsAreReadableOrAnOldAccountIsLeft() {
-        XCTAssertFalse(FeaturesEnvironment.calendarConnected(appleEnabled: false, appleAccessOff: false, hasAccounts: false))
-        XCTAssertTrue(FeaturesEnvironment.calendarConnected(appleEnabled: true, appleAccessOff: false, hasAccounts: false))
-        XCTAssertFalse(FeaturesEnvironment.calendarConnected(appleEnabled: true, appleAccessOff: true, hasAccounts: false),
-                       "macOS took the access back")
-        XCTAssertTrue(FeaturesEnvironment.calendarConnected(appleEnabled: false, appleAccessOff: false, hasAccounts: true))
+    func testCalendarShowsACalendarOnlyWhenTheCardDoesOrAnOldAccountIsLeft() {
+        XCTAssertTrue(FeaturesEnvironment.calendarConnected(macAccess: .ready, hasAccounts: false))
+        for access in [MacCalendarAccess.notAsked, .refused, .loading, .noCalendars] {
+            XCTAssertFalse(FeaturesEnvironment.calendarConnected(macAccess: access, hasAccounts: false), "\(access)")
+            XCTAssertTrue(FeaturesEnvironment.calendarConnected(macAccess: access, hasAccounts: true),
+                          "an account an earlier build connected: \(access)")
+        }
     }
 
     func testTheLiveSnapshotReadsCalendarsOfTheFixtureOnly() async throws {

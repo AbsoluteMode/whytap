@@ -55,9 +55,16 @@ struct SettingsFeaturesView: View {
             await models.onAppear()
             if environment.supportsOnDevice { await onDevice.refresh() }
         }
-        .onAppear { permissions.refresh(restartRecoveryPolling: false) }
+        .onAppear {
+            permissions.refresh(restartRecoveryPolling: false)
+            // Calendar's status: macOS access and the calendar list now (no
+            // prompt, no events), as the Calendars card checks them.
+            // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+            environment.calendarConnections.prepareMacCalendars()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissions.refresh(restartRecoveryPolling: false)
+            environment.calendarConnections.prepareMacCalendars()
         }
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyCapabilityFlagsChanged)) { _ in
             externalChange += 1

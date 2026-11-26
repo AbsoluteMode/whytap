@@ -45,11 +45,14 @@ answer only in Hotkeys.
   control, optional, for Brightness keys only. Always Ready.
 - **History**: no settings of its own exist, none were invented. Always Ready.
 - **Calendar**: the Calendars card (`SettingsCalendarIntegrationsView`) moves
-  here from Integrations. Ready once it shows a calendar (this Mac's are on and
-  readable, or an account an earlier build connected), otherwise quietly Not
-  set up; never Ready while Calendar is closed as Soon.
+  here from Integrations. Ready once it shows a calendar (the card's own check:
+  macOS allows reading and the list has a calendar, or an account an earlier
+  build connected), otherwise quietly Not set up; never Ready while Calendar is
+  closed as Soon. Features Home rechecks access and the list on appear and on
+  activation, without a prompt or an event read.
 - **Drop** gets "Language Drop writes in" (Smart's output language, the same
-  preference as Output Lang; As spoken is no translation).
+  preference as Output Lang; As spoken is no translation). The open screen
+  follows a change made in the island.
 - **Agent** lists its link keys (Paste the chosen link, Open the chosen link,
   Next link, Previous link) among its shortcuts, saved in the same fields as
   Hotkeys.
@@ -86,6 +89,11 @@ new screens, Drop and the Agent in both themes, usual and fresh.
 `FeatureCatalogTests` covers the 14 rows and their fresh-install statuses.
 That the moved rows are gone from Toolbox and Integrations was checked in the
 code and the pictures, not by a test.
+
+The builder's review of ticket 667 found Calendar Ready with access taken
+back or zero calendars (the saved opt-in counted as a calendar) and an open
+Drop screen keeping an old output language; both are covered by
+`FeaturesRelocationRegressionTests`, the builder's reproducer.
 
 Not checked in a running app: Extra on a real XDR display from the screen,
 the calendars card's macOS prompt from its new place.

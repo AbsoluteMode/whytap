@@ -120,10 +120,13 @@ struct FeaturesEnvironment {
     // WHY: .project-docs/decisions/2026-11-25-settings-features-refresh.md
     var snapshotCountChanges: AnyPublisher<Void, Never> {
         let calendar = calendarConnections
-        let calendarShown = calendar.$appleEnabled
-            .combineLatest(calendar.$appleAccessOff, calendar.$accounts.map(\.isEmpty))
-            .map { enabled, accessOff, noAccounts in Self.calendarConnected(appleEnabled: enabled, appleAccessOff: accessOff,
-                                                                             hasAccounts: !noAccounts) }
+        // Published values arrive before the change is stored: read the
+        // connections on the next turn of the run loop.
+        let calendarShown = calendar.objectWillChange
+            .receive(on: RunLoop.main)
+            .map { [calendar] _ in Self.calendarConnected(macAccess: calendar.macAccess,
+                                                          hasAccounts: !calendar.accounts.isEmpty) }
+            .prepend(Self.calendarConnected(macAccess: calendar.macAccess, hasAccounts: !calendar.accounts.isEmpty))
             .removeDuplicates()
         return notifySupervisor.$sources.map(\.count).removeDuplicates()
             .combineLatest(monitor.$availableDashboardCount, calendarShown)
@@ -132,10 +135,12 @@ struct FeaturesEnvironment {
             .eraseToAnyPublisher()
     }
 
-    /// Calendar shows a calendar: this Mac's are on and readable, or an
-    /// account an earlier build connected directly is still there.
-    nonisolated static func calendarConnected(appleEnabled: Bool, appleAccessOff: Bool, hasAccounts: Bool) -> Bool {
-        (appleEnabled && !appleAccessOff) || hasAccounts
+    /// Calendar shows a calendar: macOS lets Whytap read this Mac's
+    /// calendars and the list has one (the Calendars card says the same), or
+    /// an account an earlier build connected directly is still there. Saved
+    /// access that was not checked yet, taken back or with no calendars is not.
+    nonisolated static func calendarConnected(macAccess: MacCalendarAccess, hasAccounts: Bool) -> Bool {
+        macAccess == .ready || hasAccounts
     }
 
     static func copyToClipboard(_ text: String) {
@@ -180,8 +185,7 @@ extension FeatureSetupSnapshot {
             notifySources: environment.notifySupervisor.sources.count,
             monitorDashboards: environment.monitor.availableDashboardCount,
             calendarConnected: FeaturesEnvironment.calendarConnected(
-                appleEnabled: environment.calendarConnections.appleEnabled,
-                appleAccessOff: environment.calendarConnections.appleAccessOff,
+                macAccess: environment.calendarConnections.macAccess,
                 hasAccounts: !environment.calendarConnections.accounts.isEmpty)
         )
     }

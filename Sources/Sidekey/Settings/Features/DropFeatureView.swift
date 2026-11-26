@@ -69,14 +69,25 @@ struct DropFeatureView: View {
             wordsGroup
         }
         .onAppear(perform: reload)
+        // Output Lang and Input Lang in the island write the same preferences:
+        // the open screen shows the value Drop uses now.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            reloadLanguages()
+        }
         .onDisappear { shortcut.cancel() }
     }
 
     private func reload() {
-        language = environment.language()
-        targetLanguage = environment.targetLanguage()
+        reloadLanguages()
         volumeDuck = environment.volumeDuck.isEnabled
         autoStop = environment.autoStop.isEnabled
+    }
+
+    private func reloadLanguages() {
+        let spoken = environment.language()
+        if spoken != language { language = spoken }
+        let written = environment.targetLanguage()
+        if written != targetLanguage { targetLanguage = written }
     }
 
     // MARK: - Shortcut

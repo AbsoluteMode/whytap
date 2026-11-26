@@ -887,11 +887,13 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual((older[0], older[379], older[380]), ("first 000", "first 379",
                                                               "first 380"))
         self.assertEqual(len(older) + 120, 900)
+        # One line over the limit: archived whole, the notes keep its newest part.
         notes.write_text("x" * 5000 + "\n")
         self.enqueue(3)
         self.watcher("run")
-        self.assertEqual(archive.read_text().splitlines(), older)
-        self.assertEqual(len(notes.read_text()), 5001)
+        self.assertEqual(archive.read_text().splitlines(), older + ["x" * 5000])
+        self.assertLessEqual(notes.stat().st_size, 2000)
+        self.assertTrue(notes.read_text().startswith("[...] x"))
 
     def test_every_byte_bound_of_the_notes_counts_utf8_bytes(self):
         """Review item 5 on ticket 635: the notes and the archive stay within their
@@ -926,6 +928,38 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(moved[0], line.rstrip("\n"))  # starts at a whole line
         kept = notes.read_text().splitlines()
         self.assertEqual(int(moved[-1][:3]) + 1, int(kept[0][:3]))  # nothing lost between
+
+    def test_an_overlong_line_is_bounded_without_cutting_a_character(self):
+        """Review of ticket 641: every shape of overlong line, every cut offset."""
+        spec = importlib.util.spec_from_file_location("watcher_cuts", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        for char in ("a", "é", "中", "\U0001F680"):
+            line = (char * 60 + "\n").encode()
+            for limit in range(0, len(line) + 2):
+                with self.subTest(char=char, limit=limit):
+                    for cut in (watcher.utf8_tail(line, limit), watcher.tail_lines(line * 3, limit)):
+                        self.assertLessEqual(len(cut), limit)
+                        cut.decode("utf-8")  # never a split character
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        rocket = "\U0001F680" * 60  # 240 bytes on one line
+        shapes = {"alone": [rocket], "newest after older lines": ["older one", "older two", rocket],
+                  "oldest before short lines": [rocket, "newer one", "newer two"]}
+        for number, (shape, lines) in enumerate(shapes.items(), 1):
+            with self.subTest(shape):
+                archive.unlink(missing_ok=True)
+                self.configure_watcher(notes_max_bytes=101)
+                notes.write_text("\n".join(lines) + "\n")
+                self.enqueue(number)
+                self.watcher("run")
+                kept, moved = notes.read_bytes(), archive.read_bytes()
+                self.assertLessEqual(len(kept), 101)
+                kept.decode("utf-8"), moved.decode("utf-8")
+                text = moved.decode() + kept.decode()
+                for whole in lines:  # every complete line survives whole somewhere
+                    self.assertIn(whole, text if whole != rocket else moved.decode())
+                if lines[-1] != rocket:
+                    self.assertTrue(kept.decode().endswith(lines[-1] + "\n"))
 
 class ActivationTests(WatcherTests):
     builder = "previous-builder-chat"

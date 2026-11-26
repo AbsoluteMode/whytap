@@ -44,4 +44,37 @@ class ScreenStateTests(unittest.TestCase):
         for data, expected in cases:
             with self.subTest(data=data[:60]):
                 self.assertEqual(gate.screen_state(data, 501)[0], expected)
+class HandoffTests(unittest.TestCase):
+    """Review of ticket 641: the screen must be unlocked before and after the audio
+    samples, and a failed probe never clears (every order of failure enumerated)."""
+    def test_clear_only_when_the_screen_holds_through_the_samples(self):
+        clear, locked, unknown = ('clear', 'screen_unlocked'), ('busy', 'screen_locked'), \
+            ('unknown', 'screen_state_unreadable')
+        audio_clear = lambda: ('clear', {'reason': 'three_current_snapshots_without_call_audio'})
+        audio_busy = lambda: ('busy', {'reason': 'microphone_in_use'})
+        cases = [((clear, clear), audio_clear, 'clear'),
+                 ((locked,), audio_clear, 'busy'), ((unknown,), audio_clear, 'unknown'),
+                 ((clear, locked), audio_clear, 'busy'),
+                 ((clear, ('busy', 'session_not_on_console')), audio_clear, 'busy'),
+                 ((clear, unknown), audio_clear, 'unknown'),
+                 ((clear, clear), audio_busy, 'busy')]
+        for screens, audio, expected in cases:
+            with self.subTest(screens=screens, expected=expected):
+                sequence = iter(screens)
+                calls = []
+                status, evidence = gate.handoff(lambda: calls.append(1) or next(sequence), audio)
+                self.assertEqual(status, expected)
+                if screens[0][0] != 'clear':
+                    self.assertEqual(len(calls), 1)  # no audio sampled on a locked Mac
+    def test_a_failed_probe_is_never_read_as_clearance(self):
+        class Result:
+            def __init__(self, code, stdout):
+                self.returncode, self.stdout = code, stdout
+        unlocked = plistlib.dumps({'IOConsoleUsers': [{'kCGSSessionUserIDKey': gate.os.getuid(),
+                                                       'kCGSSessionOnConsoleKey': True}]})
+        self.assertEqual(gate.screen_probe(lambda *a, **k: Result(0, unlocked))[0], 'clear')
+        self.assertEqual(gate.screen_probe(lambda *a, **k: Result(1, unlocked))[0], 'unknown')
+        def raises(*a, **k):
+            raise OSError('no ioreg')
+        self.assertEqual(gate.screen_probe(raises)[0], 'unknown')
 if __name__=='__main__':unittest.main()

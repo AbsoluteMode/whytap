@@ -52,7 +52,9 @@ cost a noticeable part of each session.
   that keeps or ends its place and always refreshes `submitted_at`. The
   author may resubmit the identical head only after a return without review;
   a head a builder reviewed and blocked stays blocked, and queued, active or
-  installed heads stay idempotent.
+  installed heads stay idempotent. Every write that changes the dependency
+  graph (a new head, a returned head coming back) passes one check that
+  refuses a cycle, direct or through other open PRs.
 - The watcher returns a queued ticket whose `--depends-on` PR has been
   blocked or cancelled for over two hours (`stale_dependency_minutes`).
 - `status --open` lists open work and the earlier tickets of the same PRs, with
@@ -65,8 +67,9 @@ cost a noticeable part of each session.
   tests waits as `pending_install --retry-install`; install sessions start
   only with an unlocked screen, and the one install gate run right before
   every Quit (`build-queue-meeting-gate.py`) itself refuses a locked screen or
-  a session not in front, so a recovered candidate or a screen that locked
-  after packaging cannot reach the Quit, run the recorded tests on main before
+  a session not in front, read before and again after its audio samples
+  (a failed or malformed screen probe is never clear), so a recovered
+  candidate or a screen that locked after packaging cannot reach the Quit, run the recorded tests on main before
   packaging, and a failure holds the install. `done` is refused while tests
   are pending.
 - Local refresh: `EXODIA_LOCAL_INSTALL=1` builds an arm64-only app without a
@@ -77,7 +80,9 @@ cost a noticeable part of each session.
   installed app's before compiling (`scripts/local-install-floor.py`). Public releases
   are unchanged.
 - The watcher keeps `whytap-builder-notes` at most 120 lines and half of
-  `notes_max_bytes` (32 KB, UTF-8 bytes on disk) once it is over that size, appending older lines to
+  `notes_max_bytes` (32 KB, UTF-8 bytes on disk) once it is over that size
+  (a single line longer than that goes whole to the archive and the notes keep
+  its newest characters; no cut splits a character), appending older lines to
   `whytap-builder-notes.old` (its newest megabyte). It trims only under the
   session lock and writes the archive first. The builder reads the last 80
   lines.

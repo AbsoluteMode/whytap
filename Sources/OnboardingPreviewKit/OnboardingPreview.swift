@@ -98,6 +98,8 @@ final class OnboardingPreviewSession {
         /// macOS's microphone dialog was answered Don't Allow.
         var microphoneRefused = false
         weak var permissions: PermissionsSettingsViewModel?
+        /// Multiplies the simulated System Settings delays (tests pass less than 1).
+        var pace: Double = 1
 
         var snapshot: PermissionsHelper.Snapshot {
             .init(accessibilityGranted: accessibility,
@@ -116,7 +118,7 @@ final class OnboardingPreviewSession {
 
         @MainActor func ask(_ step: String, _ change: @escaping (System) -> Void) {
             guard asked.insert(step).inserted else { return grant(change) }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.6 * pace) { [weak self] in
                 if step == "microphone" { self?.microphoneRefused = true }
                 self?.returned()
             }
@@ -124,7 +126,7 @@ final class OnboardingPreviewSession {
 
         /// macOS "answers" a moment later, so Waiting for macOS shows.
         @MainActor func grant(_ change: @escaping (System) -> Void) {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9 * pace) { [weak self] in
                 guard let self else { return }
                 change(self)
                 self.permissions?.refresh(restartRecoveryPolling: false)
@@ -132,8 +134,12 @@ final class OnboardingPreviewSession {
         }
     }
 
+    /// `pace` multiplies every delay the preview's fakes add so a person can
+    /// watch the states (key checks, System Settings, the model download,
+    /// Tavily's answer). Tests pass a small value; the order of events stays.
     init(suiteName: String = OnboardingPreviewSession.suiteName,
-         dwellWait: ((TimeInterval) async -> Void)? = nil) {
+         dwellWait: ((TimeInterval) async -> Void)? = nil,
+         pace: Double = 1) {
         self.suiteName = suiteName
         let defaults = UserDefaults(suiteName: suiteName) ?? UserDefaults()
         defaults.removePersistentDomain(forName: suiteName)
@@ -150,8 +156,8 @@ final class OnboardingPreviewSession {
         let tokens = OnboardingPreviewTokenStore.Box()
         let keys = ProviderKeyStore(makeStore: { OnboardingPreviewTokenStore(account: $0, box: tokens) })
         let routing = AIRoutingStore(defaults: defaults)
-        let providers = OnboardingPreviewProviders()
-        let speechModel = OnboardingPreviewSpeechModel()
+        let providers = OnboardingPreviewProviders(pace: pace)
+        let speechModel = OnboardingPreviewSpeechModel(pace: pace)
         let readiness = OnDeviceSpeechReadiness { speechModel.isPresent }
         let models = APIAndModelsViewModel(
             routing: routing, keys: keys,
@@ -161,6 +167,8 @@ final class OnboardingPreviewSession {
             inputLanguage: { nil }, onDevice: readiness)
 
         let system = System()
+        system.pace = pace
+        OnboardingPreviewURLProtocol.pace = pace
         simulated = system
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
@@ -207,7 +215,8 @@ final class OnboardingPreviewSession {
             // OpenAI speech is shown here already; the app waits for its model.
             offersOpenAISpeech: true,
             // Simulated like every other permission here: no Core Audio tap.
-            systemAudioProbe: { await MainActor.run { system.askedSystemAudio = true } })
+            systemAudioProbe: { await MainActor.run { system.askedSystemAudio = true } },
+            tryQuiet: OnboardingJourneyModel.tryQuiet * pace)
         let model = self.model
         system.returned = { [weak model] in model?.recheckPermissions() }
     }
@@ -244,10 +253,13 @@ final class OnboardingPreviewTokenStore: TokenStore, @unchecked Sendable {
 /// Offline answers for key checks, catalogs, probes and OpenRouter endpoints.
 struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching,
                                    ServerModelChecking {
+    /// Multiplies the simulated answer delays (tests pass less than 1).
+    var pace: Double = 1
+
     /// A server's model check: a name containing "bad" is refused, "offline"
     /// gets no answer, any other passes.
     func check(_ model: String, kind: ServerModel.Kind, on server: ServerEndpoint, apiKey: String?) async -> ServerModelCheckResult {
-        try? await Task.sleep(for: .milliseconds(500))
+        try? await Task.sleep(for: .milliseconds(500 * pace))
         let name = model.lowercased()
         if name.contains("offline") { return .unreachable("\(server.name) didn't answer. Is it running?") }
         if name.contains("bad") { return .failed("\(server.name) has no model named \(model)") }
@@ -318,7 +330,7 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
     ]
 
     func check(_ account: ProviderAccount, apiKey: String?, server: ServerEndpoint?, allowPaidProbe: Bool) async -> KeyStatus {
-        try? await Task.sleep(nanoseconds: 700_000_000)
+        try? await Task.sleep(nanoseconds: UInt64(700_000_000 * pace))
         return Self.answer(apiKey)
     }
 
@@ -330,13 +342,15 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
 final class OnboardingPreviewSpeechModel: OnDeviceSpeechModelManaging, @unchecked Sendable {
     private let lock = NSLock()
     private var present = false
+    private let pace: Double
+    init(pace: Double = 1) { self.pace = pace }
     var isPresent: Bool { lock.withLock { present } }
 
     func status() async -> OnDeviceSpeechModelStatus { isPresent ? .ready : .notDownloaded }
 
     func download(progress: (@Sendable (Double) -> Void)?) async throws {
         for step in 1...24 {
-            try await Task.sleep(nanoseconds: 110_000_000)
+            try await Task.sleep(nanoseconds: UInt64(110_000_000 * pace))
             progress?(Double(step) / 24)
         }
         lock.withLock { present = true }
@@ -352,6 +366,10 @@ final class OnboardingPreviewSpeechModel: OnDeviceSpeechModelManaging, @unchecke
 /// is over its plan (432), "busy" is rate limited (429), "offline" gets no
 /// answer; any other key passes.
 final class OnboardingPreviewURLProtocol: URLProtocol {
+    /// Multiplies the simulated answer delay; set by the newest session
+    /// (tests pass less than 1). Sessions in one process run one at a time.
+    nonisolated(unsafe) static var pace: Double = 1
+
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
 
@@ -370,7 +388,7 @@ final class OnboardingPreviewURLProtocol: URLProtocol {
         let response = HTTPURLResponse(url: request.url ?? URL(string: "https://preview.invalid")!,
                                        statusCode: status ?? 200, httpVersion: "HTTP/1.1",
                                        headerFields: ["Content-Type": "application/json"])!
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6) { [weak self] in
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6 * Self.pace) { [weak self] in
             guard let self else { return }
             guard status != nil else {
                 self.client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))

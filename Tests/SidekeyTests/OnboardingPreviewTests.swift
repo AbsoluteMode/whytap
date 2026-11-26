@@ -11,13 +11,19 @@ import XCTest
 /// WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 @MainActor
 final class OnboardingPreviewTests: XCTestCase {
-    /// The preview's animation ticks can be throttled in an unattended test process.
-    /// Keep the actual dwell duration while testing transitions independently of its frame rate.
+    /// The preview's fakes wait so a person can watch each state (a key check
+    /// 0.7 s, System Settings 1.6 s, ...). The tests run every one of those
+    /// delays and every dwell at a tenth: the same order of events, a tenth of
+    /// the wall time. The dwell is still waited at once, independently of the
+    /// animation's frame rate, which can be throttled in an unattended test process.
+    // WHY: .project-docs/decisions/2026-11-26-test-suite-speed.md
+    static let pace = 0.1
+
     private func makeSession(suiteName: String = "OnboardingPreviewTests-\(UUID().uuidString)",
                              skipLanguage: Bool = true) -> OnboardingPreviewSession {
         let session = OnboardingPreviewSession(suiteName: suiteName, dwellWait: { seconds in
-            try? await Task.sleep(for: .seconds(seconds))
-        })
+            try? await Task.sleep(for: .seconds(seconds * Self.pace))
+        }, pace: Self.pace)
         if skipLanguage, session.model.step == .language { session.model.skip() }
         return session
     }
@@ -343,8 +349,9 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertLessThanOrEqual(ids.count, OnboardingModelPick.listLimit)
         XCTAssertEqual(model.modelChoices(.llmKey).first { $0.id == "gpt-6.2-astra" }?.price, "$8 / $40 per 1M")
 
-        // No automatic move: the step waits for a pick or Next.
-        try await Task.sleep(for: .milliseconds(1_600))
+        // No automatic move: the step waits for a pick or Next. 400 ms is
+        // several times the longest dwell at the tests' pace.
+        try await Task.sleep(for: .milliseconds(400))
         XCTAssertEqual(model.step, .llmKey, "with a choice of models the step waits")
         await model.chooseModel("gpt-6.2-astra", on: .llmKey)
         XCTAssertEqual(model.outcome(.llmKey), .done("gpt-6.2-astra"))
@@ -370,7 +377,7 @@ final class OnboardingPreviewTests: XCTestCase {
         let choices = model.modelChoices(.llmKey)
         XCTAssertEqual(choices.first?.id, "anthropic/claude-sonnet-5.5", "\(choices.map(\.id))")
         XCTAssertGreaterThan(choices.count, 1)
-        try await Task.sleep(for: .milliseconds(1_600))
+        try await Task.sleep(for: .milliseconds(400))
         XCTAssertEqual(model.step, .llmKey, "no automatic move with a choice of models")
         model.next()
         XCTAssertNotEqual(model.step, .llmKey)

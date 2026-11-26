@@ -49,7 +49,8 @@ single question pays no cache write.
 
 Links and returned file or folder paths appear as action cards with keyboard
 shortcuts to select, insert and open them, even when the model returns them as
-ordinary text. Nothing opens or is inserted until you act. **Escape** closes
+ordinary text. Those shortcuts are changed on Settings → Features → Agent (and in
+Hotkeys). Nothing opens or is inserted until you act. **Escape** closes
 the answer.
 
 ## Web search

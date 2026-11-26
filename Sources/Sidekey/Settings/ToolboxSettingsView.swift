@@ -380,7 +380,9 @@ struct ToolboxSettingsView: View {
                 ToolboxHistoryPane(deps: deps)
                     .settingsIslandPreview()
             case .brightness:
-                ToolboxDisplayPane()
+                // Hold, Extra and Brightness keys are on Display's own screen.
+                // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+                actionPane(tool, title: "Open Display settings") { selection.open(.display) }
             case .tasks, .calendar:
                 VStack(spacing: 14) {
                     if tool.isComingSoon {

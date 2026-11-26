@@ -84,16 +84,33 @@ struct HoverFeatureView: View {
 
     /// Where a tool's own settings are: its feature's screen, or its pane in
     /// Toolbox. Tools that only act (Quit) have none.
+    // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
     private func destination(for tool: HoverTool) -> HoverToolRow.Destination? {
         switch tool {
         case .notifs: return .init(title: "Customize") { selection.shownFeature = .notify }
         case .monitor: return .init(title: "Customize") { selection.shownFeature = .monitor }
         case .translate, .subtitles: return .init(title: "Set up") { selection.open(.translateSubtitles) }
         case .screenshot: return .init(title: "Set up") { selection.open(.screenshots) }
-        case .dropMode: return .init(title: "Drop settings") { selection.open(.drop) }
+        // Drop's mode, languages and words are on Drop's screen.
+        case .dropMode, .vocab, .filler, .inputLang, .outputLang:
+            return .init(title: "Drop settings") { selection.open(.drop) }
+        case .meetingRecord, .notes: return .init(title: "Meeting Notes settings") { selection.open(.meetings) }
         case .quit, .settings: return nil
-        default: return .init(title: "Open in Toolbox") { selection.focus(tool) }
+        default:
+            if let feature = Self.feature(for: tool) {
+                return .init(title: "\(FeatureCatalog.info(for: feature).name) settings") { selection.open(feature) }
+            }
+            return .init(title: "Open in Toolbox") { selection.focus(tool) }
         }
+    }
+
+    /// The feature whose own screen shows this island tool (Subtitles is
+    /// Translate & Subtitles', the second of its tools).
+    static func feature(for tool: HoverTool) -> AppFeature? {
+        FeatureCatalog.all.first { info in
+            if case .islandTools(let tools) = info.activation { return tools.contains(tool) }
+            return false
+        }?.feature
     }
 }
 

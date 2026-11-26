@@ -55,9 +55,16 @@ struct SettingsFeaturesView: View {
             await models.onAppear()
             if environment.supportsOnDevice { await onDevice.refresh() }
         }
-        .onAppear { permissions.refresh(restartRecoveryPolling: false) }
+        .onAppear {
+            permissions.refresh(restartRecoveryPolling: false)
+            // Calendar's status: macOS access and the calendar list now (no
+            // prompt, no events), as the Calendars card checks them.
+            // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+            environment.calendarConnections.prepareMacCalendars()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             permissions.refresh(restartRecoveryPolling: false)
+            environment.calendarConnections.prepareMacCalendars()
         }
         .onReceive(NotificationCenter.default.publisher(for: .sidekeyCapabilityFlagsChanged)) { _ in
             externalChange += 1
@@ -122,6 +129,36 @@ struct FeatureScreens: View {
                           button: "Capture") { context.environment.openScreenshot() },
                 ])
             }
+        // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+        case .history:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Your history", subtitle: "Copies, dictations and the Agent’s answers. Opens in the island.",
+                          button: "Open History") { context.environment.openHoverPanel(.history) },
+                ])
+            }
+        case .display:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Brightness slider", subtitle: "Opens Display in the island.",
+                          button: "Open Display") { context.environment.openHoverPanel(.brightness) },
+                ])
+                VStack(alignment: .leading, spacing: 0) {
+                    MacGroupTitle(title: "Settings")
+                    DisplayBrightnessSettings()
+                }
+            }
+        case .calendar:
+            FeatureScreenView(feature: feature, context: context) {
+                IslandToolActions(rows: [
+                    .init(title: "Today", subtitle: CalendarAvailability.isOpen
+                              ? "Today’s events. Opens in the island." : CalendarAvailability.message,
+                          button: "Open Calendar", isEnabled: CalendarAvailability.isOpen) {
+                        context.environment.openHoverPanel(.calendar)
+                    },
+                ])
+                SettingsCalendarIntegrationsView(connections: context.environment.calendarConnections)
+            }
         case .todo:
             FeatureScreenView(feature: feature, context: context) {
                 IslandToolActions(rows: [
@@ -149,6 +186,7 @@ struct IslandToolActions: View {
         let title: String
         let subtitle: String
         let button: String
+        var isEnabled = true
         let action: () -> Void
         var id: String { title }
     }
@@ -162,7 +200,7 @@ struct IslandToolActions: View {
                 ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
                     if index > 0 { MacRowSeparator() }
                     MacRow(title: row.title, subtitle: row.subtitle) {
-                        MacButton(title: row.button, action: row.action)
+                        MacButton(title: row.button, isEnabled: row.isEnabled, action: row.action)
                             .fixedSize()
                             .accessibilityLabel(row.button)
                     }

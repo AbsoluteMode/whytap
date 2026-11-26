@@ -38,8 +38,8 @@ final class FeatureCatalogTests: XCTestCase {
         let statuses = AppFeature.allCases.map { FeatureCatalog.status(for: $0, snapshot: snapshot) }
         XCTAssertEqual(statuses.map(\.word),
                        ["Needs setup", "Off", "Off", "Off", "Not set up", "Not set up",
-                        "Ready", "Ready", "Ready", "Not set up", "Not set up"])
-        XCTAssertEqual(FeatureCatalog.summary(statuses), "3 ready · 1 needs setup")
+                        "Ready", "Ready", "Ready", "Not set up", "Ready", "Ready", "Not set up", "Not set up"])
+        XCTAssertEqual(FeatureCatalog.summary(statuses), "5 ready · 1 needs setup")
     }
 
     func testShortcutWaitingForKeyboardControlIsNotCountedTwice() {
@@ -478,7 +478,7 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.all.map(\.feature), AppFeature.allCases)
         XCTAssertEqual(FeatureCatalog.all.map(\.name),
                        ["Drop", "Agent", "Meeting Notes", "Google search", "Translate & Subtitles", "Screenshots",
-                        "To-do", "Case", "Hover", "Notify", "Monitor"])
+                        "History", "Display", "To-do", "Calendar", "Case", "Hover", "Notify", "Monitor"])
     }
 
     func testClipsAreTheOnesThatExist() {

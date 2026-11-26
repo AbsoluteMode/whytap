@@ -19,6 +19,8 @@ protocol SecureInputHolderPresenting: AnyObject {
     /// its own. `shake` plays the macOS wrong-password shake.
     func present(_ badge: SecureInputHolderBadge, shake: Bool, persistent: Bool)
     func dismiss()
+    /// Whether a badge is on screen (a shaken one fades on its own).
+    var isShowing: Bool { get }
 }
 
 /// Makes Whytap shortcuts fail loudly instead of silently while another app
@@ -27,9 +29,11 @@ protocol SecureInputHolderPresenting: AnyObject {
 ///
 /// Whytap cannot and does not get around secure input. It watches the one
 /// signal secure input leaves it, modifier changes, and points at the
-/// holder: the holder's logo appears to the right of the island and shakes
-/// when a shortcut that could not arrive was tried. While a background app
-/// keeps secure input on, the logo stays there, dimmed.
+/// holder: while a background app keeps secure input on, its logo stays to
+/// the right of the island, dimmed, and shakes when a chord of a blocked
+/// shortcut is pressed. When the frontmost app holds secure input (the person
+/// is in its password field) nothing shakes: the key is never seen, so a
+/// failed shortcut cannot be told from typing there.
 // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
 @MainActor
 final class SecureInputGuard {
@@ -67,6 +71,9 @@ final class SecureInputGuard {
     static let sampleFreshness: TimeInterval = 1.5
     private var lastShake: Date?
     private(set) var persistentBadge: SecureInputHolderBadge?
+    /// A badge was presented and not yet dismissed by the guard; only then
+    /// is the (lazily created) presenter asked whether it is still showing.
+    private var badgeMayBeShowing = false
     private var pollTimer: Timer?
     private var globalMonitor: Any?
     private var localMonitor: Any?
@@ -108,13 +115,14 @@ final class SecureInputGuard {
         // Every modifier change on the Mac lands here; it costs one flag read.
         let on = system.isSecureInputEnabled()
         lastSample = (on, lastFront?.pid, now)
+        // A confirmed OFF, on a press or a release, ends every attribution.
+        if !on { secureInputEnded() }
         guard chord.isEmpty else {
             _ = detector.flagsChanged(to: chord, at: now, lastHotkeyFire: nil, blockedChords: [])
             return
         }
         guard on else {
             _ = detector.flagsChanged(to: [], at: now, lastHotkeyFire: nil, blockedChords: [])
-            secureInputEnded()
             return
         }
         let attempt = detector.flagsChanged(
@@ -130,19 +138,19 @@ final class SecureInputGuard {
         let previous = lastFront
         lastFront = app
         let now = system.now()
-        let wasOn: Bool
+        // Only a reading taken while `previous` was still in front is
+        // evidence; a mouse or Dock switch has none, and then nobody is named.
+        var wasOn: Bool?
         if let sample = lastSample, sample.frontPID == previous?.pid,
            now.timeIntervalSince(sample.at) <= Self.sampleFreshness {
-            wasOn = sample.on // read while `previous` was still in front
-        } else {
-            wasOn = system.isSecureInputEnabled() // a mouse switch: best reading
+            wasOn = sample.on
         }
         system.afterSwitchSettles { [weak self] in
             self?.settleSwitch(from: previous, to: app, wasOnBeforeSwitch: wasOn)
         }
     }
 
-    func settleSwitch(from previous: SecureInputApp?, to current: SecureInputApp?, wasOnBeforeSwitch: Bool) {
+    func settleSwitch(from previous: SecureInputApp?, to current: SecureInputApp?, wasOnBeforeSwitch: Bool?) {
         tracker.didSwitch(from: previous, to: current, wasOnBeforeSwitch: wasOnBeforeSwitch,
                           secureInputOn: system.isSecureInputEnabled())
         refresh()
@@ -157,6 +165,7 @@ final class SecureInputGuard {
             let badge = SecureInputHolderBadge(app: app)
             if persistentBadge != badge {
                 persistentBadge = badge
+                badgeMayBeShowing = true
                 presenter.present(badge, shake: false, persistent: true)
                 os_log("secure_input_stuck holder=%{private}@", log: Self.log, type: .info,
                        app.bundleID ?? app.name)
@@ -199,16 +208,16 @@ final class SecureInputGuard {
         case .ownApp:
             os_log("secure_input_attempt holder=self", log: Self.log, type: .info)
             return
-        case .app(let app, inBackground: false) where system.focusedElementIsSecure(app.pid):
-            // The person is typing in this app's password field: ⌥ letters
-            // and the like are not a shortcut that failed.
+        case .app(_, inBackground: false):
+            // The frontmost app holds it, normally its focused password
+            // field. The chord may be typing there (⌥ letters, a bare ⌥), so
+            // nothing shakes. WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
             dismissPersistent()
             updatePolling()
-            os_log("secure_input_attempt holder=front_password_field", log: Self.log, type: .info)
             return
-        case .app(let app, let inBackground):
+        case .app(let app, inBackground: true):
             badge = SecureInputHolderBadge(app: app)
-            persistent = inBackground
+            persistent = true
         case .unknown:
             badge = SecureInputHolderBadge(app: nil)
             persistent = false
@@ -216,16 +225,20 @@ final class SecureInputGuard {
         if let lastShake, now.timeIntervalSince(lastShake) < Self.minimumShakeInterval { return }
         lastShake = now
         if persistent { persistentBadge = badge } else { persistentBadge = nil }
+        badgeMayBeShowing = true
         presenter.present(badge, shake: true, persistent: persistent)
         os_log("secure_input_attempt holder=%{private}@ background=%{public}d", log: Self.log, type: .info,
                badge.app?.bundleID ?? badge.app?.name ?? "unknown", persistent ? 1 : 0)
         updatePolling()
     }
 
+    /// Secure input is off: no badge may keep claiming otherwise, whether
+    /// dimmed, shaken or held open by the pointer.
     private func secureInputEnded() {
         tracker.secureInputObservedOff()
-        if persistentBadge != nil {
+        if persistentBadge != nil || badgeMayBeShowing {
             persistentBadge = nil
+            badgeMayBeShowing = false
             presenter.dismiss()
             os_log("secure_input_released", log: Self.log, type: .info)
         }
@@ -235,20 +248,20 @@ final class SecureInputGuard {
     private func dismissPersistent() {
         guard persistentBadge != nil else { return }
         persistentBadge = nil
+        badgeMayBeShowing = false
         presenter.dismiss()
     }
 
-    /// A 1 s check runs only while a background holder is remembered, so
-    /// the badge leaves as soon as secure input does.
+    private var badgeShowing: Bool {
+        if badgeMayBeShowing, !presenter.isShowing { badgeMayBeShowing = false }
+        return badgeMayBeShowing
+    }
+
+    /// A 1 s check runs only while a badge is up or a live background holder
+    /// is remembered, so the badge leaves as soon as secure input does.
     private func updatePolling() {
-        if let candidate = tracker.staleCandidate, !system.isRunning(candidate.pid), persistentBadge == nil {
-            // A quit app cannot be shown; a modifier release still notices
-            // when secure input ends.
-            pollTimer?.invalidate()
-            pollTimer = nil
-            return
-        }
-        let needed = tracker.staleCandidate != nil || persistentBadge != nil
+        var needed = persistentBadge != nil || badgeShowing
+        if let candidate = tracker.staleCandidate, system.isRunning(candidate.pid) { needed = true }
         if needed, pollTimer == nil {
             let timer = Timer(timeInterval: Self.pollInterval, repeats: true) { [weak self] _ in
                 MainActor.assumeIsolated { self?.refresh(askAccessibility: false) }

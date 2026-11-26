@@ -96,7 +96,20 @@ struct SecureInputHolderView: View {
 // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
 @MainActor
 final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
-    static let shared = SecureInputHolderPanel()
+    /// Created on the first badge, so launching Whytap makes no window.
+    private static var instance: SecureInputHolderPanel?
+    static var shared: SecureInputHolderPanel {
+        if let instance { return instance }
+        let panel = SecureInputHolderPanel()
+        instance = panel
+        return panel
+    }
+
+    /// The Settings switch, applied to a badge already on screen, exactly as
+    /// `IslandPanel` applies it.
+    static func setScreenshotProtectionEnabled(_ enabled: Bool) {
+        instance?.sharingType = enabled ? .none : .readOnly
+    }
 
     static let gapFromIsland: CGFloat = 6
     /// How long a shaken badge stays at full strength (or at all, when the
@@ -126,6 +139,20 @@ final class SecureInputHolderPanel: NSPanel, SecureInputHolderPresenting {
         hoverObservation = model.$hovered.removeDuplicates().dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.reposition() }
         }
+        // Follow the island to another display or after a disconnect, as
+        // the Notify panel does.
+        for name in [NSApplication.didChangeScreenParametersNotification, IslandScreenResolver.selectionDidChangeNotification] {
+            NotificationCenter.default.addObserver(self, selector: #selector(screenDidChange), name: name, object: nil)
+        }
+    }
+
+    deinit { NotificationCenter.default.removeObserver(self) }
+
+    var isShowing: Bool { model.badge != nil }
+
+    @objc private func screenDidChange() {
+        guard model.badge != nil else { return }
+        reposition()
     }
 
     override var canBecomeKey: Bool { false }

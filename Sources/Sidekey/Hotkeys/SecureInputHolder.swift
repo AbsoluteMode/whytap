@@ -86,9 +86,14 @@ enum HotkeyFireRecorder {
 }
 
 /// Turns the `flagsChanged` stream, the only keyboard signal secure input
-/// leaves Whytap, into "the person just tried a shortcut that could not
-/// arrive": a chord of a blocked shortcut was held and released, briefly,
+/// leaves Whytap, into "the person may just have tried a shortcut that could
+/// not arrive": a chord of a blocked shortcut was held and released, briefly,
 /// and no Whytap shortcut fired meanwhile.
+///
+/// This is an approximation by design. The key itself is never seen (that is
+/// what secure input protects), so a bare ⌥ tap or ⌥ with an ordinary key
+/// looks the same as ⌥F. `SecureInputGuard` therefore shakes only while the
+/// holder is not the frontmost app, when the keyboard is stuck anyway.
 struct SecureInputAttemptDetector {
     static let maximumHold: TimeInterval = 3
 
@@ -144,35 +149,46 @@ enum SecureInputHolder: Equatable {
 /// macOS has no API for the owner. `kCGSSessionSecureInputPID` (what `ioreg`
 /// prints) reports the frontmost app while any process holds secure input,
 /// so after Cmd-Tab it names the innocent app. Whytap therefore remembers
-/// the app the person left while secure input stayed on, and trusts the
-/// frontmost app only when its focused element is a password field or no
-/// switch happened since secure input came on.
+/// the app the person left while secure input was on, but only when that was
+/// read while the app was still in front (the ⌘ that starts Cmd-Tab). A
+/// switch without such a reading (mouse, Dock) names nobody. The frontmost
+/// app counts as the holder when its focused element is a password field or
+/// when no switch happened since secure input came on.
 struct SecureInputHolderTracker {
     private(set) var staleCandidate: SecureInputApp?
+    /// Secure input stayed on across a switch whose earlier state is unknown.
+    private(set) var unverifiedSwitch = false
 
     /// Called shortly after the frontmost app changed from `previous`, once
     /// the app that lost focus had the chance to release secure input.
     /// `wasOnBeforeSwitch` is secure input while `previous` was still in
-    /// front: an app that turns it on as it comes forward (Terminal's Secure
-    /// Keyboard Entry, a focused key field) must not make the app left
-    /// behind look guilty.
+    /// front, or nil when nothing was read then. An app that turns secure
+    /// input on as it comes forward (Terminal's Secure Keyboard Entry, a
+    /// focused key field) must not make the app left behind look guilty.
     mutating func didSwitch(
         from previous: SecureInputApp?,
         to current: SecureInputApp?,
-        wasOnBeforeSwitch: Bool,
+        wasOnBeforeSwitch: Bool?,
         secureInputOn: Bool
     ) {
-        guard secureInputOn else { staleCandidate = nil; return }
-        guard wasOnBeforeSwitch, staleCandidate == nil,
+        guard secureInputOn else { forgetCandidate(); return }
+        guard staleCandidate == nil, !unverifiedSwitch,
               let previous, previous.pid != current?.pid else { return }
-        staleCandidate = previous
+        switch wasOnBeforeSwitch {
+        case true?: staleCandidate = previous
+        case nil: unverifiedSwitch = true
+        case false?: break
+        }
     }
 
-    mutating func secureInputObservedOff() { staleCandidate = nil }
+    mutating func secureInputObservedOff() { forgetCandidate() }
 
     /// The frontmost app's focused password field explains secure input, or
-    /// the remembered app has quit: stop blaming it.
-    mutating func forgetCandidate() { staleCandidate = nil }
+    /// secure input went off: stop blaming anyone remembered.
+    mutating func forgetCandidate() {
+        staleCandidate = nil
+        unverifiedSwitch = false
+    }
 
     func resolve(
         secureInputOn: Bool,
@@ -189,6 +205,7 @@ struct SecureInputHolderTracker {
             if candidate.pid == ownPID { return .ownApp }
             return isRunning(candidate.pid) ? .app(candidate, inBackground: true) : .unknown
         }
+        if unverifiedSwitch { return .unknown }
         guard let front else { return .unknown }
         return front.pid == ownPID ? .ownApp : .app(front, inBackground: false)
     }

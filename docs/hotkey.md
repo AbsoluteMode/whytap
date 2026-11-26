@@ -256,18 +256,21 @@ combos whose modifiers are only ⌥ and/or ⇧ (⌥F Shot, ⌥M Meeting, ⌥H He
 not fire. Carbon combos with ⌘ or ⌃ and modifier-only shortcuts (R⌘ Agent,
 R⌥ Google) keep working. Whytap does not work around the protection.
 
-`SecureInputGuard` watches modifier changes, which still arrive. When a
-blocked shortcut's chord is pressed (held up to 3 s) and no Whytap shortcut
-arrives, the holder's logo shakes in a black capsule just to the right of the
-island; hovering it reads "Dia holds secure input — close its password field".
-A background app that keeps secure input gets a dimmed logo there until it lets
-go. The holder is the app the person left while secure input stayed on,
-unless the frontmost app has a focused password field; macOS's
+`SecureInputGuard` watches modifier changes, which still arrive. While a
+background app keeps secure input on, its logo stays dimmed in a black pill
+just right of the island and shakes when a blocked shortcut's chord is pressed
+(held up to 3 s) and no Whytap shortcut arrives; hovering reads "Dia holds
+secure input — close its password field". The key itself is never seen, so a
+bare ⌥ tap also shakes it; that approximation is limited to this stuck state.
+When the frontmost app holds secure input (its password field), nothing
+shakes. The background holder is the app the person left while secure input
+was on, read on the ⌘ that starts Cmd-Tab; a mouse or Dock switch gives no
+such reading and the badge shows a lock instead of a name. macOS's
 `kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
-own password fields show nothing, nor does typing in the frontmost app's
-password field; an unknown or quit holder shows a lock. The badge window is
-exactly the pill, so menu-bar clicks beside it pass through.
-A bare key or Space leaves no event, so only the dimmed logo covers it.
+own password fields show nothing. Once secure input is seen off, every badge
+leaves at once. The badge window is exactly the pill, follows the island's
+display and honours screenshot protection while it is up. A bare key or Space
+leaves no event at all.
 [Decision](../.project-docs/decisions/2026-11-26-secure-input-holder.md).
 
 ## Tool hotkeys

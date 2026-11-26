@@ -2,7 +2,7 @@
 id: secure-input-holder-2026-11-26
 type: decision
 title: Whytap points at the app holding Secure Input instead of letting shortcuts die silently
-summary: While another app holds Secure Event Input, macOS drops Whytap's event-tap keys and Option-only Carbon shortcuts. Whytap cannot get around that and does not try. It watches modifier changes, which secure input does not block, and when a blocked shortcut's chord is pressed and nothing arrives it shakes the holder's logo to the right of the island. A background app that keeps secure input after Cmd-Tab gets a dimmed logo there until it lets go. The holder is tracked by Whytap itself, because macOS reports the frontmost app as the owner.
+summary: While another app holds Secure Event Input, macOS drops Whytap's event-tap keys and Option-only Carbon shortcuts. Whytap cannot get around that and does not try. A background app that keeps secure input after Cmd-Tab gets its dimmed logo to the right of the island until it lets go, and the logo shakes when a blocked shortcut's chord is pressed (an approximation, since the key is never seen). Nothing shakes while the frontmost app holds secure input. The holder is tracked by Whytap itself, because macOS reports the frontmost app as the owner.
 status: confirmed
 tags: [hotkeys, secure-input, island, carbon, event-tap, accessibility]
 canonical_for: [secure-input-holder-indicator]
@@ -75,7 +75,8 @@ the app the person switched to.
 2. **Notice the failed attempt from modifiers.** `flagsChanged` still arrives,
    so `SecureInputAttemptDetector` treats "a chord of a blocked shortcut was
    held for at most 3 s and released, and no Whytap shortcut arrived
-   meanwhile" as a failed attempt. Blocked chords come from the saved
+   meanwhile" as a possible failed attempt (see 5 for when it shakes).
+   Blocked chords come from the saved
    configuration (`SecureInputBlockedShortcuts`): Option/Shift-only Carbon
    combos, plus any modifiers of a hold-combo Drop (event tap). Every Carbon
    and modifier-only shortcut records its arrival in `HotkeyFireRecorder`, even
@@ -86,8 +87,10 @@ the app the person switched to.
    app the person left when secure input was on while that app was still in
    front and still on 0.4 s after the switch (time for a well-behaved app to
    release). "While still in front" comes from the modifier change that
-   starts Cmd-Tab (⌘ goes down before the switch); a mouse switch uses the
-   reading at activation. So an app that turns secure input on as it comes
+   starts Cmd-Tab (⌘ goes down before the switch). A mouse or Dock switch has
+   no such reading, so nobody is named: an attempt shows the lock. Any OFF
+   read, on a modifier press or release or by the 1 s check, forgets every
+   remembered holder. So an app that turns secure input on as it comes
    forward (Terminal's Secure Keyboard Entry, a focused key field) never makes
    the app left behind look guilty. The frontmost app is the holder instead
    when its focused element is a password field (Accessibility role
@@ -101,27 +104,37 @@ the app the person switched to.
    growing rightward on hover to fit the label), because a window that
    accepts the mouse eats clicks wherever its content does not hit-test; the
    shake moves the window frame, as the login window does. A failed attempt
-   plays the macOS wrong-password shake and brings it to full strength; when
-   the holder is the frontmost app the badge fades after 2.8 s. Typing in the
-   frontmost app's own password field (⌥ letters, a ⌘ chord of a hold-combo
-   Drop) shakes nothing. A background holder keeps a
+   plays the macOS wrong-password shake and brings it to full strength. The
+   badge follows the island's display (screen-parameter and display-selection
+   notifications, as the Notify panel) and the Settings screenshot-protection
+   switch reaches it while it is up, as for `IslandPanel`.
+5. **Shake only while the keyboard is stuck.** The key is never seen, so a
+   bare ⌥ tap, ⌥ with an ordinary key and ⌥F look the same. While the
+   frontmost app holds secure input the chord is most likely typing in its
+   password field (⌥ letters, a ⌘ chord of a hold-combo Drop), so nothing
+   shakes; that case stays silent, as before. While a background holder is
+   named (its dimmed logo already up) or the holder is unknown, the chord
+   shakes the badge, bare ⌥ taps included: the approximation only draws
+   attention to a badge whose claim, "the keyboard is held", is true. A background holder keeps a
    dimmed logo there until secure input ends; a 1 s check runs only in that
    state. Hovering shows one line: "Dia holds secure input — close its
    password field". Reduce Motion replaces the shake with the brightness
    change alone. Screenshot protection applies to the panel like the
    notification panel.
-5. **Whytap itself or nobody known.** When the holder is Whytap (its own key
+6. **Whytap itself or nobody known.** When the holder is Whytap (its own key
    or Case password field), nothing is shown; only `secure_input_attempt
    holder=self` is logged, since its field releases secure input when it loses
    focus. When secure input is on but the remembered app has quit, the badge
    shows a lock and "Another app holds secure input — close its password
-   field". When secure input ends, the badge leaves.
+   field". When secure input is seen off, every badge leaves at once, a shaken
+   or hovered one included; a shaken badge is watched by the 1 s check until it
+   fades.
 
 Logs carry the holder's bundle ID as private data and never keys or chords.
 
 ## Tested
 
-`SecureInputGuardTests` (23 scenarios): no secure input; background holder
+`SecureInputGuardTests` (28 scenarios) and `SecureInputHolderPanelTests` (4): no secure input; background holder
 after Cmd-Tab (dimmed logo, then shake); frontmost holder (shake, no poll);
 password field in the frontmost app wins over the remembered one and the 1 s
 check keeps that verdict; typing in the front password field never shakes;
@@ -136,7 +149,14 @@ including a hold-combo Drop; chord conversions; Carbon arrival recorded even
 when suppressed. An independent review of the first version found the
 click-eating panel margin, the blame of the app left behind, the 1 s check
 undoing the Accessibility verdict and shakes while typing a password; all four
-are fixed above and covered by the scenarios.
+are fixed above and covered by the scenarios. The builder's synthetic probes
+of that version (queue ticket #613) found: a mouse switch and an OFF read on a
+modifier press could still name the wrong app; a bare ⌥ tap shook the logo
+with no shortcut pressed; a shaken badge outlived secure input; a visible
+badge missed the screenshot-protection switch and display changes. Points 3
+to 6 above answer them, each with a scenario (mouse switch, OFF while a
+modifier is down, bare ⌥ in the stuck state, front holder never shakes,
+confirmed OFF removes a shaken lock, protection and display while up).
 
 ## Rejected
 

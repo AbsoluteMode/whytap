@@ -1349,6 +1349,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
+                    SecureInputHolderPanel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController

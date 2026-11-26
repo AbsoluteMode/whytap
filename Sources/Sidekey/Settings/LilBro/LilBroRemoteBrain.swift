@@ -10,8 +10,12 @@ import Foundation
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 struct LilBroRemoteBrain: LilBroBrain {
     static let endpoint = URL(string: "https://whytap.ai/api/ask/lilbro")!
-    /// The server accepts 3-300 characters.
+    /// The server counts Unicode scalars (Python `len`): a question of 3-300
+    /// after collapsing whitespace; earlier exchanges up to 300 and 600.
     static let questionLimit = 300
+    static let questionMinimum = 3
+    static let historyQuestionLimit = 300
+    static let historyAnswerLimit = 600
     static let timeout: TimeInterval = 25
 
     typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
@@ -24,21 +28,55 @@ struct LilBroRemoteBrain: LilBroBrain {
         }
     }
 
-    /// No cookies, no cache, no stored credentials.
+    /// No cookies, no cache, no stored credentials, no redirects.
     private static let session: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.httpCookieStorage = nil
         configuration.urlCache = nil
         configuration.timeoutIntervalForRequest = timeout
         configuration.timeoutIntervalForResource = timeout
-        return URLSession(configuration: configuration)
+        return URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }()
 
+    /// The conversation goes only to `endpoint`: a redirect anywhere is
+    /// refused, and its 3xx reads as unavailable.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+    final class NoRedirects: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+        func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+                        newRequest request: URLRequest) async -> URLRequest? {
+            nil
+        }
+    }
+
+    /// The question as the server reads it: whitespace collapsed, cut at a
+    /// character boundary to 300 Unicode scalars; nil under three.
+    static func prepared(_ question: String) -> String? {
+        let text = clipped(question.split(whereSeparator: \.isWhitespace).joined(separator: " "), to: questionLimit)
+        return text.unicodeScalars.count >= questionMinimum ? text : nil
+    }
+
+    /// Whether a question would leave this Mac (long enough for the server).
+    static func sends(_ question: String) -> Bool { prepared(question) != nil }
+
+    /// At most `limit` Unicode scalars, never splitting a character.
+    static func clipped(_ text: String, to limit: Int) -> String {
+        guard text.unicodeScalars.count > limit else { return text }
+        var out = ""
+        var count = 0
+        for character in text {
+            let size = character.unicodeScalars.count
+            guard count + size <= limit else { break }
+            out.append(character)
+            count += size
+        }
+        return out
+    }
+
     func reply(to question: LilBroQuestion) async -> LilBroReply {
-        var text = question.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        // A two-letter question gets the local guide; the server needs three.
-        guard text.count >= 3 else { return LilBroLocalGuide.match(text) }
-        if text.count > Self.questionLimit { text = String(text.prefix(Self.questionLimit)) }
+        // Under three characters gets the local guide; the server needs three.
+        guard let text = Self.prepared(question.text) else {
+            return LilBroLocalGuide.match(question.text.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         let request: URLRequest
         do {
             request = try Self.request(for: LilBroQuestion(text: text, screen: question.screen,
@@ -65,7 +103,10 @@ struct LilBroRemoteBrain: LilBroBrain {
         var body: [String: Any] = ["question": question.text]
         if !question.screen.isEmpty { body["screen"] = question.screen }
         if !question.history.isEmpty {
-            body["history"] = question.history.suffix(3).map { ["q": $0.question, "a": $0.answer] }
+            body["history"] = question.history.suffix(3).map {
+                ["q": clipped($0.question.trimmingCharacters(in: .whitespacesAndNewlines), to: historyQuestionLimit),
+                 "a": clipped($0.answer.trimmingCharacters(in: .whitespacesAndNewlines), to: historyAnswerLimit)]
+            }
         }
         request.httpBody = try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys])
         return request

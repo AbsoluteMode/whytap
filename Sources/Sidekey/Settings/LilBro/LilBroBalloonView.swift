@@ -68,8 +68,11 @@ struct LilBroBalloonView: View {
                 Button(controller.mascotVisible ? "Hide the little guy" : "Show the little guy") {
                     controller.setMascotVisible(!controller.mascotVisible)
                 }
-                Button(controller.answersFromWhytap ? "Turn off answers from whytap.ai" : "Turn on answers from whytap.ai") {
-                    controller.setAnswersFromWhytap(!controller.answersFromWhytap)
+                if controller.answersFromWhytap {
+                    Button("Turn off answers from whytap.ai") { controller.turnOffAnswers() }
+                } else {
+                    // Opens the disclosure; only its button turns answers on.
+                    Button("Turn on answers from whytap.ai…") { controller.askToTurnOnAnswers() }
                 }
                 if !controller.turns.isEmpty { Button("Clear") { controller.clear() } }
                 Button("Close") { controller.close() }
@@ -96,6 +99,10 @@ struct LilBroBalloonView: View {
             LilBroReplyView(reply: reply, question: turn.question, opened: turn.opened,
                             mascot: controller.mascotVisible, answersOn: controller.answersFromWhytap,
                             actions: actions, current: true)
+            // Asked for from ⋯ after a reply; an unknown reply already shows it.
+            if controller.consentShown, !controller.answersFromWhytap, !reply.isUnknown {
+                LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
+            }
         } else if controller.answersFromWhytap {
             paragraph(LilBroCopy.greetingAnswers)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
@@ -103,13 +110,17 @@ struct LilBroBalloonView: View {
         } else {
             paragraph(LilBroCopy.greeting)
             LilBroChips(items: LilBroLocalGuide.starters.map { q in (q, false, { controller.ask(q) }) })
-            LilBroOffer { controller.setAnswersFromWhytap(true) }
+            if controller.consentShown {
+                LilBroOffer(turnOn: { controller.turnOnAnswers() }, notNow: { controller.dismissConsent() })
+            } else {
+                LilBroOffer(turnOn: { controller.turnOnAnswers() })
+            }
         }
     }
 
     private var actions: LilBroReplyView.Actions {
         LilBroReplyView.Actions(ask: controller.ask, retry: controller.retry, open: controller.open,
-                                turnOn: { controller.setAnswersFromWhytap(true) })
+                                turnOn: { controller.turnOnAnswers() })
     }
 
     private func note(_ text: String) -> some View {
@@ -239,6 +250,7 @@ struct LilBroReplyView: View {
 // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
 struct LilBroOffer: View {
     let turnOn: () -> Void
+    var notNow: (() -> Void)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -246,7 +258,8 @@ struct LilBroOffer: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
                 .fixedSize(horizontal: false, vertical: true)
-            LilBroChips(items: [(LilBroCopy.turnOn, true, turnOn)])
+            LilBroChips(items: [(LilBroCopy.turnOn, true, turnOn)]
+                        + (notNow.map { [(LilBroCopy.notNow, false, $0)] } ?? []))
         }
         .padding(9)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -250,7 +250,7 @@ final class LilBroControllerTests: XCTestCase {
         let remote = Remote(.answer(answer))
         let selection = SettingsWindowSelection()
         let controller = make(selection: selection, remote: remote, reduceMotion: true)
-        controller.setAnswersFromWhytap(true)
+        controller.turnOnAnswers()
         XCTAssertTrue(LilBroPreferences(defaults: defaults).answersFromWhytap, "the choice is remembered")
         controller.ask("can I talk instead of typing")
         await until { controller.bubble == .full && !controller.isBusy }
@@ -268,19 +268,80 @@ final class LilBroControllerTests: XCTestCase {
     func test_turning_answers_off_goes_back_to_this_mac() async {
         let remote = Remote(.unavailable)
         let controller = make(remote: remote, reduceMotion: true)
-        controller.setAnswersFromWhytap(true)
-        controller.setAnswersFromWhytap(false)
+        controller.turnOnAnswers()
+        controller.turnOffAnswers()
         controller.ask("Set up dictation")
         await until { controller.bubble == .full && !controller.isBusy }
         XCTAssertTrue(remote.asked.isEmpty)
         XCTAssertFalse(LilBroPreferences(defaults: defaults).answersFromWhytap)
     }
 
+    /// ⋯ → Turn on answers only shows the disclosure; the choice is made by
+    /// its button (builder review of #465, ticket 604).
+    func test_the_menu_shows_the_disclosure_and_only_its_button_turns_answers_on() async {
+        let remote = Remote(.answer(LilBroAnswer(paragraphs: ["Hi"])))
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("how do I dictate")
+        await until { controller.bubble == .full && !controller.isBusy }
+        controller.askToTurnOnAnswers()
+        XCTAssertTrue(controller.consentShown)
+        XCTAssertFalse(controller.answersFromWhytap, "the menu alone turns nothing on")
+        XCTAssertFalse(LilBroPreferences(defaults: defaults).answersFromWhytap)
+        controller.dismissConsent()
+        XCTAssertFalse(controller.consentShown)
+        controller.ask("Set up dictation")
+        await until { controller.bubble == .full && !controller.isBusy && controller.turns.count == 2 }
+        XCTAssertTrue(remote.asked.isEmpty, "Not now sends nothing")
+
+        controller.askToTurnOnAnswers()
+        controller.turnOnAnswers()
+        XCTAssertFalse(controller.consentShown)
+        XCTAssertTrue(LilBroPreferences(defaults: defaults).answersFromWhytap)
+        controller.turnOffAnswers()
+        XCTAssertFalse(controller.answersFromWhytap)
+    }
+
+    /// Questions asked while answers were off never reach whytap.ai later, on
+    /// the first opt-in or after turning answers off and on again.
+    func test_questions_asked_on_this_mac_stay_out_of_what_goes_to_whytap() async {
+        let remote = Remote(.answer(LilBroAnswer(paragraphs: ["Drop types what you say."])))
+        let controller = make(remote: remote, reduceMotion: true)
+        controller.ask("my private local question about dictation")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertTrue(remote.asked.isEmpty)
+
+        controller.turnOnAnswers()
+        controller.ask("first question to whytap")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 1 }
+        XCTAssertEqual(remote.asked[0].history, [], "the local turn is not history")
+
+        controller.turnOffAnswers()
+        controller.ask("another private local question about dictation")
+        await until { controller.bubble == .full && !controller.isBusy && controller.turns.count == 3 }
+        XCTAssertEqual(remote.asked.count, 1)
+
+        controller.turnOnAnswers()
+        controller.ask("second question to whytap")
+        await until { controller.bubble == .full && !controller.isBusy && remote.asked.count == 2 }
+        XCTAssertEqual(remote.asked[1].history.map(\.question), ["first question to whytap"])
+        let sent = remote.asked.flatMap { [$0.text] + $0.history.map(\.question) }
+        XCTAssertFalse(sent.contains { $0.contains("private") })
+    }
+
+    /// While answers are off the local guide gets no screen or history either.
+    func test_a_local_question_carries_nothing_else() async {
+        let local = Remote(.unknown(suggestions: []))
+        let controller = make(brain: local, remote: Remote(.unavailable), reduceMotion: true)
+        controller.ask("zzz something")
+        await until { controller.bubble == .full && !controller.isBusy }
+        XCTAssertEqual(local.asked.first, LilBroQuestion(text: "zzz something"))
+    }
+
     func test_offline_try_again_asks_once_more_in_the_same_place() async {
         let remote = Remote(.offline)
         let selection = SettingsWindowSelection(selectedTab: .hotkeys)
         let controller = make(selection: selection, remote: remote, reduceMotion: true)
-        controller.setAnswersFromWhytap(true)
+        controller.turnOnAnswers()
         controller.ask("how do I dictate")
         await until { controller.bubble == .full && !controller.isBusy }
         XCTAssertEqual(controller.turns.last?.reply, .offline)
@@ -298,7 +359,7 @@ final class LilBroControllerTests: XCTestCase {
         let remote = Remote(.limit)
         let selection = SettingsWindowSelection(selectedTab: .permissions)
         let controller = make(selection: selection, remote: remote, reduceMotion: true)
-        controller.setAnswersFromWhytap(true)
+        controller.turnOnAnswers()
         controller.ask("how do I dictate")
         await until { controller.bubble == .full && !controller.isBusy }
         XCTAssertEqual(controller.turns.last?.reply, .limit)

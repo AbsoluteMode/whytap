@@ -36,6 +36,11 @@ enum LilBroReply: Equatable {
     case unavailable
     /// Today's questions are used up, for this Mac or for everyone.
     case limit
+
+    var isUnknown: Bool {
+        if case .unknown = self { return true }
+        return false
+    }
 }
 
 /// One question with what he knows around it: the screen the person is on

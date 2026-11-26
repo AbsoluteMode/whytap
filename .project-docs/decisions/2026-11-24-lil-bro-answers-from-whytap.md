@@ -38,14 +38,22 @@ invariant said so.
   `ask/lilbro.py`). It is the only place in `Sources/` that calls a whytap.ai
   API; a test fails if another file does.
 - **Off by default.** Nothing is sent until the person presses **Turn on
-  answers** in his balloon, under the text: questions go to whytap.ai (Claude
-  Haiku 5.5) and are kept 90 days without your address; keys and dictated
-  text stay on your Mac. ⋯ → Turn off answers from whytap.ai stops it. The
-  choice is `lilBro.answersFromWhytap`.
-- **What is sent:** the question (cut to 300 characters; shorter than 3 stays
-  local), the screen as raw ids (`features/drop`), and up to three earlier
-  answered exchanges. No keys, dictated text, notes, settings, cookies or an
-  identifier of this Mac (ephemeral URLSession).
+  answers** on the disclosure in his balloon, under the text: each question
+  then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen and up to
+  three earlier answers from it; whytap.ai keeps the questions and its
+  answers for 90 days without your address; keys, dictated text and settings
+  stay on this Mac. ⋯ → Turn on answers only shows that disclosure (with Not
+  now); it never saves the choice itself. ⋯ → Turn off answers from
+  whytap.ai stops it. The choice is `lilBro.answersFromWhytap`.
+- **What is sent:** the question with whitespace collapsed and cut at a
+  character boundary to 300 Unicode scalars, as the server counts (under 3
+  stays local), the screen as raw ids (`features/drop`), and up to three
+  earlier exchanges that whytap.ai itself answered, each cut to 300/600
+  scalars. A question asked while answers were off is never sent, also not
+  later as history; with answers off the local guide gets no screen or
+  history. No keys, dictated text, notes, settings, cookies or an identifier
+  of this Mac (ephemeral URLSession). Redirects are refused, so the request
+  never leaves the endpoint; a 3xx reads as unavailable.
 - **What comes back** is checked twice: the server sends only ids from the
   app's catalog, and the app drops any it does not know. He opens the place
   through the same Settings calls as step 1.
@@ -87,6 +95,11 @@ invariant said so.
   changes nothing, Try again replaces the turn; when whytap.ai cannot answer
   he still opens the closest page.
 - Offscreen renders of the offer and the offline balloon.
+- After the builder's review of the step-2 PR (ticket 604): the menu only
+  shows the disclosure and only its button turns answers on; local turns stay
+  out of history on the first opt-in and after off/on; mixed emoji questions
+  and long earlier turns are cut to the server's scalar limits; the redirect
+  delegate refuses any redirect.
 - Not tested: a real call to whytap.ai (the endpoint is not deployed yet).
 
 ## Rejected

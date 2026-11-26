@@ -1559,9 +1559,12 @@ same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
 names, on this Mac, no network; a keyword guide, not an English parser, whose
 contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
 there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon (LilBroOffer; `lilBro.answersFromWhytap`, off by default). Then
-LilBroRemoteBrain posts the question, the screen (`tab` or `tab/feature` raw
-ids) and up to three earlier answered exchanges to
+the balloon's disclosure (LilBroOffer; ⋯ → Turn on answers only shows it;
+`lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
+question (cut to the server's 300 Unicode scalars), the screen (`tab` or
+`tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
+answered (questions asked while answers were off never leave the Mac), with
+redirects refused, to
 `https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
 claude-haiku-5-5), which returns sentences, points, follow-ups and one place;
 an id the app does not have is dropped. No internet or a timeout is offline,

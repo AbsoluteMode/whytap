@@ -46,7 +46,13 @@ cost a noticeable part of each session.
   (`resubmits`); a return made without a model (moved head, blocked
   dependency, `auto_returned`) keeps it without spending that priority.
   Moved-head checks compare the submission time (`submitted_at`), because a
-  kept place reuses an older `queued_at`.
+  kept place reuses an older `queued_at`. Every way an existing head re-enters
+  review (`set --status queued` from blocked or in progress, the author
+  resubmitting a head returned without review) goes through one function
+  that keeps or ends its place and always refreshes `submitted_at`. The
+  author may resubmit the identical head only after a return without review;
+  a head a builder reviewed and blocked stays blocked, and queued, active or
+  installed heads stay idempotent.
 - The watcher returns a queued ticket whose `--depends-on` PR has been
   blocked or cancelled for over two hours (`stale_dependency_minutes`).
 - `status --open` lists open work and the earlier tickets of the same PRs, with
@@ -57,16 +63,21 @@ cost a noticeable part of each session.
   data is unavailable is recorded on the ticket with `protected-pending`
   before the merge. A runtime ticket merged behind a lock or with pending
   tests waits as `pending_install --retry-install`; install sessions start
-  only with an unlocked screen, run the recorded tests on main before
+  only with an unlocked screen, and the one install gate run right before
+  every Quit (`build-queue-meeting-gate.py`) itself refuses a locked screen or
+  a session not in front, so a recovered candidate or a screen that locked
+  after packaging cannot reach the Quit, run the recorded tests on main before
   packaging, and a failure holds the install. `done` is refused while tests
   are pending.
 - Local refresh: `EXODIA_LOCAL_INSTALL=1` builds an arm64-only app without a
   DMG, with a local manifest of its source commit, refuses notarization,
   legacy mode and uploads, and refuses a build number not higher (or a display
-  version lower) than the installed app's before compiling. Public releases
+  version lower by Semantic Versioning precedence, so a prerelease never
+  replaces its release; an uncomparable version is refused) than the
+  installed app's before compiling (`scripts/local-install-floor.py`). Public releases
   are unchanged.
 - The watcher keeps `whytap-builder-notes` at most 120 lines and half of
-  `notes_max_bytes` (32 KB) once it is over that size, appending older lines to
+  `notes_max_bytes` (32 KB, UTF-8 bytes on disk) once it is over that size, appending older lines to
   `whytap-builder-notes.old` (its newest megabyte). It trims only under the
   session lock and writes the archive first. The builder reads the last 80
   lines.

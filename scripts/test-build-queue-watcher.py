@@ -1040,6 +1040,78 @@ class WatcherTests(unittest.TestCase):
         self.assertFalse(self.sessions()[0]["origin_rules"])
         self.assertNotIn("rules from origin/main", result.stdout + result.stderr)
 
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    def test_a_ticket_whose_dependency_stays_blocked_is_returned_without_a_session(self):
+        self.configure_watcher(stale_dependency_minutes=0)
+        (self.control / "noop").touch()
+        parent = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        self.watcher("run")
+        self.assertEqual(self.statuses()[child], "blocked")
+        self.assertEqual(self.sessions(), [])
+
+    def test_notes_keep_their_tail_and_the_archive_keeps_every_older_line(self):
+        self.configure_watcher(notes_max_bytes=4000)
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        notes.write_text("".join(f"first {n:03}\n" for n in range(500)))
+        self.enqueue(1)
+        self.watcher("run")
+        kept = notes.read_text().splitlines()
+        self.assertEqual((len(kept), kept[-1]), (120, "first 499"))
+        self.assertEqual(archive.read_text().splitlines(),
+                         [f"first {n:03}" for n in range(380)])
+        # A second rotation appends; one that has nothing older to move changes nothing.
+        with notes.open("a") as output:
+            output.write("".join(f"second {n:03}\n" for n in range(400)))
+        self.enqueue(2)
+        self.watcher("run")
+        self.assertEqual(notes.read_text().splitlines()[-1], "second 399")
+        older = archive.read_text().splitlines()
+        self.assertEqual((older[0], older[379], older[380]), ("first 000", "first 379",
+                                                              "first 380"))
+        self.assertEqual(len(older) + 120, 900)
+        notes.write_text("x" * 5000 + "\n")
+        self.enqueue(3)
+        self.watcher("run")
+        self.assertEqual(archive.read_text().splitlines(), older)
+        self.assertEqual(len(notes.read_text()), 5001)
+
+    def test_every_byte_bound_of_the_notes_counts_utf8_bytes(self):
+        """Review item 5 on ticket 635: the notes and the archive stay within their
+        byte bounds whatever the text, and keep whole lines where a line fits."""
+        spec = importlib.util.spec_from_file_location("watcher_bytes", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        samples = {"ascii": "build ok", "two-byte": "сборка готова", "three-byte": "构建完成",
+                   "four-byte": "\U0001F680\U0001F527", "mixed": "ok \u00e9 \u4e2d \U0001F680"}
+        for name, text in samples.items():
+            with self.subTest(name):
+                lines = [f"{n:05} {text}\n".encode() for n in range(4000)]
+                data = b"".join(lines)
+                for limit in (1, 7, 100, 4096, len(data) - 1, len(data), len(data) + 1):
+                    tail = watcher.tail_lines(data, limit)
+                    self.assertLessEqual(len(tail), limit)
+                    self.assertTrue(data.endswith(tail))
+                    if limit >= len(lines[-1]):  # a whole line fits: only whole lines
+                        self.assertTrue(tail == data or tail in
+                                        [b"".join(lines[i:]) for i in range(len(lines))])
+        self.configure_watcher(notes_max_bytes=4000)
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        bound = watcher.NOTES_ARCHIVE_MAX_BYTES
+        line = "старая заметка \U0001F680 " + "ж" * 40 + "\n"
+        archive.write_text(line * (bound // len(line.encode()) + 200))  # over the bound
+        notes.write_text("".join(f"{n:03} новая \U0001F527 {'ю' * 30}\n" for n in range(400)))
+        self.enqueue(1)
+        self.watcher("run")
+        self.assertLessEqual(notes.stat().st_size, 4000)
+        self.assertLessEqual(archive.stat().st_size, bound)
+        moved = archive.read_text().splitlines()
+        self.assertEqual(moved[0], line.rstrip("\n"))  # starts at a whole line
+        kept = notes.read_text().splitlines()
+        self.assertEqual(int(moved[-1][:3]) + 1, int(kept[0][:3]))  # nothing lost between
+
 class ActivationTests(WatcherTests):
     builder = "previous-builder-chat"
 
@@ -1142,45 +1214,6 @@ def load_tests(loader, _tests, _pattern):
         if name.startswith(("test_activat",)):
             suite.addTest(ActivationTests(name))
     return suite
-
-
-    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
-    def test_a_ticket_whose_dependency_stays_blocked_is_returned_without_a_session(self):
-        self.configure_watcher(stale_dependency_minutes=0)
-        (self.control / "noop").touch()
-        parent = self.enqueue(1)
-        self.queue("claim")
-        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
-        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
-        self.watcher("run")
-        self.assertEqual(self.statuses()[child], "blocked")
-        self.assertEqual(self.sessions(), [])
-
-    def test_notes_keep_their_tail_and_the_archive_keeps_every_older_line(self):
-        self.configure_watcher(notes_max_bytes=4000)
-        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
-        notes.write_text("".join(f"first {n:03}\n" for n in range(500)))
-        self.enqueue(1)
-        self.watcher("run")
-        kept = notes.read_text().splitlines()
-        self.assertEqual((len(kept), kept[-1]), (120, "first 499"))
-        self.assertEqual(archive.read_text().splitlines(),
-                         [f"first {n:03}" for n in range(380)])
-        # A second rotation appends; one that has nothing older to move changes nothing.
-        with notes.open("a") as output:
-            output.write("".join(f"second {n:03}\n" for n in range(400)))
-        self.enqueue(2)
-        self.watcher("run")
-        self.assertEqual(notes.read_text().splitlines()[-1], "second 399")
-        older = archive.read_text().splitlines()
-        self.assertEqual((older[0], older[379], older[380]), ("first 000", "first 379",
-                                                              "first 380"))
-        self.assertEqual(len(older) + 120, 900)
-        notes.write_text("x" * 5000 + "\n")
-        self.enqueue(3)
-        self.watcher("run")
-        self.assertEqual(archive.read_text().splitlines(), older)
-        self.assertEqual(len(notes.read_text()), 5001)
 
 
 if __name__ == "__main__":

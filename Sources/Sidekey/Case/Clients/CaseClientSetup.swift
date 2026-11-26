@@ -116,7 +116,8 @@ final class CaseClientSetup: CaseClientConfiguring {
         }.value
     }
 
-    /// Whether `client` is on this Mac and already has a `whytap` MCP entry.
+    /// Whether `client` is on this Mac and already has a `whytap` MCP entry it
+    /// can start (`isConfigured`).
     /// Read only: nothing is written and no client setting changes.
     // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
     func presence(of client: CaseKnownClient) async -> (installed: Bool, configured: Bool) {

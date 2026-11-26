@@ -2051,13 +2051,21 @@ place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
 with no suspension before the action. Settings -> Integrations -> Coding tools always
 lists Claude Code and Codex (CodingToolsAccess, presence read through
-CaseClientSetup.presence: installed, and a `whytap` MCP entry already there),
-one switch each, grey with "Not installed on this Mac" for a tool that is not
-found. On runs the same client setup as Case -> Connect and the onboarding
-(CaseClientSetup.connect: the `whytap` command and the canonical MCP entry; a
-person's own `whytap` entry is left as it is and counts) and, once the entry is
-there, records Yes in HarnessAccessStore; Connected means entry plus Yes. Off
-records No and leaves the entry. Other apps with an answer (a live dictation
+CaseClientSetup.presence: installed, and a `whytap` MCP entry the client can
+start, isConfigured: a command or URL, not null, `{}` or Codex `enabled =
+false`), one switch each. The switch is the gate's answer (decision == allow),
+so a Yes can always be turned off, also when the tool is not found or its entry
+is gone; the line under it says what is missing. Without a Yes a tool that is
+not found is grey, "Not installed on this Mac". On runs the same client setup
+as Case -> Connect and the onboarding (CaseClientSetup.connect: the `whytap`
+command and the canonical MCP entry; a person's own usable `whytap` entry is
+left as it is and counts) and, once a usable entry is there and no answer was
+recorded meanwhile (HarnessAccessStore.revision), records Yes; Connected means
+entry plus Yes. Off records No and leaves the entry. Refresh re-reads the
+effective answer (loadIfNeeded: a Yes whose seal is gone disappears), the view
+follows every store change (objectWillChange, also a save that went through
+later), and a presence read started before a newer one was applied is
+dropped. Other apps with an answer (a live dictation
 client) keep a switch per answer below. WHY:
 .project-docs/decisions/2026-11-26-coding-tools-switches.md The gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query

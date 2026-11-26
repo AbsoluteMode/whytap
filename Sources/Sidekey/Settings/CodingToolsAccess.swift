@@ -6,7 +6,9 @@ import Foundation
 /// Case -> Connect and the onboarding, `CaseClientSetup.connect`) and records
 /// the person's Yes in `HarnessAccessStore`; off records No. The MCP entry is
 /// left in place when the switch goes off: without a Yes the gate refuses the
-/// tool, as for a No given in the island.
+/// tool, as for a No given in the island. The switch shows the answer the gate
+/// applies, so a Yes can always be taken back, even for a tool Whytap no
+/// longer finds or whose entry is gone.
 // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
 @MainActor
 final class CodingToolsAccess: ObservableObject {
@@ -47,7 +49,11 @@ final class CodingToolsAccess: ObservableObject {
 
     private let storeSource: () -> HarnessAccessStore?
     private let probe: Probe
-    private var grantsWatch: AnyCancellable?
+    private var storeWatch: AnyCancellable?
+    /// Each presence read gets a number when it starts; a read that started
+    /// before the last one applied (a refresh overtaken by Connect) is dropped.
+    private var reads = 0
+    private var applied: [CaseKnownClient: Int] = [:]
     private let now: () -> Date
 
     init(store: @escaping () -> HarnessAccessStore?, probe: Probe, now: @escaping () -> Date = Date.init) {
@@ -63,8 +69,19 @@ final class CodingToolsAccess: ObservableObject {
         guard store == nil, let found = storeSource() else { return }
         store = found
         found.loadIfNeeded()
-        // A Yes or No given in the island shows here at once.
-        grantsWatch = found.$grants.sink { [weak self] _ in self?.objectWillChange.send() }
+        // A Yes or No given in the island shows here at once, and so does a
+        // save that went through later (the warning under the list).
+        storeWatch = found.objectWillChange.sink { [weak self] _ in self?.objectWillChange.send() }
+    }
+
+    /// Reads the tool's presence and keeps it unless a newer read was applied.
+    private func readPresence(_ tool: CaseKnownClient) async {
+        reads += 1
+        let number = reads
+        let found = await probe.presence(tool)
+        guard number > applied[tool, default: 0] else { return }
+        applied[tool] = number
+        presence[tool] = found
     }
 
     static func harnessClient(_ tool: CaseKnownClient) -> HarnessClient? {
@@ -79,22 +96,24 @@ final class CodingToolsAccess: ObservableObject {
         return store?.grants.first { $0.identity == identity }?.decision
     }
 
-    /// Whytap's MCP server is in the tool and the tool may use Whytap.
-    func isConnected(_ tool: CaseKnownClient) -> Bool {
-        presence[tool] == .installed(configured: true) && decision(tool) == .allow
-    }
+    /// The switch: the tool may use Whytap (the gate's answer now). The line
+    /// under it says whether Whytap's MCP server is in the tool too.
+    func isConnected(_ tool: CaseKnownClient) -> Bool { decision(tool) == .allow }
 
+    /// On needs the tool on this Mac; Off is always there for a Yes.
     func canSwitch(_ tool: CaseKnownClient) -> Bool {
         guard store != nil, !busy.contains(tool) else { return false }
+        if isConnected(tool) { return true }
         if case .installed = presence[tool] { return true }
         return false
     }
 
     func refresh() async {
         attachStore()
+        // The answer that applies now: a Yes whose seal is gone no longer shows.
+        store?.loadIfNeeded()
         for tool in Self.tools where !busy.contains(tool) {
-            let found = await probe.presence(tool)
-            if !busy.contains(tool) { presence[tool] = found }
+            await readPresence(tool)
         }
     }
 
@@ -111,15 +130,17 @@ final class CodingToolsAccess: ObservableObject {
         }
         // Not on this Mac (or not checked yet): nothing to connect.
         guard case .installed = presence[tool] else { return }
+        // An answer given meanwhile (a No in the island) is newer than this On.
+        let answered = store.revision(for: client.identity)
         busy.insert(tool)
         let reported = await probe.connect(tool)
-        let found = await probe.presence(tool)
-        presence[tool] = found
+        await readPresence(tool)
         busy.remove(tool)
-        guard found == .installed(configured: true) else {
+        guard presence[tool] == .installed(configured: true) else {
             problems[tool] = reported.isEmpty ? Self.notAddedProblem : reported.joined(separator: "\n")
             return
         }
+        guard store.revision(for: client.identity) == answered else { return }
         store.record(.allow, for: client, at: now())
     }
 
@@ -134,12 +155,16 @@ final class CodingToolsAccess: ObservableObject {
         case .checking:
             line = "Checking whether \(name) is on this Mac…"
         case .notInstalled:
-            line = "Not installed on this Mac."
-        case .installed:
+            line = isConnected(tool)
+                ? "Not found on this Mac, but still allowed to use Whytap. Turn off to take that back."
+                : "Not installed on this Mac."
+        case .installed(let configured):
             if store == nil {
                 line = "Not connected. Connect it in the installed Whytap app."
-            } else if isConnected(tool) {
+            } else if isConnected(tool) && configured {
                 line = "Connected. Through Whytap’s MCP server it reads your meetings, adds Vocab and Filler words and changes settings."
+            } else if isConnected(tool) {
+                line = "Allowed to use Whytap, but \(name) has no working whytap MCP server. Turn off and on again to add it."
             } else {
                 line = "Not connected. Turn on to add Whytap’s MCP server to \(name) and let it use Whytap."
             }

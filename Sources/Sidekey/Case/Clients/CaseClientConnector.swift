@@ -14,8 +14,9 @@ protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
-    /// A `whytap` MCP entry is in the client's settings, Whytap's or the
-    /// person's own (read only).
+    /// A `whytap` MCP entry the client can start is in its settings, Whytap's
+    /// or the person's own (read only). An empty, null or turned-off entry is
+    /// not: it stays as it is, but it serves nothing.
     func isConfigured() -> Bool
     /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
     /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
@@ -37,6 +38,14 @@ enum WhytapMCPEntry {
     static let arguments = ["mcp"]
     static let legacyName = "case"
     static let legacyArguments = ["case", "mcp"]
+
+    /// A JSON entry a client can start: a command or a URL. `null` and `{}`
+    /// are left as they are but serve nothing.
+    static func isUsable(_ entry: Any?) -> Bool {
+        guard let object = entry as? [String: Any] else { return false }
+        func filled(_ key: String) -> Bool { (object[key] as? String).map { !$0.isEmpty } ?? false }
+        return filled("command") || filled("url")
+    }
 }
 
 enum CaseClientConnectorError: Error, Equatable {
@@ -293,8 +302,9 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
         return object
     }
 
-    /// A user-scope `whytap` entry exists in `~/.claude.json` (read only).
-    func isConfigured() -> Bool { (try? userServers())?[WhytapMCPEntry.name] != nil }
+    /// A user-scope `whytap` entry with a command or URL is in `~/.claude.json`
+    /// (read only).
+    func isConfigured() -> Bool { WhytapMCPEntry.isUsable((try? userServers())?[WhytapMCPEntry.name]) }
 
     func install(helperPath: String) throws {
         // Read both files first: a broken one stops before anything changes.
@@ -419,6 +429,13 @@ enum CodexMCPEntry: Equatable {
         }
     }
 
+    /// `enabled = false`: Codex keeps the entry but does not start it.
+    static func isTurnedOff(_ output: CaseCommandOutput) -> Bool {
+        guard let object = try? JSONSerialization.jsonObject(with: output.stdout) as? [String: Any],
+              let enabled = object["enabled"], isBoolean(enabled) else { return false }
+        return !isTrue(enabled)
+    }
+
     private static func isBoolean(_ value: Any?) -> Bool {
         guard let value = value as AnyObject? else { return false }
         return CFGetTypeID(value) == CFBooleanGetTypeID()
@@ -453,9 +470,14 @@ struct CodexCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { locate() != nil }
 
     func isConfigured() -> Bool {
-        guard let codex = locate() else { return false }
-        let current = entry(WhytapMCPEntry.name, codex: codex)
-        return current != .absent && current != .uncertain
+        guard let codex = locate(),
+              let output = try? reader.read(executable: codex, arguments: ["mcp", "get", WhytapMCPEntry.name, "--json"],
+                                            environment: CaseClientEnvironment.make(home: home, executable: codex))
+        else { return false }
+        switch CodexMCPEntry.parse(output, name: WhytapMCPEntry.name) {
+        case .absent, .uncertain: return false
+        case .stdio, .customized, .other: return !CodexMCPEntry.isTurnedOff(output)
+        }
     }
 
     func entry(_ name: String, codex: URL) -> CodexMCPEntry {
@@ -529,7 +551,7 @@ struct CursorCaseConnector: CaseClientConnector {
     func isInstalled() -> Bool { appInstalled() }
 
     func isConfigured() -> Bool {
-        ((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name] != nil
+        WhytapMCPEntry.isUsable(((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name])
     }
 
     func install(helperPath: String) throws {

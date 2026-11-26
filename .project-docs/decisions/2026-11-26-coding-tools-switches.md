@@ -35,18 +35,26 @@ until the tool had already connected.
   `CaseCallerResolver.knownAIApps`).
 - One switch per tool. **On**: `CaseClientSetup.connect` (the `whytap`
   command and the canonical `whytap` MCP entry, as Case → Connect and the
-  onboarding do); once the tool has a `whytap` entry, Yes is recorded in
-  `HarnessAccessStore`, the same answer the island's question stores. An entry
-  the person wrote is left as it is and counts. If no entry is there after
-  setup, no Yes is recorded and the row says what failed.
+  onboarding do); once the tool has a `whytap` entry it can start, Yes is
+  recorded in `HarnessAccessStore`, the same answer the island's question
+  stores. An entry the person wrote is left as it is and counts when it has a
+  command or URL; `null`, `{}` or Codex's `enabled = false` is left as it is
+  but does not count. If no usable entry is there after setup, no Yes is
+  recorded and the row says what failed. An answer given while setup runs (a
+  No in the island) is newer and stays.
 - **Off** records No at once. The MCP entry stays: without a Yes the gate
   refuses the tool, exactly as after a No in the island, and turning it back
   on needs no rewrite.
-- The row says Connected (entry and Yes), Not connected, Checking, Connecting,
-  or "Not installed on this Mac" with a disabled switch. Presence is read
-  without writing (`CaseClientSetup.presence`: the client's locator and its
-  read-only `isConfigured`), off the main thread, when Integrations appears
-  and when Whytap becomes active again.
+- The switch shows the gate's answer: a Yes can always be turned off, also
+  for a tool Whytap no longer finds or whose entry is gone, and the line says
+  what is missing. Otherwise the row says Connected (entry and Yes), Not
+  connected, Checking, Connecting, or "Not installed on this Mac" with a
+  disabled switch. Presence is read without writing (`CaseClientSetup.presence`:
+  the client's locator and its read-only `isConfigured`), off the main thread,
+  when Integrations appears and when Whytap becomes active again; a read that
+  started before a newer one was applied is dropped. Each refresh re-reads the
+  answer that applies (a Yes whose seal is gone no longer shows), and the row
+  follows every change of the store, a late save included.
 - Without the app's access store (a build that has no broker) the switches
   are disabled and the row points to the installed app.
 - Other apps with an answer (a live dictation client) keep their switch per
@@ -58,6 +66,9 @@ until the tool had already connected.
   Integrations; one switch is both steps the person means by "connect".
 - Recording Yes only after the entry exists keeps "Connected" true: a tool
   with access and no server would never reach Whytap.
+- The gate honours a Yes whatever the local checks find, so the switch must
+  follow the gate: a Yes the person cannot see or take back is worse than a
+  row that says the server is missing.
 - Leaving the entry on Off keeps one rule for refusing a tool (the gate) and
   never touches the person's client settings to take something away.
 
@@ -69,6 +80,12 @@ nothing and leaves the entry; a failed setup records no Yes and shows the
 setup's message or a fallback; a person's own entry counts; a missing tool is
 grey and cannot be switched; no store, no switch; Checking before the answer;
 other apps' answers listed below; pictures of Integrations in both themes.
+
+The builder's review of ticket 671 found five classes of faults (a Yes not
+revocable without the tool or entry, an On overwriting a newer No, unusable
+entries counted as connected, a stale answer after the seal went or a late
+save, an old presence read replacing a newer one). `CodingToolsRegressionTests`
+holds the builder's seven reproducers and one for the new row lines.
 
 Not checked in a running app: Connect against the real `claude` and `codex`
 CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).

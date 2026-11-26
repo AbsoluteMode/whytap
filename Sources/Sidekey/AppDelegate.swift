@@ -1444,6 +1444,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHelpHotkey()
         registerToolHotkeys()
         registerMeetingRecordHotkey()
+        // Points at the app holding Secure Input when a shortcut cannot arrive.
+        SecureInputGuard.shared.start()
         // Brightness keys install their tap only when switched on in Settings -> Toolbox.
         BrightnessKeys.shared.start(showStrip: { [weak self] in self?.showBrightnessGlance() })
         guard hotkey == nil else { return }

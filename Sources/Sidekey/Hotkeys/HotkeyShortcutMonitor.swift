@@ -204,6 +204,7 @@ final class ModifierOnlyHotkeyMonitor: HotkeyShortcutMonitoring {
         let held = HotkeyFlags.isHeld(key, rawFlags)
         if held && !isHeld && HotkeyFlags.isOnly(key, rawFlags) {
             isHeld = true
+            HotkeyFireRecorder.noteFired()
             guard shouldSuppress?() != true else { return }
             DispatchQueue.main.async(execute: onHotkey)
         } else if !held && isHeld {

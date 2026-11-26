@@ -247,6 +247,27 @@ and `PermissionsSettingsViewModel`. The source correction and remaining
 installed-app checks are recorded in the
 [permission stability audit](../.project-docs/bugs/2026-10-19-permission-stability-audit.md).
 
+### Secure Input: the holder's logo shakes
+
+While another app holds Secure Event Input (a focused password field, or a
+browser that kept it after Cmd-Tab), macOS drops the keys Whytap would see:
+`SpaceHoldMonitor` (hold-Space and hold-combo Drop) gets nothing, and Carbon
+combos whose modifiers are only ⌥ and/or ⇧ (⌥F Shot, ⌥M Meeting, ⌥H Help) do
+not fire. Carbon combos with ⌘ or ⌃ and modifier-only shortcuts (R⌘ Agent,
+R⌥ Google) keep working. Whytap does not work around the protection.
+
+`SecureInputGuard` watches modifier changes, which still arrive. When a
+blocked shortcut's chord is pressed (held up to 3 s) and no Whytap shortcut
+arrives, the holder's logo shakes in a black capsule just to the right of the
+island; hovering it reads "Dia holds secure input — close its password field".
+A background app that keeps secure input gets a dimmed logo there until it lets
+go. The holder is the app the person left while secure input stayed on,
+unless the frontmost app has a focused password field; macOS's
+`kCGSSessionSecureInputPID` names the frontmost app and is not used. Whytap's
+own password fields show nothing; an unknown or quit holder shows a lock.
+A bare key or Space leaves no event, so only the dimmed logo covers it.
+[Decision](../.project-docs/decisions/2026-11-26-secure-input-holder.md).
+
 ## Tool hotkeys
 
 Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a

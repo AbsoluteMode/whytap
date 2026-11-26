@@ -18,17 +18,30 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Selectable tabs. `agentMode` stays a case so `whytap://settings/agentMode`
-    /// keeps working; it opens the Agent's screen in Features (`resolved`,
-    /// `SettingsWindowSelection.select`).
+    /// Selectable tabs. `agentMode` and `notifications` stay cases so
+    /// `whytap://settings/agentMode` and `whytap://settings/notifications`
+    /// keep working; they open the Agent's and Notify's screens in Features
+    /// (`featureScreen`, `resolved`, `SettingsWindowSelection.select`).
     // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
+    // WHY: .project-docs/decisions/2026-11-26-notifications-in-notify.md
     static var availableCases: [SettingsWindowTab] {
-        allCases.filter { $0 != .agentMode }
+        allCases.filter { $0.featureScreen == nil }
+    }
+
+    /// The feature screen a former tab now opens: the old Agents tab is the
+    /// Agent's screen, the old Notifications tab is Notify's.
+    var featureScreen: AppFeature? {
+        switch self {
+        case .agentMode: return .agent
+        case .notifications: return .notify
+        case .features, .apiAndModels, .hotkeys, .permissions, .notes, .toolbox, .integrations, .backup, .other:
+            return nil
+        }
     }
 
     /// The tab that actually shows this tab's settings.
     var resolved: SettingsWindowTab {
-        self == .agentMode ? .features : self
+        featureScreen == nil ? self : .features
     }
 
     /// The sidebar, as in the approved mockup: Features, Keys & models,
@@ -38,12 +51,12 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
     static let sidebarCases: [SettingsWindowTab] = [.features, .apiAndModels, .permissions, .hotkeys, .other]
 
     /// The sidebar row that stays selected while this tab is shown: Meeting
-    /// notes and Toolbox belong to Features (Meeting Notes, Hover);
-    /// Notifications, Integrations and Backup to General.
+    /// notes and Toolbox belong to Features (Meeting Notes, Hover), as do the
+    /// former Agents and Notifications tabs; Integrations and Backup to General.
     var sidebarHome: SettingsWindowTab {
         switch self {
-        case .notes, .toolbox, .agentMode: return .features
-        case .notifications, .integrations, .backup: return .other
+        case .notes, .toolbox, .agentMode, .notifications: return .features
+        case .integrations, .backup: return .other
         case .features, .apiAndModels, .hotkeys, .permissions, .other: return self
         }
     }
@@ -77,8 +90,9 @@ enum SettingsWindowTab: String, CaseIterable, Identifiable {
             return "Agents"
         case .toolbox:
             return "Toolbox"
+        // The id stays for links; it opens Features → Notify.
         case .notifications:
-            return "Notifications"
+            return "Notify"
         case .integrations:
             return "Integrations"
         case .backup:

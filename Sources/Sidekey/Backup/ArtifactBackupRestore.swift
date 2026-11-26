@@ -1331,7 +1331,7 @@ struct ArtifactRestoreTransaction {
             written += 1
         }
         if written > 0 {
-            warnings.append("\(written) notification source(s) were restored switched off. Enable the ones you want in Settings → Notifications.")
+            warnings.append("\(written) notification source(s) were restored switched off. Enable the ones you want in Settings → Features → Notify.")
         }
         if !unreadable.isEmpty {
             warnings.append("\(unreadable.count) notification source file(s) were kept as an inactive copy because this version cannot read them.")

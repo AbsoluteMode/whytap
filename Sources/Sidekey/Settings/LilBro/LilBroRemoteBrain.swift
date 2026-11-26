@@ -161,7 +161,10 @@ struct LilBroRemoteBrain: LilBroBrain {
     static func destination(_ value: Any?) -> LilBroDestination? {
         guard let go = value as? [String: Any] else { return nil }
         if let raw = go["feature"] as? String, let feature = AppFeature(rawValue: raw) { return .feature(feature) }
-        if let raw = go["tab"] as? String, let tab = SettingsWindowTab(rawValue: raw) { return .tab(tab) }
+        // A former tab (Agents, Notifications) is now a feature's screen: he runs there.
+        if let raw = go["tab"] as? String, let tab = SettingsWindowTab(rawValue: raw) {
+            return tab.featureScreen.map(LilBroDestination.feature) ?? .tab(tab)
+        }
         if go["keys"] as? Bool == true { return .apiKeys }
         return nil
     }

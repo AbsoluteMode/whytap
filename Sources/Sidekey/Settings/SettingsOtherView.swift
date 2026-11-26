@@ -47,7 +47,6 @@ struct SettingsOtherView: View {
 
     /// Tabs that left the sidebar and open from General.
     static let moreRows: [(title: String, subtitle: String, tab: SettingsWindowTab)] = [
-        ("Notifications", "Which notifications appear beside the island, and their sounds.", .notifications),
         ("Backup", "Encrypted backups of your keys and settings, to restore or move to another Mac.", .backup),
         ("Integrations", "Connect GitHub, where your encrypted backups are kept.", .integrations),
     ]

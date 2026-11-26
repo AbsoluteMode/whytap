@@ -122,6 +122,12 @@ final class LilBroRemoteBrainTests: XCTestCase {
         let tab = await brain(status: 200, json: #"{"text":["Here."],"go":{"tab":"hotkeys"}}"#)
             .reply(to: LilBroQuestion(text: "shortcuts"))
         XCTAssertEqual(tab, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .tab(.hotkeys))))
+        // A former tab is now a feature's screen: he runs to that screen.
+        for (raw, feature) in [("notifications", AppFeature.notify), ("agentMode", .agent)] {
+            let former = await brain(status: 200, json: #"{"text":["Here."],"go":{"tab":"\#(raw)"}}"#)
+                .reply(to: LilBroQuestion(text: "where"))
+            XCTAssertEqual(former, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .feature(feature))), raw)
+        }
         let keys = await brain(status: 200, json: #"{"text":["Here."],"go":{"keys":true}}"#)
             .reply(to: LilBroQuestion(text: "my key"))
         XCTAssertEqual(keys, .answer(LilBroAnswer(paragraphs: ["Here."], destination: .apiKeys)))

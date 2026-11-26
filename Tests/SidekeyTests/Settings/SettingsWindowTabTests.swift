@@ -33,9 +33,37 @@ final class SettingsWindowTabTests: XCTestCase {
         XCTAssertEqual(SettingsWindowTab.allCases.dropFirst(6).first, .toolbox)
     }
 
-    func test_every_tab_but_agents_is_in_the_sidebar() {
-        XCTAssertEqual(SettingsWindowTab.availableCases, SettingsWindowTab.allCases.filter { $0 != .agentMode })
+    func test_every_tab_but_agents_and_notifications_is_selectable() {
+        XCTAssertEqual(SettingsWindowTab.availableCases,
+                       SettingsWindowTab.allCases.filter { $0 != .agentMode && $0 != .notifications })
         XCTAssertFalse(SettingsWindowTab.agentMode.isAvailable)
+        XCTAssertFalse(SettingsWindowTab.notifications.isAvailable)
+    }
+
+    /// The Notifications tab repeated Notify's list; it became Notify's screen
+    /// in Features. Its link, a What's new button or Lil Bro still land there.
+    @MainActor
+    func test_notifications_tab_opens_the_notify_screen() throws {
+        XCTAssertEqual(SettingsWindowTab.notifications.resolved, .features)
+        XCTAssertEqual(SettingsWindowTab.notifications.featureScreen, .notify)
+        XCTAssertEqual(SettingsWindowTab.notifications.sidebarHome, .features)
+        let selection = SettingsWindowSelection(selectedTab: .notifications)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .notify)
+        XCTAssertNil(selection.backLink, "Notify's screen has its own way back to the list")
+
+        let url = try XCTUnwrap(URL(string: "whytap://settings/notifications"))
+        guard case .show(.settings(let target)) = WhytapLink.request(for: url) else {
+            return XCTFail("An old Notifications link still opens Settings")
+        }
+        selection.select(.other)
+        selection.setHighlight(target)
+        XCTAssertEqual(selection.selectedTab, .features)
+        XCTAssertEqual(selection.shownFeature, .notify)
+
+        // Features in the sidebar is the list again, not Notify.
+        selection.select(.features)
+        XCTAssertNil(selection.shownFeature)
     }
 
     /// The Agents tab became the Agent's screen in Features; its link and
@@ -43,7 +71,10 @@ final class SettingsWindowTabTests: XCTestCase {
     @MainActor
     func test_agents_tab_opens_the_agent_screen() {
         XCTAssertEqual(SettingsWindowTab.agentMode.resolved, .features)
-        for tab in SettingsWindowTab.availableCases { XCTAssertEqual(tab.resolved, tab) }
+        for tab in SettingsWindowTab.availableCases {
+            XCTAssertEqual(tab.resolved, tab)
+            XCTAssertNil(tab.featureScreen)
+        }
         let selection = SettingsWindowSelection(selectedTab: .agentMode)
         XCTAssertEqual(selection.selectedTab, .features)
         selection.select(.hotkeys)

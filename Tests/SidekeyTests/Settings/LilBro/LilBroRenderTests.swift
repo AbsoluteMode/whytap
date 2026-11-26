@@ -119,7 +119,7 @@ final class LilBroRenderTests: XCTestCase {
         try await render(fixture, selection, lilBro, name: "offer-light") {
             lilBro.toggleFromSidebar()
         }
-        lilBro.setAnswersFromWhytap(true)
+        lilBro.turnOnAnswers()
         try await render(fixture, selection, lilBro, name: "offline-light") {
             lilBro.ask("how do I dictate")
             await self.until { lilBro.bubble == .full && !lilBro.isBusy }

@@ -46,6 +46,10 @@ final class LilBroController: ObservableObject {
     struct Turn: Equatable, Identifiable {
         let id = UUID()
         let question: String
+        /// Asked with answers from whytap.ai on, so whytap.ai already has it.
+        /// Only such turns go back as earlier exchanges; a question asked on
+        /// this Mac never leaves it later.
+        var sentToWhytap = false
         var reply: LilBroReply?
         /// The place he opened for this answer, said under it.
         var opened: String?
@@ -77,6 +81,8 @@ final class LilBroController: ObservableObject {
     @Published var hovering = false
     @Published var showEarlier = false
     @Published var menuOpen = false
+    /// The disclosure before answers from whytap.ai, asked for from ⋯.
+    @Published private(set) var consentShown = false
     @Published var draft = ""
 
     private(set) var map = LilBroMap()
@@ -251,9 +257,32 @@ final class LilBroController: ObservableObject {
         showEarlier = false
     }
 
-    /// The person's explicit choice in the balloon; nothing is sent before it.
-    func setAnswersFromWhytap(_ on: Bool) {
-        preferences.answersFromWhytap = on
+    /// ⋯ → Turn on answers: shows the disclosure; nothing is turned on yet.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
+    func askToTurnOnAnswers() {
+        menuOpen = false
+        guard !answersFromWhytap else { return }
+        consentShown = true
+    }
+
+    /// The disclosure's Turn on answers button — the only way answers from
+    /// whytap.ai are turned on. Nothing is sent before it.
+    func turnOnAnswers() {
+        preferences.answersFromWhytap = true
+        consentShown = false
+        menuOpen = false
+        objectWillChange.send()
+    }
+
+    /// The disclosure's Not now.
+    func dismissConsent() {
+        consentShown = false
+    }
+
+    /// ⋯ → Turn off answers from whytap.ai.
+    func turnOffAnswers() {
+        preferences.answersFromWhytap = false
+        consentShown = false
         menuOpen = false
         objectWillChange.send()
     }
@@ -277,14 +306,15 @@ final class LilBroController: ObservableObject {
         showEarlier = false
         proposal = nil
         cancelJob()
-        let asked = LilBroQuestion(text: question, screen: screen, history: history)
-        turns.append(Turn(question: question))
+        let remoteOn = answersFromWhytap
+        let asked = LilBroQuestion(text: question, screen: remoteOn ? screen : "", history: remoteOn ? history : [])
+        turns.append(Turn(question: question, sentToWhytap: remoteOn && LilBroRemoteBrain.sends(question)))
         let index = turns.count - 1
         bubble = .thinking
         busy = true
         target = nil
         if mascotVisible { setPose(.think) }
-        let brain = answersFromWhytap ? remote : local
+        let brain = remoteOn ? remote : local
         job = Task { [weak self] in
             guard let self else { return }
             let reply = await brain.reply(to: asked)
@@ -345,10 +375,11 @@ final class LilBroController: ObservableObject {
         return tab
     }
 
-    /// Up to three earlier answered exchanges, oldest first.
+    /// Up to three earlier exchanges answered by whytap.ai, oldest first.
+    /// Questions asked while answers were off stay on this Mac.
     var history: [LilBroQuestion.Exchange] {
         turns.compactMap { turn in
-            guard case .answer(let answer) = turn.reply else { return nil }
+            guard turn.sentToWhytap, case .answer(let answer) = turn.reply else { return nil }
             return LilBroQuestion.Exchange(question: turn.question,
                                            answer: (answer.paragraphs + answer.bullets).joined(separator: "\n"))
         }.suffix(3).map { $0 }
@@ -654,9 +685,10 @@ enum LilBroCopy {
     static let greetingAnswers = "Hi, I’m Lil Bro. Ask me anything about Whytap — I’ll open the right setting for you."
     static let localNote = "Answers come from this Mac: I find settings by name."
     /// Said once, before anything is sent, with the button that turns answers on.
-    static let offer = "Want real answers? Questions then go to whytap.ai (Claude Haiku 5.5) and are kept 90 days without your address. Keys and dictated text stay on your Mac."
+    static let offer = "Want real answers? Each question you ask here then goes to whytap.ai (Claude Haiku 5.5) with the Settings screen you’re on and up to three earlier answers from it. whytap.ai keeps your questions and its answers for 90 days, without your address. Keys, dictated text and your settings stay on this Mac."
     static let turnOn = "Turn on answers"
-    static let answersNote = "Questions go to whytap.ai (Claude Haiku 5.5). Keys and dictated text stay on your Mac."
+    static let answersNote = "Questions, the screen you’re on and recent answers go to whytap.ai (Claude Haiku 5.5), kept 90 days. Keys and dictated text stay on your Mac."
+    static let notNow = "Not now"
     static let unknown = "I only know Settings by name. Try one of these:"
     static let offline = "I can’t reach whytap.ai — no internet. Settings still work offline; this is the closest page:"
     static let unavailable = "whytap.ai can’t answer right now. Settings still work; this is the closest page:"

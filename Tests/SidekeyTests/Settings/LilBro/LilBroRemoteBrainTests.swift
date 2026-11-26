@@ -49,6 +49,44 @@ final class LilBroRemoteBrainTests: XCTestCase {
         XCTAssertEqual(box.requests.count, 1, "under three characters nothing is sent")
     }
 
+    /// The server counts Unicode scalars (builder review of #465, ticket
+    /// 604): mixed emoji and long earlier turns stay within its limits.
+    func test_lengths_are_counted_as_the_server_counts_them() async throws {
+        let box = Box()
+        let remote = brain(status: 200, json: #"{"text":["Hi"]}"#, box: box)
+        let thumbs = String(repeating: "👍🏽", count: 160)  // 160 characters, 320 scalars
+        let history = [LilBroQuestion.Exchange(question: String(repeating: "é", count: 401),
+                                               answer: "  " + String(repeating: "a🇫🇷", count: 300) + "  ")]
+        _ = await remote.reply(to: LilBroQuestion(text: "ok " + thumbs + "   end", history: history))
+        let body = try XCTUnwrap(JSONSerialization.jsonObject(with: box.requests[0].httpBody!) as? [String: Any])
+        let question = try XCTUnwrap(body["question"] as? String)
+        XCTAssertLessThanOrEqual(question.unicodeScalars.count, 300)
+        XCTAssertEqual(question.unicodeScalars.count, 299, "cut before a character that would split")
+        XCTAssertTrue(question.hasPrefix("ok 👍🏽"))
+        let sent = try XCTUnwrap((body["history"] as? [[String: String]])?.first)
+        XCTAssertLessThanOrEqual(sent["q"]!.unicodeScalars.count, 300)
+        XCTAssertLessThanOrEqual(sent["a"]!.unicodeScalars.count, 600)
+        XCTAssertFalse(sent["a"]!.hasPrefix(" "))
+        // Whitespace is collapsed as on the server; under three scalars stays local.
+        XCTAssertEqual(LilBroRemoteBrain.prepared("  how   do\nI  dictate "), "how do I dictate")
+        XCTAssertNil(LilBroRemoteBrain.prepared(" a  "))
+        XCTAssertFalse(LilBroRemoteBrain.sends("hi"))
+        XCTAssertTrue(LilBroRemoteBrain.sends("hey"))
+    }
+
+    func test_a_redirect_away_from_the_endpoint_is_refused() async {
+        let delegate = LilBroRemoteBrain.NoRedirects()
+        let response = HTTPURLResponse(url: LilBroRemoteBrain.endpoint, statusCode: 302, httpVersion: nil,
+                                       headerFields: ["Location": "https://example.com/collect"])!
+        let task = URLSession.shared.dataTask(with: LilBroRemoteBrain.endpoint)
+        let next = await delegate.urlSession(URLSession.shared, task: task, willPerformHTTPRedirection: response,
+                                             newRequest: URLRequest(url: URL(string: "https://example.com/collect")!))
+        XCTAssertNil(next)
+        task.cancel()
+        let reply = await brain(status: 302, json: "").reply(to: LilBroQuestion(text: "how do I dictate"))
+        XCTAssertEqual(reply, .unavailable, "an unfollowed redirect reads as unavailable")
+    }
+
     func test_an_answer_names_a_feature_a_tab_or_the_keys() async {
         let feature = await brain(status: 200, json: """
             {"text":["Drop types what you say."],"bullets":["Download the model"],"followUps":["a","b","c"],

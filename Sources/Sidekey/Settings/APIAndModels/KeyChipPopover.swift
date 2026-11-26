@@ -57,6 +57,7 @@ struct KeyChipPopover: View {
 
     private var replaceSection: some View {
         VStack(alignment: .leading, spacing: 6) {
+            // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
             SecureField("New API key", text: $newKey)
                 .textFieldStyle(.roundedBorder)
                 .disabled(replacing)

@@ -118,6 +118,7 @@ struct ProviderKeyTiles: View {
                 }
                 .contentShape(RoundedRectangle(cornerRadius: 12))
         }
+        .lilBroControl(title)
         .buttonStyle(APIModelFeedbackStyle(cornerRadius: 12))
         .disabled(busy || tavily.saving)
         .focused($focused, equals: target)

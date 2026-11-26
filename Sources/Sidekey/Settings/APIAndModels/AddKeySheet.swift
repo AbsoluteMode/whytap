@@ -65,10 +65,12 @@ struct AddKeySheet: View {
             MacField(placeholder: "Base URL", text: $baseURL, monospaced: true)
             Text("For example http://localhost:8000/v1")
                 .font(.caption).foregroundStyle(MacSettingsTheme.text2)
+            // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
             SecureField("API key (optional)", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .disabled(saving)
         } else {
+            // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
             SecureField("API key", text: $key)
                 .textFieldStyle(.roundedBorder)
                 .disabled(saving)

@@ -221,6 +221,7 @@ struct FeatureListRow: View {
     }
 
     var body: some View {
+        // lilBro-exempt: a feature in the Features list: opens its screen; Lil Bro presses it himself as a stop (spot .feature)
         Button(action: action) {
             HStack(spacing: 12) {
                 FeatureIcon(feature: info.feature, size: .row)

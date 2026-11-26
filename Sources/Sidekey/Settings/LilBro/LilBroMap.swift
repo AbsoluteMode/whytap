@@ -11,6 +11,9 @@ enum LilBroSpot: Hashable {
     case feature(AppFeature)
     /// One row of a tab he can lead to (`LilBroRow.id`).
     case row(String)
+    /// What opens one part of a tab, by the screen it shows
+    /// (`apiAndModels/keys`: the API keys tab; `toolbox/vocab`: the Vocab tile).
+    case part(String)
 }
 
 /// The window as Lil Bro sees it: named spots and the blocks (cards) he can
@@ -111,6 +114,12 @@ extension View {
         modifier(LilBroCatalogRowModifier(title: title))
     }
 
+    /// `lilBroCatalogRow(title)`, or nothing for nil.
+    @ViewBuilder
+    func lilBroCatalogRow(_ title: String?) -> some View {
+        if let title { lilBroCatalogRow(title) } else { self }
+    }
+
     /// Rows inside are data (one per app, tool, server or dashboard), not
     /// settings of their own: they are not listed and Lil Bro does not lead
     /// to them one by one.
@@ -168,9 +177,10 @@ private struct LilBroScrollKey: EnvironmentKey { static let defaultValue = LilBr
 private struct LilBroItemsKey: EnvironmentKey { static let defaultValue = false }
 private struct LilBroInRowKey: EnvironmentKey { static let defaultValue = false }
 
-/// Scrolls the Settings pane to a row by its id.
+/// Scrolls the Settings pane to a row by its id: into the middle, or a row
+/// taller than that to its top so its top edge stays in view.
 struct LilBroScroll {
-    var to: @MainActor (String) -> Void = { _ in }
+    var to: @MainActor (String, UnitPoint) -> Void = { _, _ in }
 }
 
 /// A row drawn on a Settings screen, as the coverage test sees it.
@@ -208,6 +218,11 @@ private struct LilBroRowModifier: ViewModifier {
     let id: String
     @Environment(\.lilBroFocusedRow) private var focused
     @Environment(\.lilBroScroll) private var scroll
+    @State private var height: CGFloat = 0
+
+    /// A tall row (API keys, a Toolbox tool, Costs) goes to the top: in the
+    /// middle its top edge, where he stands, would be above the pane.
+    private var anchor: UnitPoint { height > 220 ? UnitPoint(x: 0.5, y: 0.02) : .center }
 
     func body(content: Content) -> some View {
         content
@@ -216,11 +231,14 @@ private struct LilBroRowModifier: ViewModifier {
             .background(GeometryReader { proxy in
                 Color.clear.preference(key: LilBroBlocksKey.self,
                                        value: focused == id ? [proxy.frame(in: .named(LilBroSpace.name))] : [])
+                    .onAppear { height = proxy.size.height }
+                    .onChange(of: proxy.size.height) { _, now in height = now }
             })
-            // The pane scrolls the row Lil Bro led to into the middle, also
-            // when its screen has just opened.
-            .onAppear { if focused == id { scroll.to(id) } }
-            .onChange(of: focused) { _, now in if now == id { scroll.to(id) } }
+            // The pane scrolls the row Lil Bro led to into view, also when its
+            // screen has just opened.
+            // After the row has measured itself.
+            .onAppear { if focused == id { DispatchQueue.main.async { scroll.to(id, anchor) } } }
+            .onChange(of: focused) { _, now in if now == id { scroll.to(id, anchor) } }
     }
 }
 

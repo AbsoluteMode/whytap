@@ -17,6 +17,7 @@ struct NotificationSoundControl: View {
     var body: some View {
         Menu {
             ForEach(NotificationSound.allCases, id: \.self) { sound in
+                // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                 Button {
                     settings.setSound(sound, for: sourceID)
                     preview(sound)
@@ -36,6 +37,7 @@ struct NotificationSoundControl: View {
                 .contentShape(Rectangle())
                 .opacity(isEnabled ? 1 : 0.42)
         }
+        .lilBroControl("Sound")
         .menuStyle(.button)
         .buttonStyle(MacButtonInteractionStyle(focused: focused))
         .menuIndicator(.hidden)

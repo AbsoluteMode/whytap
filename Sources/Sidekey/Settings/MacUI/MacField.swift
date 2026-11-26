@@ -12,6 +12,7 @@ struct MacField: View {
     var body: some View {
         Group {
             if isSecure {
+                // lilBro-exempt: part of a Mac* primitive that reports itself with .lilBroControl in its own body
                 SecureField(placeholder, text: $text)
             } else {
                 TextField(placeholder, text: $text)

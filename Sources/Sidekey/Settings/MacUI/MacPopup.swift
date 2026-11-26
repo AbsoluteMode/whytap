@@ -101,6 +101,7 @@ struct MacPopup<Value: Hashable>: View {
     var body: some View {
         MacMenu(title: currentLabel, minWidth: minWidth, maxWidth: maxWidth, appearance: appearance) {
             ForEach(items) { item in
+                // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                 Button {
                     selection = item.value
                 } label: {

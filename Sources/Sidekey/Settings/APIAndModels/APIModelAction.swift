@@ -36,6 +36,7 @@ struct APIModelAction: View {
                 .foregroundStyle(foreground)
                 .background(background, in: RoundedRectangle(cornerRadius: 6))
         }
+        .lilBroControl(title)
         .buttonStyle(APIModelFeedbackStyle(focused: focused))
         .disabled(!isEnabled).focused($focused)
     }

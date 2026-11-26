@@ -69,6 +69,7 @@ struct IntegrationLink: View {
 
     var body: some View {
         Link(title, destination: destination)
+            .lilBroControl(title)
             .buttonStyle(IntegrationButtonStyle(primary: false, focused: focused))
             .focused($focused)
     }

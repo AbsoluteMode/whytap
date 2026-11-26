@@ -11,6 +11,7 @@ struct ProviderMenu: View {
 
     var body: some View {
         MacMenu(title: choice.label, minWidth: width ?? 90, maxWidth: width ?? 160) {
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button {
                 viewModel.selectProvider(nil, for: feature)
             } label: {
@@ -20,6 +21,7 @@ struct ProviderMenu: View {
             switch viewModel.providerLists[choice.model] {
             case .loaded(let endpoints, _):
                 ForEach(endpoints, id: \.tag) { endpoint in
+                    // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                     Button {
                         viewModel.selectProvider(endpoint.tag, for: feature)
                     } label: {
@@ -30,6 +32,7 @@ struct ProviderMenu: View {
                     itemLabel("\(pinned)   not offered now", selected: true)
                 }
             case .failed:
+                // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                 Button("Couldn't load providers · Retry") {
                     Task { await viewModel.loadProviders(for: feature, force: true) }
                 }

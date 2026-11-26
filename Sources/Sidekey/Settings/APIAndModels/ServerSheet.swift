@@ -158,6 +158,7 @@ struct ServerSheet: View {
                     modelRow(index)
                 }
                 divider
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Button {
                     model.addRow()
                 } label: {
@@ -184,6 +185,7 @@ struct ServerSheet: View {
         return VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 10) {
                 nameField(index)
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Picker("Type", selection: Binding(get: { row.kind }, set: { model.setKind($0, of: row.id) })) {
                     ForEach(ServerModel.Kind.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
@@ -193,6 +195,7 @@ struct ServerSheet: View {
                 .accessibilityLabel("Type of \(row.name)")
                 status(row.status)
                     .frame(width: Self.statusWidth, alignment: .leading)
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Button {
                     model.removeRow(row.id)
                 } label: {
@@ -222,6 +225,7 @@ struct ServerSheet: View {
         let id = draft.rows[index].id
         let suggestions = model.suggestions
         return HStack(spacing: 4) {
+            // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
             TextField("Model name", text: Binding(get: { model.draft.rows.first { $0.id == id }?.name ?? "" },
                                                    set: { model.setName($0, of: id) }))
                 .textFieldStyle(.plain)
@@ -230,9 +234,11 @@ struct ServerSheet: View {
                 .padding(.leading, 10)
                 .padding(.vertical, 6)
             if !suggestions.isEmpty {
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Menu {
                     Section("On this server") {
                         ForEach(suggestions, id: \.self) { name in
+                            // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                             Button(name) { model.choose(name, for: id) }
                         }
                     }

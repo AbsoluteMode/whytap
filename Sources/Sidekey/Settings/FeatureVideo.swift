@@ -82,6 +82,7 @@ struct FeatureVideoButton: View {
 
     var body: some View {
         if let url = video.url(in: bundle) {
+            // lilBro-exempt: plays the feature's demo video, not a setting
             Button { presented.toggle() } label: {
                 Image(systemName: "play.circle")
                     .font(.system(size: 17, weight: .regular))

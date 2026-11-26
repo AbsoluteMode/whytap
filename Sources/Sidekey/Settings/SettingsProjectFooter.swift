@@ -14,6 +14,7 @@ struct SettingsProjectFooter: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
                 if let whatsNew, !whatsNew.history.isEmpty {
+                    // lilBro-exempt: the sidebar footer (version, update, project link), not a setting
                     Button { whatsNew.presentHistory() } label: {
                         Text("\(identity.name) \(identity.version)").lineLimit(1)
                     }
@@ -61,6 +62,7 @@ private struct SettingsFooterUpdateButton: View {
 
     var body: some View {
         if let offer = controller.settingsOffer {
+            // lilBro-exempt: the sidebar footer (version, update, project link), not a setting
             Button {
                 controller.updateFromSettings()
             } label: {
@@ -111,6 +113,7 @@ private struct SettingsFooterLink: View {
     var brand: String?
 
     var body: some View {
+        // lilBro-exempt: the sidebar footer (version, update, project link), not a setting
         Link(destination: destination) {
             HStack(spacing: 5) {
                 icon

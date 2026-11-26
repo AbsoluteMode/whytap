@@ -279,6 +279,7 @@ struct APIHintsView: View {
                     .foregroundStyle(MacSettingsTheme.text)
                     .padding(.horizontal, 10).padding(.vertical, 5)
                 }
+                .lilBroControl("Get offer")
                 .buttonStyle(MacButtonInteractionStyle(background: MacSettingsTheme.controlBg, focused: focused))
                 .focused($focused)
                 .onHover { inside in

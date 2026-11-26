@@ -106,6 +106,7 @@ struct FeatureScreenHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
+            // lilBro-exempt: the way back to the screen this one opens from, not a setting
             Button(action: back) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))
@@ -175,6 +176,7 @@ struct FeatureVideoStrip: View {
         VStack(alignment: .leading, spacing: 10) {
             Group {
                 if url != nil {
+                    // lilBro-exempt: plays the feature's demo video, not a setting
                     Button { playing.toggle() } label: {
                         strip(available: true).opacity(isEnabled ? 1 : 0.42)
                     }

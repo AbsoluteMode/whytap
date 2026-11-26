@@ -31,9 +31,35 @@ struct LilBroRow: Hashable {
     let about: String
 
     /// The screen the row is on, as `LilBroController.screen` names it:
-    /// `tab` or `features/feature`.
+    /// `tab`, `features/feature`, `apiAndModels/section` (the part of Keys &
+    /// models) or `toolbox/tool` (the Toolbox tool's pane).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 15, builder ticket 651)
     var screen: String {
-        feature.map { "\(SettingsWindowTab.features.rawValue)/\($0.rawValue)" } ?? tab.resolved.rawValue
+        if let feature { return "\(SettingsWindowTab.features.rawValue)/\(feature.rawValue)" }
+        if let tool { return "\(SettingsWindowTab.toolbox.rawValue)/\(tool.rawValue)" }
+        if let apiSection { return "\(SettingsWindowTab.apiAndModels.rawValue)/\(apiSection.lilBroKey)" }
+        return tab.resolved.rawValue
+    }
+
+    /// The part of Keys & models that shows the row: Models unless listed
+    /// in `apiSections`.
+    var apiSection: APIAndModelsSection? {
+        tab.resolved == .apiAndModels ? Self.apiSections[id] ?? .models : nil
+    }
+
+    /// Rows of Keys & models outside Models.
+    private static let apiSections: [String: APIAndModelsSection] = [
+        "apiAndModels.onThisMac": .keys,
+        "apiAndModels.apiKeys": .keys,
+        "apiAndModels.costs": .costs,
+        "apiAndModels.apiHints": .hints,
+    ]
+
+    /// Whether the row shows on `screen`: its own, and for a row of the
+    /// whole Toolbox (its hover and catalog) also every tool's pane.
+    func isShown(on screen: String) -> Bool {
+        screen == self.screen
+            || (tab.resolved == .toolbox && tool == nil && screen.hasPrefix(self.screen + "/"))
     }
 
     private static func row(_ id: String, _ tab: SettingsWindowTab, _ title: String, _ about: String) -> LilBroRow {
@@ -147,6 +173,10 @@ struct LilBroRow: Hashable {
         row("apiAndModels.agent", .apiAndModels, "Agent", "The Agent's voice and answer models (under Advanced)"),
         row("apiAndModels.voiceSearch", .apiAndModels, "Voice search", "Voice search's own speech model (under Advanced)"),
         row("apiAndModels.translation", .apiAndModels, "Translation", "Translate's own model (under Advanced)"),
+        row("apiAndModels.onThisMac", .apiAndModels, "On this Mac", "Download or remove the on-device speech model that runs without a key (Apple Silicon)"),
+        row("apiAndModels.apiKeys", .apiAndModels, "API keys", "Add, replace or remove a provider's API key (OpenAI, Anthropic, Soniox, Deepgram, ElevenLabs, OpenRouter, Tavily) or a custom server"),
+        row("apiAndModels.costs", .apiAndModels, "Costs", "What your API keys have cost, by provider, feature and day"),
+        row("apiAndModels.apiHints", .apiAndModels, "API hints", "Which provider each feature needs and where to get its API key"),
         row("permissions.keyboard", .permissions, "Keyboard control", "Accessibility and keyboard access Drop and hotkeys need"),
         row("permissions.microphone", .permissions, "Microphone", "Microphone access for Drop, the Agent and meetings"),
         row("permissions.screenRecording", .permissions, "Screen Recording", "Screen recording access for screenshots and meeting audio"),
@@ -184,11 +214,34 @@ struct LilBroRow: Hashable {
         row("integrations.github", .integrations, "GitHub", "Connect GitHub (or an access token) for encrypted backups; check or disconnect it"),
         row("integrations.calendars", .integrations, "Calendars", "Calendars Whytap reads: allow access to calendars, open Internet Accounts to add Google or Outlook"),
         row("backup.backUpAndRestore", .backup, "Back up and restore", "Back up now, Restore backup, save or show the recovery code, Connect GitHub"),
+        row("backup.restoreFromCode", .backup, "Restore from recovery code", "Enter the recovery code and restore a backup on this Mac"),
         row("toolbox.openTodo", tool: .tasks, "Open To-do", "Opens your task list inside Hover"),
         row("toolbox.openCalendar", tool: .calendar, "Open Calendar", "Opens today's calendar inside Hover (coming soon)"),
         row("toolbox.holdBrightness", tool: .brightness, "Hold brightness", "Keeps the screen brightness you set"),
         row("toolbox.extraBrightness", tool: .brightness, "Extra", "Brightness above the normal maximum (uses more battery)"),
         row("toolbox.brightnessKeys", tool: .brightness, "Brightness keys", "Lets the keyboard brightness keys use Whytap's brightness"),
+        row("toolbox.yourHover", .toolbox, "Your hover", "The tools shown when you hover over the island: add one, drag to reorder, remove"),
+        row("toolbox.allTools", .toolbox, "All tools", "Every tool: click one to use it here, drag it to Your hover"),
+        row("toolbox.dropMode", tool: .dropMode, "Drop Mode", "Switch Drop between Fast and Smart"),
+        row("toolbox.clipboard", tool: .clipboard, "History", "Your clipboard history: copy or paste an earlier item"),
+        row("toolbox.notifs", tool: .notifs, "Notify", "Recent notifications from your sources"),
+        row("toolbox.vocab", tool: .vocab, "Vocab", "Words dictation should spell right: add or remove one"),
+        row("toolbox.caseVault", tool: .caseVault, "Case", "Your Case keys and projects"),
+        row("toolbox.filler", tool: .filler, "Filler", "Words dictation removes: add or remove one"),
+        row("toolbox.inputLang", tool: .inputLang, "Input Lang", "The language you speak for dictation"),
+        row("toolbox.outputLang", tool: .outputLang, "Output Lang", "The language Smart writes in"),
+        row("toolbox.hotkeys", tool: .hotkeys, "Hotkeys", "Opens Hotkeys"),
+        row("toolbox.notes", tool: .notes, "Notes", "Opens your meeting notes"),
+        row("toolbox.meetingRecord", tool: .meetingRecord, "Record", "Start or stop recording a meeting"),
+        row("toolbox.monitor", tool: .monitor, "Monitor", "Your dashboards"),
+        row("toolbox.translate", tool: .translate, "Translate", "Translate text from here"),
+        row("toolbox.subtitles", tool: .subtitles, "Subtitles", "Start or stop live subtitles"),
+        row("toolbox.quit", tool: .quit, "Quit", "Quits Whytap"),
+        row("toolbox.settings", tool: .settings, "Settings", "Opens Keys & models"),
+        row("toolbox.screenshot", tool: .screenshot, "Shot", "Take a screenshot of an area"),
+        row("toolbox.brightness", tool: .brightness, "Display", "Screen brightness: the slider, Hold brightness, Extra and Brightness keys"),
+        row("toolbox.tasks", tool: .tasks, "To-do", "Your task list"),
+        row("toolbox.calendar", tool: .calendar, "Calendar", "Today's calendar (coming soon)"),
     ]
 
     static func named(_ id: String) -> LilBroRow? {
@@ -197,7 +250,11 @@ struct LilBroRow: Hashable {
 
     /// The row drawn on `screen` under `title`, if it is listed.
     static func at(screen: String, title: String) -> LilBroRow? {
-        byPlace[Place(screen: screen, title: title)]
+        if let row = byPlace[Place(screen: screen, title: title)] { return row }
+        // Toolbox's hover and catalog show above every tool's pane.
+        let toolbox = SettingsWindowTab.toolbox.rawValue
+        guard screen.hasPrefix(toolbox + "/") else { return nil }
+        return byPlace[Place(screen: toolbox, title: title)]
     }
 
     private struct Place: Hashable {

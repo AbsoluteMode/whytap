@@ -3,6 +3,16 @@ import SwiftUI
 
 enum APIAndModelsSection: String, CaseIterable {
     case keys = "API keys", models = "Models", costs = "Costs", hints = "API hints"
+
+    /// The section in Lil Bro's screen name (`apiAndModels/keys`).
+    var lilBroKey: String {
+        switch self {
+        case .keys: return "keys"
+        case .models: return "models"
+        case .costs: return "costs"
+        case .hints: return "hints"
+        }
+    }
 }
 
 /// Four sections in one Keys & models surface. One model menu
@@ -26,7 +36,17 @@ struct APIAndModelsView: View {
     @State private var showAdvanced: Bool
     /// A shared pick waiting for the answer about custom per-feature models.
     @State private var pendingShared: PendingShared?
-    @State private var section: APIAndModelsSection
+    @State private var ownSection: APIAndModelsSection
+    /// The Settings window's section, when it keeps it (Lil Bro's screen).
+    private let sharedSection: Binding<APIAndModelsSection>?
+    /// The key tile shown open (tests and previews).
+    private let initiallyExpandedKey: ProviderKeyTiles.Target?
+    private var section: APIAndModelsSection {
+        get { sharedSection?.wrappedValue ?? ownSection }
+        nonmutating set {
+            if let sharedSection { sharedSection.wrappedValue = newValue } else { ownSection = newValue }
+        }
+    }
     @StateObject private var usage: AIUsageCostsViewModel
     @FocusState private var focusedGroup: String?
     @FocusState private var focusedSection: APIAndModelsSection?
@@ -38,6 +58,8 @@ struct APIAndModelsView: View {
 
     init(viewModel: APIAndModelsViewModel, focusedFeature: Binding<AIFeature?>,
          initiallyExpandedGroup: String? = nil, initialSection: APIAndModelsSection = .models,
+         section: Binding<APIAndModelsSection>? = nil,
+         initiallyExpandedKey: ProviderKeyTiles.Target? = nil,
          usageStore: AIUsageStore? = nil, usageModel: AIUsageCostsViewModel? = nil,
          initialKeyResult: Bool? = nil) {
         self.viewModel = viewModel
@@ -48,7 +70,9 @@ struct APIAndModelsView: View {
         // (Mixed), open the per-feature list.
         self._showAdvanced = State(initialValue: initiallyExpandedGroup != nil
                                    || viewModel.sharedRows.contains(where: \.isMixed))
-        self._section = State(initialValue: initialSection)
+        self._ownSection = State(initialValue: initialSection)
+        self.sharedSection = section
+        self.initiallyExpandedKey = initiallyExpandedKey
         self._usage = StateObject(wrappedValue: usageModel ?? AIUsageCostsViewModel(store: usageStore ?? .shared))
     }
 
@@ -101,15 +125,18 @@ struct APIAndModelsView: View {
                         }
                     case .costs:
                         AIUsageCostsView(model: usage)
+                            .lilBroCatalogRow(APIAndModelsSection.costs.rawValue)
                     case .hints:
                         APIHintsView(onAddKey: showKeySetup,
                                      onClose: { section = .models }, embedded: true)
+                            .lilBroCatalogRow(APIAndModelsSection.hints.rawValue)
                     }
                 }
             .onChange(of: focusedFeature) { _, feature in
                 if let feature { focus(feature, scroller: scroller) }
             }
             .onChange(of: lilBroFocusedRow) { _, _ in revealLilBroRow() }
+            .onChange(of: section) { old, new in if new == .costs, old != .costs { usage.beginVisit() } }
             .onAppear { revealLilBroRow() }
             .onChange(of: showUnsetTick) { _, _ in
                 var unset = viewModel.rows.filter { $0.status == .notSet }.map(\.feature)
@@ -163,6 +190,7 @@ struct APIAndModelsView: View {
     private var sectionTabs: some View {
         HStack(spacing: 22) {
             ForEach(APIAndModelsSection.allCases, id: \.self) { item in
+                // lilBro-exempt: switches the part of this screen; Lil Bro presses it himself (spot .part).
                 Button { selectSection(item) } label: {
                     Text(item.rawValue)
                         .font(.system(size: 12.5, weight: section == item ? .medium : .regular))
@@ -176,6 +204,7 @@ struct APIAndModelsView: View {
                 .focused($focusedSection, equals: item)
                 .overlay { RoundedRectangle(cornerRadius: 4).strokeBorder(focusedSection == item ? MacSettingsTheme.accent : .clear, lineWidth: 1.5) }
                 .accessibilityValue(section == item ? "Selected" : "")
+                .lilBroSpot(.part("\(SettingsWindowTab.apiAndModels.rawValue)/\(item.lilBroKey)"))
                 .onMoveCommand { direction in
                     let items = APIAndModelsSection.allCases
                     guard direction == .left || direction == .right,
@@ -190,7 +219,6 @@ struct APIAndModelsView: View {
     }
 
     private func selectSection(_ next: APIAndModelsSection) {
-        if next == .costs, section != .costs { usage.beginVisit() }
         section = next
     }
 
@@ -218,6 +246,7 @@ struct APIAndModelsView: View {
             MacGroupTitle(title: "On this Mac")
             OnDeviceSpeechCard(viewModel: viewModel, model: .shared)
         }
+        .lilBroCatalogRow("On this Mac")
     }
 
     // MARK: - API keys
@@ -225,12 +254,14 @@ struct APIAndModelsView: View {
     private var keysBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "API keys")
-            ProviderKeyTiles(viewModel: viewModel,
+            ProviderKeyTiles(viewModel: viewModel, initiallyExpanded: initiallyExpandedKey,
                 onRemoveFailure: { keyNotice = KeyNotice(accepted: false, failureText: "Couldn’t remove key") },
                 onSaveResult: { keyNotice = KeyNotice(accepted: $0) },
                 // The reason replaces the bare "Key not accepted".
                 onSaveFailure: { keyNotice = KeyNotice(accepted: false, failureText: $0) })
         }
+        // The tiles and the key form a tile opens: one row (builder ticket 651).
+        .lilBroCatalogRow("API keys")
     }
 
     // MARK: - Models
@@ -285,8 +316,11 @@ struct APIAndModelsView: View {
             titleVisibility: .visible,
             presenting: pendingShared
         ) { pending in
+            // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
             Button("Keep custom models") { applyShared(pending, replaceCustom: false) }
+            // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
             Button("Replace them too") { applyShared(pending, replaceCustom: true) }
+            // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
             Button("Cancel", role: .cancel) { pendingShared = nil }
         } message: { pending in
             Text(pending.custom.map(\.title).joined(separator: ", "))
@@ -361,16 +395,19 @@ struct APIAndModelsView: View {
                     .frame(width: 116, alignment: .leading)
                     MacMenu(title: row.current.label, minWidth: menuWidth, maxWidth: menuWidth) {
                         if let builtIn = row.builtIn {
+                            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                             Button { viewModel.selectSearch(.auto) } label: {
                                 if row.current == builtIn { Label(builtIn.label, systemImage: "checkmark") } else { Text(builtIn.label) }
                             }
                         }
                         if row.tavilyConnected {
+                            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                             Button { viewModel.selectSearch(.tavily) } label: {
                                 if row.current == .tavily { Label("Tavily", systemImage: "checkmark") } else { Text("Tavily") }
                             }
                         } else {
                             if row.builtIn != nil { Divider() }
+                            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                             Button("Add a Tavily key…", action: showKeySetup)
                         }
                     }
@@ -461,6 +498,7 @@ struct APIAndModelsView: View {
     }
 
     private var advancedToggle: some View {
+        // lilBro-exempt: opens Advanced, the rows under it; Lil Bro opens it himself for a row there (revealLilBroRow)
         Button {
             showAdvanced.toggle()
         } label: {
@@ -491,6 +529,7 @@ struct APIAndModelsView: View {
     private func unsetNote(_ text: String) -> some View {
         HStack(spacing: 4) {
             Text("\(text) ·").foregroundStyle(MacSettingsTheme.text3)
+            // lilBro-exempt: lights up the rows still without a model; it acts on rows, it is not a setting
             Button("Show") { showUnsetTick += 1 }
                 .buttonStyle(.plain)
                 .foregroundStyle(MacSettingsTheme.accent)
@@ -512,6 +551,7 @@ struct APIAndModelsView: View {
     }
 
     private func bannerButton(text: String, systemImage: String, action: @escaping () -> Void) -> some View {
+        // lilBro-exempt: a one-off fix offered for a retired model; it changes the rows below, which Lil Bro leads to
         Button(action: action) {
             MacBanner(tone: .warn, systemImage: systemImage, text: text)
         }
@@ -556,6 +596,7 @@ struct APIAndModelsView: View {
                 .frame(height: 48)
                 .contentShape(Rectangle())
             }
+            .lilBroControl(group.title)
             .buttonStyle(.plain)
             .focused($focusedGroup, equals: group.id)
             .accessibilityLabel(group.title)
@@ -633,9 +674,11 @@ struct APIAndModelsView: View {
                     .foregroundStyle(MacSettingsTheme.text2)
                     .frame(width: 52, alignment: .leading)
                 MacMenu(title: slot.label, minWidth: modelWidth, maxWidth: modelWidth) {
+                    // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                     Button {} label: { Label(slot.label, systemImage: "checkmark") }
                     if !slot.isActive {
                         Divider()
+                        // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                         Button("Add a Soniox key…", action: showKeySetup)
                     }
                 }
@@ -696,6 +739,7 @@ struct APIAndModelsView: View {
                         Text(prefix.map { "\($0): \(status.text)" } ?? status.text)
                         if let action = status.action {
                             Button(action.title, action: action.run)
+                                .lilBroControl(action.title)
                                 .buttonStyle(.plain)
                                 .foregroundStyle(MacSettingsTheme.accent)
                         }
@@ -773,19 +817,20 @@ struct APIAndModelsView: View {
 
     // MARK: - Focus
 
-    /// Scrolls to the row, lights it for a second and gives the binding back.
-    /// A row Lil Bro leads to must be drawn before it can be scrolled to:
-    /// it is under Models, and a feature's own row under Advanced (REV 14).
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14)
+    /// A row Lil Bro leads to must be drawn before it can be scrolled to: a
+    /// feature's own row is under Advanced (REV 14). The Settings window opens
+    /// the row's section itself; the person's own section choice is never
+    /// overridden here (builder ticket 651).
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14, REV 15)
     private func revealLilBroRow() {
         guard let id = lilBroFocusedRow, let row = LilBroRow.named(id),
-              row.screen == SettingsWindowTab.apiAndModels.rawValue else { return }
-        section = .models
+              row.apiSection == .models, section == .models else { return }
         if viewModel.groups.contains(where: { $0.audioTranslate == nil && $0.title == row.title }) {
             showAdvanced = true
         }
     }
 
+    /// Scrolls to the row, lights it for a second and gives the binding back.
     private func focus(_ feature: AIFeature, scroller: ScrollViewProxy) {
         section = .models
         Task { @MainActor in

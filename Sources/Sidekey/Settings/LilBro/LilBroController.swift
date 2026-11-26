@@ -212,9 +212,10 @@ final class LilBroController: ObservableObject {
         }
     }
 
-    /// The row is still the focused one on its own tab or feature screen.
+    /// The row is still the focused one on its own screen (tab, feature
+    /// screen, Keys & models section or Toolbox pane).
     private func leadIsActive(_ row: LilBroRow) -> Bool {
-        selection.focusedRow == row.id && selection.lilBroScreen == row.screen
+        selection.focusedRow == row.id && row.isShown(on: selection.lilBroScreen)
     }
 
     /// Ends a row lead: no outline; with the little guy he goes back home.
@@ -438,9 +439,23 @@ final class LilBroController: ObservableObject {
             // person would click them; the row itself is scrolled to and
             // outlined after it opens (REV 14).
             if let feature = row.feature { return stops(for: .feature(feature)) }
-            // A Toolbox pane opens with its tool, from Features (its home).
+            if row.isShown(on: selection.lilBroScreen) { return [] }
+            // A Toolbox pane opens with its tool: its tile when Toolbox is
+            // open, otherwise from Features (Toolbox's home).
             if let tool = row.tool {
-                return [Stop(spot: .tab(row.tab.sidebarHome)) { selection.focus(tool) }]
+                let spot: LilBroSpot = selection.selectedTab == .toolbox ? .part(row.screen) : .tab(row.tab.sidebarHome)
+                return [Stop(spot: spot) { selection.focus(tool) }]
+            }
+            // A part of Keys & models: its tab at the top when Keys & models
+            // is open (builder ticket 651).
+            if let section = row.apiSection {
+                if selection.selectedTab == .apiAndModels {
+                    return [Stop(spot: .part(row.screen)) { selection.apiSection = section }]
+                }
+                return [Stop(spot: .tab(.apiAndModels)) {
+                    selection.select(.apiAndModels)
+                    selection.apiSection = section
+                }]
             }
             if selection.selectedTab == row.tab.resolved { return [] }
             return [Stop(spot: .tab(row.tab.resolved)) { selection.select(row.tab) }]
@@ -540,13 +555,18 @@ final class LilBroController: ObservableObject {
         return true
     }
 
-    /// The window's place as far as guiding goes: tab and feature screen.
+    /// The window's place as far as guiding goes: tab, feature screen, Keys
+    /// & models section and Toolbox pane. The person's change of any of
+    /// them during his run stops it (builder ticket 651).
     private struct Place: Equatable {
         let tab: SettingsWindowTab
         let feature: AppFeature?
+        let screen: String
     }
 
-    private var place: Place { Place(tab: selection.selectedTab, feature: selection.shownFeature) }
+    private var place: Place {
+        Place(tab: selection.selectedTab, feature: selection.shownFeature, screen: selection.lilBroScreen)
+    }
 
     /// Where he stands and what he outlines once the place is open: the row
     /// he was asked about, scrolled into view, or the screen's first block.
@@ -556,7 +576,7 @@ final class LilBroController: ObservableObject {
         // The person's tab wins: if they left the row's tab while it opened,
         // the lead ends here and their choice stays (builder review of #493,
         // ticket 630). Only the focus is set, never the tab again.
-        guard selection.lilBroScreen == row.screen else { return nil }
+        guard row.isShown(on: selection.lilBroScreen) else { return nil }
         selection.focusedRow = row.id
         // The tab scrolls to it (0.3 s); the row counts once it stands still,
         // while it is still the focused row on its own tab. Never another

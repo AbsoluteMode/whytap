@@ -1566,20 +1566,29 @@ to answer in the balloon or open a place; there is no keyword guide on this
 Mac, no ready-made questions and no setup step he presses. When the answer
 names a row (LilBroRow: any setting, REV 12 and REV 14: e.g. Hotkeys →
 Meeting record, Drop → Lower other audio while speaking, Toolbox → Display →
-Hold brightness), he opens its tab, feature screen or Toolbox pane,
-`SettingsWindowSelection.focus(row)` focuses it and the pane scrolls it to
-the middle, and he stands on that row and outlines it. Rows find their
+Hold brightness), he opens its tab, feature screen, Keys & models section
+(by its tab) or Toolbox tool (by its tile), `SettingsWindowSelection.focus(row)`
+focuses it and the pane scrolls it to the middle (a tall row to its top), and
+he stands on that row and outlines it. The screen he and the rows name
+(`lilBroScreen`) includes the Keys & models section and the Toolbox tool
+(`apiAndModels/keys`, `toolbox/vocab`; `apiSection`, `toolboxTool`), so a
+person's own section or tool change during his run ends it. Rows find their
 catalog entry themselves: `MacRow`, `HotkeySettingRow`,
 `ConcreteSettingPicker`, the feature shortcut rows, Hover's tool rows and
 the Keys & models rows call `lilBroCatalogRow(title)`, which looks the title
 up on the screen the window tells them (`lilBroScreen`), tags the row and
 scrolls to it when focused (`lilBroFocusedRow`, `lilBroScroll` from a
-ScrollViewReader around the pane); Keys & models opens Models and Advanced
-for a focused row. Lists of data rows (one per app, tool, server, dashboard)
-are `lilBroItems()`. LilBroRowCoverageTests draws every tab, feature screen
-and Toolbox pane and fails on a row missing from the catalog or a switch,
-pop-up, segmented control, button or field outside a row (REV 15), and
-focuses every catalog row as Lil Bro does to check it is drawn; without the little guy only the outline shows. The outline
+ScrollViewReader around the pane); Keys & models opens Advanced for a
+focused row there. Lists of data rows (one per app, tool, server, dashboard)
+are `lilBroItems()`. LilBroRowCoverageTests draws every tab, feature screen,
+Keys & models section (Advanced and key forms open), Toolbox tool and Backup
+state and fails on a row missing from the catalog or a switch, pop-up,
+segmented control, button or field outside a row (REV 15);
+LilBroNativeControlSourceTests requires every native SwiftUI control in the
+Settings sources to report itself (`lilBroControl`) or carry a
+`// lilBro-exempt:` reason; LilBroRowLeadTests leads to every catalog row
+one by one in a 960×560 window and checks it is focused, visible and
+outlined (builder ticket 651). Without the little guy only the outline shows. The outline
 is the led row's current place (`leadRow`): gone while it is scrolled away,
 back when it returns, ended with the focus (another tab, Clear, a new
 question, closing). With the little guy he waits at home while

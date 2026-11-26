@@ -155,6 +155,7 @@ struct AgentSetupGuideView: View {
             .frame(minHeight: 42)
             .contentShape(Rectangle())
         }
+        .lilBroControl("Show setup steps")
         .buttonStyle(.plain)
         .accessibilityLabel("Setup guide for \(content.providerName)")
     }
@@ -269,6 +270,7 @@ private struct CopyableCommandView: View {
             )
             .animation(.easeOut(duration: 0.15), value: copied)
         }
+        .lilBroControl("Copy command")
         .buttonStyle(.plain)
         .help("Copy command")
         .accessibilityLabel("Copy command: \(command)")

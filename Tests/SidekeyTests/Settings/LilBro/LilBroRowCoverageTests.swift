@@ -3,99 +3,139 @@ import SwiftUI
 import XCTest
 @testable import Sidekey
 
-/// REV 14: Lil Bro's map has every row of every Settings screen. Each tab and
-/// each feature's own screen is drawn in the real Settings window; every row
-/// it draws (`MacRow`, `HotkeySettingRow`, `ConcreteSettingPicker`) must be in
-/// `LilBroRow.catalog`, unless it is one of a list of data rows
-/// (`lilBroItems`), and every switch, pop-up or segmented control must sit in
-/// such a row. A new setting without its catalog line fails here.
-// WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14)
+/// REV 14–15: Lil Bro's map has every row of every Settings screen. Each tab,
+/// each part of Keys & models, each Toolbox tool's pane and each feature's
+/// own screen is drawn in the real Settings window, in a fresh and a usual
+/// Mac, with Advanced open, with each kind of key form open and with
+/// Backup's state-dependent cards on screen. Every row it draws (`MacRow`,
+/// `HotkeySettingRow`, `ConcreteSettingPicker`, the cards tagged
+/// `lilBroCatalogRow`) must be in `LilBroRow.catalog`, unless it is one of a
+/// list of data rows (`lilBroItems`), and every control that reports itself
+/// must sit in such a row. Native controls that cannot report are held to
+/// the same rule by `LilBroNativeControlSourceTests`. A new setting without
+/// its catalog line fails here.
+// WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 14, REV 15, builder ticket 651)
 @MainActor
 final class LilBroRowCoverageTests: XCTestCase {
     private final class Seen {
         var rows: Set<LilBroSeenRow> = []
         var controls: Set<LilBroSeenControl> = []
+        /// Screens that drew at least one row of the catalog.
+        var screensWithRows: Set<String> = []
+    }
+
+    private struct Screen {
+        let name: String
+        let open: (SettingsWindowSelection) -> Void
     }
 
     /// The screens of the Settings window, as `SettingsWindowSelection`
-    /// opens them: every tab, every feature's own screen and every Toolbox
-    /// tool's pane.
-    private static var screens: [(name: String, open: (SettingsWindowSelection) -> Void)] {
-        let tabs = SettingsWindowTab.availableCases.filter { $0.featureScreen == nil && $0 != .notes }
+    /// opens them and `lilBroScreen` names them.
+    private static var screens: [Screen] {
+        let tabs = SettingsWindowTab.availableCases.filter {
+            $0.featureScreen == nil && ![.notes, .apiAndModels, .toolbox].contains($0)
+        }
         let features = AppFeature.allCases.filter {
             $0 == .drop || FeatureCatalog.info(for: $0).place == .screen
         }
-        return tabs.map { tab in (tab.rawValue, { $0.select(tab) }) }
-            + features.map { feature in ("features/\(feature.rawValue)", { $0.open(feature) }) }
-            + HoverTool.allCases.map { tool in (SettingsWindowTab.toolbox.rawValue, { $0.focus(tool) }) }
+        let advanced = LilBroRow.named("apiAndModels.dropFast")!
+        return tabs.map { tab in Screen(name: tab.rawValue) { $0.select(tab) } }
+            + APIAndModelsSection.allCases.map { section in
+                Screen(name: "apiAndModels/\(section.lilBroKey)") { $0.select(.apiAndModels); $0.apiSection = section }
+            }
+            // Advanced open: the per-feature rows.
+            + [Screen(name: "apiAndModels/models") { $0.focus(advanced) }]
+            + [Screen(name: "toolbox") { $0.select(.toolbox) }]
+            + HoverTool.allCases.map { tool in Screen(name: "toolbox/\(tool.rawValue)") { $0.focus(tool) } }
+            + features.map { feature in Screen(name: "features/\(feature.rawValue)") { $0.open(feature) } }
     }
 
-    /// Rows only a state the fixture cannot make shows: Backup's switches
-    /// appear once a backup exists or sync was turned on.
-    private static let drawnOnlyLater: Set<String> = ["backup.automaticBackup", "backup.syncSettings"]
+    /// Draws `view` tall enough that nothing is cut off and collects what
+    /// its rows and controls report.
+    private func collect<V: View>(_ view: V, into seen: Seen, size: NSSize = NSSize(width: 960, height: 2400)) {
+        let root = view
+            .environment(\.colorScheme, .light)
+            .onPreferenceChange(LilBroSeenRowsKey.self) { rows in
+                seen.rows.formUnion(rows)
+                for row in rows where row.id != nil { seen.screensWithRows.insert(row.screen) }
+            }
+            .onPreferenceChange(LilBroSeenControlsKey.self) { seen.controls.formUnion($0) }
+        let host = NSHostingView(rootView: root)
+        host.frame = NSRect(origin: .zero, size: size)
+        let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
+                              styleMask: .borderless, backing: .buffered, defer: true)
+        window.isReleasedWhenClosed = false
+        window.contentView = host
+        for _ in 0..<5 {
+            host.layoutSubtreeIfNeeded()
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
+        }
+        window.contentView = nil
+        window.close()
+    }
 
-    private func draw(_ state: FeaturesFixture.State,
-                      screens given: [(name: String, open: (SettingsWindowSelection) -> Void)]? = nil,
-                      focused: ((SettingsWindowSelection) -> String?)? = nil) async throws -> Seen {
+    private func draw(_ state: FeaturesFixture.State, into seen: Seen) async throws {
         let fixture = try await FeaturesFixture(state)
         defer { fixture.cleanUp() }
-        let seen = Seen()
-        for screen in given ?? Self.screens {
+        for screen in Self.screens {
             let selection = SettingsWindowSelection()
             screen.open(selection)
-            if focused == nil { XCTAssertEqual(selection.lilBroScreen, screen.name, "opened as named") }
-            let root = fixture.shell(selection: selection)
-                .environment(\.colorScheme, .light)
-                .onPreferenceChange(LilBroSeenRowsKey.self) { seen.rows.formUnion($0) }
-                .onPreferenceChange(LilBroSeenControlsKey.self) { seen.controls.formUnion($0) }
-            // Tall, so nothing is cut off; rows below the fold still report.
-            let size = NSSize(width: 960, height: 2400)
-            let host = NSHostingView(rootView: root)
-            host.frame = NSRect(origin: .zero, size: size)
-            let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: size.width, height: size.height),
-                                  styleMask: .borderless, backing: .buffered, defer: true)
-            window.isReleasedWhenClosed = false
-            window.contentView = host
-            for _ in 0..<5 {
-                host.layoutSubtreeIfNeeded()
-                RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.05))
-            }
-            window.contentView = nil
-            window.close()
+            XCTAssertEqual(selection.lilBroScreen, screen.name, "opened as named")
+            collect(fixture.shell(selection: selection), into: seen)
         }
-        return seen
+        // Each kind of key form open under API keys.
+        let targets: [ProviderKeyTiles.Target] = [.provider(.openAI), .provider(.anthropic), .provider(.soniox), .tavily]
+        for target in targets {
+            collect(APIAndModelsView(viewModel: fixture.models, focusedFeature: .constant(nil), initialSection: .keys,
+                                     initiallyExpandedKey: target)
+                .environment(\.lilBroScreen, "apiAndModels/keys"), into: seen)
+        }
+        // Backup as a Mac that backed up, with the restore card and the
+        // recovery code open; then with every result and follow-up at once.
+        let root = fixture.files.appendingPathComponent("backup-\(UUID().uuidString)", isDirectory: true)
+        let (restoring, restoringDefaults, suiteA) = LilBroBackupFixture.model(root: root.appendingPathComponent("a"))
+        let (finished, finishedDefaults, suiteB) = LilBroBackupFixture.model(root: root.appendingPathComponent("b"))
+        defer {
+            restoringDefaults.removePersistentDomain(forName: suiteA)
+            finishedDefaults.removePersistentDomain(forName: suiteB)
+        }
+        await restoring.stopAndWait()
+        await finished.stopAndWait()
+        LilBroBackupFixture.backedUp(restoring, restoringDefaults)
+        restoring.recoveryCode = "TEST-CODE-ONLY"
+        LilBroBackupFixture.everything(finished, finishedDefaults)
+        let restore = try XCTUnwrap(LilBroRow.named("backup.restoreFromCode"))
+        for (model, focus) in [(restoring, true), (finished, false)] {
+            let selection = SettingsWindowSelection()
+            if focus { selection.focus(restore) } else { selection.select(.backup) }
+            collect(fixture.shell(selection: selection, backup: model), into: seen)
+        }
     }
 
     func test_every_settings_row_and_control_is_on_lil_bros_map() async throws {
-        var rows: Set<LilBroSeenRow> = []
-        var controls: Set<LilBroSeenControl> = []
+        let seen = Seen()
         for state in [FeaturesFixture.State.freshInstall, .usual] {
-            let seen = try await draw(state)
-            rows.formUnion(seen.rows)
-            controls.formUnion(seen.controls)
+            try await draw(state, into: seen)
         }
-        XCTAssertFalse(rows.isEmpty, "the screens draw their rows")
+        XCTAssertFalse(seen.rows.isEmpty, "the screens draw their rows")
 
-        let missing = rows.filter { $0.id == nil && !$0.item }
+        let missing = seen.rows.filter { $0.id == nil && !$0.item }
             .map { "\($0.screen) · \($0.title)" }.sorted()
         XCTAssertEqual(missing, [], "rows not in LilBroRow.catalog (add a row(...) line, or lilBroItems() for data rows)")
 
-        let loose = controls.filter { !$0.inRow }.map { "\($0.screen) · \($0.label)" }.sorted()
+        let loose = seen.controls.filter { !$0.inRow }.map { "\($0.screen) · \($0.label)" }.sorted()
         XCTAssertEqual(loose, [], "controls outside a row Lil Bro can lead to")
 
-    }
+        // Features home is the list of features: each opens its own screen,
+        // where Lil Bro leads with the feature (not a row).
+        let empty = Set(Self.screens.map(\.name)).subtracting(seen.screensWithRows)
+            .subtracting([SettingsWindowTab.features.rawValue]).sorted()
+        XCTAssertEqual(empty, [], "every screen has a row Lil Bro can lead to")
 
-    /// The other way, as Lil Bro leads: every listed row, focused the way he
-    /// focuses it, is drawn on its screen under its id.
-    func test_every_catalog_row_is_drawn_when_he_leads_to_it() async throws {
-        let rows = LilBroRow.catalog.filter { !Self.drawnOnlyLater.contains($0.id) }
-        let screens = rows.map { row in (name: row.screen, open: { (selection: SettingsWindowSelection) in
-            selection.focus(row)
-        }) }
-        let seen = try await draw(.usual, screens: screens, focused: { $0.focusedRow })
         let drawn = Set(seen.rows.compactMap(\.id))
-        let unseen = rows.filter { !drawn.contains($0.id) }.map { "\($0.id) (\($0.screen) · \($0.title))" }
-        XCTAssertEqual(unseen, [], "catalog rows not drawn when focused")
+        let notDrawn = LilBroRow.catalog.map(\.id).filter { !drawn.contains($0) }
+            .filter { $0 != "apiAndModels.onThisMac" || OnDeviceSpeechModelStore.isSupportedHost }
+        XCTAssertEqual(notDrawn, [], "catalog rows no screen draws")
     }
 
     func test_catalog_ids_and_places_are_unique() {

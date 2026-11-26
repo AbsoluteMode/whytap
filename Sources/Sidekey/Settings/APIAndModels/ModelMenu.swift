@@ -20,6 +20,7 @@ struct ModelMenu: View {
         } label: {
             MacPopupLabel(title: label, minWidth: width ?? 90, maxWidth: width ?? 300)
         }
+        .lilBroControl(label)
         .buttonStyle(APIModelFeedbackStyle(cornerRadius: MacPopupMetrics.radius, focused: focused))
         .focused($focused)
         .help(label)
@@ -69,6 +70,7 @@ struct SharedModelMenu: View {
         } label: {
             MacPopupLabel(title: label, minWidth: width ?? 90, maxWidth: width ?? 300)
         }
+        .lilBroControl(label)
         .buttonStyle(APIModelFeedbackStyle(cornerRadius: MacPopupMetrics.radius, focused: focused))
         .focused($focused)
         .help(label)

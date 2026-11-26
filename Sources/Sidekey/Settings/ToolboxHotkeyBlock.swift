@@ -187,6 +187,7 @@ struct ToolboxHotkeyRow: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(MacSettingsTheme.text2)
                     }
+                    .lilBroControl("Remove shortcut")
                     .buttonStyle(.borderless)
                     .help("Remove shortcut")
                     .accessibilityLabel("Remove \(title.lowercased())")

@@ -50,6 +50,7 @@ private struct GlassSwitchStyle: ToggleStyle {
     func makeBody(configuration: Configuration) -> some View {
         let dragging = translation != nil
         let position = min(size.travel, max(0, ((startOn ?? configuration.isOn) ? size.travel : 0) + (translation ?? 0)))
+        // lilBro-exempt: part of a Mac* primitive that reports itself with .lilBroControl in its own body
         Button {
             configuration.isOn.toggle()
         } label: {
@@ -107,6 +108,7 @@ private struct GlassSwitchStyle: ToggleStyle {
         .animation(reduceMotion ? nil : .spring(response: 0.22, dampingFraction: 0.88), value: configuration.isOn)
         .opacity(isEnabled ? 1 : 0.45)
         .accessibilityRepresentation {
+            // lilBro-exempt: part of a Mac* primitive that reports itself with .lilBroControl in its own body
             Toggle(isOn: configuration.$isOn) { configuration.label }
                 .toggleStyle(.switch)
                 .disabled(!isEnabled)

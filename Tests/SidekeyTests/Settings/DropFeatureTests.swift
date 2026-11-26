@@ -38,14 +38,14 @@ final class DropFeatureTests: XCTestCase {
         selection.open(.drop)
         selection.showAPIKeys()
         XCTAssertEqual(selection.selectedTab, .apiAndModels)
-        XCTAssertEqual(selection.requestedAPISection, .keys)
+        XCTAssertEqual(selection.apiSection, .keys)
         try FeaturesFixture.render(fixture.shell(selection: selection), size: NSSize(width: 960, height: 560), dark: false,
                                    to: FeaturesFixture.renderDirectory?.appendingPathComponent("drop-add-key-opens-api-keys.png"))
-        XCTAssertNil(selection.requestedAPISection, "Keys & models takes the request once")
+        XCTAssertEqual(selection.apiSection, .keys, "API keys stays shown")
 
         selection.select(.hotkeys)
         selection.select(.apiAndModels)
-        XCTAssertNil(selection.requestedAPISection, "the sidebar entry opens Models as before")
+        XCTAssertEqual(selection.apiSection, .models, "the sidebar entry opens Models as before")
 
         selection.open(.drop)
         XCTAssertEqual(selection.selectedTab, .features)

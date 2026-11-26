@@ -62,12 +62,16 @@ struct SettingsCalendarIntegrationsView: View {
                 userInfo: [.announcement: error, .priority: NSAccessibilityPriorityLevel.high.rawValue])
         }
         .alert("Disconnect calendars of this Mac?", isPresented: $confirmingAppleDisconnect) {
+            // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
             Button("Cancel", role: .cancel) {}
+            // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
             Button("Disconnect", role: .destructive) { connections.disableApple() }
         } message: { Text("Whytap stops showing them. Your calendars and macOS access stay as they are.") }
         .alert("Disconnect \(removing?.label ?? "account")?", isPresented: Binding(
             get: { removing != nil }, set: { if !$0 { removing = nil } }), presenting: removing) { account in
+                // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
                 Button("Cancel", role: .cancel) { removing = nil }
+                // lilBro-exempt: a button of a confirmation dialog; the row that asks is where Lil Bro leads
                 Button("Disconnect", role: .destructive) { disconnect(account) }
             } message: { _ in Text("This removes the direct connection from Whytap. Your events stay in the source calendar.") }
     }
@@ -140,6 +144,7 @@ struct SettingsCalendarIntegrationsView: View {
                             Toggle(feed.calendarTitle ?? feed.title, isOn: Binding(
                                 get: { connections.isShown(feedID: feed.id) },
                                 set: { connections.setVisible($0, feedID: feed.id) }))
+                                .lilBroControl(feed.calendarTitle ?? feed.title)
                                 .toggleStyle(.checkbox).font(.system(size: 12)).padding(.leading, 22)
                         }
                     }

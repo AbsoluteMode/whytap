@@ -185,6 +185,7 @@ struct HoverToolRow: View {
                         .frame(width: 26, height: 26)
                         .contentShape(Rectangle())
                 }
+                .lilBroControl("Show \(info.title) details")
                 .buttonStyle(MacButtonInteractionStyle(focused: chevronFocused))
                 .focused($chevronFocused)
                 .help(expanded ? "Hide shortcut and options" : "Shortcut and options")
@@ -217,10 +218,13 @@ struct HoverToolRow: View {
         .lilBroCatalogRow(info.title)
         .accessibilityActions {
             if canMoveUp {
+                // lilBro-exempt: a VoiceOver action of the row, which Lil Bro leads to
                 Button("Move up") { move(-1) }
+                // lilBro-exempt: a VoiceOver action of the row, which Lil Bro leads to
                 Button("Move to top") { move(.min) }
             }
             if canMoveDown {
+                // lilBro-exempt: a VoiceOver action of the row, which Lil Bro leads to
                 Button("Move down") { move(1) }
             }
         }
@@ -257,12 +261,17 @@ struct HoverToolRow: View {
 
     @ViewBuilder private var menu: some View {
         if isOn {
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button("Move Up") { move(-1) }.disabled(!canMoveUp)
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button("Move Down") { move(1) }.disabled(!canMoveDown)
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button("Move to Top") { move(.min) }.disabled(!canMoveUp)
             Divider()
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button("Remove from the Island") { setOn(false) }
         } else {
+            // lilBro-exempt: an item of a menu; the menu is the control and reports itself
             Button("Add to the Island") { setOn(true) }
         }
     }

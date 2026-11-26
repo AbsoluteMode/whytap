@@ -130,6 +130,7 @@ struct AgentControlsCodex: View {
                 }
                 Spacer()
                 Button("Refresh models") { Task { await settings.refreshCodexCatalog(force: true) } }
+                    .lilBroControl("Refresh models")
                     .font(.caption).disabled(settings.codexCatalogLoading)
             }
         }

@@ -27,7 +27,12 @@ struct ToolboxSettingsView: View {
     @ObservedObject private var hotkeys: HotkeyPreferences
     let deps: ToolboxDeps
 
-    @State private var selectedTool: HoverTool? = nil
+    /// The tool whose pane is shown, kept by the Settings window so Lil Bro
+    /// knows the pane (`toolbox/tool`).
+    private var selectedTool: HoverTool? {
+        get { selection.toolboxTool }
+        nonmutating set { selection.toolboxTool = newValue }
+    }
     @State private var hoveredTool: HoverTool? = nil
     @StateObject private var vocabVM: IslandVocabularyViewModel
     @StateObject private var fillerVM: IslandFillerViewModel
@@ -65,7 +70,7 @@ struct ToolboxSettingsView: View {
 
     private func takeFocusedTool() {
         guard let tool = selection.focusedTool else { return }
-        selectedTool = tool
+        if selectedTool != tool { selectedTool = tool }
         selection.focusedTool = nil
     }
 
@@ -89,6 +94,7 @@ struct ToolboxSettingsView: View {
                         }
                         ForEach(HoverTool.allCases.filter { $0 != .settings && !hoverStore.slots.contains($0) }, id: \.self) { tool in
                             let info = HoverToolRegistry.info(for: tool)
+                            // lilBro-exempt: an item of the Add menu; the menu is the control.
                             Button {
                                 hoverStore.placeTool(tool, at: hoverStore.lockSlotIndex)
                             } label: {
@@ -103,6 +109,7 @@ struct ToolboxSettingsView: View {
                     .menuIndicator(.hidden)
                     .fixedSize()
                     .accessibilityLabel("Add tool to hover")
+                    .lilBroControl("Add tool to hover")
                 }
             }
             .padding(16)
@@ -114,6 +121,7 @@ struct ToolboxSettingsView: View {
                             .strokeBorder(MacSettingsTheme.hover, lineWidth: 1)
                     )
             )
+            .lilBroCatalogRow("Your hover")
 
             toolHoverDescription
         }
@@ -152,6 +160,7 @@ struct ToolboxSettingsView: View {
                         .frame(width: 20, height: 20)
                         .background(Circle().fill(MacSettingsTheme.controlBg))
                 }
+                .lilBroControl("Remove \(info.title)")
                 .buttonStyle(.plain)
                 .help("Remove \(info.title) from hover")
                 .accessibilityLabel("Remove \(info.title) from hover")
@@ -190,6 +199,7 @@ struct ToolboxSettingsView: View {
                             .strokeBorder(MacSettingsTheme.hover, lineWidth: 1)
                     )
             )
+            .lilBroCatalogRow("All tools")
         }
     }
 
@@ -218,7 +228,10 @@ struct ToolboxSettingsView: View {
         .onHover { hovering in
             updateHoveredTool(tool, hovering: hovering)
         }
+        // Lil Bro opens a tool's pane by its tile, as a person would.
+        .lilBroSpot(.part("\(SettingsWindowTab.toolbox.rawValue)/\(tool.rawValue)"))
         .contextMenu {
+            // lilBro-exempt: a context-menu item; Your hover and its Add menu do the same.
             Button(isInHover ? "Remove from hover" : "Add to hover") {
                 if isInHover { hoverStore.removeTool(tool) }
                 else { hoverStore.placeTool(tool, at: hoverStore.lockSlotIndex) }
@@ -268,13 +281,18 @@ struct ToolboxSettingsView: View {
                 if let tool = selectedTool {
                     // Title and Hotkey stay pinned above the tool's own
                     // panel, so the shortcut is visible without scrolling.
-                    toolHeader(for: tool)
-                    ToolboxHotkeyBlock(tool: tool, preferences: hotkeys)
-                    Divider()
-                        .background(MacSettingsTheme.hover)
-                    ToolboxToolViewport {
-                        rightPaneContent(for: tool)
+                    // The tool is one row Lil Bro leads to: its header, hotkey
+                    // and panel (builder ticket 651).
+                    VStack(alignment: .leading, spacing: 10) {
+                        toolHeader(for: tool)
+                        ToolboxHotkeyBlock(tool: tool, preferences: hotkeys)
+                        Divider()
+                            .background(MacSettingsTheme.hover)
+                        ToolboxToolViewport {
+                            rightPaneContent(for: tool)
+                        }
                     }
+                    .lilBroCatalogRow(HoverToolRegistry.info(for: tool).title)
                 } else {
                     rightPanePlaceholder
                 }
@@ -327,6 +345,7 @@ struct ToolboxSettingsView: View {
                 } label: {
                     Image(systemName: added ? "minus.circle" : "plus.circle")
                 }
+                .lilBroControl("Add or remove \(tool.rawValue)")
                 .buttonStyle(.plain)
                 .help(added ? "Remove from hover" : "Add to hover")
                 .accessibilityLabel(added ? "Remove \(info.title) from hover" : "Add \(info.title) to hover")
@@ -471,6 +490,7 @@ struct ToolboxSettingsView: View {
                                     lineWidth: 1)
                         )
                     }
+                    .lilBroControl(mode.rawValue)
                     .buttonStyle(.plain)
                 }
             }
@@ -510,6 +530,7 @@ struct ToolboxSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Button(title, action: action)
                 .buttonStyle(.bordered)
+                .lilBroControl(title)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

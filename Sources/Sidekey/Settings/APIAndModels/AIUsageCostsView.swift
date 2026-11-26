@@ -179,6 +179,7 @@ struct AIUsageCostsView: View {
                         Text("Costs").font(.system(size: 15, weight: .semibold))
                         Menu {
                             ForEach(AIUsagePeriod.allCases) { period in
+                                // lilBro-exempt: an item of a menu; the menu is the control and reports itself
                                 Button { model.period = period } label: {
                                     if model.period == period { Label(period.title, systemImage: "checkmark") }
                                     else { Text(period.title) }
@@ -187,6 +188,7 @@ struct AIUsageCostsView: View {
                         } label: {
                             MacPopupLabel(title: model.period.title, minWidth: 140, maxWidth: 180)
                         }
+                        .lilBroControl("Period")
                             .menuStyle(.button).menuIndicator(.hidden)
                             .buttonStyle(AIUsageControlStyle(hovered: periodHovered, focused: periodFocused))
                             .fixedSize(horizontal: true, vertical: false)
@@ -293,6 +295,7 @@ private struct AIUsageRefreshButton: View {
 
     var body: some View {
         Button(title, action: action)
+            .lilBroControl(title)
             .buttonStyle(AIUsageControlStyle(hovered: hovered, focused: focused, compactLabel: true))
             .focused($focused)
             .disabled(!isEnabled)
@@ -349,6 +352,7 @@ private struct AIUsageFeatureCostRow: View {
                 }
                 .padding(.vertical, 5).contentShape(Rectangle())
             }
+            .lilBroControl(row.title)
             .buttonStyle(AIUsageControlStyle(hovered: false, focused: focused)).focused($focused)
             .accessibilityLabel("\(row.title), \(row.models.count) models used. Show model costs")
             .onChange(of: focused) { _, value in
@@ -442,6 +446,7 @@ struct AIUsageDateControl: View {
             Button { presented.toggle() } label: {
                 MacPopupLabel(title: date.formatted(date: .numeric, time: .omitted), minWidth: 116, maxWidth: 136)
             }
+            .lilBroControl("\(title) date")
             .buttonStyle(AIUsageControlStyle(hovered: hovered, focused: focused))
             .focused($focused)
             .onHover { hovered = $0 }

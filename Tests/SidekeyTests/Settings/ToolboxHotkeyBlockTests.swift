@@ -291,7 +291,7 @@ final class ToolboxHotkeyBlockTests: XCTestCase {
         let toolbox = try source("Sources/Sidekey/Settings/ToolboxSettingsView.swift")
         let header = try XCTUnwrap(toolbox.range(of: "toolHeader(for: tool)\n"))
         let block = try XCTUnwrap(toolbox.range(of: "ToolboxHotkeyBlock(tool: tool, preferences: hotkeys)"))
-        let viewport = try XCTUnwrap(toolbox.range(of: "ToolboxToolViewport {\n                        rightPaneContent"))
+        let viewport = try XCTUnwrap(toolbox.range(of: #"ToolboxToolViewport \{\s*rightPaneContent"#, options: .regularExpression))
         XCTAssertLessThan(header.lowerBound, block.lowerBound)
         XCTAssertLessThan(block.lowerBound, viewport.lowerBound, "the Hotkey block never scrolls away")
     }

@@ -10,6 +10,7 @@ struct SettingsBackupView: View {
     @State private var restoreCode = ""
     @FocusState private var isRestoreCodeFocused: Bool
     @FocusState private var isGitHubFocused: Bool
+    @Environment(\.lilBroFocusedRow) private var lilBroFocusedRow
 
     init(model: BackupViewModel = .shared, settingsSync: SettingsSyncService = .shared, showRestore: Bool = false,
          openIntegrations: @escaping () -> Void = {}) {
@@ -29,12 +30,17 @@ struct SettingsBackupView: View {
                 HStack {
                     Text("Backup").font(.system(size: 20, weight: .semibold))
                     Spacer()
-                    if model.isBusy {
-                        ProgressView().controlSize(.small)
-                        if model.canCancelOperation {
-                            MacButton(title: "Cancel", style: .default) { model.cancelCurrentOperation() }
+                    // Cancels the operation running now: not a setting Lil
+                    // Bro leads to (builder ticket 651).
+                    Group {
+                        if model.isBusy {
+                            ProgressView().controlSize(.small)
+                            if model.canCancelOperation {
+                                MacButton(title: "Cancel", style: .default) { model.cancelCurrentOperation() }
+                            }
                         }
                     }
+                    .lilBroItems()
                 }
                 Text("Restore your keys, passwords and settings. Backups are encrypted on your Mac and saved in your private GitHub repository, so GitHub cannot read your secrets. Your first backup turns on hourly automatic sync. Keep your recovery code to restore.")
                     .font(.system(size: 13))
@@ -58,6 +64,7 @@ struct SettingsBackupView: View {
                                     .foregroundStyle(MacSettingsTheme.text)
                                     .help("Open your private backup repository on GitHub")
                                     .accessibilityLabel("Open backup on GitHub")
+                                    .lilBroControl("Open backup on GitHub")
                             }
                             if !model.canUseGitHubBackup {
                                 MacButton(title: "Connect GitHub", style: .tinted, isEnabled: !model.isBusy) {
@@ -118,6 +125,7 @@ struct SettingsBackupView: View {
                             }
                         }.padding(14)
                     }
+                    .lilBroCatalogRow("Restore from recovery code")
                 }
                 if !model.recoveryCode.isEmpty {
                     MacCard {
@@ -133,7 +141,15 @@ struct SettingsBackupView: View {
                             }
                         }.padding(14)
                     }
+                    // The code itself, shown by Save/Show recovery code in
+                    // Back up and restore: data, not a setting.
+                    .lilBroItems()
                 }
+                // What the last backup or restore did and its one-off
+                // follow-ups (Cancel restore, Finish backup management, kept
+                // copies, Dismiss, previous data): results, not settings Lil
+                // Bro leads to (builder ticket 651).
+                Group {
                 if model.isBusy {
                     Text(model.statusText).font(.system(size: 12)).foregroundStyle(MacSettingsTheme.text2)
                 }
@@ -170,6 +186,8 @@ struct SettingsBackupView: View {
                 if model.recoveryCheckpoint != nil {
                     MacButton(title: "Show previous data", style: .default) { model.showRecoveryFiles() }
                 }
+                }
+                .lilBroItems()
                 ForEach(model.parkedItems) { item in
                     MacCard {
                         MacRow(title: item.title, subtitle: "Restored · paused") {
@@ -189,6 +207,13 @@ struct SettingsBackupView: View {
         .focusable(false)
         .task { await model.checkGitHubConnection() }
         .onChange(of: showRestore) { _, shown in isRestoreCodeFocused = shown }
+        // Lil Bro leads to Restore from recovery code: the card opens, as
+        // Restore backup opens it.
+        .onChange(of: lilBroFocusedRow, initial: true) { _, row in
+            if row == "backup.restoreFromCode", !model.needsRestart, !showRestore {
+                model.hideRecoveryCode(); showRestore = true
+            }
+        }
         .onDisappear { clearCode() }
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { notification in
             if let window = notification.object as? NSWindow, window.title.contains("Settings") { clearCode() }

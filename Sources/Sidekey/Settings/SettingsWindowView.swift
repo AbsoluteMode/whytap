@@ -24,6 +24,8 @@ struct SettingsWindowView: View {
     /// What the Features screens read besides the view models; tests and
     /// previews replace it to show a Mac in another state.
     let featuresEnvironment: FeaturesEnvironment?
+    /// Backup's model; tests show a Mac that has backed up. Nil is the app's.
+    let backupModel: BackupViewModel?
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
@@ -53,6 +55,7 @@ struct SettingsWindowView: View {
         privacyPreferences: PrivacyPreferences? = nil,
         screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
         featuresEnvironment: FeaturesEnvironment? = nil,
+        backupModel: BackupViewModel? = nil,
         lilBro: LilBroController? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
@@ -70,6 +73,7 @@ struct SettingsWindowView: View {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
+        self.backupModel = backupModel
         _lilBro = State(initialValue: lilBro ?? LilBroController(selection: selection))
     }
 
@@ -134,11 +138,11 @@ struct SettingsWindowView: View {
                     detailPane
                         .environment(\.lilBroScreen, selection.lilBroScreen)
                         .environment(\.lilBroFocusedRow, selection.focusedRow)
-                        .environment(\.lilBroScroll, LilBroScroll { id in
+                        .environment(\.lilBroScroll, LilBroScroll { id, anchor in
                             if reduceMotion {
-                                proxy.scrollTo(id, anchor: .center)
+                                proxy.scrollTo(id, anchor: anchor)
                             } else {
-                                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: .center) }
+                                withAnimation(.easeInOut(duration: 0.3)) { proxy.scrollTo(id, anchor: anchor) }
                             }
                         })
                 }
@@ -204,6 +208,7 @@ struct SettingsWindowView: View {
         }()
         let isSelected = selection.selectedTab.sidebarHome == tab
 
+        // lilBro-exempt: the window's sidebar; Lil Bro presses it himself as a stop (spot .tab)
         Button {
             selection.select(tab)
         } label: {
@@ -243,6 +248,7 @@ struct SettingsWindowView: View {
             return false
         }()
 
+        // lilBro-exempt: the sidebar's Quit row, not a setting
         return Button {
             NSApp.terminate(nil)
         } label: {
@@ -280,8 +286,7 @@ struct SettingsWindowView: View {
             )
         case .apiAndModels:
             APIAndModelsView(viewModel: apiAndModelsViewModel, focusedFeature: $selection.focusedFeature,
-                             initialSection: selection.requestedAPISection ?? .models)
-                .onAppear { selection.requestedAPISection = nil }
+                             section: $selection.apiSection)
         case .hotkeys:
             HotkeysSettingsView()
         case .permissions:
@@ -313,7 +318,7 @@ struct SettingsWindowView: View {
         case .integrations:
             SettingsIntegrationsView()
         case .backup:
-            SettingsBackupView(openIntegrations: { selection.select(.integrations) })
+            SettingsBackupView(model: backupModel ?? .shared, openIntegrations: { selection.select(.integrations) })
         }
     }
 }
@@ -407,9 +412,17 @@ final class SettingsWindowSelection: ObservableObject {
     /// The row Lil Bro led to (`LilBroRow.id`): its tab scrolls to it while
     /// it is set. Any other tab choice clears it.
     @Published var focusedRow: String?
-    /// The part of Keys & models to open on next (API keys from a feature's
-    /// screen); Keys & models takes it once and clears it.
-    @Published var requestedAPISection: APIAndModelsSection?
+    /// The part of Keys & models shown (API keys, Models, Costs, API hints).
+    /// The sidebar entry opens Models; "Add a key" on a feature's screen
+    /// opens API keys. Changing it ends a Lil Bro lead to another part.
+    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 15, builder ticket 651)
+    @Published var apiSection: APIAndModelsSection = .models {
+        didSet { if apiSection != oldValue { dropRowOffScreen() } }
+    }
+    /// The Toolbox tool whose pane is shown; nil shows the placeholder.
+    @Published var toolboxTool: HoverTool? {
+        didSet { if toolboxTool != oldValue { dropRowOffScreen() } }
+    }
     /// Non-nil for ~1s while a Toolbox navigate-tool click highlights a
     /// sidebar row or the Quit row. Cleared automatically by `setHighlight`.
     @Published private(set) var highlightedTarget: HoverNavigationTarget?
@@ -440,7 +453,18 @@ final class SettingsWindowSelection: ObservableObject {
         // Notify's own screen.
         if availableTab == .features { shownFeature = tab.featureScreen }
         focusedRow = nil
+        if availableTab != selectedTab {
+            // Each visit starts on Models and with no tool picked, as before.
+            if availableTab == .apiAndModels { apiSection = .models }
+            if availableTab == .toolbox { toolboxTool = nil }
+        }
         selectedTab = availableTab
+    }
+
+    /// The person chose another part of the tab: the row Lil Bro led to is
+    /// no longer his to scroll to.
+    private func dropRowOffScreen() {
+        if let row = focusedRow.flatMap(LilBroRow.named), !row.isShown(on: lilBroScreen) { focusedRow = nil }
     }
 
     /// The screen shown, as Lil Bro and his rows name it: `tab`, or
@@ -451,6 +475,8 @@ final class SettingsWindowSelection: ObservableObject {
            feature == .drop || FeatureCatalog.info(for: feature).place == .screen {
             return "\(tab.rawValue)/\(feature.rawValue)"
         }
+        if tab == .apiAndModels { return "\(tab.rawValue)/\(apiSection.lilBroKey)" }
+        if tab == .toolbox, let toolboxTool { return "\(tab.rawValue)/\(toolboxTool.rawValue)" }
         return tab.rawValue
     }
 
@@ -460,10 +486,11 @@ final class SettingsWindowSelection: ObservableObject {
         if let feature = row.feature {
             if selectedTab != .features || shownFeature != feature { open(feature) }
         } else if let tool = row.tool {
-            focus(tool)
+            if lilBroScreen != row.screen { focus(tool) }
         } else if selectedTab != row.tab.resolved {
             select(row.tab)
         }
+        if let section = row.apiSection { apiSection = section }
         focusedRow = row.id
     }
 
@@ -509,13 +536,14 @@ final class SettingsWindowSelection: ObservableObject {
     /// "Add a key" and "Fix the key" on a feature's screen.
     // WHY: .project-docs/decisions/2026-11-24-settings-around-features.md
     func showAPIKeys() {
-        requestedAPISection = .keys
         select(.apiAndModels)
+        apiSection = .keys
     }
 
     /// Opens Toolbox on one tool's pane without running its action.
     func focus(_ tool: HoverTool) {
         select(.toolbox)
+        toolboxTool = tool
         focusedTool = tool
     }
 
@@ -574,6 +602,7 @@ struct SettingsBackBar: View {
 
     var body: some View {
         HStack(spacing: 0) {
+            // lilBro-exempt: the way back to the screen this one opens from, not a setting
             Button(action: action) {
                 HStack(spacing: 3) {
                     Image(systemName: "chevron.left").font(.system(size: 10, weight: .semibold))

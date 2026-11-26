@@ -83,6 +83,7 @@ struct AIUsageDateCalendar: View {
             }.accessibilityHidden(true)
             LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
                 ForEach(visible.days, id: \.self) { day in
+                    // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                     Button { date = day; close() } label: {
                         Text("\(visible.calendar.component(.day, from: day))")
                             .font(.system(size: 13, weight: visible.calendar.isDate(day, inSameDayAs: date) ? .semibold : .regular))
@@ -108,10 +109,12 @@ struct AIUsageDateCalendar: View {
                 }
             }
             HStack {
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Button { date = visible.latest; close() } label: { Text("Today").padding(.horizontal, 12).frame(height: 30).background(MacSettingsTheme.controlBg, in: RoundedRectangle(cornerRadius: 6)) }
                     .buttonStyle(AIUsageCalendarButtonStyle(selected: false, inMonth: true)).focused($focusedAction, equals: "today")
                     .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(focusedAction == "today" ? MacSettingsTheme.accent : .clear, lineWidth: 1.5) }
                 Spacer()
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 Button(action: close) { Text("Done").padding(.horizontal, 12).frame(height: 30) }
                     .buttonStyle(AIUsageCalendarButtonStyle(selected: true, inMonth: true)).focused($focusedAction, equals: "done")
                     .overlay { RoundedRectangle(cornerRadius: 6).strokeBorder(focusedAction == "done" ? MacSettingsTheme.text : .clear, lineWidth: 1.5) }
@@ -124,6 +127,7 @@ struct AIUsageDateCalendar: View {
         .onExitCommand(perform: close)
     }
     private func navigation(_ image: String, label: String, offset: Int) -> some View {
+        // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
         Button { if let next = visible.shifted(offset) { visible.show(next) } } label: {
             Image(systemName: image).font(.system(size: 10, weight: .semibold)).frame(width: 24, height: 30)
         }

@@ -706,6 +706,7 @@ struct HotkeySettingRow: View {
                 )
                 if shortcutContents.isEmpty && !isRecording {
                     Button("Record shortcut", action: onRecord)
+                        .lilBroControl("Record shortcut")
                         .buttonStyle(.borderless)
                         .font(.system(size: 11))
                         .foregroundStyle(MacSettingsTheme.accent)
@@ -722,6 +723,7 @@ struct HotkeySettingRow: View {
                         Image(systemName: "xmark.circle.fill")
                             .foregroundStyle(MacSettingsTheme.text2)
                     }
+                    .lilBroControl("Remove shortcut")
                     .buttonStyle(.borderless)
                     .help("Remove shortcut")
                     .accessibilityLabel("Remove shortcut for \(title)")
@@ -768,6 +770,7 @@ private struct ShortcutGestureSlot: View {
                 .background(slotBackground)
                 .overlay(slotStroke)
         }
+        .lilBroControl("Switch gesture")
         .buttonStyle(.plain)
         .disabled(!isSwitchable)
         .accessibilityLabel(isSwitchable ? "Switch gesture" : "\(title) gesture")
@@ -806,6 +809,7 @@ struct ShortcutKeySlot: View {
             }
             .frame(width: 34, height: 30)
         }
+        .lilBroControl("Shortcut key")
         .buttonStyle(.plain)
         .accessibilityLabel("Shortcut key")
     }

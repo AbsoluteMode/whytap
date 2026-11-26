@@ -58,6 +58,7 @@ struct ToolboxRecordingPane: View {
                 .font(.caption).foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             Button(state.meetingRecordingActive ? "Stop recording" : "Start recording", action: toggle)
+                .lilBroControl("Start or stop recording")
                 .buttonStyle(.borderedProminent)
                 .tint(state.meetingRecordingActive ? .red : .blue)
         }

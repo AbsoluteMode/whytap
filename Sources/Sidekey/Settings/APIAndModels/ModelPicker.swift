@@ -68,6 +68,7 @@ struct ModelPicker: View {
     private func providerButton(title: String, count: Int?, account: ProviderAccount?) -> some View {
         let current = sections.contains { $0.account == providerFilter } ? providerFilter : nil
         let selected = current == account
+        // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
         return Button {
             providerFilter = account
         } label: {
@@ -230,6 +231,7 @@ struct ModelPicker: View {
             Text("This server doesn't provide a model list. Enter the model name configured on it.")
                 .font(.system(size: 11.5)).foregroundStyle(MacSettingsTheme.text2)
             HStack {
+                // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
                 TextField("Model name on this server", text: name)
                     .textFieldStyle(.roundedBorder)
                     .onSubmit { if !trimmed.isEmpty { onSelect(section.account, trimmed) } }
@@ -240,6 +242,7 @@ struct ModelPicker: View {
     }
 
     private func resultRow(_ result: ModelPickerSearch.Result) -> some View {
+        // lilBro-exempt: inside a sheet or popover opened from a row that reports itself; Lil Bro leads to that row
         Button { choose(result) } label: {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark")

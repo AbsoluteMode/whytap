@@ -564,6 +564,10 @@ final class LilBroController: ObservableObject {
             return true
         }
         bubble = .tag("On my way…")
+        // Where the window is as far as he knows; a click of the person's
+        // own during his run or punch changes it, and then he presses
+        // nothing more (builder review of #493, ticket 631).
+        var expected = place
         for stop in stops {
             guard !Task.isCancelled else { return false }
             if let rect = await visibleSpot(stop.spot) {
@@ -573,8 +577,16 @@ final class LilBroController: ObservableObject {
                 await punch(rect)
             }
             guard !Task.isCancelled else { return false }
+            guard place == expected else {
+                // The person went somewhere themselves: their choice stays.
+                if row != nil, selection.focusedRow == row?.id { selection.focusedRow = nil }
+                feet = map.homeStand
+                setPose(.idle)
+                return false
+            }
             stop.press()
             await settle()
+            expected = place
         }
         guard !Task.isCancelled else { return false }
         let landing = await landing(for: destination)
@@ -599,12 +611,27 @@ final class LilBroController: ObservableObject {
             target = now
             feet = LilBroPlanner.perch(on: now)
         } else {
+            // The person went elsewhere while he walked to the card: he
+            // outlines nothing on their screen.
+            guard place == expected, map.platforms.contains(block) else {
+                feet = map.homeStand
+                setPose(.idle)
+                return true
+            }
             target = block
         }
         holding = true
         setPose(.point)
         return true
     }
+
+    /// The window's place as far as guiding goes: tab and feature screen.
+    private struct Place: Equatable {
+        let tab: SettingsWindowTab
+        let feature: AppFeature?
+    }
+
+    private var place: Place { Place(tab: selection.selectedTab, feature: selection.shownFeature) }
 
     /// Where he stands and what he outlines once the place is open: the row
     /// he was asked about, scrolled into view, or the screen's first block.

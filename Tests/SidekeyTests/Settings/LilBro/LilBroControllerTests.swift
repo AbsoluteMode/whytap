@@ -941,4 +941,29 @@ final class LilBroControllerTests: XCTestCase {
             XCTAssertNil(controller.turns.last?.opened, "\(mode)")
         }
     }
+
+    /// The person clicks General while he punches the Hotkeys row in the
+    /// sidebar: he presses nothing, their tab stays, nothing is claimed
+    /// (ticket 631). The same holds for a feature's screen.
+    func test_a_click_of_the_persons_own_during_his_punch_wins() async {
+        for destination in [LilBroDestination.row(Self.record), .feature(.drop)] {
+            let gate = Gate { $0 == 0.43 }
+            let selection = SettingsWindowSelection(selectedTab: .permissions)
+            let controller = make(selection: selection,
+                                  remote: Remote(.answer(LilBroAnswer(paragraphs: ["Here."], destination: destination))),
+                                  sleep: { await gate.sleep($0) })
+            controller.ask("take me there")
+            await until { controller.flash != nil && gate.waiting == 1 }
+            selection.select(.other)
+            gate.release()
+            await until { controller.bubble == .full && !controller.isBusy }
+            await settleDown()
+            XCTAssertEqual(selection.selectedTab, .other, "\(destination)")
+            XCTAssertNil(selection.shownFeature, "\(destination)")
+            XCTAssertNil(selection.focusedRow, "\(destination)")
+            XCTAssertNil(controller.target, "\(destination)")
+            XCTAssertNil(controller.turns.last?.opened, "\(destination)")
+            XCTAssertEqual(controller.feet, CGPoint(x: 176, y: 471), "home \(destination)")
+        }
+    }
 }

@@ -1574,7 +1574,10 @@ answers, a new question, closing). With the little guy he waits at home while
 it is away and is back on it when it returns. A row he cannot show (the
 person left the tab meanwhile, even while it was still laying out, or it
 never reports) outlines nothing, leaves their tab and is not said to be
-opened; the guide never selects the tab again after its sidebar stop. When the
+opened; the guide never selects the tab again after its sidebar stop.
+Before every press he checks that the window is still where his last press
+left it; a click of the person's own during his run or punch ends the guide
+with nothing pressed or claimed. When the
 answer names another place, he runs to the sidebar row and then the
 Features row a person would click, punches each and opens it through the same
 SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —

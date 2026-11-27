@@ -3,7 +3,7 @@ id: agent-low-effort-2026-11-23
 type: decision
 title: The built-in Agent asks Anthropic and OpenAI models for low effort
 summary: Direct Anthropic requests send output_config.effort low and direct OpenAI Responses requests send reasoning.effort low, only to models documented to take it; a finished plain-text Anthropic reply (end_turn, text blocks only) is the answer, the direct output cap is 16,384 tokens or the catalog's lower limit with a 180-second wait, a cut answer says so, and diagnostics record the effort and token usage. OpenRouter is unchanged.
-status: confirmed
+status: stale
 tags: [agent, native-agent, anthropic, openai, effort, latency, diagnostics]
 canonical_for: [agent-effort]
 verified_at: 2026-11-23
@@ -20,16 +20,18 @@ sources:
   - type: url
     reference: https://developers.openai.com/api/docs/guides/reasoning
     confirmed_at: 2026-11-23
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentEffort.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentEffort.swift
     confirmed_at: 2026-11-23
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentLowEffortTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentLowEffortTests.swift
     confirmed_at: 2026-11-23
-related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-24-agent-minimal-reasoning.md]
+related: [2026-10-22-native-agent.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-22-agent-provider-web-search.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-24-agent-minimal-reasoning.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # The built-in Agent asks for low effort
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in agent was removed; the Agent's reasoning is chosen in Models → Harness.
 
 ## Context
 

@@ -179,8 +179,7 @@ final class CaseRegistrationTests: XCTestCase {
         XCTAssertEqual(fx.vm.registeredAppNames, [])
 
         // Access is gone at once: the same caller now resolves as an unregistered AI.
-        let caller = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [],
-                                        builtInOpenCodePIDs: [])
+        let caller = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [])
         XCTAssertEqual(caller.resolve(peerPID: 100), .knownUnregisteredAI(name: "Claude Code"))
         await assertThrows(.missingApp) { _ = try await fx.vm.unregisterApp(appID) }
     }
@@ -219,78 +218,6 @@ final class CaseRegistrationTests: XCTestCase {
 
     // MARK: Built-in OpenCode
 
-    func test_opencode_config_contains_case_mcp_only_when_registered() async throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
-        let helperURL = directory.appendingPathComponent("Whytap.app/Contents/Helpers/whytap")
-        try FileManager.default.createDirectory(at: helperURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try Data("#!/bin/sh\n".utf8).write(to: helperURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: helperURL.path)
-
-        let fx = try await Fixture(payload: payload())
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: helperURL))
-        let unregistered = try OpenCodeEnvironment.make(workingDirectory: directory, model: "vendor/model", key: "k",
-            allowActions: true, caseMCPCommand: nil, inherited: [:])
-        XCTAssertNil(try config(unregistered)["mcp"])
-
-        _ = try await fx.vm.registerApp(.builtInOpenCode, name: CaseKnownClient.builtInOpenCode.displayName)
-        let command = try XCTUnwrap(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: helperURL))
-        XCTAssertEqual(command, [helperURL.path, "case", "mcp"])
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload, helperURL: nil),
-                     "no helper in the bundle: no entry")
-        XCTAssertNil(CaseBuiltInAgentAccess.mcpCommand(payload: fx.service.payload,
-                                                       helperURL: directory.appendingPathComponent("missing")))
-
-        for allowActions in [true, false] {
-            let env = try OpenCodeEnvironment.make(workingDirectory: directory, model: "vendor/model", key: "k",
-                allowActions: allowActions, caseMCPCommand: command, inherited: [:])
-            let json = try config(env)
-            let mcp = try XCTUnwrap(json["mcp"] as? [String: Any])
-            let entry = try XCTUnwrap(mcp["case"] as? [String: Any])
-            XCTAssertEqual(entry["type"] as? String, "local")
-            XCTAssertEqual(entry["command"] as? [String], [helperURL.path, "case", "mcp"])
-            XCTAssertEqual(entry["enabled"] as? Bool, true)
-            XCTAssertNil(entry["environment"], "no values or tokens in the agent config")
-            let permission = try XCTUnwrap(json["permission"] as? [String: String])
-            XCTAssertEqual(permission["case_*"], "allow", "listing tools allowed even with actions off")
-            if !allowActions { XCTAssertEqual(permission["*"], "deny") }
-        }
-
-        // The built-in agent is told apart by the PIDs Whytap started.
-        let processes = CaseBuiltInAgentProcesses()
-        processes.insert(4242)
-        let resolver = CaseCallerResolver(inspector: StubInspector(), registrations: fx.service.payload?.apps ?? [],
-                                          builtInOpenCodePIDs: processes.pids)
-        guard case .registered(let reg) = resolver.resolve(peerPID: 200) else {
-            return XCTFail("built-in agent should resolve to its registration")
-        }
-        XCTAssertEqual(reg.identity, .builtInOpenCode)
-        processes.remove(4242)
-        XCTAssertTrue(processes.pids.isEmpty)
-    }
-
-    func test_opencode_process_pid_is_tracked_while_running() throws {
-        let processes = CaseBuiltInAgentProcesses.shared
-        let exited = expectation(description: "exit")
-        var seenWhileRunning = false
-        let handle = OpenCodeProvider.defaultRunStreaming(
-            binary: URL(fileURLWithPath: "/bin/sh"), args: ["-c", "read line; echo done"],
-            workingDirectory: FileManager.default.temporaryDirectory, environment: [:], prompt: "go\n",
-            onLine: { _ in }, onExit: { _ in exited.fulfill() })
-        let deadline = Date().addingTimeInterval(2)
-        while Date() < deadline {
-            if let pid = handle.processIdentifier, processes.pids.contains(pid) { seenWhileRunning = true; break }
-            if !seenWhileRunning, handle.processIdentifier == nil { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        }
-        wait(for: [exited], timeout: 5)
-        XCTAssertTrue(seenWhileRunning || processes.pids.isEmpty)
-        // After exit nothing of it remains, so a reused PID is never mistaken for the agent.
-        let settle = Date().addingTimeInterval(1)
-        while Date() < settle, !processes.pids.isEmpty { RunLoop.current.run(until: Date().addingTimeInterval(0.01)) }
-        XCTAssertTrue(processes.pids.isEmpty)
-    }
-
     // MARK: Known clients
 
     func test_known_clients_match_caller_resolver_identities() {
@@ -321,8 +248,7 @@ final class CaseRegistrationTests: XCTestCase {
         let claudeConnector = ClaudeCodeCaseConnector(home: home, socketPath: "/tmp/x.sock", runner: runner,
                                                       locate: { URL(fileURLWithPath: "/usr/local/bin/claude") })
         let setup = CaseClientSetup(helperURL: helperURL, binDir: bin, flavorName: "prod",
-                                    connectors: [.claudeCode: claudeConnector, .cursor: CursorCaseConnector(home: home, appInstalled: { false })],
-                                    builtInAgentAvailable: { true })
+                                    connectors: [.claudeCode: claudeConnector, .cursor: CursorCaseConnector(home: home, appInstalled: { false })])
 
         let ok = await setup.connect(claude)
         XCTAssertEqual(ok.problems, [])
@@ -341,30 +267,29 @@ final class CaseRegistrationTests: XCTestCase {
 
         // No helper in the bundle: nothing points at a missing file.
         let noHelper = CaseClientSetup(helperURL: nil, binDir: bin, flavorName: "prod",
-                                       connectors: [.claudeCode: claudeConnector], builtInAgentAvailable: { true })
+                                       connectors: [.claudeCode: claudeConnector])
         runner.calls.removeAll()
         let missing = await noHelper.connect(claude)
         XCTAssertEqual(missing.problems.count, 1)
         XCTAssertTrue(runner.calls.isEmpty)
 
-        // Built-in agent and arbitrary programs have no external config.
+        // Arbitrary programs have no external config.
         runner.status = 0
         try FileManager.default.removeItem(at: bin.appendingPathComponent("whytap"))
-        let builtIn = await setup.connect(.builtInOpenCode)
-        XCTAssertEqual(builtIn.problems, [])
         let other = await setup.disconnect(.executablePath("/Applications/Other.app"))
         XCTAssertEqual(other.problems, [])
         // The located Claude Code CLI is offered; Codex and Cursor are absent here.
         let detected = await setup.detectInstalledClients()
-        XCTAssertEqual(detected, [.builtInOpenCode, .claudeCode])
+        XCTAssertEqual(detected, [.claudeCode])
     }
 
-    func test_connect_catalog_offers_installed_agent_claude_code_codex_and_cursor_only() async throws {
-        XCTAssertEqual(CaseKnownClient.connectableClients, [.builtInOpenCode, .claudeCode, .codex, .cursor])
+    func test_connect_catalog_offers_installed_claude_code_codex_and_cursor_only() async throws {
+        // The earlier in-app agent is no longer offered; its identity stays readable.
+        XCTAssertEqual(CaseKnownClient.connectableClients, [.claudeCode, .codex, .cursor])
         let home = FileManager.default.temporaryDirectory.appendingPathComponent("case-detection-\(UUID().uuidString)")
         let runner = FakeCommandRunner()
         // Discovery must not install a CLI, write a config, run a client or request authentication.
-        for openCodeInstalled in [false, true] {
+        do {
             for claudeInstalled in [false, true] {
                 for codexInstalled in [false, true] {
                     for cursorInstalled in [false, true] {
@@ -377,16 +302,14 @@ final class CaseRegistrationTests: XCTestCase {
                         let setup = CaseClientSetup(helperURL: nil, binDir: home, flavorName: "prod",
                                                     connectors: [.claudeCode: claudeConnector,
                                                                  .codex: codexConnector,
-                                                                 .cursor: CursorCaseConnector(home: home, appInstalled: { cursorInstalled })],
-                                                    builtInAgentAvailable: { openCodeInstalled })
+                                                                 .cursor: CursorCaseConnector(home: home, appInstalled: { cursorInstalled })])
                         let found = await setup.detectInstalledClients()
                         var expected: [CaseKnownClient] = []
-                        if openCodeInstalled { expected.append(.builtInOpenCode) }
                         if claudeInstalled { expected.append(.claudeCode) }
                         if codexInstalled { expected.append(.codex) }
                         if cursorInstalled { expected.append(.cursor) }
                         XCTAssertEqual(found, expected,
-                                       "Agent \(openCodeInstalled), Claude Code \(claudeInstalled), Codex \(codexInstalled), Cursor \(cursorInstalled)")
+                                       "Claude Code \(claudeInstalled), Codex \(codexInstalled), Cursor \(cursorInstalled)")
                     }
                 }
             }
@@ -399,7 +322,7 @@ final class CaseRegistrationTests: XCTestCase {
         let fx = try await Fixture(payload: payload())
         fx.clients.detected = [.claudeCode, .cursor, .codex, .builtInOpenCode]
         let available = await fx.vm.availableClientsToRegister()
-        XCTAssertEqual(available, [.builtInOpenCode, .claudeCode, .codex, .cursor])
+        XCTAssertEqual(available, [.claudeCode, .codex, .cursor], "the earlier in-app agent is not offered")
 
         // Not installed: not offered.
         fx.clients.detected = [.cursor, .codex]

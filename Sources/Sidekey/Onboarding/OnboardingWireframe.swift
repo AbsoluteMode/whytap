@@ -1126,15 +1126,13 @@ struct OnboardingSourceStage: View {
 
 /// One provider of a key step (speech or language model), with where to get
 /// a key and pay.
-/// Whose key a key step takes: a model provider, or Tavily for search.
+/// Whose key a key step takes: a model provider.
 enum OnboardingKeyVendor: Hashable {
     case provider(AIProviderKind)
-    case tavily
 
     var displayName: String {
         switch self {
         case .provider(let kind): return kind.displayName
-        case .tavily: return "Tavily"
         }
     }
 
@@ -1143,7 +1141,6 @@ enum OnboardingKeyVendor: Hashable {
     var route: OnboardingRoute {
         switch self {
         case .provider(let kind): return .provider(kind)
-        case .tavily: return .tavily
         }
     }
 }
@@ -1154,14 +1151,9 @@ struct OnboardingKeyProvider: Equatable {
     let keysURL: URL
     let billingURL: URL
 
-    static let tavily = OnboardingKeyProvider(kind: .tavily, assetName: "tavily",
-                                              keysURL: URL(string: "https://app.tavily.com/home")!,
-                                              billingURL: URL(string: "https://app.tavily.com/billing")!)
-
     static func of(_ vendor: OnboardingKeyVendor) -> OnboardingKeyProvider? {
         switch vendor {
         case .provider(let kind): return of(kind)
-        case .tavily: return tavily
         }
     }
 
@@ -1192,7 +1184,7 @@ struct OnboardingKeyProvider: Equatable {
     /// characters.
     static let prefixes: [(prefix: String, kind: OnboardingKeyVendor)] = [
         ("sk-svcacct-", .provider(.openAI)), ("sk-proj-", .provider(.openAI)), ("sk-ant-", .provider(.anthropic)),
-        ("sk-or-", .provider(.openRouter)), ("tvly-", .tavily), ("sk_", .provider(.elevenLabs)), ("sk-", .provider(.openAI)),
+        ("sk-or-", .provider(.openRouter)), ("sk_", .provider(.elevenLabs)), ("sk-", .provider(.openAI)),
     ]
 
     /// A real key is at least this long; shorter input is never recognised.
@@ -1239,37 +1231,32 @@ enum OnboardingKeyMask {
 /// Which key a key step asks for. Both steps share one layout, the wire key
 /// over its padlock, the mask and the five problems.
 enum OnboardingKeyStageKind: Equatable {
-    case speech, languageModel, search
+    case speech, languageModel
 
     var step: OnboardingStep {
         switch self {
         case .speech: return .speechKey
         case .languageModel: return .llmKey
-        case .search: return .search
         }
     }
     var title: String {
         switch self {
         case .speech: return "Paste your speech key."
         case .languageModel: return "Paste a language model key."
-        case .search: return "Paste a Tavily key."
         }
     }
     init?(step: OnboardingStep) {
         switch step {
         case .speechKey: self = .speech
         case .llmKey: self = .languageModel
-        case .search: self = .search
         default: return nil
         }
     }
 
-    /// Search has no server of its own: its link is absent.
     var serverHelp: String? {
         switch self {
         case .speech: return "Add an OpenAI-compatible speech server (Ollama, LM Studio, vLLM)"
         case .languageModel: return "Add an OpenAI-compatible language model server (Ollama, LM Studio, vLLM)"
-        case .search: return nil
         }
     }
 }
@@ -1305,21 +1292,18 @@ struct OnboardingKeyStage: View {
         switch kind {
         case .speech: return model.speechProviders.compactMap(OnboardingKeyProvider.of)
         case .languageModel: return OnboardingJourneyModel.llmProviders.compactMap(OnboardingKeyProvider.of)
-        case .search: return [.tavily]
         }
     }
     private var detected: OnboardingKeyProvider? { OnboardingKeyProvider.detect(draft, among: providers) }
     /// The provider the key's format or the person named; nil otherwise.
     private var known: OnboardingKeyProvider? {
-        // The search step has one provider: with the field empty it is known.
-        detected ?? picked.flatMap(OnboardingKeyProvider.of) ?? (kind == .search && draft.isEmpty ? .tavily : nil)
+        detected ?? picked.flatMap(OnboardingKeyProvider.of)
     }
     /// The step's provider in the model: whose key is saved or was answered.
     private var current: OnboardingKeyVendor {
         switch kind {
         case .speech: return .provider(model.speechProvider)
         case .languageModel: return .provider(model.llmProvider)
-        case .search: return .tavily
         }
     }
     private func setCurrent(_ vendor: OnboardingKeyVendor) {
@@ -1346,8 +1330,8 @@ struct OnboardingKeyStage: View {
         if case .failed = outcome { return model.keyProblems[step] ?? .other(outcome.failureText ?? "") } else { return nil }
     }
     private var saved: Bool {
-        if case .provider(let provider) = current { return model.keySaved(provider) }
-        return model.tavily.configured
+        guard case .provider(let provider) = current else { return false }
+        return model.keySaved(provider)
     }
     /// This step's providers whose key is already in the Keychain: named under
     /// an empty field, so a key kept from an earlier setup is found without
@@ -1419,14 +1403,7 @@ struct OnboardingKeyStage: View {
             // returns to its key, Self-hosted turns the key field into the
             // server's fields.
             logos
-                .padding(.top, server ? 2 : kind == .search ? 2 : 10)
-            if kind == .search {
-                // Search: one quiet line under its one mark.
-                Text("Optional · the Agent searches the web with it")
-                    .font(OnboardingTheme.sans(12.5))
-                    .foregroundColor(OnboardingTheme.faint)
-                    .padding(.top, 4)
-            }
+                .padding(.top, server ? 2 : 10)
             Spacer(minLength: 4)
         }
         .frame(maxWidth: .infinity)
@@ -1814,7 +1791,6 @@ struct OnboardingKeyStage: View {
             switch provider {
             case .provider(let kind) where self.kind == .speech: await model.useSpeechKey(key, provider: kind)
             case .provider(let kind): await model.useLLMKey(key, provider: kind)
-            case .tavily: await model.useSearchKey(key)
             }
             if model.outcome(step, for: provider.route).isDone { draft = "" }
         }

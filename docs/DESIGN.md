@@ -96,7 +96,7 @@ change the tool's settings below.
 ## Shared Speech and LLM rows — 2026-11-22
 
 - Models opens with two cards, Speech ("Drop, voice, Meetings") and LLM
-  ("Cleanup, notes, Agent"), each a single model menu that sets every feature
+  ("Text features"), each a single model menu that sets every feature
   of its kind. Subtitles keeps its own card below them.
 - The menu label tells the whole state in one line: "Choose a model",
   "ElevenLabs · scribe_v3_live", "Anthropic · claude-opus-5 · 1 custom",
@@ -113,22 +113,6 @@ change the tool's settings below.
   (default), Replace them too, Cancel; the message names those features.
 
 See the [shared model rows decision](../.project-docs/decisions/2026-11-22-shared-model-rows.md).
-
-## Search row — 2026-11-22
-
-- A third card under Speech and LLM, laid out like them: "Search" with the
-  caption "Agent web search" and one menu. The label is what the Agent uses
-  now: "Anthropic · built-in", "OpenAI · built-in", "OpenRouter · web",
-  "Tavily" or "Off — add a Tavily key".
-- The menu offers the Agent model's built-in search (when it has one) and
-  Tavily, with a checkmark on the current one; without a Tavily key it offers
-  "Add a Tavily key…", which opens API keys.
-- Under the menu, "Follows the Agent model: <provider> · <model>." names the
-  model the search follows (the Agent can keep its own model while the LLM row
-  shows another), then one line names the price and who bills it. Off keeps
-  the orange setup contour and turns the price line orange.
-
-See the [provider web search decision](../.project-docs/decisions/2026-11-22-agent-provider-web-search.md).
 
 ## History: several rows in one paste — 2026-11-22
 
@@ -184,6 +168,11 @@ appear legibly in place. In a full wing, any scroll adjustment tapers to zero
 at the current word. Reduce Motion fits each visible transcript update immediately.
 
 ## Agent voice model mark — 2026-10-22
+
+Superseded on 2026-11-27: the Agent runs on Claude Code or Codex, and the voice
+ticker shows that harness's mark. The model-author marks, their neutral mask
+and the pulse below still apply to Drop and cleanup tickers; the background
+artwork refresh was removed with the built-in agent.
 
 The user speaks to the agent and wants to recognize the selected model's author.
 First keep the transcript legible; the small mark identifies who will answer.
@@ -441,7 +430,7 @@ The chosen direction is the user's tile-to-inline-form request.
   anchored to the visible panel instead of scrolled content, and announces it
   to accessibility. Repeating Save resets the notice lifetime; the notice never
   captures clicks or shifts fields/buttons. Existing keys are never read back.
-  A failed Tavily deletion uses "Couldn’t remove key" in the same brief notice,
+  A failed key deletion uses "Couldn’t remove key" in the same brief notice,
   so a storage failure is not described as a rejected credential.
   Add-key entry points in Models open this same API keys surface.
 - OpenAI and Anthropic are ordinary LLM providers for all text modes. Adding a
@@ -920,7 +909,7 @@ in SwiftUI; the native app does not acquire a React runtime or npm dependencies.
 - The visible explanation states both outcomes: On runs file edits and
   commands without approval using the Mac user's permissions; Off blocks
   those actions. It also states that changes apply to the next request.
-  Why: OpenCode controls local approvals; OpenRouter routes model requests.
+  Why: the harness (Claude Code or Codex) controls its own approvals.
   Off must not imply an interactive approval mode that Whytap does not offer.
 - Keep the established row, wrapping subtitle, switch size, keyboard and
   accessibility behavior. Live pointer and keyboard acceptance remains in
@@ -1414,6 +1403,10 @@ pressed; this does not establish contrast on every native glass backdrop.
 
 ### Case Connect polish — 2026-10-21
 
+Superseded on 2026-11-27: the picker offers Claude Code, Codex and Cursor;
+the earlier in-app agent (OpenCode) is no longer offered, and its saved
+registration stays readable.
+
 The person comes to connect an installed agent. First they see OpenCode and/or
 Cursor with their logos. Clicking one opens its access mode and project scope;
 only Connect commits the draft after authentication. The user chose this flow.
@@ -1712,32 +1705,10 @@ and a month grid are not added to Hover. The explicit current-day requirement
 supersedes the former window presentation. See
 `.project-docs/decisions/2026-10-21-calendar-hover.md`.
 
-## Agents: native runtime and Tavily (2026-10-22)
-
-- Keep the existing macOS Settings card/row typography and spacing. The selected
-  model, workspace and connection stay together; no runtime
-  installation card remains. Reason: the agent is now built in.
-- Tavily belongs in Keys & models → API keys, alongside every other API key.
-  The user corrected its original Agents placement on October 22. Its search tile
-  uses the existing provider grid and minimal secure Save/Remove form; the shared
-  accepted/rejected notice is announced without adding a model route. Its saved
-  Keychain account remains unchanged, and failed replacement retains that key.
-  Leaving the form or closing its own Settings window clears the draft.
-- Key tiles and form actions retain the shared APIModel hover/press/focus/disabled
-  feedback and secure native field; saving disables competing tile/form actions.
-- Open folder exposes the permanent app-data workspace; the action switch says
-  Allow file edits and commands. Reason: describe current behavior while approve
-  and bypass modes remain future work. Context reset after 15 minutes means no
-  reuse, not timed deletion of the last local conversation file.
-- Verification uses offscreen native views in light/dark at compact/roomy sizes,
-  plus fixture save/error/disabled states. No animated transitions were added, so
-  reduced motion follows the existing shell without extra movement. Real key
-  acceptance and native Screen Recording remain installed-app checks.
-
 ## API hints: rows by category (2026-11-19)
 
 - Replace the grid of large offer cards with rows grouped under Speech to
-  text, Language models and Web search. Reason: the user wanted offers compared
+  text and Language models. Reason: the user wanted offers compared
   within one job, and cards already scrolled at five offers.
 - A row is two lines high: logo, provider over what it takes to start, the
   allowance over its period, and Get offer. No chips: "Paid plan" and "Card
@@ -1749,30 +1720,6 @@ supersedes the former window presentation. See
 - The header carries "Reviewed monthly · Last checked <newest date>".
 - Verified offscreen only (light/dark, 440/560/760 pt, both scroll ends). The
   popover's placement and hover timing need a check in the installed app.
-
-## API hints: Tavily search (2026-10-22)
-
-- Keep the existing offer cards, typography and semantic colors; add Tavily as
-  web search for Agent with a neutral globe symbol. Reason: a search API should
-  not appear as another LLM model.
-- Lay out all offers dynamically: two columns from 560pt, with the odd final
-  card spanning both; below 560pt use one column. Keep the offer grid scrollable.
-  Reason: five offers must not leave an empty half-row or hide the last provider.
-  The tab has no footer since 2026-11-19 (user request): no explanatory lines
-  and no Add API key button under the offers.
-- Show verification dates on each card: existing offers retain October 19, Tavily
-  uses October 22. Reason: adding one verified offer does not reverify the rest.
-- Point all key setup, including Tavily, to Keys & models → API keys.
-  Use MacButton interaction surfaces for full link/button hover, pressed,
-  focus and disabled feedback without layout shifts or added animation.
-- Check light/dark native offscreen layouts, narrow/wide, embedded/standalone and
-  scroll extremes. Physical pointer/keyboard/VoiceOver acceptance remains pending;
-  Claude Opus 5.5 independently reviewed source and offscreen images without
-  UI blockers; physical acceptance remains separate.
-  Link/card contrast is 5.59:1 light and 4.92:1 dark; date/card contrast is
-  6.62:1 light and 6.84:1 dark using the shared semantic tokens.
-
-
 
 ## Quick Translate: two text rows — 2026-10-26
 

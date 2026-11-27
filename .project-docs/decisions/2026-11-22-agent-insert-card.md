@@ -11,16 +11,16 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer reported that the Agent rephrased text without offering to insert it, and answered "how to update Codex" with website links instead of first offering the command to insert. The same report showed a numbered list restarting at 1 after a "3–4." item.
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentFinalAnswer.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentFinalAnswer.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentAnswerArtifacts.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentAnswerArtifacts.swift
     confirmed_at: 2026-11-22
   - type: repository
     reference: Sources/Sidekey/Agent/UI/Renderers/RendererSupport.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-structured-agent-answers.md]
+related: [2026-11-21-structured-agent-answers.md, 2026-11-27-agent-plain-text-cards.md]
 ---
 
 # Agent answers lead with an Insert card

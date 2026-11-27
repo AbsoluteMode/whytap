@@ -47,8 +47,8 @@
       "focused_test_filter": "CloudRemovalTests|LocalPathLoggingInvariantTests|KeychainStoreTests"
     },
     "agent": {
-      "entry_points": ["Sources/Sidekey/Agent/AgentController.swift", "Sources/Sidekey/AgentDaemon/NativeAgentProvider.swift", "Sources/Sidekey/AgentDaemon/NativeAgentModel.swift", "Sources/Sidekey/AgentDaemon/NativeAgentTools.swift", "Sources/Sidekey/AgentDaemon/TavilySearch.swift", "Sources/Sidekey/Settings/AgentOtherSection.swift", "Sources/Sidekey/Customization/WhytapCustomizationContext.swift"],
-      "contract": "Native selected OpenRouter/OpenAI/Anthropic model and local tool loop; provider keys only in HTTPS requests; Tavily search; bounded neutral workspace memory/context; file edits and commands allowed by default, enforced off when disabled."
+      "entry_points": ["Sources/Sidekey/Agent/AgentController.swift", "Sources/Sidekey/AgentDaemon/ClaudeCodeProvider.swift", "Sources/Sidekey/AgentDaemon/CodexProvider.swift", "Sources/Sidekey/AgentDaemon/AgentHarnessFlags.swift", "Sources/Sidekey/AgentDaemon/AgentSettingsStore.swift", "Sources/Sidekey/Settings/APIAndModels/HarnessSettingsModel.swift", "Sources/Sidekey/Settings/AgentOtherSection.swift", "Sources/Sidekey/Customization/WhytapCustomizationContext.swift"],
+      "contract": "The user's own Claude Code or Codex CLI runs each turn with its own sign-in and settings; the model and reasoning come from the CLI's catalog; Whytap's app control reaches it as a per-turn MCP server; no blanket permission bypass; \"Allow file edits and commands\" maps to the CLI's permission flags; Codex gets the prompt on stdin; no raw stderr or content in logs; bounded neutral workspace memory/context."
     },
     "notifications": {
       "guide": "docs/customization/notifications.md",

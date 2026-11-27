@@ -12,8 +12,7 @@ struct OpenRouterReasoningCapabilities: Codable, Equatable, Hashable {
     }
 
     /// The least reasoning this model takes: off where reasoning is optional,
-    /// else the lowest level listed. Used by Smart, the model probe and the
-    /// built-in Agent.
+    /// else the lowest level listed. Used by Smart and the model probe.
     var dictationSetting: OpenRouterReasoningSetting? {
         if mandatory == false { return .init(enabled: false, effort: nil) }
         guard let supportedEfforts else { return nil }

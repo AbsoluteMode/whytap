@@ -3,7 +3,7 @@ id: agent-sources-gated-2026-11-27
 type: decision
 title: Connected Agent sources stay in the code but are gated off until the owner decides
 summary: The connected-sources feature from PR #491 (MCP servers, GitHub, Jira, folders for the Right Command Agent) is hidden behind one code constant, AgentSourcesGate.isEnabled = false, with no user-visible toggle. With it off there is no Settings entry, no source tool or context for the Agent, no MCP server process, no scan of other apps' configurations, no gh call and no manifest or Keychain access. The code and its tests stay; tests enable the feature per instance. User-facing docs no longer describe it.
-status: confirmed
+status: stale
 tags: [agent, native-agent, sources, mcp, feature-gate, privacy]
 canonical_for: [agent-sources-gate]
 verified_at: 2026-11-27
@@ -11,16 +11,18 @@ sources:
   - type: user-confirmed
     reference: "On 2026-11-27, after #491 had merged and shipped in Whytap 2.2.27 (1784), the owner said the feature is better not shown while it is unclear whether it will stay; the orchestrator decided to hide it behind an off-by-default gate rather than revert it."
     confirmed_at: 2026-11-27
-  - type: repository
-    reference: Sources/Sidekey/Assistant/Connections/AgentSourcesGate.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/Assistant/Connections/AgentSourcesGate.swift
     confirmed_at: 2026-11-27
-  - type: repository
-    reference: Tests/SidekeyTests/Assistant/AgentSourcesGateTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/Assistant/AgentSourcesGateTests.swift
     confirmed_at: 2026-11-27
-related: [2026-11-26-agent-sources.md]
+related: [2026-11-26-agent-sources.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Connected Agent sources are gated off
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): connected Sources were removed with the built-in agent.
 
 ## Context
 

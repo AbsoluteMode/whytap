@@ -199,6 +199,9 @@ struct FeatureRequirement: Equatable, Identifiable {
         case permission(FeaturePermission)
         /// Drop's shortcut is installed and macOS delivers it.
         case dropShortcut
+        /// The Agent's harness: the user's Claude Code or Codex is chosen.
+        // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+        case harness
     }
 
     let kind: Kind
@@ -213,6 +216,7 @@ struct FeatureRequirement: Equatable, Identifiable {
         case .subtitlesKey: return "subtitlesKey"
         case .permission(let permission): return "permission.\(permission.rawValue)"
         case .dropShortcut: return "dropShortcut"
+        case .harness: return "harness"
         }
     }
 }
@@ -230,11 +234,14 @@ enum FeatureSetupAction: Equatable {
     /// The route's key is refused and no other model would work: the key
     /// has to be fixed or replaced in Keys & models.
     case fixKey(AIFeature)
-    case addOpenAIKey
+    /// Subtitles' engine has no key: Soniox's, or OpenAI's when chosen.
+    case addSubtitlesKey(SubtitleAudioTranslate.Engine)
     case allow(FeaturePermission)
     case openInputMonitoring
     case restartWhytap
     case retryShortcut
+    /// Keys & models → Models → Harness, opened.
+    case chooseHarness
 
     var title: String {
         switch self {
@@ -243,11 +250,12 @@ enum FeatureSetupAction: Equatable {
         case .chooseModel: return "Choose a model"
         case .addKey: return "Add a key"
         case .fixKey: return "Fix the key"
-        case .addOpenAIKey: return "Add a Soniox key"
+        case .addSubtitlesKey(let engine): return "Add \(engine == .openAI ? "an" : "a") \(engine.providerName) key"
         case .allow(let permission): return "Allow \(permission.title)"
         case .openInputMonitoring: return "Open Input Monitoring"
         case .restartWhytap: return "Restart Whytap"
         case .retryShortcut: return "Retry shortcut"
+        case .chooseHarness: return "Choose a harness"
         }
     }
 }
@@ -353,6 +361,8 @@ struct FeatureSetupSnapshot: Equatable {
     /// that is not refused. Only then does "Choose a model" fix anything.
     var modelAlternatives: Set<AIFeature> = []
     var subtitlesKeyPresent = false
+    /// The Subtitles engine the user chose; nil lets the keys decide.
+    var subtitlesEngineChoice: SubtitleAudioTranslate.Engine?
     var onDevice: OnDeviceSpeechAvailability = .unsupported
     var keyboardReady = false
     /// macOS 27.3: the grant is made, a restart makes it work.
@@ -367,6 +377,8 @@ struct FeatureSetupSnapshot: Equatable {
     var systemAudioHeard = false
     var dropShortcut: DropHotkeyStatus = .ready
     var agentOn = false
+    /// Claude Code or Codex is chosen as the Agent's harness.
+    var harnessReady = false
     var meetingsOn = false
     var googleOn = false
     /// Notify sources a coding agent connected (the built-in Meeting notes
@@ -627,8 +639,8 @@ enum FeatureCatalog {
             ]
         case .agent:
             return [
-                FeatureRequirement(kind: .model(.agent), title: "Text model that can use tools",
-                                   detail: "The Agent thinks and answers with it. OpenAI, Anthropic and OpenRouter models can."),
+                FeatureRequirement(kind: .harness, title: "Claude Code or Codex",
+                                   detail: "The Agent runs on the coding tool you already use, with your sign-in."),
                 FeatureRequirement(kind: .permission(.keyboard), title: FeaturePermission.keyboard.title,
                                    detail: "To hear the shortcut and paste the Agent's results."),
                 FeatureRequirement(kind: .model(.agentVoice), title: "Speech-to-text model",
@@ -698,11 +710,14 @@ enum FeatureCatalog {
         case .model(let feature):
             return modelState(feature, snapshot: snapshot)
         case .subtitlesKey:
-            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No Soniox or OpenAI key", action: .addOpenAIKey)
+            let missing = snapshot.subtitlesEngineChoice.map { "No \($0.providerName) key" } ?? "No Soniox or OpenAI key"
+            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: missing, action: .addSubtitlesKey(snapshot.subtitlesEngineChoice ?? .soniox))
         case .permission(let permission):
             return permissionState(permission, snapshot: snapshot)
         case .dropShortcut:
             return dropShortcutState(snapshot)
+        case .harness:
+            return snapshot.harnessReady ? .met : .unmet(reason: "No harness chosen", action: .chooseHarness)
         }
     }
 
@@ -900,8 +915,8 @@ enum FeatureCatalog {
         case .model(.dropSmartCleanup):
             let tidy = "Smart mode can’t tidy your text until it has a text model."
             return isFastWorking(snapshot) ? tidy + " Fast mode has a working model: switch to it to dictate without tidying." : tidy
-        case .model(.agent):
-            return "The Agent can’t answer until it has a text model that can use tools."
+        case .harness:
+            return "The Agent can’t answer until you choose Claude Code or Codex as its harness."
         case .model(.agentVoice):
             return "Talking to the Agent needs a speech-to-text model. Typing to it works without one."
         case .model(.voiceSearch):

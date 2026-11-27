@@ -38,9 +38,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
     /// `capabilities.thinking.supported`.
     var supportsReasoning: Bool?
     var reasoning: OpenRouterReasoningCapabilities?
-    /// Anthropic's `capabilities.server_tools.web_search.supported`; `nil`
-    /// when the catalog does not say. Decides the Agent's built-in search.
-    var supportsWebSearch: Bool?
     /// Anthropic's `capabilities.effort.low.supported` (`false` when
     /// `effort.supported` is false); `nil` when the catalog does not say.
     /// Decides whether the Agent sends `effort: low`.
@@ -65,7 +62,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
         supportsTools: Bool? = nil,
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
-        supportsWebSearch: Bool? = nil,
         supportsLowEffort: Bool? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
@@ -80,7 +76,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.supportsTools = supportsTools
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
-        self.supportsWebSearch = supportsWebSearch
         self.supportsLowEffort = supportsLowEffort
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
@@ -445,7 +440,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             let maxInputTokens: Int?
             let maxTokens: Int?
             let thinking: Bool?
-            let webSearch: Bool?
             let lowEffort: Bool?
             let createdAt: String?
 
@@ -459,13 +453,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
 
             private struct Capabilities: Decodable {
                 struct Support: Decodable { let supported: Bool? }
-                struct ServerTools: Decodable {
-                    let webSearch: Support?
-                    enum CodingKeys: String, CodingKey { case webSearch = "web_search" }
-                    init(from decoder: Decoder) throws {
-                        webSearch = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Support.self, forKey: .webSearch)
-                    }
-                }
                 struct Effort: Decodable {
                     let supported: Bool?
                     let low: Support?
@@ -477,18 +464,13 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                     enum CodingKeys: String, CodingKey { case supported, low }
                 }
                 let thinking: Support?
-                let serverTools: ServerTools?
                 let effort: Effort?
-                enum CodingKeys: String, CodingKey {
-                    case thinking, effort
-                    case serverTools = "server_tools"
-                }
+                enum CodingKeys: String, CodingKey { case thinking, effort }
                 // Each capability decodes on its own: an odd value in one
-                // (say web_search.supported) never costs another (thinking).
+                // (say effort.low) never costs another (thinking).
                 init(from decoder: Decoder) throws {
                     let container = try decoder.container(keyedBy: CodingKeys.self)
                     thinking = try? container.decodeIfPresent(Support.self, forKey: .thinking)
-                    serverTools = try? container.decodeIfPresent(ServerTools.self, forKey: .serverTools)
                     effort = try? container.decodeIfPresent(Effort.self, forKey: .effort)
                 }
             }
@@ -502,7 +484,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 // A capabilities object of another shape costs only the flag.
                 let capabilities = try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
                 thinking = capabilities?.thinking?.supported
-                webSearch = capabilities?.serverTools?.webSearch?.supported
                 let effort = capabilities?.effort
                 lowEffort = effort?.supported == false ? false : effort?.low?.supported
             }
@@ -529,7 +510,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 maxOutputTokens: model.maxTokens,
                 supportsTools: true,
                 supportsReasoning: model.thinking,
-                supportsWebSearch: model.webSearch,
                 supportsLowEffort: model.lowEffort,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
             )

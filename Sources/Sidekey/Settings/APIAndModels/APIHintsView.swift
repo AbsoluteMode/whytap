@@ -67,7 +67,7 @@ struct APIHintsView: View {
 
     private var footer: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add keys in API keys. Choose language and speech models in Models. Agent searches the web with its model: on Anthropic or OpenAI about $10 per 1,000 searches plus result tokens, through OpenRouter Exa at about $7 per 1,000 (Claude models use Anthropic's search). Tavily serves other models, or when chosen in Models → Search.")
+            Text("Add keys in API keys. Choose language and speech models in Models. Agent runs on your own Claude Code or Codex and their sign-in, not on these keys.")
                 .font(.system(size: 11.5))
                 .foregroundStyle(MacSettingsTheme.text2)
 
@@ -93,13 +93,12 @@ struct APIHintsView: View {
     }
 
     enum Category: CaseIterable {
-        case speech, models, search
+        case speech, models
 
         var title: String {
             switch self {
             case .speech: "Speech to text"
             case .models: "Language models"
-            case .search: "Web search"
             }
         }
     }
@@ -180,7 +179,7 @@ struct APIHintsView: View {
             allowance: "$100–200",
             cadence: "API credit each month",
             access: .paidPlan,
-            detail: "Max includes $100 and Ultra includes $200. After seven days, link a Console organization in Claude's billing settings. Use its Anthropic key for Agent. Credits expire each cycle.",
+            detail: "Max includes $100 and Ultra includes $200. After seven days, link a Console organization in Claude's billing settings. Use its Anthropic key for text features. Credits expire each cycle.",
             url: URL(string: "https://support.claude.com/en/articles/17154008-monthly-api-credits-for-max-ultra-and-team-plans")!,
             checked: "2026-11-21"
         ),
@@ -191,19 +190,8 @@ struct APIHintsView: View {
             allowance: "$100–500",
             cadence: "API credit each month",
             access: .paidPlan,
-            detail: "Pro tiers: $100, $200 or $500; Business: up to $500 per workspace. After seven days, claim it in ChatGPT's billing settings and link an API organization you own. Use its OpenAI key for Agent. Credits expire each cycle.",
+            detail: "Pro tiers: $100, $200 or $500; Business: up to $500 per workspace. After seven days, claim it in ChatGPT's billing settings and link an API organization you own. Use its OpenAI key for text and speech features. Credits expire each cycle.",
             url: URL(string: "https://developers.openai.com/api/docs/guides/chatgpt-api-credits")!,
-            checked: "2026-11-21"
-        ),
-        Hint(
-            category: .search,
-            provider: "Tavily",
-            assetName: "tavily",
-            allowance: "1,000",
-            cadence: "free search credits each month",
-            access: .noCard,
-            detail: "Web search for Agent with a model that has no search of its own, or when chosen in Models → Search. No card required. One basic search uses one credit. Add the Tavily key in API keys.",
-            url: URL(string: "https://www.tavily.com/pricing")!,
             checked: "2026-11-21"
         ),
     ]

@@ -43,16 +43,19 @@ struct TranslationIssue: Equatable {
         if let failure = error as? SpeechTranslationFailure {
             return speechTranslation(failure, target: nil)
         }
-        // Subtitles need the Soniox or the OpenAI key: say so instead of
-        // refusing quietly, and open Keys & models on Subtitles.
-        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+        // Subtitles need their engine's key: say which instead of refusing
+        // quietly, and open Keys & models on Subtitles.
+        // WHY: .project-docs/decisions/2026-11-27-subtitle-engine-choice.md
         if let unavailable = error as? SubtitleAudioTranslate.Unavailable {
             switch unavailable {
-            case .missingKey:
+            case .missingKey(.some(let engine)):
+                return Self(message: "Subtitles on \(engine.providerName) need \(engine == .openAI ? "an" : "a") \(engine.providerName) key. Add it in Keys & models.",
+                            feature: .subtitlesAudio)
+            case .missingKey(nil):
                 return Self(message: "Subtitles need a Soniox or OpenAI key. Add one in Keys & models.",
                             feature: .subtitlesAudio)
-            case .unreadableKey:
-                return Self(message: "Whytap couldn't read the Subtitles key from the Keychain. Check it in Keys & models.",
+            case .unreadableKey(let engine):
+                return Self(message: "Whytap couldn't read the \(engine?.providerName ?? "Subtitles") key from the Keychain. Check it in Keys & models.",
                             feature: .subtitlesAudio)
             }
         }

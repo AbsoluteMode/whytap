@@ -9,7 +9,6 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
     let assetName: String?
     let systemName: String?
     let label: String
-    var modelBrand: AgentModelBrand? = nil
 
     init(assetName: String, label: String) {
         self.assetName = assetName
@@ -38,27 +37,13 @@ struct TranscriptionProviderBrand: Equatable, Sendable {
         }
     }
 
-    /// Compatibility fallback when no model route is supplied.
+    /// The Agent's harness mark.
     static func agent(_ provider: CLIProviderID) -> TranscriptionProviderBrand {
-        agent(provider, route: nil)
-    }
-
-    static func agent(_ provider: CLIProviderID, route: FeatureRoute?) -> TranscriptionProviderBrand {
         switch provider {
         case .codex:
             return TranscriptionProviderBrand(assetName: "codex", label: "Codex")
         case .claude:
             return TranscriptionProviderBrand(assetName: "claude-code", label: "Claude Code")
-        case .native:
-            if let route, let model = AgentModelBrand.resolve(route) {
-                var brand = TranscriptionProviderBrand(assetName: model.assetName, label: model.label)
-                brand.modelBrand = model
-                return brand
-            }
-            if route?.account == .openRouter { return .openRouter }
-            return TranscriptionProviderBrand(systemName: "sparkle", label: "Whytap Agent")
-        case .opencode:
-            return TranscriptionProviderBrand(systemName: "terminal", label: "OpenCode")
         }
     }
 

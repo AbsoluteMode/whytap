@@ -159,7 +159,7 @@ final class APIKeysFitTests: XCTestCase {
             ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
             ProviderBrandIconAsset.clearCacheForTesting()
         }
-        for name in ["soniox", "deepgram", "elevenlabs", "openrouter", "tavily"] {
+        for name in ["soniox", "deepgram", "elevenlabs", "openrouter"] {
             XCTAssertNotNil(ProviderBrandIconAsset.image(named: name), name)
         }
         let scenarios: [(String, [(ProviderAccount, KeyStatus)], OnDeviceSpeechModelStatus, NSSize)] = [

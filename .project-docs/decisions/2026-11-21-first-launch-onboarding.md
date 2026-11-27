@@ -41,10 +41,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/OnboardingTests.swift
     confirmed_at: 2026-11-21
-related: [../project.md, 2026-10-26-first-launch-permissions.md, 2026-11-19-permission-request-before-settings.md, 2026-11-19-on-device-dictation.md, 2026-11-18-drop-into-whytap-editors.md, 2026-10-17-local-workspace.md, 2026-11-20-other-feature-videos.md, 2026-11-20-settings-sync.md, 2026-11-20-input-language-suggestion.md, 2026-11-22-shot-single-permission-prompt.md, 2026-11-22-onboarding-journey.md, 2026-11-26-coding-tools-switches.md]
+related: [../project.md, 2026-10-26-first-launch-permissions.md, 2026-11-19-permission-request-before-settings.md, 2026-11-19-on-device-dictation.md, 2026-11-18-drop-into-whytap-editors.md, 2026-10-17-local-workspace.md, 2026-11-20-other-feature-videos.md, 2026-11-20-settings-sync.md, 2026-11-20-input-language-suggestion.md, 2026-11-22-shot-single-permission-prompt.md, 2026-11-22-onboarding-journey.md, 2026-11-26-coding-tools-switches.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Context
+
+> Superseded 2026-11-27: Tavily removed; onboarding has no web-search key. See [the agent harness](2026-11-27-agent-harness-cli.md).
 
 Whytap had no onboarding since 2026-10-17: the first launch on a Mac only
 opened Settings -> Permissions when something was missing. On a clean Mac that

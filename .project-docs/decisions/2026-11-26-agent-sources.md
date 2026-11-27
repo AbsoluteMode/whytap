@@ -3,7 +3,7 @@ id: agent-sources-2026-11-26
 type: decision
 title: The Agent searches sources the user connects through Whytap's own MCP client, with read tools only
 summary: Iteration 1 of the Assistant plan. Settings → Features → Agent → Sources connects MCP servers (imported from Claude Code, Claude Desktop, Cursor, Codex or VS Code, GitHub and Jira tiles with a pasted token, a custom command or address) and folders on this Mac. A hand-written MCP client in the native runtime (stdio and Streamable HTTP with static headers) lists and calls tools. Every tool gets a class in app code; the Agent is offered only approved Read tools through one strict source_call function. Secrets live in Keychain and reach a server only through its process environment or its own HTTP headers. Imported and custom servers are called only after the user approves their tools. After a request reads source content, only that source's Read tools and the answer remain for the rest of that request.
-status: confirmed
+status: stale
 tags: [agent, native-agent, sources, mcp, security, privacy, keychain, assistant]
 canonical_for: [agent-sources, mcp-client, source-tool-classes, source-taint-rule]
 verified_at: 2026-11-26
@@ -23,19 +23,21 @@ sources:
   - type: url
     reference: https://github.blog/changelog/2025-08-26-template-urls-for-fine-grained-pats-and-updated-permissions-ui
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Sources/Sidekey/Assistant/Connections/SourcesController.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/Assistant/Connections/SourcesController.swift
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentSources.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentSources.swift
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Tests/SidekeyTests/Assistant/SourcesControllerTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/Assistant/SourcesControllerTests.swift
     confirmed_at: 2026-11-26
-related: [2026-10-22-native-agent.md, 2026-11-27-agent-sources-gated.md]
+related: [2026-10-22-native-agent.md, 2026-11-27-agent-sources-gated.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # The Agent searches connected sources, read tools only
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): connected Sources were removed with the built-in agent; the user's Claude Code or Codex loads its own MCP servers.
 
 > Gated off since 2026-11-27: `AgentSourcesGate.isEnabled` is false until
 > the owner decides whether the feature stays. See

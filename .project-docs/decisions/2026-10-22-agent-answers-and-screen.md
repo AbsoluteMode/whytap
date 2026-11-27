@@ -11,14 +11,14 @@ sources:
   - type: user-confirmed
     reference: On 2026-10-22 the user reported that a native agent answer showed its source as a plain URL instead of the former keyboard-action artifact and requested restoring cards for links and found files.
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentAnswerArtifacts.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentAnswerArtifacts.swift
     confirmed_at: 2026-10-22
   - type: user-confirmed
     reference: On 2026-10-22 the user reported raw useful.actions JSON instead of folder actions, requested compact precise replies, and asked to give the agent screenshot capability.
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/OpenCodeEventMapper.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/OpenCodeEventMapper.swift
     confirmed_at: 2026-10-22
   - type: repository
     reference: Sources/Sidekey/Agent/AgentScreenCapture.swift

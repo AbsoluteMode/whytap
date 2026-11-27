@@ -20,10 +20,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/APIKeysFitTests.swift
     confirmed_at: 2026-11-27
-related: [2026-10-21-provider-key-tiles.md, 2026-11-19-on-device-dictation.md]
+related: [2026-10-21-provider-key-tiles.md, 2026-11-19-on-device-dictation.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Compact provider key tiles
+
+> Superseded 2026-11-27: Tavily removed; API keys has no search tile. See [the agent harness](2026-11-27-agent-harness-cli.md).
 
 ## Context
 

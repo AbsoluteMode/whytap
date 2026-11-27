@@ -87,121 +87,83 @@ final class AgentSettingsStoreTests: XCTestCase {
     func testClaudeSettingsRemainIndependent() {
         let d = freshDefaults(#function)
         d.set("opus", forKey: "agent.claude.model")
-        let s = AgentSettingsStore(defaults: d, codexConfig: .init())
-        XCTAssertEqual(s.options(for: .claude), AgentRunOptions(model: "sonnet", effort: "low"))
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        XCTAssertEqual(s.options(for: .claude), AgentRunOptions(model: "opus", effort: "low"))
+        XCTAssertEqual(d.string(forKey: "agent.claude.model"), "opus", "loading never rewrites the pick")
         s.claudeEffort = "MAX"
         XCTAssertEqual(s.options(for: .claude).effort, "max")
         s.claudeEffort = "bogus"
         XCTAssertEqual(s.options(for: .claude).effort, "low")
     }
 
-    // MARK: - OpenCode model from the agent route
+    // MARK: - Claude Code model catalog
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 
-    private func routing(_ name: String) -> AIRoutingStore {
-        AIRoutingStore(defaults: freshDefaults(name))
+    private static let claudeCatalog = ClaudeModelCatalog(models: [
+        ClaudeModelOption(value: "default", displayName: "Default (recommended)", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"]),
+        ClaudeModelOption(value: "sonnet", displayName: "Sonnet 5.5", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"]),
+        ClaudeModelOption(value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5"),
+        ClaudeModelOption(value: "claude-opus-4-6", displayName: "Opus 4.6", supportedEffortLevels: ["low", "medium", "high", "max"]),
+    ], cliVersion: "2.1.325")
+
+    func testNoClaudePickSendsNoModelSoClaudeCodeUsesItsOwnDefault() {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        XCTAssertNil(s.options(for: .claude).model, "no hard-coded model")
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        XCTAssertEqual(s.selectedClaudeOption?.value, "default")
+        XCTAssertNil(s.options(for: .claude).model)
+        XCTAssertEqual(s.options(for: .claude).effort, "low")
+        s.claudeModel = "default"
+        XCTAssertNil(s.options(for: .claude).model, "picking Claude Code's default sends no --model")
     }
 
-    func test_opencode_model_comes_from_the_agent_route() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.options(for: .opencode).model, "anthropic/claude-sonnet-5.5")
-        XCTAssertEqual(s.selectedOpenCodeModel, "anthropic/claude-sonnet-5.5")
+    func testClaudePickIsSentVerbatimAndEffortFollowsTheModel() {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        s.claudeEffort = "xhigh"
+        s.claudeModel = "sonnet"
+        XCTAssertEqual(s.options(for: .claude).model, "sonnet")
+        XCTAssertEqual(s.options(for: .claude).effort, "xhigh")
+        s.claudeModel = "claude-opus-4-6"
+        XCTAssertEqual(s.options(for: .claude).effort, "low", "a level the model lacks falls back to Low")
+        XCTAssertEqual(s.claudeEffort, "xhigh", "the pick is kept for a model that takes it")
+        s.claudeModel = "claude-haiku-4-5-20251001"
+        XCTAssertNil(s.options(for: .claude).effort, "no --effort for a model without reasoning levels")
     }
 
-    func test_model_label_names_the_route_provider_and_model() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.selectedOpenCodeModelLabel, "OpenRouter · anthropic/claude-sonnet-5.5")
+    func testSavedClaudeModelMissingFromCatalogIsKept() {
+        let d = freshDefaults(#function)
+        d.set("claude-retired-1", forKey: "agent.claude.model")
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        XCTAssertNil(s.selectedClaudeOption)
+        XCTAssertEqual(s.options(for: .claude).model, "claude-retired-1")
+        XCTAssertNil(s.options(for: .claude).effort, "the loaded list gives no evidence the model takes --effort")
     }
 
-    func test_model_label_is_nil_without_a_usable_agent_model() {
-        let r = routing(#function)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertNil(s.selectedOpenCodeModelLabel)
+    func testSavedUnlistedClaudeModelDoesNotAssumeEffortSupport() {
+        let d = freshDefaults(#function)
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        s.claudeModel = "saved-unlisted-fixture"
+        s.claudeEffort = "xhigh"
+        XCTAssertEqual(s.options(for: .claude).effort, "xhigh", "before discovery: the user's pick among Claude Code's levels")
+        s.updateClaudeCatalog(.init(models: [
+            ClaudeModelOption(value: "default", displayName: "Default", supportedEffortLevels: ["low"]),
+            ClaudeModelOption(value: "fixture-no-effort", displayName: "Fixture"),
+        ], cliVersion: nil))
+        XCTAssertEqual(s.options(for: .claude).model, "saved-unlisted-fixture")
+        XCTAssertNil(s.options(for: .claude).effort)
     }
 
-    func test_no_agent_route_means_no_model() {
-        let r = routing(#function)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertNil(s.options(for: .opencode).model)
-        XCTAssertNil(s.selectedOpenCodeModel)
-    }
-
-    func test_agent_route_on_another_provider_means_no_opencode_model() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .deepgram, model: "nova-3"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertNil(s.selectedOpenCodeModel)
-    }
-
-    func test_agent_route_model_is_normalized_for_opencode() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.selectedOpenCodeModel, "anthropic/claude-sonnet-5.5")
-    }
-    // MARK: - OpenCode model limits from the OpenRouter catalog
-
-    private func catalogs(_ models: [CatalogModel]) throws -> ModelCatalogStore {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
-        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
-        let stored = [ProviderAccount.openRouter.storageID: CatalogSnapshot(models: models, fetchedAt: Date())]
-        try JSONEncoder().encode(stored).write(to: file)
-        return ModelCatalogStore(fileURL: file)
-    }
-
-    private func agentOnOpenRouter(_ name: String, model: String, catalog: [CatalogModel]) throws -> AgentSettingsStore {
-        let r = routing(name)
-        r.setRoute(FeatureRoute(account: .openRouter, model: model), for: .agent)
-        return AgentSettingsStore(defaults: freshDefaults(name + ".settings"), codexConfig: .init(), routing: r,
-                                  catalogs: try catalogs(catalog))
-    }
-
-    func test_agent_options_carry_the_catalog_spec() throws {
-        let s = try agentOnOpenRouter(#function, model: "anthropic/claude-sonnet-5.5", catalog: [
-            CatalogModel(id: "anthropic/claude-sonnet-5.5", contextLength: 1_000_000, maxOutputTokens: 128_000,
-                         supportsTools: true, supportsReasoning: true)])
-        XCTAssertEqual(s.options(for: .opencode).openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000))
-    }
-
-    func test_spec_falls_back_for_fields_the_catalog_omits() throws {
-        let s = try agentOnOpenRouter(#function, model: "vendor/model", catalog: [
-            CatalogModel(id: "vendor/model", contextLength: 200_000)])
-        XCTAssertEqual(s.options(for: .opencode).openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 200_000, outputLimit: 16_384))
-    }
-
-    /// An Agent route on Anthropic runs OpenCode's `anthropic` provider with
-    /// the plain model id and the limits of the Anthropic catalog.
-    func test_agent_route_on_anthropic_runs_the_anthropic_provider() throws {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
-        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
-        let stored = [ProviderAccount.anthropic.storageID: CatalogSnapshot(models: [
-            CatalogModel(id: "claude-sonnet-5-5", uses: [.chat, .chatWithTools], contextLength: 1_000_000,
-                         maxOutputTokens: 128_000, supportsTools: true, supportsReasoning: true)], fetchedAt: Date())]
-        try JSONEncoder().encode(stored).write(to: file)
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .anthropic, model: "claude-sonnet-5-5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r,
-                                   catalogs: ModelCatalogStore(fileURL: file))
-        let options = s.options(for: .opencode)
-        XCTAssertEqual(options.model, "claude-sonnet-5-5")
-        XCTAssertEqual(options.openCodeProvider, .anthropic)
-        XCTAssertEqual(options.openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000))
-        XCTAssertEqual(s.selectedOpenCodeModelLabel, "Anthropic · claude-sonnet-5-5")
-
-        r.setRoute(FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"), for: .agent)
-        XCTAssertEqual(s.options(for: .opencode).openCodeProvider, .openRouter)
-    }
-
-    func test_no_spec_without_context_length_or_catalog_entry() throws {
-        let noContext = try agentOnOpenRouter(#function + "1", model: "vendor/model", catalog: [CatalogModel(id: "vendor/model")])
-        XCTAssertNil(noContext.options(for: .opencode).openCodeModelSpec)
-        let missing = try agentOnOpenRouter(#function + "2", model: "vendor/model", catalog: [])
-        XCTAssertNil(missing.options(for: .opencode).openCodeModelSpec)
+    func testClaudeCatalogFailureKeepsTheLastGoodListAndSaysWhy() async {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        await s.refreshClaudeCatalog(force: true, load: { Self.claudeCatalog })
+        XCTAssertEqual(s.claudeCatalog.count, 4)
+        XCTAssertEqual(s.claudeVersion, "2.1.325")
+        await s.refreshClaudeCatalog(force: true, load: { throw ClaudeModelCatalogError.timedOut })
+        XCTAssertEqual(s.claudeCatalog.count, 4)
+        XCTAssertNotNil(s.claudeCatalogError)
+        await s.refreshClaudeCatalog(force: true, load: { throw ClaudeModelCatalogError.notInstalled })
+        XCTAssertEqual(s.claudeCatalogError, "Claude Code isn’t installed on this Mac.")
     }
 }

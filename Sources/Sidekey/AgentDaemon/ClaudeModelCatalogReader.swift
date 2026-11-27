@@ -1,92 +1,171 @@
 import Foundation
+import os.log
 
-/// The Claude model choices for the picker. Each option's `token` is the CLI
-/// ALIAS (`opus`/`sonnet`/`haiku`) — which Claude Code always resolves to the
-/// latest version of that family — and `label` carries the real version that
-/// alias currently resolves to (e.g. "Opus 4.8"), read from the binary.
-struct ClaudeModelCatalog: Equatable {
-    var options: [ClaudeModelOption]
-    /// Family alias to pre-select (derived from the user's current default).
-    var defaultAlias: String?
+/// One model Claude Code offers, as its own `initialize` answer lists it.
+struct ClaudeModelOption: Codable, Equatable, Identifiable, Sendable {
+    /// Sent verbatim as `--model`: an alias (`sonnet`) or a full ID.
+    let value: String
+    let displayName: String
+    var description: String? = nil
+    /// Reasoning levels the model takes; nil when it takes none.
+    var supportedEffortLevels: [String]? = nil
 
-    init(options: [ClaudeModelOption] = [], defaultAlias: String? = nil) {
-        self.options = options
-        self.defaultAlias = defaultAlias
+    var id: String { value }
+    var efforts: [String] { supportedEffortLevels ?? [] }
+    /// Claude Code's own default entry: Whytap then sends no `--model`.
+    var isCLIDefault: Bool { value == ClaudeModelCatalog.cliDefaultValue }
+}
+
+struct ClaudeModelCatalog: Equatable, Sendable {
+    static let cliDefaultValue = "default"
+    var models: [ClaudeModelOption]
+    /// Claude Code's version, shown in the Harness status.
+    var cliVersion: String?
+}
+
+enum ClaudeModelCatalogError: Error, Equatable {
+    case notInstalled
+    case timedOut
+    case unreadable
+    /// The Agent's folder in Application Support could not be prepared.
+    case workspaceUnavailable
+}
+
+/// Reads the model list from the user's Claude Code: one `initialize` control
+/// request over the stream-json protocol, answered without a model request,
+/// so it costs nothing and sends no prompt. The answer also carries the
+/// account (e-mail, organization); only models and the version are decoded,
+/// and nothing from it is logged. Replaces the earlier scan of the binary for
+/// model names, which could not see new families or what the account offers.
+// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+struct ClaudeModelCatalogReader {
+    static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "agent.cli")
+    static let requestID = "whytap-models"
+    static let initializeRequest =
+        #"{"type":"control_request","request_id":"whytap-models","request":{"subtype":"initialize"}}"#
+
+    var locate: () -> URL? = { ClaudeBinaryLocator().locate() }
+    var timeout: TimeInterval = 15
+    /// Runs the handshake and returns the matching control_response line.
+    var handshake: @Sendable (URL, TimeInterval) throws -> String = { try ClaudeModelCatalogReader.defaultHandshake(binary: $0, timeout: $1) }
+
+    func read() async throws -> ClaudeModelCatalog {
+        guard let binary = locate() else { throw ClaudeModelCatalogError.notInstalled }
+        let handshake = self.handshake
+        let timeout = self.timeout
+        let line = try await Task.detached(priority: .userInitiated) {
+            try handshake(binary, timeout)
+        }.value
+        guard let catalog = Self.parse(controlResponse: line) else {
+            os_log("claude catalog: unreadable answer", log: Self.log, type: .error)
+            throw ClaudeModelCatalogError.unreadable
+        }
+        os_log("claude catalog: models=%{public}d", log: Self.log, type: .default, catalog.models.count)
+        return catalog
+    }
+
+    /// Decodes the `initialize` control_response line. Nil for any other line
+    /// or a response without models.
+    static func parse(controlResponse line: String) -> ClaudeModelCatalog? {
+        guard let data = line.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              object["type"] as? String == "control_response",
+              let response = object["response"] as? [String: Any],
+              response["request_id"] as? String == requestID,
+              response["subtype"] as? String == "success",
+              let body = response["response"] as? [String: Any],
+              let rawModels = body["models"] as? [[String: Any]] else { return nil }
+        var seen = Set<String>()
+        let models = rawModels.compactMap { entry -> ClaudeModelOption? in
+            guard let value = (entry["value"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !value.isEmpty, !value.contains(where: \.isWhitespace), seen.insert(value).inserted
+            else { return nil }
+            let name = (entry["displayName"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? value
+            let supportsEffort = entry["supportsEffort"] as? Bool ?? false
+            let levels = supportsEffort ? (entry["supportedEffortLevels"] as? [String]) ?? [] : []
+            return ClaudeModelOption(value: value, displayName: name,
+                                     description: entry["description"] as? String,
+                                     supportedEffortLevels: levels.isEmpty ? nil : levels)
+        }
+        guard !models.isEmpty else { return nil }
+        return ClaudeModelCatalog(models: models, cliVersion: body["claude_code_version"] as? String)
+    }
+
+    /// Starts `claude -p` in stream-json mode in the Agent's own folder (the
+    /// settings a turn loads), sends `initialize` and stops the child as soon
+    /// as the answer arrives. No user message is ever written.
+    @Sendable
+    static func defaultHandshake(binary: URL, timeout: TimeInterval,
+                                 workspace: () throws -> URL = { try AgentDaemonWorkingDirectory.ensure() }) throws -> String {
+        // Fail closed like a turn: Claude Code loads the folder's settings and
+        // runs SessionStart hooks, so it never starts in whatever folder
+        // Whytap happens to have.
+        // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+        guard let folder = try? workspace() else { throw ClaudeModelCatalogError.workspaceUnavailable }
+        let process = Process()
+        process.executableURL = binary
+        process.arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
+        process.environment = ClaudeCodeProvider.childEnvironment()
+        process.currentDirectoryURL = folder
+        let input = Pipe()
+        let output = Pipe()
+        process.standardInput = input
+        process.standardOutput = output
+        process.standardError = FileHandle.nullDevice
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+
+        let state = HandshakeState()
+        output.fileHandleForReading.readabilityHandler = { handle in
+            state.receive(handle.availableData)
+        }
+        process.terminationHandler = { _ in state.finish(nil) }
+        do { try process.run() } catch { throw ClaudeModelCatalogError.notInstalled }
+        try? input.fileHandleForWriting.write(contentsOf: Data((initializeRequest + "\n").utf8))
+
+        let timedOut = state.done.wait(timeout: .now() + timeout) == .timedOut
+        output.fileHandleForReading.readabilityHandler = nil
+        try? input.fileHandleForWriting.close()
+        if process.isRunning { process.terminate() }
+        if timedOut { throw ClaudeModelCatalogError.timedOut }
+        guard let line = state.answer else { throw ClaudeModelCatalogError.unreadable }
+        return line
     }
 }
 
-/// Derives the always-latest model list straight from the chosen `claude`
-/// binary: the versioned tokens (`claude-opus-4-8`, ...) are embedded in it, so
-/// we read the highest version per family and present it as an alias + label.
-/// Re-derived whenever the binary changes, so it never goes stale. Read-only;
-/// never makes a model call. We cannot fetch a live model registry — the client
-/// never talks to Anthropic directly and the
-/// subscription OAuth exposes no `/v1/models`; the local binary IS the registry.
-struct ClaudeModelCatalogReader {
-    /// Returns every `claude-<family>-<major>-<minor>` token embedded in the
-    /// binary. Default greps the binary; injectable for tests.
-    var scanTokens: (URL) -> [String] = ClaudeModelCatalogReader.defaultScan
-    /// The user's current default model token (from `~/.claude.json`), used only
-    /// to pre-select the matching family.
-    var currentModel: () -> String? = { ClaudeConfigReader().read().currentModel }
+/// Collects the handshake's stdout on one serial queue.
+private final class HandshakeState: @unchecked Sendable {
+    let done = DispatchSemaphore(value: 0)
+    private let queue = DispatchQueue(label: "com.sidekey.claude-catalog")
+    private var lines = ProcessLineBuffer()
+    private var received = 0
+    private var finished = false
+    private var line: String?
 
-    static let families = ["opus", "sonnet", "haiku"]
+    var answer: String? { queue.sync { line } }
 
-    func read(binary: URL?) -> ClaudeModelCatalog {
-        guard let binary else { return ClaudeModelCatalog() }
-        return Self.build(tokens: scanTokens(binary), current: currentModel())
-    }
-
-    static func build(tokens: [String], current: String?) -> ClaudeModelCatalog {
-        // Highest (major, minor) per family.
-        var best: [String: (major: Int, minor: Int)] = [:]
-        for token in tokens {
-            guard let p = parse(token) else { continue }
-            if let cur = best[p.family] {
-                if (p.major, p.minor) > (cur.major, cur.minor) { best[p.family] = (p.major, p.minor) }
-            } else {
-                best[p.family] = (p.major, p.minor)
+    func receive(_ chunk: Data) {
+        queue.async {
+            guard !self.finished else { return }
+            guard !chunk.isEmpty else { return self.complete(nil) }
+            self.received += chunk.count
+            // Hooks can print before the answer; a runaway stream is cut off.
+            guard self.received <= 4 * 1024 * 1024 else { return self.complete(nil) }
+            if let match = self.lines.append(chunk).first(where: {
+                ClaudeModelCatalogReader.parse(controlResponse: $0) != nil
+            }) {
+                self.complete(match)
             }
         }
-        var options: [ClaudeModelOption] = []
-        for family in families {
-            if let v = best[family] {
-                options.append(ClaudeModelOption(
-                    token: family,                                       // the alias
-                    label: "\(family.capitalized) \(v.major).\(v.minor)"))
-            }
-        }
-        let defaultAlias = parse(current ?? "")?.family ?? options.first?.token
-        return ClaudeModelCatalog(options: options, defaultAlias: defaultAlias)
     }
 
-    /// Parse a versioned token. Ignores date-form variants like
-    /// `claude-opus-4-20250514` (minor >= 100) so they never win "highest".
-    static func parse(_ token: String) -> (family: String, major: Int, minor: Int)? {
-        guard let re = try? NSRegularExpression(pattern: "claude-(opus|sonnet|haiku)-([0-9]+)-([0-9]+)"),
-              let m = re.firstMatch(in: token, range: NSRange(token.startIndex..., in: token))
-        else { return nil }
-        let ns = token as NSString
-        let family = ns.substring(with: m.range(at: 1))
-        guard let major = Int(ns.substring(with: m.range(at: 2))),
-              let minor = Int(ns.substring(with: m.range(at: 3))),
-              minor < 100 else { return nil }
-        return (family, major, minor)
+    func finish(_ value: String?) {
+        queue.async { self.complete(value) }
     }
 
-    static func defaultScan(_ binary: URL) -> [String] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/grep")
-        process.arguments = ["-aoE", "claude-(opus|sonnet|haiku)-[0-9]+-[0-9]+", binary.path]
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = Pipe()
-        do { try process.run() } catch { return [] }
-        // Drain before reaping (grep output can exceed the pipe buffer).
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
-        return String(decoding: data, as: UTF8.self)
-            .split(separator: "\n")
-            .map(String.init)
+    private func complete(_ value: String?) {
+        guard !finished else { return }
+        finished = true
+        line = value
+        done.signal()
     }
 }

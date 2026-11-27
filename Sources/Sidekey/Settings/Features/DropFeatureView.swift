@@ -336,6 +336,7 @@ struct FeatureRequirementRow<Menu: View>: View {
         case .permission: return "Allowed"
         case .dropShortcut: return "Heard"
         case .model, .subtitlesKey: return "Set"
+        case .harness: return "Chosen"
         }
     }
 
@@ -347,7 +348,7 @@ struct FeatureRequirementRow<Menu: View>: View {
     /// No keyed provider can serve it: there is no list to choose from yet.
     private var needsKey: Bool {
         switch check.action {
-        case .addKey, .fixKey, .addOpenAIKey: return true
+        case .addKey, .fixKey, .addSubtitlesKey: return true
         default: return false
         }
     }

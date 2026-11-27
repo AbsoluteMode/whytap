@@ -138,22 +138,4 @@ final class OpenRouterProviderTests: XCTestCase {
         return url
     }
 
-    func test_agent_config_pins_the_openrouter_provider() throws {
-        let env = try OpenCodeEnvironment.make(workingDirectory: try temporaryDirectory(), model: "x/m",
-            key: "k", allowActions: false, openRouterProvider: "deepinfra/fp4", inherited: [:])
-        let options = try XCTUnwrap(try modelDeclaration(env, provider: "openrouter", model: "x/m")["options"] as? [String: Any])
-        let provider = try XCTUnwrap(options["provider"] as? [String: Any])
-        XCTAssertEqual(provider["order"] as? [String], ["deepinfra/fp4"])
-        XCTAssertEqual(provider["allow_fallbacks"] as? Bool, false)
-    }
-
-    func test_agent_config_on_auto_or_anthropic_has_no_provider_options() throws {
-        let auto = try OpenCodeEnvironment.make(workingDirectory: try temporaryDirectory(), model: "x/m",
-            key: "k", allowActions: false, inherited: [:])
-        XCTAssertNil(try modelDeclaration(auto, provider: "openrouter", model: "x/m")["options"])
-        let anthropic = try OpenCodeEnvironment.make(workingDirectory: try temporaryDirectory(),
-            model: "claude-sonnet-5-5", provider: .anthropic, key: "k", allowActions: false,
-            openRouterProvider: "deepinfra/fp4", inherited: [:])
-        XCTAssertNil(try modelDeclaration(anthropic, provider: "anthropic", model: "claude-sonnet-5-5")["options"])
-    }
 }

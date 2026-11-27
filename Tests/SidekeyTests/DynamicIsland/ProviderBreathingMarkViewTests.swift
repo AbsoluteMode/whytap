@@ -161,7 +161,7 @@ final class ProviderBreathingMarkViewTests: XCTestCase {
             BYOKProvider.allCases.map(TranscriptionProviderBrand.byok)
             + CLIProviderID.allCases.map(TranscriptionProviderBrand.agent)
             + [.google, .openRouter, .customLLM]
-            + AgentModelBrand.allCases.map { TranscriptionProviderBrand(assetName: $0.assetName, label: $0.label) }
+            + AgentModelBrand.allCases.map { TranscriptionProviderBrand(assetName: $0.assetName, label: $0.rawValue) }
 
         for brand in brands {
             let image = try XCTUnwrap(

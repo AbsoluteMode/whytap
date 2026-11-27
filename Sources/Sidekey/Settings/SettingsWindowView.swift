@@ -7,7 +7,6 @@ struct SettingsWindowView: View {
     @ObservedObject var permissionsViewModel: PermissionsSettingsViewModel
     @ObservedObject var apiAndModelsViewModel: APIAndModelsViewModel
     @ObservedObject var selection: SettingsWindowSelection
-    @ObservedObject var agentModeViewModel: AgentModeViewModel
     let toolboxDeps: ToolboxDeps
     let agentEnabled: () -> Bool
     let onAgentToggle: (Bool) -> Void
@@ -39,7 +38,6 @@ struct SettingsWindowView: View {
         permissionsViewModel: PermissionsSettingsViewModel,
         apiAndModelsViewModel: APIAndModelsViewModel,
         selection: SettingsWindowSelection,
-        agentModeViewModel: AgentModeViewModel,
         toolboxDeps: ToolboxDeps = ToolboxDeps(),
         agentEnabled: @escaping () -> Bool = { false },
         onAgentToggle: @escaping (Bool) -> Void = { _ in },
@@ -56,7 +54,6 @@ struct SettingsWindowView: View {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
         self.selection = selection
-        self.agentModeViewModel = agentModeViewModel
         self.toolboxDeps = toolboxDeps
         self.agentEnabled = agentEnabled
         self.onAgentToggle = onAgentToggle
@@ -89,9 +86,8 @@ struct SettingsWindowView: View {
                                               activeProvider: AgentProviderStore.shared.activeProvider) },
             meetingsOn: otherMeetingsEnabled,
             googleOn: otherGoogleEnabled,
-            setAgent: { [agentModeViewModel, onAgentToggle] on in
-                await AgentOtherSection.turn(on, viewModel: agentModeViewModel, settings: .shared,
-                                             store: .shared, onAgentToggle: onAgentToggle)?.message
+            setAgent: { [onAgentToggle] on in
+                AgentOtherSection.turn(on, store: .shared, onAgentToggle: onAgentToggle)?.message
             },
             setMeetings: otherOnMeetingsToggle,
             setGoogle: otherOnGoogleToggle,

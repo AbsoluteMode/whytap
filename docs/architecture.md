@@ -329,250 +329,75 @@ Drop auto-stop (opt-in, Settings -> Features -> Drop, off by default):
   .project-docs/decisions/2026-11-12-drop-auto-stop-local-rule-only.md,
   .project-docs/decisions/2026-11-13-drop-auto-stop-voice-guard.md
 
-Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
-  The Agent voice ticker shows the selected model author's bundled mark instead
-  of the generic star; OpenRouter's hosting-provider pin does not change authorship.
-  OpenAI, Anthropic, Gemini, DeepSeek, Qwen, Mistral, Cohere and Perplexity have
-  prewarmed fallbacks. Unknown/Auto OpenRouter authors use the OpenRouter mark.
-  One provider has one mark: an OpenAI or Anthropic account shows that same
-  bundled model-author mark wherever its provider is drawn (Drop and cleanup
-  tickers, Keys & models, first-run keys), never a second asset or an SF Symbol.
-  A separate bounded task refreshes public OpenRouter artwork weekly with ETag,
-  without keys/content/model requests; recording never waits for it. Cache I/O
-  is off the main actor, failed refreshes retain usable artwork, and stale view
-  loads cannot overwrite a new model. Existing geometry, breathing and reduced
-  motion remain. WHY: .project-docs/decisions/2026-10-22-native-agent.md
+Agent flow (the user's Claude Code or Codex):
   User -> Right Command tap (text) / hold (voice) -> RightCmdGestureMonitor
        -> voice: the same STT factory as Drop, route of agentVoice
-       -> NativeAgentProvider -> direct model HTTP -> local tool -> model loop
-       -> validated finish_answer object -> text and typed cards in the island
-  Native and CLI final text use compact Markdown. Comparisons adapt to the
-  available width, and completed answers open with the conclusion at the top.
-  An ordered list keeps its first marker's number (CommonMark start), so a list
-  resumed after a non-marker line such as "3–4." continues at 5, not 1.
+       -> AgentController -> ClaudeCodeProvider / CodexProvider (the harness
+          in AgentProviderStore) -> the CLI's streamed events
+       -> text, steps and typed cards in the island
+  The Agent voice ticker shows the harness mark (Claude Code or Codex). One
+  provider has one mark: an OpenAI or Anthropic account shows the same bundled
+  model-author mark wherever its provider is drawn (Drop and cleanup tickers,
+  Keys & models, first-run keys), never a second asset or an SF Symbol.
+  Final text uses compact Markdown. Comparisons adapt to the available width,
+  and completed answers open with the conclusion at the top. An ordered list
+  keeps its first marker's number (CommonMark start), so a list resumed after
+  a non-marker line such as "3–4." continues at 5, not 1.
   WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
+  Cards (Insert, links, paths) come from one final `useful.actions` JSON fence
+  the prompt asks for (AgentUsefulLinksExtractor), plus links, paths and a
+  single shell command in the final answer's text (AgentAnswerArtifacts);
+  nothing opens or is inserted until the user acts.
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.
-  No CLI installation, binary/version probe, MCP bootstrap, provider discovery,
-  model catalog fetch or paid connection probe is needed to start a request.
-  Settings -> Keys & models chooses the exact Agent route/key. OpenRouter uses
-  Chat Completions (including an explicit endpoint pin without fallback),
-  OpenAI uses Responses with store:false and encrypted reasoning replay, and
-  Anthropic uses Messages. Every route asks for the least reasoning the model
-  accepts (NativeAgentEffort, from the tables Drop Smart uses: OpenAI
-  reasoning.effort none, minimal or low; Anthropic output_config.effort low
-  plus thinking disabled on Claude Haiku 5.5 and Claude Sonnet 5 and
-  between_tools on Claude Sonnet 5.5; OpenRouter reasoning off or the lowest
-  level of its saved catalog entry). In a turn with the provider's own web
-  search OpenAI minimal becomes low; Claude Sonnet 5.5 keeps between_tools
-  there too (since 2026-11-26), and several finish_answer calls alone in one
-  response give the first valid one; text after a search is never read as
-  the answer (an end_turn without finish_answer gets the completion request);
-  on a turn that ran the search, Claude's indexed citation tags (<cite
-  index="1-9"> and then </cite>) are removed from the answer prose outside
-  code, never from Insert or Copy; a malformed finish_answer beside a valid
-  one does not fail the batch; finish_answer calls beside a pending search
-  all wait for it; a direct Anthropic request carries a cache_control
-  breakpoint on the system block only after an accepted request of the
-  turn with the same system, tools and search tool. WHY:
-  .project-docs/decisions/2026-11-26-agent-fast-search-answers.md The setting follows the request that starts the turn (after a
-  refused provider search, the one without it) and is kept after the first
-  accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no
-  endpoints ... requested parameters") to a request that carried a reasoning
-  field, except a refusal of the provider's own web search, without reading
-  the error text as in Smart (so an unrelated 400 is sent once more and fails
-  the same way: unbilled, no tool runs, never a second time, and the request the search
-  fallback sends next is not repeated; the 404 wording must be in one
-  sentence of one message), is repeated once with OpenAI low or without
-  the fields, and a model whose repeat is answered keeps that until relaunch
-  (on OpenRouter per pinned endpoint or Auto); apart from this and the web
-  search fallback below, no model request is retried. WHY:
-  .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md Direct
-  Anthropic and OpenAI requests allow 16,384 output tokens (or
-  the catalog's lower limit, even without a context length) and
-  wait up to 180 s; OpenRouter keeps 8,192 tokens and 60 s.
-  A finished direct Anthropic plain-text reply (end_turn, text blocks only) is
-  the answer, checked like finish_answer; cards come from its text as usual.
-  A cut answer reports the output limit. WHY:
-  .project-docs/decisions/2026-11-23-agent-low-effort.md Provider-native reasoning/tool items survive within
-  the turn. OpenRouter continuations normalize tool arguments to JSON strings,
-  preserve tool IDs and ordered reasoning_details, and omit duplicate plaintext
-  reasoning. Only allowlisted provider error categories become static messages;
-  raw errors stay out of output/logs. HTTP-200 error envelopes fail after any
-  reported usage is recorded. Native model requests also emit local
-  unified-log events (native-agent): generated turn/request IDs, timings, counts,
-  tool/reasoning shape, requested effort, token usage (input, output, thinking,
-  cache), status and fixed error hints only. No content, route
-  strings, external IDs, keys or raw errors; search HTTP is not model traffic.
-  The OS manages retention. Hints are mentions, not a proven cause. No provider fallback or model substitution. Connect checks only
-  local key availability, model selection and writable workspace; it does not
-  prove the provider accepts the key. Existing connected OpenCode users migrate
-  to native without changing the route/key; disconnected users stay disconnected.
-  Persist the legacy opencode connection identifier so the retained rollback app
-  can still read the connected state; dispatch resolves it to native in memory.
-  Keys stay in Keychain, only in requests to their own service. No model key is
-  put in child environments, argv, files or logs. The old OpenCode implementation
-  and its local files remain unused for compatibility; do not delete user data.
   AgentDaemonWorkingDirectory keeps the dedicated workspace at
-  Application Support/whytap/agent, with AGENTS.md memory, sessions.json and
-  native-conversation.json. Read bounded memory before the first model request;
-  no bootstrap scan of the home directory or source checkout. Recent context is
-  at most six completed user/assistant pairs (answer text and returned card
-  descriptions/destinations) and 12,000 characters, scoped
-  to provider/model/endpoint and resumed within 15 minutes. Expiry stops reuse;
-  the last file remains locally until replaced. An oversized latest exchange is
-  shortened while retaining both ends and room for later turns. Copy-card
-  payloads are excluded from supplementary memory; only their labels remain.
-  Tool output, reasoning and
-  screenshots are not written into this new history. The system prompt is one
-  app-owned source, supplied once per request; this is not an empty context on
-  every question. Old project catalogs/indexes/workspaces remain unused on disk.
-  Sources (iteration 1 of docs/plans/2026-11-26-assistant.md) are built and
-  tested but gated off: AgentSourcesGate.isEnabled is false until the owner
-  decides whether the feature stays, so nothing below runs in shipped builds
-  (no Settings section, no source_call, no server processes, no config
-  scanning, no manifest or Keychain access). Tests enable it per instance.
-  WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md. Settings ->
-  Features -> Agent -> Sources (AgentSourcesSection, AddSourceSheet) adds MCP
-  servers imported from Claude Code, Claude Desktop, Cursor, Codex and VS Code
-  (MCPConfigImporter, MiniTOML; read only on opening the sheet, nothing written
-  back), GitHub (GitHub's remote MCP server, pasted fine-grained token or the gh
-  CLI sign-in, always X-MCP-Readonly) and Jira (uvx mcp-atlassian with
-  READ_ONLY_MODE) tiles, folders (FolderSource: bounded name/text search inside
-  the folder through one openat/O_NOFOLLOW opener, regular files only, no hidden,
-  symlinked, build or credential-like files) and custom stdio/HTTPS servers.
-  SourceCredentialPolicy is the one credential rule for import, tiles, the custom
-  form, previews and launch (problem / display over redacted): argv or address
-  credentials are refused and masked by the same word-based test, credentials
-  never go over plain http, and imports are checked against one strict entry
-  shape (keys, types, one transport, enabled) and keep their full launch
-  parameters or are listed with a reason. SourceSecretMask masks each source's
-  known values out of every server text (results, errors, exit detail, proof,
-  tool metadata) before Settings, the manifest or a model. FolderSource stores
-  the folder's real path and device/inode and reaches it and every entry through
-  O_NOFOLLOW descriptors. SourcesController keeps the manifest
-  (Application Support/whytap/assistant/sources.json, 0600, names only),
-  Keychain values (integration.<source>.<NAME>), live clients and statuses.
-  MCPClient is hand-written (initialize, paginated tools/list, tools/call, ping,
-  list_changed, cancelled; no sampling/elicitation/roots) over MCPStdioTransport
-  (MCPProcess: NotifyProcess-style group with the parent-death guard on fd 3,
-  argv without a shell, environment = allowlisted app variables + login-shell
-  PATH + the source's values, never model keys; stderr tail only for a masked
-  exit reason) or MCPHTTPTransport (Streamable HTTP, JSON or SSE, session and
-  protocol headers, same-origin redirects only, HTTPS except loopback; static
-  headers, no OAuth yet). Limits: 16 MB per message, results clipped to 24,000
-  characters, Agent calls 10 s, proof 15 s, connect 20 s HTTP / 90 s stdio, idle
-  stop 10 min, stop on sleep, at most three restarts in five minutes. Each tool
-  gets a class in app code (SourceToolClassifier: user > strictest of server
-  hints, write/delete name rule and one Agent-model suggestion for tools nothing
-  else settles; unknown tools are never Read) and a pin hash. Imported and
-  custom servers start with every tool waiting for Approve tools (no hint or
-  model suggestion approves; nothing, not even the proof, is called before);
-  GitHub, Jira and folders are trusted on connect. Approval is bound to the exact
-  list: MCPClient.listTools returns its epoch, list_changed, an ended client or
-  another HTTP session moves it, and callTool checks the SourceLease, epoch and
-  pin in the same actor step that sends. Generations and leases are replaced by
-  stop, disable, remove, new values, class changes and approvals; late answers
-  are discarded. Operation-wide deadlines (MCPDeadline) and cancellation stop
-  the actual stdin write, HTTP task or folder read. Connecting a trusted or approved source runs one harmless read call
-  as proof. The Agent gets one strict function,
-  source_call(tool, arguments), whose tool enum lists only approved Read tools
-  of enabled sources (signatures in the system prompt, 10,000 characters);
-  SourcesController.callRead rechecks class, approval and enablement at every
-  call. NativeAgentSources.installed is set by AppDelegate only when the gate
-  is on, and NativeAgentSources.offered() ignores it while the gate is off.
-  Taint: after a request receives text from a source, write_file, run_command,
-  fetch_url, Tavily and the provider's search, read_file/list_directory/
-  search_files, capture_screen, case_list_keys, show_actions and app control
-  leave the catalog and are refused for the rest of the request, and
-  source_call is narrowed to the sources already read. Source failures reach the
-  model only as fixed MCPError.agentMessage text. Both completion paths keep only
-  link cards to addresses a source returned verbatim (taintedActions), and the
-  conversation's sourceReads keep its later requests restricted. Nothing in this path
-  logs. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
-  Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
-  server-side tool when the model has it (Anthropic web_search_20250305 with
-  max_uses 2, OpenAI Responses web_search with max_tool_calls 2 and
-  web_search_call.action.sources, OpenRouter openrouter:web_search with
-  max_uses 2); else the Tavily web_search function when its key exists; else
-  no search tool and a prompt line telling the model to say so. Anthropic's
-  catalog flag capabilities.server_tools.web_search.supported decides when
-  present; a few OpenAI families without search are excluded by ID. API &
-  Models -> Models -> Search (AgentSearchRow, under Speech and LLM) shows the
-  resolved search ("Anthropic · built-in", "OpenRouter · web", "Tavily",
-  "Off — add a Tavily key") and a menu of the built-in search or Tavily;
-  agent.native.webSearch is auto (default) or tavily, and tavily applies only
-  while its key exists. When the turn does not use Tavily, the function is not
-  offered and a call to it gets an "unavailable" tool result without reaching
-  Tavily. Saving or removing the Tavily key posts whytapTavilyKeyChanged so
-  the row updates. Without any search the prompt asks for a one-line answer
-  pointing to a Tavily key in API keys. An error never moves the query to
-  Tavily: Tavily is used only when picked or when the model is known before
-  the turn to lack search. A 400 on the turn's first request with built-in
-  search retries once on the same route without search (NativeAgentWebSearch
-  .refused: the model says search is unavailable) only on tool-specific evidence
-  (ErrorShape.refusesWebSearch from a bounded body read of `message` only: the
-  request carried a search tool; no typed category or unrelated OpenAI code;
-  a param or leading path must be the search tool's own index: its type with
-  a refusal code or word, or the entry itself with the tool named as the
-  refusal's subject, never one of its options or any other location; a
-  message about an option, parameter, field or setting never qualifies, even
-  when it names the tool; otherwise, with quoted text removed and no
-  size/context wording, the tool's identifier and a refusal in one clause, or
-  a message opening with an account or model policy); an ambiguous error stays
-  on the route and later failures are never retried. The two-search budget is per
-  turn: Anthropic's max_uses counts across its provider turn (pause_turn and
-  tool_result continuations), so the tool stays unchanged there and a new
-  provider turn (the app's "Continue" message) gets what is left; OpenAI
-  (max_tool_calls, counting every web_search_call action) and OpenRouter
-  (max_uses; engine exa except for anthropic/ models, because other native
-  engines ignore max_uses and nothing else caps them before they run; a 403 on
-  the first request from a workspace whose locked Server Tools policy excludes
-  Exa (or any other first-request 403 there: the body is not read) retries
-  once without the search tool, like a refusal) get the remainder per request, and the tool is dropped once it is spent. Any provider web work
-  (an OpenAI open_page, OpenRouter usage.server_tool_use_details
-  web_search_requests or tool_calls_executed without citations, Anthropic
-  end_turn after a search or after a deferred web_search_tool_result)
-  with no function call continues the turn; only pause_turn is replayed
-  verbatim, every other continuation adds the user "Continue" message because
-  current Claude models reject prefill. Anthropic's catalog capabilities decode
-  independently, and AgentSettingsStore.selectedWebSearchSupport feeds both the
-  next turn and the Search row even without token limits. A synced
-  agent.native.webSearch reloads through SettingsSyncLiveReload, which also
-  refreshes the row for a synced Tavily key. Anthropic server blocks, including
-  encrypted_content, are replayed verbatim; pause_turn and a search without a
-  function call continue the same turn (OpenAI/OpenRouter add a short user
-  "Continue" message). A finish_answer beside an Anthropic search whose result
-  has not arrived gets a tool result asking to wait. When finish_answer has no
-  source links, up to five provider citations (then results) become link cards.
-  Anthropic's estimate adds $0.01 per usage.server_tool_use.web_search_requests;
-  OpenRouter's reported cost includes search; OpenAI stays unpriced.
-  WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-  Settings -> Keys & models -> API keys saves a separate Tavily key in Keychain
-  (byok.tavily.search_api_key), after a GET /usage check without a search. The
-  web_search tool sends only its bounded query to POST /search (basic, five
-  results, at most two searches per turn); excerpts/URLs go to the chosen model.
-  Tools cover bounded file reads/list/search, HTTPS fetch, requested screenshot,
-  structured finish_answer completion and Case key names. The existing action preference
-  agent.opencode.allowActions is preserved: Allow file edits and commands is
-  on by default; off removes and rejects write_file/run_command. Case keeps its
-  own approvals through the signed helper and scoped child PID registrations.
-  Commands use a dedicated process group, 30-second deadline and bounded output;
-  cancellation signals that group. Stop waiting within a bounded drain if a
-  detached child holds output open, and report that it may still be running.
-  Child environments exclude model keys and unrelated app descriptors and
-  always carry a UTF-8 `LANG` (the app's own when it is an installed
-  `.UTF-8` locale, else en_US.UTF-8): an app opened from Finder has none, and pbcopy then broke
-  non-ASCII text. WHY:
-  .project-docs/decisions/2026-11-20-agent-command-utf8-locale.md. This is
-  an action policy, not a filesystem
-  sandbox. Approve and bypass modes are a later phase, not implemented here.
-  The loop has bounded steps/tool calls/context, explicit failures and no automatic
-  retries that could repeat side effects. Files, selections, web/tool output and
-  screenshots are untrusted evidence. Never treat them as user authorization.
-  WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
-  WHY: .project-docs/decisions/2026-10-22-native-agent.md
+  Application Support/whytap/agent with AGENTS.md memory (CLAUDE.md is a
+  relative alias to it) and sessions.json; AgentSessionStore resumes the CLI's
+  own session per harness within 15 minutes. The earlier built-in agent's
+  native-conversation.json and OpenCode runtime files remain unused on disk;
+  do not delete user data. Files, selections, web/tool output and screenshots
+  are untrusted evidence, never user authorization.
+  WhytapCustomizationContext.promptInstructions retains Monitor/source-kit
+  contracts. The built-in model loop and its web search,
+  connected Sources and per-turn costs were removed on 2026-11-27.
+  Claude Code and Codex (ClaudeCodeProvider, CodexProvider) run Right Command:
+  AppDelegate dispatches only to the harness in AgentProviderStore
+  (`agent.harness.active`), chosen in Keys & models -> Models -> Harness
+  (HarnessModelsCard, HarnessSettingsModel). The row is closed like the other
+  Models rows (harness · model · reasoning · Fast) and expands in place to the
+  harness menu, model and reasoning pickers, Codex Fast mode when the selected
+  model lists a priority/fast tier, a status line (not installed, signed out,
+  plan problem, ready with the Claude Code version) and Check again. A pick
+  becomes active only after its sign-in probe passes; the first opening checks
+  the active harness and reloads its model list. The earlier
+  `agent.activeProvider` key is only read, never written or removed: a Mac
+  that had the Agent connected sees a one-time "choose a harness" contour
+  (`agent.harness.chosen` ends it); nothing connects by itself and a rollback
+  build finds its native connection as it was. Without a harness the island
+  shows "Choose a harness" and Settings opens Models with the row expanded.
+  The `.agent` text route is inactive (AIFeature.isActive) but stays stored.
+  Every turn maps Allow file
+  edits and commands to the CLI's own flags (AgentHarnessFlags), never a blanket
+  bypass. Claude On: --permission-mode auto; Off: dontAsk, Bash/PowerShell/
+  Monitor/Edit/Write/NotebookEdit removed, Read/Grep/Glob/WebSearch/WebFetch and
+  mcp__whytap allowed; both with --permission-prompts none, so nothing waits for
+  an approval. Codex On: workspace-write sandbox, approval_policy on-request,
+  approvals_reviewer auto_review; Off: read-only, approval_policy never; all as
+  -c overrides that exec resume also takes. Each turn adds the running app's
+  `whytap mcp` helper as the `whytap` server (--mcp-config / -c mcp_servers),
+  replacing the Coding tools entry for that turn; the user's own servers, hooks
+  and skills load as in their terminal. Codex reads the prompt from stdin (`-`),
+  never argv. The Claude model list is Claude Code's own `initialize` answer
+  (ClaudeModelCatalogReader: no model request, no user message, account fields
+  not decoded); a saved model is sent verbatim, none means the CLI default, and
+  --effort follows the model's own levels (Low by default, none for a model
+  without levels or a saved model the loaded list lacks). Turns and model
+  discovery run in Application Support/whytap/agent and neither starts the CLI
+  if it cannot be created. Sign-in checks (ProcessOneShot) have one deadline
+  for the whole call; a timed-out check or output without EOF is a failure. Logs carry exit codes and byte counts only. Codex
+  item-level error events are notices; top-level error and turn.failed end the
+  turn. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 
 Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native
@@ -648,14 +473,18 @@ Translation tools:
   handling; pairs hold final words only. WHY:
   .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md) whenever
   the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
-  only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
-  -> Subtitles is an ordinary row whose model is preselected by the key:
-  "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate"; no switch,
-  engine, Speech or LLM choice. Without either key the card has the usual
-  setup contour, its menu adds "Add a Soniox key…", it counts as a feature
-  without a model, and Start names the missing key and opens Keys & models
-  (no system audio is captured). WHY:
-  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md A session
+  only without it (SubtitleAudioTranslate.engine) unless the user chose an
+  engine. Keys & models -> Models -> Subtitles expands like the other rows to
+  an Engine menu: "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate",
+  "— no key" beside an engine without its key, and "Add a Soniox key…" /
+  "Add an OpenAI key…" for the chosen one. The choice is stored as
+  `subtitles.engine`; without it the key rule above decides. A chosen engine
+  runs only with its own key and never falls back: Start says which key it
+  needs and opens Keys & models (no system audio is captured), and Features
+  shows "No Soniox key" / "No OpenAI key". Without a usable key the card has
+  the usual setup contour and counts as a feature without a model. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md,
+  .project-docs/decisions/2026-11-27-subtitle-engine-choice.md A session
   stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
   no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
   like Decision: their IDs stay for Costs and history, saved routes are
@@ -1337,12 +1166,13 @@ processing routes: never switch where existing users send audio or text. A
 retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
-Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
-then Search (the Agent's web search, AgentSearchRow; see the native Agent
-section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
+Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift;
+LLM serves Drop Smart cleanup, meeting notes and Translation), then Harness
+(the Agent's Claude Code or Codex; see the Agent section) and Subtitles;
+"Advanced · a model per feature" discloses the per-feature
 list (FeatureGroup.layout): a function that listens and writes is one card,
-speech route first (Drop Smart, Meetings, and Agent with its Agent voice
-route). A shared pick writes every feature route of its kind
+speech route first (Drop Smart, Meetings), and "Agent voice" for the Agent's
+speech route. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
 a feature it cannot serve (the Agent without tools, a provider without a
@@ -1383,19 +1213,18 @@ Only model rates/update time are cached; rate refresh failures retain usable
 rates. First-use models without a rate stay unavailable. Recording never makes
 a billing read. No workspace Reported usage block, balance deltas, account-total
 allocation or USD-to-credit conversion. Missing prices are never zero; partial
-totals show +. OpenCode's computed step prices remain estimates.
+totals show +.
 Tracking starts with this update; synthetic model checks are excluded. WHY:
 .project-docs/decisions/2026-10-20-feature-costs.md
 
 API hints: the fourth tab lists provider offers as rows grouped by Speech to
-text, Language models and Web search. A row shows the logo, provider, what it
+text and Language models. A row shows the logo, provider, what it
 takes to start (No card needed, Card required or Paid plan, in that order
 within a group), the allowance with its period, and Get offer. Hovering or
 focusing Get offer opens the conditions and that offer's check date in a
 popover beside the button. The header says Reviewed monthly and shows the
 newest check date. List only offers whose key works in Whytap as it is; Groq
 and Cloudflare wait for their own provider support. The tab has no footer.
-Tavily has its own search tile in API keys, without model routing.
 Opening hints never checks balances or changes routes. WHY:
 .project-docs/decisions/2026-10-19-api-hints.md
 The no-card offers also form README's Free to use cards (provider,
@@ -1551,7 +1380,7 @@ NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
 (.project-docs/decisions/2026-11-25-settings-features-refresh.md).
 SettingsWindowController keeps that APIAndModelsViewModel for the app's life
 but presents it only while the window is open: closed, a UserDefaults write
-(the island's Drop Mode or language controls) or a Tavily key change does not
+(the island's Drop Mode or language controls) does not
 reread every key on the main thread mid-animation, and `show` always
 recomputes it once before the first frame (keys can change with no
 notification, e.g. a credential-only Settings Sync round)
@@ -1602,8 +1431,8 @@ the same parts. The Agent,
 Meeting Notes and Google search have their own screens (SwitchFeatureScreen):
 the switch (FeatureSwitchModel) writes the same flag as Other and the island
 through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
-connects the native Agent first (AgentOtherSection.turn) and moves only once
-it is on, otherwise the card says why. The Agent screen adds Allow file edits
+needs a chosen harness (AgentOtherSection.turn) and moves only once it is
+on, otherwise the card says why. The Agent screen adds Allow file edits
 and commands and things to ask, and its shortcuts include the four keys of the
 links under an answer (FeatureHotkey.agentLink*, the usefulLinks* fields
 Hotkeys edits); Meeting Notes adds the note-ready notification
@@ -1739,13 +1568,11 @@ First run: no sign-in. Launch and reopen show the island immediately. The
 first GUI launch on a Mac also opens the onboarding (Sources/Sidekey/Onboarding/,
 OnboardingJourneyWindowController + OnboardingJourneyModel, temporarily visible in the app switcher): one dark 520x440 window with Back (also ← and ⌘[ outside text
 fields), a progress rail with one segment per step (a passed step reached by
-Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10"
-("NN / 11" with the search step), one step at
-a time and a footer. The journey starts with the language globe. Drag, click
+Back stays green and is lit, OnboardingSegmentState.revisited) and "NN / 10",
+one step at a time and a footer. The journey starts with the language globe. Drag, click
 a country or type a language. English, Portuguese and Spanish offer variants,
 stored in PrivacyPreferences.selectedLanguageVariant. Source (On this Mac or
-API keys), Speech key, optional Language model key, and optional Tavily for
-a self-hosted language model follow. The access steps are Keyboard control, Microphone, Input Monitoring (only when the Drop
+API keys), Speech key and optional Language model key follow. The access steps are Keyboard control, Microphone, Input Monitoring (only when the Drop
 shortcut needs it), Screen Recording (optional), Try Drop, Toolbox,
 and the last step (Enjoy Whytap, with whytap.ai and Finish); a step whose result already holds is left out. A step whose
 action succeeds moves on by itself after its dwell (OnboardingDwellController;
@@ -1757,8 +1584,7 @@ padlock, turns and opens it when a key is accepted and catches when refused.
 The key field (OnboardingKeyStage) shows every input as dots; a provider is
 named only by its key's own format (prefix or Deepgram's 40 hex characters)
 or a clicked mark, otherwise Return is a format problem; five problems are
-named (format, refused, no credit or access, no answer with Retry; Tavily's
-429 is "busy" with Retry). An accepted language model key starts on the
+named (format, refused, no credit or access, no answer with Retry). An accepted language model key starts on the
 recommended model, the provider's newest Sonnet or Sol in its catalog
 (OnboardingModelPick.recommended), otherwise its newest flagship (newest
 generation, highest known output price). On the language model step only
@@ -1779,10 +1605,10 @@ added on one comes back filled in on the other; Return adds the server and its c
 Settings does (addServer, runServerModelCheck, addServerModel), sets the
 shared row and moves on; a provider mark or Escape turns the fields back.
 "Accepted" belongs to the route that answered (OnboardingJourneyModel.accepted:
-a provider, the server or Tavily; `outcome(_:for:)`): another mark shows its
+a provider or the server; `outcome(_:for:)`): another mark shows its
 own state (its try, "Saved X key · press Return" or an empty field), the
-server fields stay open, and the route, model, Self-hosted mark and Tavily
-step change only after a new check passes; "Choose model" picks only on the
+server fields stay open, and the route, model and Self-hosted mark change
+only after a new check passes; "Choose model" picks only on the
 accepted provider. Above ten models the list opens with a search over the
 provider's whole catalog (OnboardingModelSearch, modelCatalog). The four access
 steps share one template (OnboardingAccessStage): a title, the step's own wire
@@ -1884,8 +1710,8 @@ nothing in the window takes is dropped without the alert sound
 (OnboardingJourneyWindow), and the Try Drop field takes Escape quietly. WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md,
 .project-docs/decisions/2026-11-21-first-launch-onboarding.md
 Configure provider keys and endpoints in
-Settings -> Keys & models (the agent's model is chosen there too; Settings ->
-Other -> Agent turns the native Agent on, which connects it, and holds Allow
+Settings -> Keys & models (the Agent's harness is chosen there too, under
+Models -> Harness; Settings -> Features -> Agent turns it on and holds Allow
 file edits and commands; the workspace path is in the Whytap plugin's
 get_state; the former Agents tab is gone, its whytap://settings/agentMode link
 opens Other. WHY: .project-docs/decisions/2026-11-20-other-feature-videos.md),
@@ -2221,72 +2047,29 @@ wing. Not listed in tools/list, unknown to AppControlController (the built-in
 Agent cannot reach it), never logged. WHY:
 .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
 
-Agent answers: native Whytap Agent keeps intermediate text hidden and completes
-with a sole finish_answer call containing status, answer, insert_text, sources
-and actions; on direct Anthropic a finished plain-text reply (end_turn, text
-blocks only, no tool call) is also the answer, with no sources or actions of its
-own; links, paths and commands in its text become cards as for every answer.
-Strict tool schemas and application-required completion preserve the selected route.
-Claude uses auto tool choice directly and through OpenRouter to avoid unsupported
-forced-tool HTTP400s; other Agent routes request required tool choice. In all cases
-local validation rejects missing/unknown fields, empty/source-only answers, invalid
-cards and mixed final/tool batches. No automatic repair or repeated actions.
-Unverified/clarification statuses are visibly labeled; invalid finals are errors,
-not successful History. Structural checks do not prove factual correctness.
-Recent context includes returned card descriptions/destinations, and History
-persists visible text together with cards in both blocks and Markdown.
-Legacy CLI compatibility extractors remain separate from native completion.
-NativeAgentAnswerArtifacts also turns ordinary final HTTP(S) links and returned
-absolute/tilde paths into the same keyboard-action cards if the model omits
-card metadata in a valid final. Explicit metadata wins; destinations deduplicate and cap at 20.
-The fallback scans at most 32,000 characters, skips ordinary code/config fences
-(a closed shell fence's single command line becomes an Insert card),
-and does no network/file I/O or extra model call. It formats returned paths,
-not verifies their existence; nothing opens or inserts before user interaction. A
-folder answer provides the verified absolute path in a copyable code fence
-and a path action for open/insert. Simple answers use 1–2 short sentences;
-longer answers remain available when requested.
-Insert card: finish_answer.insert_text (required in the strict schema; absent or
-null from a lax endpoint means none) becomes the first, preselected copy card,
-whose Insert pastes into the field the user came from and replaces their
-selection. The prompt fills it with the complete result when the user gives
-text (selected or pasted) and asks to rewrite, shorten, translate, fix or
-reformat it or asks for a message, and with the one exact command for how to
-install/update/run questions, whose answer leads with that command; links
-only support it. Empty for plain questions. One enclosing fence is unwrapped.
-Cards are ordered insert text, the answer's own commands, other copy actions,
-paths, then sources.
-Without the field, a closed bash/sh/zsh/shell/fish/console/terminal fence with
-one command line (no script, continuation or heredoc; at most three) is the
-card. WHY: .project-docs/decisions/2026-11-22-agent-insert-card.md
-The native capture_screen tool calls AgentScreenCapture directly, independent
-of Case and the edit/command switch. It uses the app's Screen Recording grant,
-selects the island display, and returns JPEG (long edge <=1920, <=2 MB) within
-10 seconds, with cancellation and a busy guard. No file, clipboard or input tap
-is created. Pixels go to the selected model only within the current tool loop;
-the provider may retain them according to its policy. Never substitute a vision
-model. The separate screen MCP helper remains for compatibility; the settings
-MCP scope does not accept capture. WHY:
-.project-docs/decisions/2026-10-22-native-agent.md
-Whytap controls in the Agent: the native Agent gets every operation of the
-plugin (AppControlMCPServer.tools) through ONE strict tool, whytap, with two
-required strings: operation (enum of the MCP names) and arguments (a JSON
-object string following that operation's MCP schema; descriptions and schemas
-are listed in the tool description). Separate strict tools broke Anthropic's
-limits (20 strict tools, 16 unions per request) and OpenAI's nesting depth; a
-test checks every route's first request. NativeAgentAppControl runs them in
-process through the broker's AppControlController (one allowlist, write lock
-and expected-value check). No MCP server or helper. An optional field's null
-that its schema does not accept means not given; the controller validates the
-rest. Each confirmed write becomes one app-owned line, built from the saved
-value, shown as the step label and above the answer ("Drop Smart cleanup →
-model"); todo_add's status saved on a reused task too, identical repeats stay
-quiet. Meetings need no harness prompt (the user is at this Mac) and stay
-untrusted content. No key values, clipboard or commands; the prompt paragraph
-is added only with the tool and never mentions the reply language. Offered
-only when the app installed the controller (packaged app), never in tests or
-swift run. The CLI providers are not reachable (only native connects). WHY:
-.project-docs/decisions/2026-11-22-native-agent-app-control.md
+Agent answers: the harness's final text is the answer. A trailing
+`useful.actions` JSON fence (AgentUsefulLinksExtractor, also the legacy
+`useful.links` forms) becomes typed link, path and copy cards and is removed
+from the shown text; nothing opens or inserts before user interaction.
+At `done`, AskResponseStore reads the final answer's text only (never a Codex
+intermediate message) with AgentAnswerArtifacts: http(s) links, Markdown
+links, absolute or tilde paths (code spans, quotes, path-only fences,
+conservative unquoted roots) and the one command line of a closed shell fence
+become cards, merged into one actions block with the fence's items (fence
+metadata wins; commands first so Insert is preselected; deduplicated, 20 at
+most; 32,000 characters scanned, no network or file I/O). A failed turn gets
+none. WHY: .project-docs/decisions/2026-11-27-agent-plain-text-cards.md
+History persists visible text together with cards in both blocks and
+Markdown. Screen capture reaches the Agent as the `whytap_capture_screen`
+operation of the per-turn `whytap` MCP server (AppControlController ->
+AgentScreenCapture: the island display, JPEG with long edge <=1920 and
+<=2 MB, within 10 seconds, no file or clipboard copy); pixels go to the
+harness's own model. Whytap controls in the Agent are the same `whytap_*`
+operations as in the user's own Claude Code or Codex sessions, behind the
+same HarnessAccessGate Yes. The built-in agent's finish_answer schema,
+plain-text card fallback, native capture tool and single `whytap` function
+tool were removed on 2026-11-27. WHY:
+.project-docs/decisions/2026-11-27-agent-harness-cli.md
 Island tools and hotkeys (Agent and `whytap mcp`): whytap_toolbox_get lists
 the pinned order and every tool with its hotkey; whytap_toolbox_set pins
 (optionally at a place) or removes a tool through HoverLayoutStore
@@ -2314,10 +2097,8 @@ notifications and every take reads the lists. One invalid entry adds nothing
 (line breaks and control characters are refused, joiners like U+200C pass);
 an existing entry is reported in its saved form, never rewritten. No read or
 removal, no per-route promise (each route sends what its model supports).
-External harnesses need HarnessAccessGate's Yes (gatedOperations), with
-HarnessConsent rechecked right before the write; the built-in Agent adds what
-the current request names. App-owned change lines are escaped as Markdown
-literals in the answer ("Vocab + __init__" renders as saved). WHY:
+Harnesses, including the Agent's own turns, need HarnessAccessGate's Yes
+(gatedOperations), with HarnessConsent rechecked right before the write. WHY:
 .project-docs/decisions/2026-11-23-agent-drop-lists.md
 
 Clipboard history retains the newest 50 local entries across launch, quit and
@@ -2830,15 +2611,13 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
    the meeting detector's Silero VAD download from Hugging Face, the On this
    Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),
-   notification sources accessed by user-configured local scripts, MCP servers the
-   user connected as Agent sources (and what their local processes reach), calendar providers
-   explicitly connected by the user (Google, Microsoft and Zoom), direct agent provider
-   traffic, public OpenRouter model-author artwork (without keys or user content),
-   optional Tavily search queries/usage checks and requested tool destinations, the model catalogs and free key checks of providers the user added
+   notification sources accessed by user-configured local scripts, calendar providers
+   explicitly connected by the user (Google, Microsoft and Zoom), the user's own
+   Claude Code or Codex and their own service traffic, the model catalogs and free key checks of providers the user added
    a key for, OpenRouter's provider list (latency, throughput) for a model
    selected on an OpenRouter route, synthetic model probes (silence or a one-word prompt, never user
    audio or text) sent only to that provider when a model is picked or on
-   Check now, its official OpenCode native package downloads from the npm registry, `google.com`, the Whytap site and Help Center (`whytap.ai`, `whytap.ai/help/`) opened in the
+   Check now, `google.com`, the Whytap site and Help Center (`whytap.ai`, `whytap.ai/help/`) opened in the
    browser, the Sparkle feed on GitHub Releases, and optional encrypted backups
    and settings sync to the user's own GitHub repository or selected sync folder.
    `Tests/SidekeyTests/CloudRemovalTests.swift` fails the build on any
@@ -2911,13 +2690,8 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
    data goes (provider routes/endpoints, notification scripts, Monitor,
    backup destination). WHY: .project-docs/decisions/2026-10-20-whytap-links.md,
    .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
-8. **No model output executes an outward action.** Connected sources (gated
-   off in shipped builds, see `AgentSourcesGate`) offer
-   the Agent only tools classified Read in app code (`source_call`'s enum and
-   `SourcesController.callRead`); tools that change or delete things are never
-   called by a model. An outward action will run only after a confirmation in
-   a Whytap-owned surface. Imported and custom servers are called only after
-   the user approves their tools. After a request reads source content, only
-   that source's Read tools and the answer remain; file edits and reads,
-   commands, web access, other sources and Whytap changes are refused. WHY:
-   .project-docs/decisions/2026-11-26-agent-sources.md
+8. **The Agent's actions are its harness's own.** Right Command runs the
+   user's Claude Code or Codex; Whytap maps Allow file edits and commands to
+   that tool's permission flags and never passes a blanket bypass. Whytap's
+   own MCP operations keep their consent gate and expected-value checks.
+   WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md

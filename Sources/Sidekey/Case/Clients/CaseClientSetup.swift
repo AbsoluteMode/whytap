@@ -9,9 +9,11 @@ enum CaseKnownClient: String, CaseIterable, Equatable {
     case cursor
     case builtInOpenCode
 
-    /// The current Connect catalog. Preserve legacy identities and registrations.
+    /// The current Connect catalog. Preserve legacy identities and registrations:
+    /// `builtInOpenCode` (the earlier in-app agent) is kept only so a stored
+    /// registration still reads and can be removed.
     // WHY: .project-docs/decisions/2026-11-23-case-connect-codex.md
-    static let connectableClients: [CaseKnownClient] = [.builtInOpenCode, .claudeCode, .codex, .cursor]
+    static let connectableClients: [CaseKnownClient] = [.claudeCode, .codex, .cursor]
 
     var displayName: String {
         switch self {
@@ -68,16 +70,13 @@ final class CaseClientSetup: CaseClientConfiguring {
     private let binDir: URL
     private let flavorName: String
     private let connectors: [CaseKnownClient: CaseClientConnector]
-    private let builtInAgentAvailable: () -> Bool
 
     init(helperURL: URL?, binDir: URL, flavorName: String,
-         connectors: [CaseKnownClient: CaseClientConnector],
-         builtInAgentAvailable: @escaping () -> Bool) {
+         connectors: [CaseKnownClient: CaseClientConnector]) {
         self.helperURL = helperURL
         self.binDir = binDir
         self.flavorName = flavorName
         self.connectors = connectors
-        self.builtInAgentAvailable = builtInAgentAvailable
     }
 
     static func live() -> CaseClientSetup {
@@ -85,24 +84,22 @@ final class CaseClientSetup: CaseClientConfiguring {
         let bundleID = Bundle.main.bundleIdentifier ?? BuildConfig.bundleID
         let socket = CaseBrokerPaths.socketURL(bundleID: bundleID).path
         return CaseClientSetup(
-            helperURL: CaseBuiltInAgentAccess.bundledHelperURL,
+            helperURL: WhytapBundledHelper.bundledHelperURL,
             binDir: CaseCLIInstaller.defaultBinDir,
             flavorName: CaseCLIInstaller.currentFlavorName,
             connectors: [
                 .claudeCode: ClaudeCodeCaseConnector(home: home, socketPath: socket),
                 .codex: CodexCaseConnector(home: home),
                 .cursor: CursorCaseConnector(home: home),
-            ],
-            builtInAgentAvailable: { true })
+            ])
     }
 
     func detectInstalledClients() async -> [CaseKnownClient] {
         let connectors = connectors
-        let builtIn = builtInAgentAvailable
         // Locators may ask a login shell; keep that off the main thread.
         return await Task.detached {
             CaseKnownClient.connectableClients.filter { client in
-                client == .builtInOpenCode ? builtIn() : (connectors[client]?.isInstalled() ?? false)
+                connectors[client]?.isInstalled() ?? false
             }
         }.value
     }
@@ -182,48 +179,14 @@ final class CaseClientSetup: CaseClientConfiguring {
     }
 }
 
-// MARK: Built-in OpenCode agent
+// MARK: Whytap's helper
 
-/// Whether Whytap's own OpenCode runs get the Case MCP server: only while the
-/// built-in agent is registered and the helper is in the bundle.
-enum CaseBuiltInAgentAccess {
+/// The running app's bundled `whytap` helper (Case CLI and Whytap MCP server).
+enum WhytapBundledHelper {
     static var bundledHelperURL: URL? {
         let bundle = Bundle.main.bundleURL
         guard bundle.pathExtension == "app" else { return nil }
         let helper = bundle.appendingPathComponent("Contents/Helpers/whytap")
         return FileManager.default.isExecutableFile(atPath: helper.path) ? helper : nil
     }
-
-    static func mcpCommand(payload: CaseVaultPayload?, helperURL: URL?) -> [String]? {
-        guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path),
-              let payload, payload.apps.contains(where: { $0.identity == .builtInOpenCode })
-        else { return nil }
-        return [helperURL.path, "case", "mcp"]
-    }
-
-    /// Reads the existing vault once if nothing has loaded it yet; never
-    /// creates a vault and never asks for Touch ID.
-    @MainActor
-    static func currentMCPCommand(service: CaseVaultService = .shared,
-                                  vaultURL: URL = CaseVaultStore.defaultFileURL) -> [String]? {
-        guard let helper = bundledHelperURL else { return nil }
-        if service.payload == nil, FileManager.default.fileExists(atPath: vaultURL.path) {
-            _ = try? service.loadIfNeeded()
-        }
-        return mcpCommand(payload: service.payload, helperURL: helper)
-    }
-}
-
-/// PIDs of the OpenCode processes Whytap started itself; the broker uses them
-/// to recognise the built-in agent. A PID is removed when its process exits.
-final class CaseBuiltInAgentProcesses {
-    static let shared = CaseBuiltInAgentProcesses()
-
-    private let lock = NSLock()
-    private var running: Set<pid_t> = []
-
-    var pids: Set<pid_t> { lock.withLock { running } }
-
-    func insert(_ pid: pid_t) { _ = lock.withLock { running.insert(pid) } }
-    func remove(_ pid: pid_t) { _ = lock.withLock { running.remove(pid) } }
 }

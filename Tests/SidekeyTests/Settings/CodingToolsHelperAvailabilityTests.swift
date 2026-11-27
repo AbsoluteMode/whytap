@@ -17,8 +17,7 @@ final class CodingToolsHelperAvailabilityTests: XCTestCase {
         let setup = CaseClientSetup(
             helperURL: nil, binDir: root.appendingPathComponent("bin"), flavorName: "dev",
             connectors: [.codex: CodexCaseConnector(home: root, runner: runner, reader: runner,
-                                                    locate: { root.appendingPathComponent("codex") })],
-            builtInAgentAvailable: { false })
+                                                    locate: { root.appendingPathComponent("codex") })])
         let store = HarnessAccessStore(persistence: nil)
         let client = try XCTUnwrap(CodingToolsAccess.harnessClient(.codex))
         store.record(.allow, for: client, at: Date())
@@ -61,7 +60,7 @@ final class CodingToolsHelperAvailabilityTests: XCTestCase {
                 .claudeCode: ClaudeCodeCaseConnector(home: root, socketPath: root.appendingPathComponent("sock").path,
                                                     runner: runner, locate: { fakeClient }),
                 .codex: CodexCaseConnector(home: root, runner: runner, reader: runner, locate: { fakeClient }),
-            ], builtInAgentAvailable: { false }
+            ]
         )
         let store = HarnessAccessStore(persistence: nil)
         let access = CodingToolsAccess(store: { store }, probe: .live(setup: setup))

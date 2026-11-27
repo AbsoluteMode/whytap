@@ -55,8 +55,11 @@ enum HistoryPastePlan {
     static let textSeparator = "\n"
 
     /// Splits marked rows into pastes, keeping their order. Neighbouring
-    /// rows of one kind share a paste, so three files are one Cmd+V and
-    /// text, file, text are three.
+    /// texts share a paste and so do neighbouring files, so three files are
+    /// one Cmd+V and text, file, text are three. Every image is a paste of
+    /// its own: a pasteboard with several image items gives Chromium,
+    /// Electron and most other apps only the first image.
+    // WHY: .project-docs/decisions/2026-11-28-history-multi-paste-every-image.md
     static func groups(for cards: [HistoryStripCard]) -> [HistoryPasteGroup] {
         var groups: [HistoryPasteGroup] = []
         var texts: [String] = []
@@ -80,7 +83,15 @@ enum HistoryPastePlan {
                 texts.append(text)
             case .attachments(let items):
                 flushTexts()
-                attachments.append(contentsOf: items)
+                for item in items {
+                    switch item {
+                    case .file:
+                        attachments.append(item)
+                    case .image:
+                        flushAttachments()
+                        groups.append(.attachments([item]))
+                    }
+                }
             }
         }
         flushTexts()
@@ -154,6 +165,61 @@ enum HistoryPasteboardWriter {
         }
     }
 
+    /// Writes one paste of a multi-paste series and reports what the series
+    /// needs to wait for it. Text and a single image are promised data
+    /// (`PromisedPasteboardPayload`): the target's read is counted in
+    /// `reads`, so the next paste replaces the pasteboard only after the
+    /// target took this one. Files are written as before (file URLs read by
+    /// path); they give no read signal and the series waits a fixed gap.
+    // WHY: .project-docs/decisions/2026-11-28-history-multi-paste-every-image.md
+    @MainActor
+    static func writeForPaste(
+        _ group: HistoryPasteGroup,
+        to pasteboard: NSPasteboard,
+        assetsDirectory: URL,
+        reads: PasteboardReadMonitor
+    ) -> HistoryPasteWrite {
+        let readsBefore = reads.readCount
+        switch group {
+        case .text(let text):
+            guard let written = PromisedPasteboardPayload.write(
+                [.string: Data(text.utf8)], to: pasteboard, reads: reads
+            ) else { return .failed }
+            return .written(.init(changeCount: written.after, readsBefore: readsBefore))
+        case .attachments(let items):
+            if items.count == 1, case .image(let image) = items[0] {
+                guard let payload = imagePayload(image, assetsDirectory: assetsDirectory) else { return .nothing }
+                guard let written = PromisedPasteboardPayload.write(payload, to: pasteboard, reads: reads)
+                else { return .failed }
+                return .written(.init(changeCount: written.after, readsBefore: readsBefore))
+            }
+            let objects = items.compactMap { pasteboardObject(for: $0, assetsDirectory: assetsDirectory) }
+            guard !objects.isEmpty else { return .nothing }
+            let owned = pasteboard.clearContents()
+            guard pasteboard.writeObjects(objects) else { return .failed }
+            return .written(.init(changeCount: owned, readsBefore: nil))
+        }
+    }
+
+    /// PNG and TIFF of a History image: Chromium and Electron read PNG
+    /// first, AppKit text views and most native apps read TIFF. nil when
+    /// neither the sidecar nor the thumbnail decodes.
+    static func imagePayload(
+        _ image: ClipboardImagePayload,
+        assetsDirectory: URL
+    ) -> [NSPasteboard.PasteboardType: Data]? {
+        let sidecar = try? Data(contentsOf: image.sidecarURL(in: assetsDirectory))
+        for data in [sidecar, image.thumbnailData].compactMap({ $0 }) where !data.isEmpty {
+            guard let decoded = NSImage(data: data), let tiff = decoded.tiffRepresentation else { continue }
+            var payload: [NSPasteboard.PasteboardType: Data] = [.tiff: tiff]
+            if let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+                payload[.png] = png
+            }
+            return payload
+        }
+        return nil
+    }
+
     private static func pasteboardObject(
         for item: HistoryPasteAttachment,
         assetsDirectory: URL
@@ -208,43 +274,145 @@ enum HistoryKeyDecision {
     }
 }
 
+/// What the series knows about one paste it put on the pasteboard.
+struct HistoryPasteReceipt: Equatable {
+    /// The pasteboard generation this write owns.
+    let changeCount: Int
+    /// The read count before the write; nil when the content gives no read
+    /// signal (files) and the series waits a fixed gap instead.
+    let readsBefore: Int?
+}
+
+/// The result of writing one paste of the series.
+enum HistoryPasteWrite: Equatable {
+    /// The group had nothing pastable (an evicted image without a
+    /// thumbnail); the pasteboard was not touched.
+    case nothing
+    case written(HistoryPasteReceipt)
+    /// The pasteboard refused the write.
+    case failed
+}
+
+/// How a wait for the target to read one paste ended (for logs and tests).
+enum HistoryPasteWaitOutcome: Equatable {
+    /// The target read it; quiet for `afterReadMs` since the last read.
+    case read
+    /// No read came within `fallbackMs`.
+    case timeout
+    /// Files: no read signal, the fixed gap passed.
+    case gap
+    /// Other content replaced the paste on the pasteboard.
+    case replaced
+}
+
+/// Waits until the target has read one paste before the series replaces
+/// the pasteboard (the next paste or the user's own clipboard).
+// WHY: .project-docs/decisions/2026-11-28-history-multi-paste-every-image.md
+@MainActor
+struct HistoryPasteReadWaiter {
+    struct Timing: Equatable {
+        /// How often the wait checks for reads and replacements.
+        var pollMs: UInt64 = 10
+        /// Quiet time after the last read: a reader that takes several
+        /// types (PNG, then TIFF) reads them in a burst.
+        var afterReadMs: UInt64 = 150
+        /// Continue anyway when the target never reads the paste.
+        var fallbackMs: UInt64 = 2_000
+        /// Files give no read signal: the former fixed gap.
+        var unsignalledGapMs: UInt64 = 400
+
+        static let standard = Timing()
+    }
+
+    let readCount: () -> Int
+    let changeCount: () -> Int
+    let nowMs: () -> UInt64
+    let sleepMs: (UInt64) async -> Void
+    var timing: Timing = .standard
+
+    func wait(for receipt: HistoryPasteReceipt) async -> HistoryPasteWaitOutcome {
+        guard let baseline = receipt.readsBefore else {
+            await sleepMs(timing.unsignalledGapMs)
+            return .gap
+        }
+        let start = nowMs()
+        var seen = baseline
+        var lastReadAt: UInt64?
+        while true {
+            let now = nowMs()
+            if changeCount() != receipt.changeCount { return .replaced }
+            let reads = readCount()
+            if reads != seen {
+                seen = reads
+                lastReadAt = now
+            }
+            if let lastReadAt {
+                if now - lastReadAt >= timing.afterReadMs { return .read }
+            } else if now - start >= timing.fallbackMs {
+                return .timeout
+            }
+            await sleepMs(timing.pollMs)
+        }
+    }
+}
+
 /// Runs the pastes of marked rows one after another into the target that
-/// was remembered when Enter was pressed. Collaborators are injected so the
-/// order, gaps and target checks are testable without a pasteboard or
-/// synthetic events.
+/// was remembered when Enter was pressed, then gives the user's clipboard
+/// back. Collaborators are injected so the order, waits, target checks and
+/// the restore are testable without a pasteboard or synthetic events.
 @MainActor
 struct HistoryMultiPaster {
-    /// Time the target gets to read one paste before the pasteboard is
-    /// replaced for the next. Drop restores the clipboard 120 ms after its
-    /// Cmd+V; attachments can be read more slowly, so mixed pastes wait longer.
-    static let gapBetweenPastesNs: UInt64 = 400_000_000
-
     /// The series' target is still the one Enter was pressed for: running,
     /// not replaced by a later capture and, after the first paste, still
     /// focused (the argument is `true` for the first paste). Checked before
-    /// the pasteboard is replaced, so a stopped series leaves the last pasted
-    /// content in place.
+    /// the pasteboard is replaced.
     let targetIsCurrent: (_ isFirst: Bool) -> Bool
-    let write: (HistoryPasteGroup) -> Void
+    let write: (HistoryPasteGroup) -> HistoryPasteWrite
     /// Posts Cmd+V only into the series' target
     /// (`pasteAlreadyOnPasteboard(into:restoringFocus:)`); only the first
     /// paste may bring the target back to the front.
     let paste: (_ isFirst: Bool) async -> Bool
-    let sleep: (UInt64) async -> Void
+    /// Returns once the target has read the paste (`HistoryPasteReadWaiter`).
+    /// Runs after every posted paste, the last one too: the next write or the
+    /// restore must not replace content the target has not read yet.
+    let awaitConsumed: (HistoryPasteReceipt) async -> Void
+    let changeCount: () -> Int
+    /// Puts the user's clipboard from before the series back.
+    let restore: () -> Void
 
     /// Returns how many pastes were posted. Stops at the first paste whose
-    /// target is gone or that the engine could not post, so nothing lands in
-    /// another app or out of order.
+    /// target is gone, that the engine could not post or whose content was
+    /// replaced by someone else, so nothing lands in another app or out of
+    /// order. Afterwards the user's clipboard comes back, unless other
+    /// content replaced the series' last write (a user copy stays).
     @discardableResult
     func run(_ groups: [HistoryPasteGroup]) async -> Int {
         var posted = 0
-        for (index, group) in groups.enumerated() {
-            if index > 0 { await sleep(Self.gapBetweenPastesNs) }
-            guard targetIsCurrent(index == 0) else { break }
-            write(group)
-            guard await paste(index == 0) else { break }
-            posted += 1
+        // The series' write still on the pasteboard, if any.
+        var owned: Int?
+        var wroteAnything = false
+        series: for group in groups {
+            guard targetIsCurrent(posted == 0) else { break }
+            if let owned, changeCount() != owned { return posted }
+            switch write(group) {
+            case .nothing:
+                continue
+            case .failed:
+                // The refused write may have cleared the pasteboard.
+                owned = nil
+                wroteAnything = true
+                break series
+            case .written(let receipt):
+                owned = receipt.changeCount
+                wroteAnything = true
+                guard await paste(posted == 0) else { break series }
+                posted += 1
+                await awaitConsumed(receipt)
+            }
         }
+        guard wroteAnything else { return posted }
+        if let owned, changeCount() != owned { return posted }
+        restore()
         return posted
     }
 }

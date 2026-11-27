@@ -74,9 +74,11 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in }
+            awaitConsumed: { _ in },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)
@@ -108,9 +110,11 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in }
+            awaitConsumed: { _ in },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)
@@ -141,9 +145,11 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in }
+            awaitConsumed: { _ in },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)
@@ -165,9 +171,11 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in env.frontmost = Self.targetB }
+            awaitConsumed: { _ in env.frontmost = Self.targetB },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)
@@ -193,7 +201,7 @@ final class AutoPasteEngineTests: XCTestCase {
     func testHistorySeriesStopsWhenANewCaptureReplacesTheTargetDuringTheGap() async throws {
         // Between pastes the user starts Drop or reopens History in another
         // app: the engine's remembered target becomes B. The next Cmd+V must
-        // not go to B, and the pasteboard must keep what was pasted.
+        // not go to B.
         let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
         let engine = env.makeEngine()
         engine.rememberTargetBeforeRecording()
@@ -201,12 +209,14 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in
+            awaitConsumed: { _ in
                 env.frontmost = Self.targetB
                 engine.rememberTargetBeforeRecording()
-            }
+            },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)
@@ -225,12 +235,14 @@ final class AutoPasteEngineTests: XCTestCase {
         var writes: [HistoryPasteGroup] = []
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
-            write: { writes.append($0) },
+            write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
             paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
-            sleep: { _ in
+            awaitConsumed: { _ in
                 env.terminatedPids.insert(Self.targetA.pid)
                 env.frontmost = Self.targetB   // macOS hands focus to another app
-            }
+            },
+            changeCount: { writes.count },
+            restore: {}
         )
 
         let posted = await paster.run(Self.mixedSeries)

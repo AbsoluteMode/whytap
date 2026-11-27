@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-23
+verified_at: 2026-11-28
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-28 (orchestrator card 42, spec REV 8) the owner removed every code review from the builder (previews, feature PRs, releases) and moved review to one inquisition on the assembled, tested release candidate, run by the orchestrator, whose confirmed bugs are fixed before the release ships.
+    confirmed_at: 2026-11-28
   - type: user-confirmed
     reference: On 2026-11-23 the maintainer approved starting the builder-queue rework with a model-free watchdog, a load and screen-lock gate, current builder rules and a baseline measurement.
     confirmed_at: 2026-11-23
@@ -68,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-preview-before-validation.md, ../decisions/2026-11-26-release-batches.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-builder-never-reviews.md]
 ---
 
 # Parallel development, one working Whytap
@@ -258,7 +261,7 @@ watcher checks the environment without a model: a five-minute load average
 above `load_limit_per_cpu` (default 2) times the CPU count only waits, logged
 as `waiting: …`. A locked screen (or another user at the console) waits only
 for install sessions (and, with `validate_while_locked: false`, for
-everything): review, tests and merges go on behind it, because only the two
+everything): tests and merges go on behind it, because only the two
 protected-data tests, signing and the install need an unlocked screen (see the
 [builder quick wins decision](../decisions/2026-11-26-builder-quick-wins.md)).
 A wait counts no backoff and blames no PR; the next tick starts the session
@@ -310,6 +313,61 @@ a retry backoff after a clear gate is not one), for comparing the queue before a
 The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this
 process and the builder prompt, never queue contents.
+
+### Preview lane and release batches
+
+On 2026-11-26 the owner set the order: he checks the feature itself in his
+running app first; the full suite and the merge follow the owner's
+approval, once for everything approved (see the
+[preview decision](../decisions/2026-11-26-preview-before-validation.md) and
+the [release batches decision](../decisions/2026-11-26-release-batches.md)).
+The maintainer enables it with `activate --preview-lane --orchestrator <id>
+--orchestrator-token-file <path>` from clean main with no session running;
+until then `--preview` submissions go through normal validation.
+
+**Policy by lane and stage** (the single policy; the builder prompt and the
+preview prompt follow it):
+
+| Lane, stage | Checks before the suite | Full suite | Merge | Install |
+|---|---|---|---|---|
+| Normal (`enqueue` without `--preview`) | per PR: documentation checks, build, `swift test --filter` | per PR candidate | per PR | grouped, at most four runtime PRs |
+| Preview (`--preview`, admitted) | build and safety checks only | none; the worker's targeted tests | none | main + train + this PR, safety checks, admission of the whole composition, handoff gate |
+| Release batch (approved previews) | documentation checks, build | one on the batch, failures bisected by failing tests | member by member, each merge a checkpoint (`pending_install --install-first`) | one, main + remaining train |
+
+No lane or stage has a builder code review: the only review is the
+orchestrator's one inquisition on the release candidate before a public
+release ("The builder never reviews").
+
+Every install, in either lane, uses the local arm64 build, records its
+composition in the app (`ExodiaBuildComposition`), checks signature,
+identity, designated requirement, a higher build than the installed app and
+the native `--installation-check`, takes `whytap-app.lock`, passes
+`preview-handoff` right before a normal Quit allowed by a fresh meeting gate,
+and keeps a signed rollback bundle. Protected-data tests skipped behind a
+locked screen run on main before any install.
+
+A worker submits a reviewed head with `enqueue ... --preview` after its branch
+build and targeted tests. Only a PR whose every changed input is of a
+preview-safe kind (regular files: Swift sources and tests, Markdown, images
+whose bytes match their type, text resources) and whose changed Swift files
+name no state gateway, file, process or run-time loading API anywhere is
+previewed; a PR that builds on another open PR is not. Everything else goes
+to normal validation, and its author is told why. The installed app itself is
+the record of what the owner sees: the queue compares it with the train to
+decide a rebuild, refuses `awaiting_approval` unless the app carries the train
+plus that preview, and binds every decision to the app's current build.
+
+The owner's decisions come only from the configured orchestrator, never the
+builder, which proves itself with its private file. The commands are `approve --ticket <id> --head <sha> --build <n> --by
+"<owner's words>" --note <context>` and `reject --ticket <id> --head <sha>
+--build <n> --note "<what to change>"`. A fix is enqueued again with
+`--preview` and keeps the preview's place. `release --by "<owner's words>"`,
+or the watcher's count trigger when `release_after_approved` is set, starts
+one release batch. The receipt shows previews only under **Preview, not
+merged**. The watchdog raises `ready_to_check:<ticket>` for each preview
+awaiting the owner. Activation and deactivation refuse while a preview or a
+batch is unfinished or the app lock is held; deactivation also switches the
+preview lane off, and queued previews go to normal validation.
 
 A worker uses the shared helper even from a worktree that predates this change:
 
@@ -370,6 +428,51 @@ the queue change within about a minute. Where a builder chat is still
 configured, the worker sends it a short request containing the ticket ID. The
 queue survives downtime.
 
+### The builder never reviews
+
+Since 2026-11-28 the builder never reviews code, for previews, feature PRs or
+releases ([builder never reviews decision](../decisions/2026-11-28-builder-never-reviews.md)).
+It builds, runs the documentation checks and tests, resolves merge conflicts
+so both sides' tests pass, merges, installs and rolls back behind the
+mechanical gates below (exact head and base, signature, Developer ID team,
+designated requirement, a higher build number, `--installation-check`, the
+meeting and activity gate, one rollback bundle, build provenance). It does
+not judge a diff, run race or interleaving probes, write review findings, ask
+for reproducing checks or invoke review agents. It blocks only when the build,
+a test or a documentation check fails because of the PR, when a merge
+conflict needs the author's choice, or when the head moved.
+
+**Owner preview first.** An app-changing PR is first composed on current
+`origin/main` with every PR whose preview still awaits the owner (the train),
+built as the local arm64 app (`EXODIA_LOCAL_INSTALL=1`) and installed as an
+unmerged preview with only those gates; no tests before the owner's OK. The
+ticket is then set `blocked` with a note that starts `PREVIEW AWAITING OWNER`
+and names the build, the main base and every member head; this is not a
+failure. The orchestrator, the only party that carries the owner's words,
+appends each decision to `whytap-owner-decisions.txt` in the Git common
+directory as `<UTC time> ok|reject PR #<n> <exact head> build <n> -- <owner's words>`;
+the builder reads it at the start of every run. After an `ok`, the author
+resubmits (current main merged into the branch, or an empty commit); the
+builder accepts it when every non-merge commit after the approved head is
+empty or already on `origin/main`, runs the full suite and merges. A
+`reject` cancels the preview ticket and the next install leaves the PR out.
+A new head without an `ok` is a new preview and supersedes the earlier one.
+Builder tooling and documentation-only PRs have nothing to preview: their
+own tests and documentation checks, then the merge. Once the maintainer
+enables the preview lane ("Preview lane and release batches" below), previews
+use `enqueue --preview`, the orchestrator's `approve`/`reject` and release
+batches instead of `PREVIEW AWAITING OWNER` tickets and
+`whytap-owner-decisions.txt`; this manual rule applies until then.
+
+**One inquisition per release.** The orchestrator, not the builder, owns
+review: approved features accumulate on main; when the orchestrator decides
+to release, the builder builds the release candidate from one main SHA and
+runs the full suite on it; the orchestrator runs one inquisition (its
+council review) on the whole diff from the previous release to that
+candidate; its confirmed bugs are fixed as ordinary queued PRs and a new
+candidate is built and tested; then the release ships through
+`user-release.sh` and its gates.
+
 ### Builder turn
 
 1. Read `status` and `events --pending`. Deliver queued receipts to their
@@ -403,11 +506,13 @@ queue survives downtime.
    PR/title/head and ask that agent to follow the build and check its acceptance
    steps when notified. The worker may inspect, diagnose and report problems;
    it must not merge, package, install or acquire a competing integration lock.
-4. Inspect the exact live PR head/base, review evidence, dependencies, overlaps
-   and source. Follow all integration/signature/version/activity/rollback gates
-   below. Queue membership is a request, never proof that gates passed. A moved
-   head needs new review; block the ticket and ask its worker to resubmit the
-   reviewed result. To give a claimed ticket back without blaming the PR (the
+4. Check the exact live PR head/base, the submitted checks, dependencies and
+   overlaps (other PRs touching the same files, for conflict resolution).
+   Never review the code ("The builder never reviews" above). Follow all
+   integration/signature/version/activity/rollback gates below. Queue
+   membership is a request, never proof that gates passed. A moved head is
+   blocked with a request to its worker to resubmit the exact head. To give a
+   claimed ticket back without blaming the PR (the
    environment stopped it, an undeclared dependency is not merged yet), use
    `set --status queued --note <reason>`: from `in_progress` it keeps its place,
    while a requeue after `blocked` goes to the end as before. The watcher
@@ -419,18 +524,18 @@ queue survives downtime.
    the tests of both, push the resolution to the PR branch as a normal commit
    and record the new head and what was resolved in the ticket note. Mechanical
    repairs that change no behavior (guidance sync, reciprocal links) are the
-   builder's too. Block only for a product choice by the author or maintainer,
-   tests failing because of the feature itself, missing review evidence, or a
-   destructive migration or access decision. Preserve every other session's
+   builder's too. Block only for a product choice by the author or maintainer in a merge
+   conflict, or a build, test or documentation check failing because of the
+   feature itself. Preserve every other session's
    work. Do not automatically merge unrelated open PRs. Before the full suite
    run `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment --for suite`
    from the integration worktree (main's copy, also before reactivation): a
-   locked screen does not stop the review, the suite or the merge; while the
+   locked screen does not stop the suite or the merge; while the
    load keeps it not clear, wait (re-checking every few minutes, up to 15 minutes) instead of
    running the suite. If it stays not clear, do not run it: return the ticket
    with `set --status queued` and a note that the environment, not the PR,
    stopped it. Failures in a
-   suite that ran while the check was not clear are not findings against the PR.
+   suite that ran while the check was not clear are not failures of the PR.
    The full suite runs as `python3 scripts/test-shards.py --shards 2`: two
    class shards of the built test bundle at once, a split fixed by the
    committed class times and checked against `swift test --list-tests`, every
@@ -443,40 +548,32 @@ queue survives downtime.
    [test shards decision](../decisions/2026-11-26-builder-test-shards.md)).
    A failed test whose file and code under test the candidate does not change
    is rerun alone (`swift test --filter <Class>/<test>`), not with a second
-   full suite. If it passes, it is not a finding: the builder continues,
+   full suite. If it passes, it is not a failure of the PR: the builder continues,
    appends the test, ticket and date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git
    common directory and names it as a follow-up in the ticket note when it is
    already listed within the last seven days; if it fails again, it is a
-   finding. A test skipped with "Protected data is unavailable" ran while the
+   failure of the PR. A test skipped with "Protected data is unavailable" ran while the
    screen was locked. Its exact name is recorded on the ticket before the
    merge (`protected-pending --ticket <id> --tests <json>`), so an interrupted
    session, a deferred install or a group keeps it. The merge may proceed; the
    runtime ticket then waits as `pending_install --retry-install`, and the
    watcher starts its install session only with an unlocked screen. That
    session runs the recorded tests on main before packaging and records them
-   with `protected-pending --passed`; a failure there is a finding against
+   with `protected-pending --passed`; a failure there is a failure of the
    merged code, holds the install (`--hold`) and is reported to the authors.
    `done` is refused while tests are pending (see the
    [flaky tests decision](../decisions/2026-11-23-builder-queue-flaky-tests.md)
    and the [builder quick wins decision](../decisions/2026-11-26-builder-quick-wins.md)).
-   Cheapest checks first: review, probes, documentation checks and `swift test
-   --filter` of the touched classes; a blocking finding blocks without the
-   full suite and names a reproducing check for its whole class that the
-   author adds to the PR. A stacked PR waits for its parent (`set --status
-   queued`). The full suite is the acceptance gate of a merge candidate.
-   Block a PR once with everything. Before setting `blocked`, finish the whole
-   inspection: every probe and check across all paths the PR touches. Write
-   **all** problems found into the ticket note as one numbered list. When a
-   probe exposes a class of error (for example parsing other tools'
-   configuration files), name the whole class and check every instance, not
-   only the one that failed. On a later attempt of the same PR (its earlier
-   tickets and notes are in `status`), a new block is allowed only for (a) a
-   problem the fix itself introduced or (b) an item of the previous list that
-   is still not fixed. A problem that was already in the code at the previous
-   attempt but missing from its list never blocks: fix it yourself when the
-   fix is mechanical and safe, otherwise record it in the ticket note as a
-   follow-up and continue with the PR (see the
-   [builder blocks once decision](../decisions/2026-11-22-builder-blocks-once.md)).
+   Cheapest checks first: documentation checks, the build and `swift test
+   --filter` of the touched classes; a failure there blocks without the full
+   suite, with the failing command and its output. A stacked PR waits for its
+   parent (`set --status queued`). The full suite is the acceptance gate of a
+   merge candidate. Block a PR once with everything: every failing build,
+   test and documentation check in one numbered list. A later attempt of the
+   same PR is blocked only for a check that still fails or a failure the fix
+   introduced (see the
+   [builder blocks once decision](../decisions/2026-11-22-builder-blocks-once.md),
+   now limited to failing checks).
 5. Record the result with `set --ticket <id> --status <state> --note <evidence>`.
    `done` requires either a verified running build with source/version/smoke
    evidence, or an explicit tooling/documentation-only result requiring no app
@@ -488,9 +585,10 @@ queue survives downtime.
    automatically. Release the integration lock when deferring. A safe
    handoff can finish it later, or a newer verified candidate can supersede it
    after proving the earlier feature is included. Neither case silently drops
-   acceptance steps. `blocked` records missing evidence, failures or a decision
-   needed from the worker/user, all of them in one numbered list (step 4); a
-   re-block names the list item it repeats or the fix that caused it.
+   acceptance steps. `blocked` records failing checks or a decision needed from the
+   worker/user, all of them in one numbered list (step 4), or a preview
+   awaiting the owner; a re-block names the list item it repeats or the fix
+   that caused it.
    Pending/blocked tickets do not stop later work.
 6. Deliver new status events and acknowledge successful sends. Messages include
    the event ID, result, what is actually running, acceptance checks and any
@@ -548,21 +646,22 @@ The directory lock is a cooperative agent rule, not an existing script guard.
 Under the lock:
 
 1. Fetch current main. In the task's clean integration candidate, incorporate
-   the latest base without discarding others' changes. Review both
-   `git diff origin/main...HEAD` and the resulting combined tree. An ancestor
-   check or a conflict-free merge alone does not prove existing features survive.
-2. Resolve dependencies and gather review findings before final validation.
-   Check the affected behavior and adjacent interactions. For runtime changes,
+   the latest base without discarding others' changes. A conflict-free merge
+   alone does not prove existing features survive: the combined tree must
+   build and pass both sides' tests. The builder does not review the diff.
+2. Resolve dependencies before final validation. For runtime changes,
    run the required local build/tests, including the integrated full suite, on
-   the final candidate. Documentation-only changes use documentation checks.
+   the final candidate: one PR in the normal lane, the whole batch in a
+   release batch (see "Policy by lane and stage"). Documentation-only changes use documentation checks.
    Keep GitHub Actions disabled. Do not repeat broad checks without a change,
    failure or concrete remaining risk.
-3. Merge through the repository's PR workflow, checking the exact reviewed head
-   SHA and base. If either moves, reconcile and validate the affected result.
+3. Merge through the repository's PR workflow, checking the exact submitted
+   head SHA and base. If either moves, reconcile and validate the affected result.
    Fetch and verify the merged source/tree before packaging. Do not force-push
-   shared main or bypass existing review/release gates.
-4. Group the install, never the review or the tests: each PR is still checked,
-   tested and merged alone. The helper marks each ticket `runtime` at
+   shared main or bypass the release gates.
+4. In the normal lane, group the install, never the tests: each
+   PR is still checked, tested and merged alone (a release batch is tested
+   as one composition, see "Policy by lane and stage"). The helper marks each ticket `runtime` at
    submission (any changed path outside documentation, tests, `.github/` and
    the queue's own scripts). After merging a runtime PR, count the merged
    runtime tickets waiting for an automatic install, including this one. While
@@ -749,8 +848,8 @@ the current app/data if compatibility is unknown.
 
 Before the first main-based refresh, inventory the actual installed build and
 reconcile its source with main. In particular, an already installed build from
-a feature branch may contain fixes not in main yet. Integrate/review those
-fixes before replacing it; do not silently downgrade to an older source tree.
+a feature branch may contain fixes not in main yet. Integrate those fixes
+through the queue before replacing it; do not silently downgrade to an older source tree.
 Preserve the primary checkout's WIP for its owning session to reconcile.
 
 Publish this procedure through main, the team runbook and synchronized

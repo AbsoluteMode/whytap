@@ -15,7 +15,7 @@ final class MCPConfigImporterTests: XCTestCase {
     }
 
     func testNoConfigFilesMeansNothingFoundAndNoProblems() throws {
-        let scan = MCPConfigImporter(home: try home([:])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([:])).scan()
         XCTAssertEqual(scan, SourceImportScan())
     }
 
@@ -33,7 +33,7 @@ final class MCPConfigImporterTests: XCTestCase {
          },
          "projects": {"/Users/me/code/app": {"mcpServers": {"db": {"command": "uvx", "args": ["db-mcp"], "env": {"DB_URL": "postgres://u:p@h/db"}}}}}}
         """
-        let scan = MCPConfigImporter(home: try home([".claude.json": claude])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".claude.json": claude])).scan()
         XCTAssertTrue(scan.problems.isEmpty)
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         let github = try XCTUnwrap(byName["github"]?.draft)
@@ -61,7 +61,7 @@ final class MCPConfigImporterTests: XCTestCase {
     }
 
     func testBrokenFilesAreNamedAndOtherAppsStillImport() throws {
-        let scan = MCPConfigImporter(home: try home([
+        let scan = MCPConfigImporter(enabled: true, home: try home([
             ".cursor/mcp.json": "{ not json",
             "Library/Application Support/Claude/claude_desktop_config.json": #"{"mcpServers": {"fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"]}}}"#,
         ])).scan()
@@ -88,7 +88,7 @@ final class MCPConfigImporterTests: XCTestCase {
         args = ['mcp-atlassian'] # trailing comment
         env = { JIRA_URL = "https://x.atlassian.net", JIRA_API_TOKEN = "atl" }
         """
-        let scan = MCPConfigImporter(home: try home([".codex/config.toml": toml])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".codex/config.toml": toml])).scan()
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         XCTAssertEqual(byName["github"]?.draft?.secrets["GITHUB_PERSONAL_ACCESS_TOKEN"], "github_pat_abc")
         let remote = try XCTUnwrap(byName["remote"]?.draft)
@@ -102,7 +102,7 @@ final class MCPConfigImporterTests: XCTestCase {
 
     func testVSCodeServersWithInputPlaceholdersNeedAValue() throws {
         let json = #"{"inputs": [{"id": "tok", "type": "promptString", "password": true}], "servers": {"gh": {"type": "http", "url": "https://api.githubcopilot.com/mcp/", "headers": {"Authorization": "Bearer ${input:tok}"}}, "local": {"command": "node", "args": ["server.js"]}}}"#
-        let scan = MCPConfigImporter(home: try home(["Library/Application Support/Code/User/mcp.json": json])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home(["Library/Application Support/Code/User/mcp.json": json])).scan()
         XCTAssertEqual(scan.candidates.map(\.name), ["gh", "local"])
         XCTAssertEqual(scan.candidates[0].draft?.missing, ["header.Authorization"])
         XCTAssertEqual(scan.candidates[1].draft?.transport, .stdio(command: "node", arguments: ["server.js"], directory: nil))
@@ -110,14 +110,14 @@ final class MCPConfigImporterTests: XCTestCase {
 
     func testTheSameServerInTwoAppsIsOfferedOnce() throws {
         let entry = #"{"mcpServers": {"fs": {"command": "npx", "args": ["-y", "server-fs"]}}}"#
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": entry,
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": entry,
                                                      "Library/Application Support/Claude/claude_desktop_config.json": entry])).scan()
         XCTAssertEqual(scan.candidates.filter { $0.draft != nil }.count, 1)
         XCTAssertEqual(scan.candidates.first { $0.draft == nil }?.note, "Same server as Claude Desktop · fs.")
     }
 
     func testInsecureRemoteAddressIsNotImported() throws {
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": #"{"mcpServers": {"x": {"url": "http://example.com/mcp"}}}"#])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": #"{"mcpServers": {"x": {"url": "http://example.com/mcp"}}}"#])).scan()
         XCTAssertNil(scan.candidates.first?.draft)
         XCTAssertEqual(scan.candidates.first?.note, MCPError.insecureURL.message)
     }
@@ -127,7 +127,7 @@ final class MCPConfigImporterTests: XCTestCase {
     /// Point 1: the builder's sentinel never reaches a preview, a draft or a launch.
     func testTheBuildersArgvSentinelIsMaskedAndNotImported() throws {
         let json = #"{"mcpServers": {"probe": {"command": "/usr/local/bin/probe", "args": ["--token", "synthetic_value_for_secret_redaction_check"]}}}"#
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": json])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": json])).scan()
         let probe = try XCTUnwrap(scan.candidates.first)
         XCTAssertNil(probe.draft)
         XCTAssertEqual(probe.note, SourceCredentialPolicy.argumentReason)
@@ -137,7 +137,7 @@ final class MCPConfigImporterTests: XCTestCase {
 
     func testCredentialsInARemoteAddressAreRefusedAndMasked() throws {
         let json = #"{"mcpServers": {"q": {"url": "https://mcp.example.com/mcp?api_key=s3cr3t"}, "u": {"url": "https://user:pw@mcp.example.com/mcp"}, "loop": {"url": "http://127.0.0.1:8080/mcp", "headers": {"Authorization": "Bearer abc"}}, "plainloop": {"url": "http://localhost:8080/mcp"}}}"#
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": json])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": json])).scan()
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         for name in ["q", "u"] {
             XCTAssertNil(byName[name]?.draft, name)
@@ -162,7 +162,7 @@ final class MCPConfigImporterTests: XCTestCase {
         ]
         cwd = "/Users/me/work"
         """
-        let scan = MCPConfigImporter(home: try home([".codex/config.toml": toml])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".codex/config.toml": toml])).scan()
         let fs = try XCTUnwrap(scan.candidates.first?.draft)
         XCTAssertEqual(fs.transport, .stdio(command: "npx", arguments: ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/Documents"],
                                             directory: "/Users/me/work"))
@@ -183,7 +183,7 @@ final class MCPConfigImporterTests: XCTestCase {
         [mcp_servers.ok]
         command = "srv"
         """#
-        let scan = MCPConfigImporter(home: try home([".codex/config.toml": toml])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".codex/config.toml": toml])).scan()
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         XCTAssertNil(byName["filtered"]?.draft)
         XCTAssertEqual(byName["filtered"]?.note, "Uses enabled_tools, which Whytap can’t carry over yet.")
@@ -194,7 +194,7 @@ final class MCPConfigImporterTests: XCTestCase {
 
     func testJSONEntriesKeepTheirWorkingFolderAndRefuseUnknownKeys() throws {
         let json = #"{"mcpServers": {"a": {"command": "srv", "cwd": "~/proj"}, "b": {"command": "srv", "cwd": "rel"}, "c": {"command": "srv", "envFile": ".env"}}}"#
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": json])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": json])).scan()
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         XCTAssertEqual(byName["a"]?.draft?.transport,
                        .stdio(command: "srv", arguments: [], directory: ("~/proj" as NSString).expandingTildeInPath))

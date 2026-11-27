@@ -138,13 +138,13 @@ final class SourceInputClassTests: XCTestCase {
             "twoAddresses": ["url": "https://x.example/mcp", "serverUrl": "https://y.example/mcp"],
         ]
         let data = try JSONSerialization.data(withJSONObject: ["mcpServers": entries])
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": String(decoding: data, as: UTF8.self)])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": String(decoding: data, as: UTF8.self)])).scan()
         XCTAssertEqual(scan.candidates.count, entries.count)
         for candidate in scan.candidates {
             XCTAssertNil(candidate.draft, candidate.name)
             XCTAssertFalse((candidate.note ?? "").isEmpty, candidate.name)
         }
-        let ok = MCPConfigImporter(home: try home([".cursor/mcp.json": #"{"mcpServers": {"a": {"type": "stdio", "command": "srv", "args": ["-y"], "env": {"A": "b"}, "cwd": "/tmp", "description": "x"}, "b": {"type": "http", "url": "https://x.example/mcp", "headers": {"Authorization": "Bearer ${T}"}}}}"#])).scan()
+        let ok = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": #"{"mcpServers": {"a": {"type": "stdio", "command": "srv", "args": ["-y"], "env": {"A": "b"}, "cwd": "/tmp", "description": "x"}, "b": {"type": "http", "url": "https://x.example/mcp", "headers": {"Authorization": "Bearer ${T}"}}}}"#])).scan()
         XCTAssertEqual(ok.candidates.compactMap(\.draft).count, 2)
     }
 
@@ -172,14 +172,14 @@ final class SourceInputClassTests: XCTestCase {
         var toml = ""
         for (name, body) in entries.sorted(by: { $0.key < $1.key }) { toml += "[mcp_servers.\(name)]\n\(body)\n\n" }
         toml += "[mcp_servers.subtable]\ncommand = \"srv\"\n[mcp_servers.subtable.env]\nA = \"b\"\n[mcp_servers.subtable.extra]\nx = 1\n\n"
-        let scan = MCPConfigImporter(home: try home([".codex/config.toml": toml])).scan()
+        let scan = MCPConfigImporter(enabled: true, home: try home([".codex/config.toml": toml])).scan()
         let byName = Dictionary(uniqueKeysWithValues: scan.candidates.map { ($0.name, $0) })
         for name in entries.keys.sorted() + ["subtable"] {
             let candidate = try XCTUnwrap(byName[name], name)
             XCTAssertNil(candidate.draft, name)
             XCTAssertFalse((candidate.note ?? "").isEmpty, name)
         }
-        let good = MCPConfigImporter(home: try home([".codex/config.toml": "[mcp_servers.ok]\ncommand = \"srv\"\nargs = [\"tab\\there\", \"\\u00e9\"]\nenabled = true\nenv_vars = [\"HOME_TOKEN\"]\n"])).scan()
+        let good = MCPConfigImporter(enabled: true, home: try home([".codex/config.toml": "[mcp_servers.ok]\ncommand = \"srv\"\nargs = [\"tab\\there\", \"\\u00e9\"]\nenabled = true\nenv_vars = [\"HOME_TOKEN\"]\n"])).scan()
         let draft = try XCTUnwrap(good.candidates.first?.draft)
         XCTAssertEqual(draft.transport, .stdio(command: "srv", arguments: ["tab\there", "é"], directory: nil))
         XCTAssertEqual(draft.missing, ["HOME_TOKEN"], "env_vars become values to paste")

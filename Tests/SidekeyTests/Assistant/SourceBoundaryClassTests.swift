@@ -60,7 +60,7 @@ final class SourceBoundaryClassTests: XCTestCase {
             servers["bad\(index)"] = ["url": address, "timeout": 5]
             codex += "[mcp_servers.url\(index)]\nurl = \(toml(address))\n\n"
         }
-        let scan = MCPConfigImporter(home: try home([".cursor/mcp.json": json(["mcpServers": servers]),
+        let scan = MCPConfigImporter(enabled: true, home: try home([".cursor/mcp.json": json(["mcpServers": servers]),
                                                      ".codex/config.toml": codex])).scan()
         XCTAssertEqual(scan.candidates.count, servers.count + 2 * Self.commandLines.count + Self.addresses.count, "Every entry is listed")
         for candidate in scan.candidates {
@@ -367,7 +367,7 @@ final class SourceBoundaryClassTests: XCTestCase {
         for revocation in Revocation.allCases {
             // A fresh controller loads the folder from disk, as after a relaunch.
             let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: InMemoryTokenStore.Box()) })
-            let loaded = SourcesController(directory: directory, keys: keys, classifier: nil)
+            let loaded = SourcesController(enabled: true, directory: directory, keys: keys, classifier: nil)
             loaded.loadIfNeeded()
             let gate = TestCheckpoint()
             await gate.arm()
@@ -478,7 +478,7 @@ final class SourceBoundaryClassTests: XCTestCase {
         let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
         let environment = environment ?? SourceProcessEnvironment(resolve: { $0.hasPrefix("/") ? $0 : nil },
                                                                   base: { ["PATH": "/usr/bin:/bin"] })
-        let controller = SourcesController(directory: directory, keys: keys, classifier: classifier, environment: environment)
+        let controller = SourcesController(enabled: true, directory: directory, keys: keys, classifier: classifier, environment: environment)
         addTeardownBlock { @MainActor in
             await controller.stopAll()
             try? FileManager.default.removeItem(at: directory)

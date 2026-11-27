@@ -90,7 +90,11 @@ final class SourcesController: ObservableObject {
     @Published private(set) var error: String?
 
     let fileURL: URL
-    private let keys: ProviderKeyStore
+    private let keyStore: ProviderKeyStore
+    /// Every Keychain access (read, write, delete, presence) goes through
+    /// this: nil while the feature is gated off, so an off controller never
+    /// reaches the store. WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+    private var keys: ProviderKeyStore? { isEnabled ? keyStore : nil }
     private let classifier: SourceToolModelClassifier?
     private let session: URLSession
     private let environment: SourceProcessEnvironment
@@ -122,17 +126,24 @@ final class SourcesController: ObservableObject {
             .appendingPathComponent("assistant", isDirectory: true)
     }
 
-    init(directory: URL = SourcesController.defaultDirectory, keys: ProviderKeyStore = ProviderKeyStore(),
+    /// False while the feature is gated off: nothing is loaded, saved, stored
+    /// in Keychain, connected or offered to the Agent.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+    let isEnabled: Bool
+
+    init(enabled: Bool = AgentSourcesGate.isEnabled,
+         directory: URL = SourcesController.defaultDirectory, keys: ProviderKeyStore = ProviderKeyStore(),
          classifier: SourceToolModelClassifier? = .agentModel, session: URLSession = .shared,
          environment: SourceProcessEnvironment = .live) {
+        isEnabled = enabled
         fileURL = directory.appendingPathComponent("sources.json")
-        self.keys = keys; self.classifier = classifier; self.session = session; self.environment = environment
+        self.keyStore = keys; self.classifier = classifier; self.session = session; self.environment = environment
     }
 
     // MARK: - Manifest
 
     func loadIfNeeded() {
-        guard !loaded else { return }
+        guard isEnabled, !loaded else { return }
         loaded = true
         if let data = try? Data(contentsOf: fileURL) {
             do { sources = try JSONDecoder().decode([SourceRecord].self, from: data) }
@@ -148,6 +159,7 @@ final class SourcesController: ObservableObject {
     }
 
     private func save() {
+        guard isEnabled else { return }
         do {
             let directory = fileURL.deletingLastPathComponent()
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true,
@@ -195,7 +207,7 @@ final class SourcesController: ObservableObject {
         if let mask = masks[id] { return mask }
         guard let record = record(id) else { return SourceSecretMask([]) }
         let mask = SourceSecretMask(record.secretNames.compactMap {
-            keys.read(account: SourceRecord.keychainAccount(source: id, name: $0))
+            keys?.read(account: SourceRecord.keychainAccount(source: id, name: $0))
         })
         masks[id] = mask
         return mask
@@ -217,6 +229,7 @@ final class SourcesController: ObservableObject {
     /// that breaks the credential policy is refused here too.
     @discardableResult
     func add(_ draft: SourceDraft) async -> String? {
+        guard isEnabled else { return nil }
         loadIfNeeded()
         if let problem = draft.credentialProblem { error = problem; return nil }
         let id = Self.newID(name: draft.name, existing: Set(sources.map(\.id)))
@@ -225,7 +238,7 @@ final class SourcesController: ObservableObject {
                                   environment: draft.environment, headers: draft.headers)
         record.proof = draft.proof
         for (name, value) in draft.secrets where !value.isEmpty && record.secretNames.contains(name) {
-            do { try keys.save(value, account: SourceRecord.keychainAccount(source: id, name: name)) }
+            do { try keys?.save(value, account: SourceRecord.keychainAccount(source: id, name: name)) }
             catch { self.error = "Couldn’t save a value in Keychain." }
         }
         if case .folder(let path) = draft.transport {
@@ -261,15 +274,15 @@ final class SourcesController: ObservableObject {
         exits[id] = nil
         save()
         await stop(id)
-        for name in record.secretNames { try? keys.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
+        for name in record.secretNames { try? keys?.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
     }
 
     func setSecret(_ value: String, name: String, id: String) async {
-        guard let record = record(id), record.secretNames.contains(name) else { return }
+        guard isEnabled, let record = record(id), record.secretNames.contains(name) else { return }
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         do {
-            if trimmed.isEmpty { try keys.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
-            else { try keys.save(trimmed, account: SourceRecord.keychainAccount(source: id, name: name)) }
+            if trimmed.isEmpty { try keys?.delete(account: SourceRecord.keychainAccount(source: id, name: name)) }
+            else { try keys?.save(trimmed, account: SourceRecord.keychainAccount(source: id, name: name)) }
         } catch { self.error = "Couldn’t save a value in Keychain." }
         masks[id] = nil
         await stop(id)
@@ -277,7 +290,7 @@ final class SourcesController: ObservableObject {
     }
 
     func hasSecret(_ name: String, id: String) -> Bool {
-        keys.hasKey(account: SourceRecord.keychainAccount(source: id, name: name))
+        keys?.hasKey(account: SourceRecord.keychainAccount(source: id, name: name)) ?? false
     }
 
     /// The user's own class for one tool, approved as the tool is now.
@@ -319,6 +332,7 @@ final class SourcesController: ObservableObject {
 
     /// Connects, lists tools (pinning), classifies new ones and runs the proof call.
     func check(_ id: String) async {
+        guard isEnabled else { return }
         loadIfNeeded()
         guard let record = record(id) else { return }
         guard record.enabled else { statuses[id] = .off; return }
@@ -553,7 +567,7 @@ final class SourcesController: ObservableObject {
     }
 
     func missingSecrets(_ record: SourceRecord) -> [String] {
-        record.secretNames.filter { !keys.hasKey(account: SourceRecord.keychainAccount(source: record.id, name: $0)) }
+        record.secretNames.filter { !(keys?.hasKey(account: SourceRecord.keychainAccount(source: record.id, name: $0)) ?? false) }
     }
 
     /// "header.Authorization" → "the Authorization header".
@@ -567,7 +581,7 @@ final class SourcesController: ObservableObject {
     /// The live client for this generation, connecting when needed. A new
     /// client is not validated: its tools are re-listed before any call.
     private func client(for id: String, generation: Int) async throws -> MCPClient {
-        guard isCurrent(id, generation) else { throw MCPError.notAllowed }
+        guard isEnabled, isCurrent(id, generation) else { throw MCPError.notAllowed }
         if let existing = clients[id] {
             if await existing.isOpen, clients[id] === existing { return existing }
             if clients[id] === existing { clients[id] = nil; validated[id] = nil }
@@ -617,7 +631,7 @@ final class SourcesController: ObservableObject {
             guard !Task.isCancelled, isCurrent(record.id, generation) else { throw MCPError.cancelled }
         }
         let secret = { (name: String) -> String? in
-            self.keys.read(account: SourceRecord.keychainAccount(source: record.id, name: name))
+            self.keys?.read(account: SourceRecord.keychainAccount(source: record.id, name: name))
         }
         let transport: MCPTransport
         let timeout: TimeInterval
@@ -733,6 +747,7 @@ final class SourcesController: ObservableObject {
     /// Approved Read tools of enabled sources, or nil without any. No server
     /// is started for this: the tool lists come from the last check.
     func agentCatalog() -> AgentSourceCatalog? {
+        guard isEnabled else { return nil }
         loadIfNeeded()
         var tools: [AgentSourceCatalog.Tool] = []
         var used = Set<String>()
@@ -757,7 +772,7 @@ final class SourcesController: ObservableObject {
 
     /// The only way the Agent reaches a source.
     func callRead(sourceID: String, tool: String, arguments: MCPValue) async throws -> MCPToolResult {
-        guard let record = record(sourceID), record.enabled, record.readTools.contains(where: { $0.name == tool }) else {
+        guard isEnabled, let record = record(sourceID), record.enabled, record.readTools.contains(where: { $0.name == tool }) else {
             throw MCPError.notAllowed
         }
         guard arguments.object != nil else { throw MCPError.server(code: -32602, message: "arguments must be a JSON object") }

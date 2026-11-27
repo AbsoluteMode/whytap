@@ -48,13 +48,28 @@ clipboard png/tiff only. The target pasted the old screenshot.
   timeout, quit and every restore check ownership first.
 - A remembered, still running target that loses focus during the 80 ms
   non-blocking settle stops the paste and the clipboard comes back: the
-  global Cmd+V would reach the other app.
+  global Cmd+V would reach the other app. The take's target is fixed when
+  its paste starts, so a newer take capturing another app cannot redirect
+  it.
+- The global Cmd+V is checked once more between Command-down and V-down
+  (the event that pastes): the clipboard must still hold this take's
+  dictation and the app that was frontmost at Command-down must still be
+  frontmost. Otherwise Command is released, V is never sent, and the
+  clipboard comes back only if it is still Drop's. Without a remembered
+  target only ownership decides (the documented fallback).
+- A failed write restores only when the write itself moved the change
+  count (or the previous take's dictation is still there) and nothing newer
+  arrived after it.
 - Drop pastes run one at a time. A take that starts while the previous one
   waits for its read waits too (up to the 2 s fallback), so the previous
   target reads its own dictation, then inherits the snapshot; if its write
   fails, the snapshot is restored at once.
 - `applicationWillTerminate` gives the clipboard back whether the paste is
-  before Cmd+V (it then stops) or after it.
+  before Cmd+V (it then stops) or after it. Every Drop paste that began
+  before the flush stops before writing or posting, including takes that
+  wait for the previous target's read or for their paste turn. A
+  handed-over claim stays registered until the next take's write replaces
+  it, so a flush in between still restores it.
 - Another Whytap feature that snapshots the clipboard, writes and restores
   (selection capture, a failed Shot text copy) puts the dictation back with
   a new change count. Drop recognises its dictation by content (transient
@@ -96,7 +111,12 @@ a second Drop waits until the first target read "take one", then each
 target reads its own take; concurrent pastes run in turn; focus lost during
 the settle posts nothing; selection capture (with and without a selection)
 and a failed Shot text copy no longer strand the dictation, and a
-successful Shot copy is kept. On a named pasteboard: promise read counting
+successful Shot copy is kept. After the review of ticket 692: a copy
+between Command-down and V-down (with and without a target) is not pasted
+and not overwritten; a failed write does not restore over a later copy; quit
+while a second take waits for the first read, or while two later takes
+wait, stops them; a newer take capturing another app during the settle, and
+a focus change between Command-down and V-down, post no V. On a named pasteboard: promise read counting
 and cache, `ClipboardWatcher` skipping the item unread, and an end-to-end
 run where a separate `osascript` process reads 300 ms after Cmd+V from an
 image-only pasteboard. With the timing forced back to 120 ms that process

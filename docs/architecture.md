@@ -210,8 +210,11 @@ Voice flow (Drop / dictation):
             CGEvent Cmd+V (4-event sequence) -> return. Drop owns only the
             generation its write produced (a clipboard claim): newer content
             before Cmd+V stops the paste (false) and is never restored over;
-            a remembered target that loses focus during the 80 ms
-            non-blocking settle stops it too. The clipboard comes back
+            a remembered target (fixed when the paste starts) that loses
+            focus during the 80 ms non-blocking settle stops it too, and
+            ownership plus the frontmost recipient are rechecked between
+            Command-down and V-down (V is never sent otherwise). Quit stops
+            every Drop paste that began before it. The clipboard comes back
             asynchronously 150 ms after the last read of the dictation after
             Cmd+V, or after 2 s without one. Drop pastes run one at a time;
             a newer take waits for the previous target's read (or its

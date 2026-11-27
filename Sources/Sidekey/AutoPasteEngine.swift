@@ -201,6 +201,9 @@ final class AutoPasteEngine {
         func handOver() { handedOver = true }
     }
     private var claim: ClipboardClaim?
+    /// Bumped by `flushPendingRestore` (quit): every Drop paste that began
+    /// before it stops before its clipboard write or key events.
+    private var flushGeneration = 0
     /// Drop pastes run one at a time; a newer take waits for its turn.
     private var pasteTurnBusy = false
     private var pasteTurnWaiters: [CheckedContinuation<Void, Never>] = []
@@ -375,9 +378,18 @@ final class AutoPasteEngine {
             return inserted
         }
 
+        // The take's target is fixed for this paste: a newer take that
+        // captures another app while this one waits must not redirect it.
+        let target = remembered
+        let generation = flushGeneration
+
         // One Drop paste at a time: the claim below must not be shared.
         await acquirePasteTurn()
         defer { releasePasteTurn() }
+        guard flushGeneration == generation else {
+            logEmit(.error, "autopaste_failed step=paste reason=retired_by_flush")
+            return false
+        }
 
         // Step 1: the user's clipboard to restore after the paste. A take
         // that arrives while the previous paste still waits for its read
@@ -385,6 +397,11 @@ final class AutoPasteEngine {
         // and takes over its snapshot: the pasteboard then holds the
         // previous dictation, not the user's clipboard.
         let (snapshot, inherited) = await takeOverPreviousClaim()
+        guard flushGeneration == generation else {
+            // The flush already gave back whatever the previous take held.
+            logEmit(.error, "autopaste_failed step=paste reason=retired_by_flush")
+            return false
+        }
         logEmit(.info, "autopaste_pasteboard_snapshotted items=\(snapshot.items.count) inherited=\(inherited)")
 
         // Step 2: enable the shared clipboard-suppression flag BEFORE
@@ -396,9 +413,10 @@ final class AutoPasteEngine {
 
         // Step 3: pasteboard write. If this fails the rest of the
         // pipeline is moot. A writer may have cleared the clipboard before
-        // reporting failure, so restore if its change count moved (or the
-        // pasteboard still holds an earlier take's dictation). Suppression
-        // must still be cleared on the failure path.
+        // reporting failure, so restore if the write itself moved the
+        // change count (or the pasteboard still holds an earlier take's
+        // dictation) — and only while nothing newer arrived since.
+        // Suppression must still be cleared on the failure path.
         let beforeWriteCount = currentChangeCount()
         let written: (before: Int, after: Int)?
         let plainText: String
@@ -409,11 +427,17 @@ final class AutoPasteEngine {
             plainText = text
             written = pasteboardWrite(text)
         }
+        let afterWriteCount = currentChangeCount()
         guard let counts = written else {
             logEmit(.error, "autopaste_failed step=pasteboard reason=write_returned_nil")
-            if inherited || currentChangeCount() != beforeWriteCount {
+            let writerMutated = afterWriteCount != beforeWriteCount
+            let previousTakeHolds = inherited && claim.map(clipboardIsOwned(by:)) == true
+            if claim != nil { claim = nil }
+            if (writerMutated || previousTakeHolds), currentChangeCount() == afterWriteCount {
                 pasteboardRestore(snapshot)
                 suppressClipboardThrough(currentChangeCount())
+            } else if writerMutated || inherited {
+                logEmit(.info, "autopaste_pasteboard_restore_skipped reason=replaced after=failure")
             }
             setClipboardSuppression(false)
             return false
@@ -457,10 +481,10 @@ final class AutoPasteEngine {
         }
         logEmit(.info, "autopaste_modifiers_released wait_ms=\(Int(modifierWaitMs))")
 
-        // Step 6: restore focus to the remembered target. If the remembered
-        // app died or no target was remembered, skip; paste lands wherever
-        // focus currently is (acceptable degradation).
-        await restoreTargetFocusIfNeeded()
+        // Step 6: restore focus to the take's target. If that app died or
+        // no target was remembered, skip; paste lands wherever focus
+        // currently is (acceptable degradation).
+        await restoreTargetFocusIfNeeded(target)
         let frontmostBeforeSettle = frontmostAppInfo()
 
         // Step 7: settle.
@@ -486,7 +510,12 @@ final class AutoPasteEngine {
             logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
             return false
         }
-        if let target = remembered, !isTerminated(target.pid),
+        guard flushGeneration == generation else {
+            logEmit(.error, "autopaste_failed step=paste reason=retired_by_flush")
+            giveBack(claim, after: "flush")
+            return false
+        }
+        if let target, !isTerminated(target.pid),
            frontmostBeforeSettle?.pid == target.pid, frontmostAppInfo()?.pid != target.pid {
             logEmit(.error, "autopaste_failed step=focus reason=target_lost_focus")
             giveBack(claim, after: "failure")
@@ -495,8 +524,12 @@ final class AutoPasteEngine {
 
         // Step 10: post Cmd+V. Explicit Command-down → V-down → V-up →
         // Command-up sequence with usleep gaps — `CGEvent.flags = .maskCommand`
-        // alone is not enough on every app (friend's empirical note).
-        postCmdV()
+        // alone is not enough on every app (friend's empirical note). The
+        // app frontmost now receives it; ownership and that recipient are
+        // checked again right before V-down.
+        guard postDropCmdV(recipient: frontmostAppInfo(), claim: claim) else {
+            return false
+        }
         let readsAtPaste = readMonitor.readCount
         logEmit(.info, "autopaste_posted_cmdv")
 
@@ -515,9 +548,42 @@ final class AutoPasteEngine {
     /// before or after its Cmd+V. A paste that has not posted Cmd+V yet
     /// then stops. Called when the app terminates.
     func flushPendingRestore() {
+        flushGeneration += 1
         guard let claim else { return }
         claim.task?.cancel()
         giveBack(claim, after: "flush")
+    }
+
+    /// Drop's global Cmd+V. Before V-down — the event that pastes — the
+    /// clipboard must still hold this take's dictation and `recipient`
+    /// must still be frontmost; otherwise Command is released, nothing is
+    /// pasted and the clipboard comes back if it is still Drop's. After
+    /// V-down the paste is delivered and the sequence completes.
+    /// WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
+    private func postDropCmdV(recipient: RememberedTarget?, claim: ClipboardClaim) -> Bool {
+        postEvent(Self.commandKeyCode, true, [])
+        sleepUs(Self.keyEventGapUs)
+        let recipientReady = recipient.map { frontmostAppInfo()?.pid == $0.pid } ?? true
+        let owned = self.claim === claim && clipboardIsOwned(by: claim)
+        guard recipientReady, owned else {
+            postEvent(Self.commandKeyCode, false, [])
+            if self.claim !== claim {
+                logEmit(.error, "autopaste_failed step=paste reason=clipboard_given_back")
+            } else if !owned {
+                self.claim = nil
+                logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
+            } else {
+                logEmit(.error, "autopaste_failed step=focus reason=recipient_lost_focus")
+                giveBack(claim, after: "failure")
+            }
+            return false
+        }
+        postEvent(Self.vKeyCode, true, .maskCommand)
+        sleepUs(Self.keyEventGapUs)
+        postEvent(Self.vKeyCode, false, .maskCommand)
+        sleepUs(Self.keyEventGapUs)
+        postEvent(Self.commandKeyCode, false, [])
+        return true
     }
 
     /// Waits until the pending clipboard restore (if any) has finished.
@@ -550,10 +616,12 @@ final class AutoPasteEngine {
                 logEmit(.info, "autopaste_waiting_for_previous_paste")
                 await previous.task?.value
             }
-            if claim === previous { claim = nil }
-            if previous.handedOver, clipboardIsOwned(by: previous) {
+            // A handed-over claim stays registered until this take's write
+            // replaces it, so a flush in between still gives it back.
+            if claim === previous, previous.handedOver, clipboardIsOwned(by: previous) {
                 return (previous.snapshot, true)
             }
+            if claim === previous { claim = nil }
         }
         return (pasteboardSnapshot(), false)
     }
@@ -634,7 +702,6 @@ final class AutoPasteEngine {
             guard readSettled || timedOut || elapsedMs >= deadlineMs else { continue }
             let detail = " wait_ms=\(elapsedMs) reads=\(seenReads - readsAtPaste)"
             if claim.successorWaiting {
-                self.claim = nil
                 claim.handOver()
                 logEmit(.info, "autopaste_pasteboard_handed_over after=\(readSettled ? "read" : "timeout")\(detail)")
                 return
@@ -826,10 +893,14 @@ final class AutoPasteEngine {
     /// Activates the remembered target and polls until the frontmost app
     /// matches. No-op if no remembered target or if it has terminated.
     private func restoreTargetFocusIfNeeded() async {
+        await restoreTargetFocusIfNeeded(remembered)
+    }
+
+    private func restoreTargetFocusIfNeeded(_ target: RememberedTarget?) async {
         let from = frontmostAppInfo()
         let fromName = from?.name ?? "(unknown)"
 
-        guard let target = remembered else {
+        guard let target else {
             logEmit(.info, "autopaste_focus_restored from=\(fromName) to=(no_target)")
             return
         }

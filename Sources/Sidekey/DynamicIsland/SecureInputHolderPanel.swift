@@ -12,6 +12,11 @@ final class SecureInputHolderModel: ObservableObject {
     @Published var hovered = false
     /// The island's compact height, so the pill matches it.
     @Published var height: CGFloat = 32
+    /// Taller than `height` when the hover label wraps.
+    @Published var pillHeight: CGFloat = 32
+    /// Set when the label does not fit on one line beside the island: it
+    /// wraps at this width instead of running off the screen.
+    @Published var wrapWidth: CGFloat?
 }
 
 /// The macOS wrong-password shake, as horizontal offsets in points. The
@@ -29,11 +34,41 @@ enum SecureInputHolderMetrics {
 
     static func horizontalPadding(height: CGFloat) -> CGFloat { (height - iconSide) / 2 }
 
+    /// Kept free between the pill and the screen's right edge.
+    static let screenMargin: CGFloat = 8
+    static let wrappedVerticalPadding: CGFloat = 7
+    static let minimumWrapWidth: CGFloat = 80
+
     /// A circle when collapsed; on hover it grows rightward to fit the label.
     static func pillWidth(label: String?, height: CGFloat) -> CGFloat {
         guard let label else { return height }
-        let text = (label as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up) + 2
-        return height + labelSpacing + text
+        return height + labelSpacing + singleLineWidth(label)
+    }
+
+    static func singleLineWidth(_ label: String) -> CGFloat {
+        (label as NSString).size(withAttributes: [.font: labelFont]).width.rounded(.up) + 2
+    }
+
+    struct Layout: Equatable {
+        var size: CGSize
+        /// Nil: one line. Otherwise the label wraps at this width.
+        var wrapWidth: CGFloat?
+    }
+
+    /// The pill for a label within `maxWidth` (from the pill's left edge to
+    /// the screen margin): one line when it fits, otherwise the label wraps
+    /// and the pill grows downward, so the whole text stays readable.
+    // WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
+    static func layout(label: String?, height: CGFloat, maxWidth: CGFloat) -> Layout {
+        let oneLine = pillWidth(label: label, height: height)
+        guard let label, oneLine > maxWidth else { return Layout(size: CGSize(width: oneLine, height: height)) }
+        let wrap = max(minimumWrapWidth, maxWidth - height - labelSpacing).rounded(.down)
+        let text = (label as NSString).boundingRect(
+            with: CGSize(width: wrap, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: labelFont]).height.rounded(.up)
+        let pillHeight = max(height, text + 2 * wrappedVerticalPadding)
+        return Layout(size: CGSize(width: height + labelSpacing + wrap, height: pillHeight), wrapWidth: wrap)
     }
 }
 
@@ -56,24 +91,34 @@ struct SecureInputHolderView: View {
             icon(badge)
                 .frame(width: SecureInputHolderMetrics.iconSide, height: SecureInputHolderMetrics.iconSide)
             if model.hovered {
-                Text(badge.label)
+                label(badge.label)
                     .font(Font(SecureInputHolderMetrics.labelFont))
                     .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .fixedSize()
                     .transition(.opacity)
             }
         }
         .padding(.horizontal, SecureInputHolderMetrics.horizontalPadding(height: model.height))
         .frame(maxWidth: .infinity, alignment: .leading)
-        .frame(height: model.height)
-        .background(Capsule(style: .continuous).fill(Color.black))
+        .frame(height: model.pillHeight)
+        .background(RoundedRectangle(cornerRadius: model.height / 2, style: .continuous).fill(Color.black))
         .opacity(model.emphasized || model.hovered ? 1 : 0.7)
         .animation(.easeOut(duration: 0.15), value: model.hovered)
         .animation(.easeOut(duration: 0.2), value: model.emphasized)
         .onHover { model.hovered = $0 }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(badge.label)
+    }
+
+    @ViewBuilder
+    private func label(_ text: String) -> some View {
+        if let width = model.wrapWidth {
+            Text(text)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: width, alignment: .leading)
+        } else {
+            Text(text).lineLimit(1).fixedSize()
+        }
     }
 
     @ViewBuilder
@@ -169,11 +214,22 @@ final class SecureInputHolderPanel: NSPanel, HotkeyBlockerBadgeSurface {
 
     /// Top-flush with the island, starting just past its right edge.
     static func frame(on screen: IslandScreenDescriptor, width: CGFloat) -> NSRect {
+        frame(on: screen, size: CGSize(width: width, height: islandHeight(on: screen)))
+    }
+
+    /// A wrapped label makes the pill taller; it grows downward.
+    static func frame(on screen: IslandScreenDescriptor, size: CGSize) -> NSRect {
         let island = IslandFrameLayout.islandFrame(on: screen)
-        let height = islandHeight(on: screen)
+        let height = max(islandHeight(on: screen), size.height)
         let x = island.maxX + gapFromIsland
-        let fitted = max(height, min(width, screen.frame.maxX - x))
+        let fitted = max(islandHeight(on: screen), min(size.width, screen.frame.maxX - x))
         return NSRect(x: x, y: island.maxY - height, width: fitted, height: height)
+    }
+
+    /// Room for the pill between the island and the screen's right margin.
+    static func availableWidth(on screen: IslandScreenDescriptor) -> CGFloat {
+        let x = IslandFrameLayout.islandFrame(on: screen).maxX + gapFromIsland
+        return screen.frame.maxX - SecureInputHolderMetrics.screenMargin - x
     }
 
     // MARK: SecureInputHolderPresenting
@@ -248,7 +304,10 @@ final class SecureInputHolderPanel: NSPanel, HotkeyBlockerBadgeSurface {
         let height = Self.islandHeight(on: screen)
         model.height = height
         let label = model.hovered ? model.badge?.label : nil
-        let frame = Self.frame(on: screen, width: SecureInputHolderMetrics.pillWidth(label: label, height: height))
-        setFrame(frame, display: true)
+        let layout = SecureInputHolderMetrics.layout(label: label, height: height,
+                                                     maxWidth: Self.availableWidth(on: screen))
+        model.pillHeight = layout.size.height
+        model.wrapWidth = layout.wrapWidth
+        setFrame(Self.frame(on: screen, size: layout.size), display: true)
     }
 }

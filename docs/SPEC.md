@@ -873,20 +873,22 @@ Copy text распознаёт текст и числа в выбранном о
 удержание Drop с ⌘ — нет.
 Подробнее: [hotkey.md](hotkey.md#secure-input-the-holders-logo-shakes).
 
-## Хоткей перехватывает другое приложение
+## A hotkey intercepted by another app
 
-Если приложение со своим event tap (например, Punto Switcher с переключением
-раскладки на правом ⌥) забирает R⌘ или R⌥ раньше Whytap, Whytap видит
-физическое нажатие своим HID-зондом, но не получает его в обработчиках
-хоткеев. Тогда справа от острова дрожит логотип перехватчика (тот же бейдж,
-что для Secure Input) примерно 3 секунды, затем скрывается; приглушённым он
-не остаётся. Каждое новое перехваченное нажатие показывает его снова и
-перезапускает эти 3 секунды. Наведение показывает «Punto Switcher is
-intercepting Right Option — change the key in one of the apps». Сам
-Whytap, системные процессы Apple и пассивные (listen-only) tap'ы не
-называются. Ремапы ниже tap'ов (Karabiner, `hidutil`), Carbon-сочетания и
-удержание пробела не распознаются.
-Подробнее: [hotkey.md](hotkey.md#another-app-intercepts-a-modifier-shortcut-its-logo-shakes).
+When an app with its own event tap (for example Punto Switcher switching
+layouts on Right Option) takes Right Command or Right Option before Whytap,
+Whytap's HID probe sees the physical press but its shortcut handlers never
+receive it. The interceptor's logo then shakes to the right of the island
+(the same badge as for Secure Input) for about 3 seconds and hides; it never
+stays dimmed. Every new intercepted press shows it again and restarts the
+3 seconds. Hovering shows "Punto Switcher may be intercepting Right Option";
+a long label wraps instead of running off a small screen. Only a press the
+shortcut itself would take counts (the key alone, not with Shift). Whytap
+itself, Apple's system processes and listen-only taps are never named, nor
+an app whose filter appeared after the press or when another app came to the
+front meanwhile. Remaps below the taps (Karabiner, `hidutil`), Carbon combos
+and holding Space are not detected.
+Details: [hotkey.md](hotkey.md#another-app-intercepts-a-modifier-shortcut-its-logo-shakes).
 
 ## Управление приложением через агента
 

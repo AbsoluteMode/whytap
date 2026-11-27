@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import CoreGraphics
 import Darwin
 import os.log
@@ -8,11 +9,12 @@ import os.log
 /// to the same key.
 ///
 /// The signal is exact, not a guess: Whytap's HID-level probe saw the key go
-/// down, and Whytap's shortcut monitors never saw it held. Only then is the
-/// tap list read, and the app owning an enabled active `flagsChanged` filter
-/// (not Apple's, not Whytap's) gets its logo beside the island, shaking, for
-/// about 3 s; then it hides. Every new lost press shows it again and restarts
-/// the time. It never stays dimmed.
+/// down alone, and Whytap's shortcut monitors never saw that same press held.
+/// Only then is the tap list read: the owners of enabled active
+/// `flagsChanged` filters (not Apple's, not Whytap's) that already existed
+/// when the press began, with the same app in front, are named as possible
+/// interceptors. The logo shakes beside the island for about 3 s, then hides;
+/// every new lost press shows it again. It never stays dimmed.
 // WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
 @MainActor
 final class HotkeyInterceptionGuard {
@@ -56,16 +58,22 @@ final class HotkeyInterceptionGuard {
     private lazy var presenter: SecureInputHolderPresenting = makePresenter()
 
     private var detector = HotkeyInterceptionDetector()
+    /// Bumped on every probe install and stop: a callback or verdict from an
+    /// earlier probe is discarded.
+    private(set) var probeGeneration = 0
+    private var contexts: [Int: HotkeyPressContext] = [:]
     /// Other processes' HID modifier filters when the probe was installed.
     private var probeBaseline: Set<UInt32> = []
     private var probeRetryAt: TimeInterval?
+    private var lastHeadCheck: TimeInterval?
+    /// The press whose badge is up, so a late delivery of it can take it back.
+    private var shownForPress: Int?
     /// The last badge shown, for diagnostics and tests; it hides by itself.
     private(set) var lastBadge: SecureInputHolderBadge?
-    private var lastHeadCheck: TimeInterval?
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
-    private var launchObserver: NSObjectProtocol?
     private var started = false
+    private var monitors: [Any] = []
+    private var observers: [(NotificationCenter, NSObjectProtocol)] = []
+    private var preferencesObservation: AnyCancellable?
 
     init(system: System, probe: HotkeyPressProbing, makePresenter: @escaping () -> SecureInputHolderPresenting) {
         self.system = system
@@ -74,37 +82,66 @@ final class HotkeyInterceptionGuard {
     }
 
     /// Idempotent. Watches `flagsChanged` where Whytap's shortcuts do (which
-    /// modifiers are down, nothing else) and installs the probe while a
-    /// modifier shortcut exists.
+    /// modifiers are down, nothing else), follows shortcut, capability,
+    /// permission and session changes, and keeps the probe installed exactly
+    /// while a modifier shortcut is live.
     func start() {
         guard !started else { return }
         started = true
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
             let flags = event.cgEvent?.flags.rawValue ?? UInt64(event.modifierFlags.rawValue)
-            let time = ProcessInfo.processInfo.systemUptime
-            MainActor.assumeIsolated { self?.handleDelivered(rawFlags: flags, at: time) }
-        }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged) { [weak self] event in
+            let time = Self.eventTime(of: event)
+            MainActor.assumeIsolated { self?.handleDelivered(rawFlags: flags, eventTime: time) }
+        }) { monitors.append(global) }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .flagsChanged, handler: { [weak self] event in
             let flags = event.cgEvent?.flags.rawValue ?? UInt64(event.modifierFlags.rawValue)
-            self?.handleDelivered(rawFlags: flags, at: ProcessInfo.processInfo.systemUptime)
+            self?.handleDelivered(rawFlags: flags, eventTime: Self.eventTime(of: event))
             return event
+        }) { monitors.append(local) }
+
+        let workspace = NSWorkspace.shared.notificationCenter
+        observe(workspace, NSWorkspace.didLaunchApplicationNotification) { guard_ in
+            guard_.system.after(Self.launchSettleDelay) { [weak guard_] in guard_?.keepProbeAtHead() }
         }
-        launchObserver = NSWorkspace.shared.notificationCenter.addObserver(
-            forName: NSWorkspace.didLaunchApplicationNotification, object: nil, queue: .main
-        ) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.system.after(Self.launchSettleDelay) { [weak self] in self?.keepProbeAtHead() }
+        observe(workspace, NSWorkspace.sessionDidResignActiveNotification) { $0.bindingsOrSessionChanged() }
+        observe(workspace, NSWorkspace.sessionDidBecomeActiveNotification) { $0.bindingsOrSessionChanged() }
+        let distributed = DistributedNotificationCenter.default()
+        for name in ["com.apple.screenIsLocked", "com.apple.screenIsUnlocked", "com.apple.accessibility.api"] {
+            observe(distributed, Notification.Name(name)) { guard_ in
+                // The lock and trust flags settle just after the notice.
+                guard_.system.after(0.5) { [weak guard_] in guard_?.bindingsOrSessionChanged(retryNow: true) }
             }
         }
+        observe(NotificationCenter.default, .sidekeyCapabilityFlagsChanged) { $0.bindingsOrSessionChanged() }
+        // Published before the value changes: read it on the next turn.
+        preferencesObservation = HotkeyPreferences.shared.objectWillChange.sink { [weak self] _ in
+            DispatchQueue.main.async { MainActor.assumeIsolated { self?.bindingsOrSessionChanged() } }
+        }
         syncProbe()
+    }
+
+    private func observe(_ center: NotificationCenter, _ name: Notification.Name,
+                         _ handler: @escaping @MainActor (HotkeyInterceptionGuard) -> Void) {
+        let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { if let self { handler(self) } }
+        }
+        observers.append((center, token))
+    }
+
+    nonisolated private static func eventTime(of event: NSEvent) -> TimeInterval {
+        HotkeyEventTime.seconds(event.cgEvent?.timestamp ?? 0, fallback: ProcessInfo.processInfo.systemUptime)
     }
 
     // MARK: - Events (internal for tests)
 
     /// A `flagsChanged` that reached Whytap's shortcut monitors.
-    func handleDelivered(rawFlags: UInt64, at time: TimeInterval) {
-        detector.delivered(rawFlags: rawFlags, at: time)
+    func handleDelivered(rawFlags: UInt64, eventTime: TimeInterval) {
+        let reversed = detector.delivered(rawFlags: rawFlags, eventTime: eventTime)
+        if let shown = shownForPress, reversed.contains(shown) {
+            // The press did arrive, only late: take the claim back.
+            shownForPress = nil
+            presenter.dismiss()
+        }
         syncProbe()
         let now = system.uptime()
         if lastHeadCheck.map({ now - $0 >= Self.headCheckInterval }) ?? true {
@@ -114,15 +151,33 @@ final class HotkeyInterceptionGuard {
     }
 
     /// A hardware `flagsChanged` the probe saw, before any session tap.
-    func handlePhysical(rawFlags: UInt64, at time: TimeInterval) {
-        let (began, ended) = detector.physical(rawFlags: rawFlags, at: time, watched: system.watchedKeys())
-        for press in began {
-            schedule(press, due: press.startedAt + HotkeyInterceptionDetector.holdDecision)
+    /// `generation` is the probe install it came from.
+    func handlePhysical(rawFlags: UInt64, eventTime: TimeInterval, seenAt: TimeInterval, generation: Int) {
+        guard generation == probeGeneration, probe.isRunning else { return }
+        let changes = detector.physical(rawFlags: rawFlags, eventTime: eventTime, seenAt: seenAt,
+                                        watched: system.watchedKeys())
+        for change in changes {
+            switch change {
+            case .began(let id, let at):
+                let front = system.frontmostPID()
+                contexts[id] = HotkeyPressContext(
+                    frontmostPID: front,
+                    filterOwners: HotkeyInterceptorClassifier.filterOwners(in: system.tapList(), ownPID: system.ownPID,
+                                                                          frontmostPID: front))
+                schedule(id, due: at + HotkeyInterceptionDetector.holdDecision)
+            case .ended(let id, let at):
+                schedule(id, due: at + HotkeyInterceptionDetector.decisionDelay)
+            }
         }
-        let now = system.uptime()
-        for press in ended {
-            schedule(press, due: now + HotkeyInterceptionDetector.decisionDelay)
+        if contexts.count > 64 {
+            contexts = contexts.filter { detector.presses[$0.key] != nil }
         }
+    }
+
+    /// Shortcuts, capabilities, Accessibility or the session changed.
+    func bindingsOrSessionChanged(retryNow: Bool = false) {
+        if retryNow { probeRetryAt = nil }
+        syncProbe()
     }
 
     /// Reinstalls the probe when another app put a HID modifier filter in
@@ -135,44 +190,50 @@ final class HotkeyInterceptionGuard {
             return
         }
         os_log("hotkey_probe_reinstalled", log: Self.log, type: .info)
-        probe.stop()
+        stopProbe()
         installProbe()
     }
 
     // MARK: - Private
 
-    private func schedule(_ press: HotkeyInterceptionDetector.Press, due: TimeInterval, retries: Int = 0) {
+    private func schedule(_ id: Int, due: TimeInterval, retries: Int = 0) {
+        let generation = probeGeneration
         let delay = max(0, due - system.uptime())
         system.after(delay) { [weak self] in
-            guard let self else { return }
+            guard let self, self.probeGeneration == generation else { return }
             let late = self.system.uptime() - due
             if late > Self.lateDecisionSlack, retries < Self.maxDecisionRetries {
-                self.schedule(press, due: self.system.uptime() + HotkeyInterceptionDetector.decisionDelay,
+                self.schedule(id, due: self.system.uptime() + HotkeyInterceptionDetector.decisionDelay,
                               retries: retries + 1)
                 return
             }
-            self.decide(press)
+            self.decide(id)
         }
     }
 
-    private func decide(_ press: HotkeyInterceptionDetector.Press) {
-        guard let verdict = detector.decide(press, now: system.uptime()) else { return }
-        if case .blocked(let key) = verdict { reportBlocked(key) }
+    private func decide(_ id: Int) {
+        guard let verdict = detector.decide(id, now: system.uptime()) else { return }
+        guard case .blocked(let key) = verdict, let context = contexts.removeValue(forKey: id) else {
+            contexts[id] = nil
+            return
+        }
+        reportBlocked(key, press: id, context: context)
     }
 
-    private func reportBlocked(_ key: HotkeyModifierKey) {
+    private func reportBlocked(_ key: HotkeyModifierKey, press: Int, context: HotkeyPressContext) {
         guard system.watchedKeys().contains(key), system.isSessionInteractive() else { return }
         let candidates = HotkeyInterceptorClassifier.candidates(
-            in: system.tapList(), ownPID: system.ownPID, frontmostPID: system.frontmostPID(),
-            process: system.process)
+            in: system.tapList(), context: context, frontmostPID: system.frontmostPID(),
+            ownPID: system.ownPID, process: system.process)
         guard let first = candidates.first else {
-            // Lost, but no other app's filter could have done it: say nothing.
+            // Lost, but no filter of another app in the same context: say nothing.
             os_log("hotkey_press_lost interceptor=none", log: Self.log, type: .info)
             return
         }
         let badge = SecureInputHolderBadge(app: first,
                                            message: HotkeyInterceptorClassifier.message(for: candidates, key: key))
         lastBadge = badge
+        shownForPress = press
         // Transient: shaken and highlighted, then hidden by the panel about
         // 3 s later. A new lost press presents again, which restarts that
         // time. WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
@@ -181,15 +242,12 @@ final class HotkeyInterceptionGuard {
                first.bundleID ?? first.name, candidates.count)
     }
 
-    /// Installs the probe while a modifier shortcut exists, removes it
-    /// otherwise.
+    /// The probe exists exactly while a modifier shortcut is live and the
+    /// session is interactive.
     private func syncProbe() {
-        let watched = system.watchedKeys()
-        if watched.isEmpty {
-            if probe.isRunning {
-                probe.stop()
-                detector.forgetPhysical()
-            }
+        let needed = !system.watchedKeys().isEmpty && system.isSessionInteractive()
+        if !needed {
+            if probe.isRunning { stopProbe() }
             return
         }
         guard !probe.isRunning else { return }
@@ -197,20 +255,33 @@ final class HotkeyInterceptionGuard {
         installProbe()
     }
 
+    private func stopProbe() {
+        probe.stop()
+        probeGeneration &+= 1
+        detector.reset()
+        contexts = [:]
+    }
+
     private func installProbe() {
-        detector.forgetPhysical()
+        probeGeneration &+= 1
+        detector.reset()
+        contexts = [:]
+        let generation = probeGeneration
         probeBaseline = HotkeyInterceptorClassifier.foreignHIDFilterIDs(in: system.tapList(), ownPID: system.ownPID)
         let installed = probe.start(
-            deliver: { [weak self] flags, time in self?.handlePhysical(rawFlags: flags, at: time) },
+            deliver: { [weak self] flags, eventTime, seenAt in
+                self?.handlePhysical(rawFlags: flags, eventTime: eventTime, seenAt: seenAt, generation: generation)
+            },
             onFailure: { [weak self] in
-                guard let self else { return }
-                self.detector.forgetPhysical()
+                guard let self, self.probeGeneration == generation else { return }
+                self.probeGeneration &+= 1
+                self.detector.reset()
+                self.contexts = [:]
                 self.probeRetryAt = self.system.uptime() + Self.probeRetryInterval
             }
         )
         probeRetryAt = installed ? nil : system.uptime() + Self.probeRetryInterval
     }
-
 }
 
 extension HotkeyInterceptionGuard {

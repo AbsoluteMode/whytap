@@ -107,6 +107,8 @@ enum HotkeyInterceptorClassifier {
         Set(taps.filter { $0.location == .hid && $0.filtersModifiers && $0.tappingPID != ownPID }.map(\.id))
     }
 
+    /// The tap list proves which apps could have taken the press, not which
+    /// one did, so every owner is named as a possible interceptor.
     static func message(for apps: [SecureInputApp], key: HotkeyModifierKey) -> String {
         let names: String
         switch apps.count {
@@ -115,102 +117,188 @@ enum HotkeyInterceptorClassifier {
         case 2: names = "\(apps[0].name) or \(apps[1].name)"
         default: names = "\(apps[0].name) or another app"
         }
-        return "\(names) is intercepting \(key.title) — change the key in one of the apps"
+        return "\(names) may be intercepting \(key.title)"
     }
+
+    /// The candidates of a verdict, judged against the context the press
+    /// began in: the same frontmost app, and only filters that already
+    /// existed then. A changed context gives no candidates.
+    static func candidates(
+        in taps: [EventTapRecord],
+        context: HotkeyPressContext,
+        frontmostPID: pid_t?,
+        ownPID: pid_t,
+        process: (pid_t) -> InterceptorProcess?
+    ) -> [SecureInputApp] {
+        guard frontmostPID == context.frontmostPID else { return [] }
+        let present = candidates(in: taps, ownPID: ownPID, frontmostPID: frontmostPID, process: process)
+        return present.filter { context.filterOwners.contains($0.pid) }
+    }
+
+    /// Owners of the modifier filters that could act on a press made with
+    /// `frontmostPID` in front.
+    static func filterOwners(in taps: [EventTapRecord], ownPID: pid_t, frontmostPID: pid_t?) -> Set<pid_t> {
+        Set(taps.filter { tap in
+            tap.filtersModifiers && tap.tappingPID > 0 && tap.tappingPID != ownPID
+                && (tap.tappedPID == 0 || tap.tappedPID == frontmostPID)
+        }.map(\.tappingPID))
+    }
+}
+
+/// What surrounded a press when it began.
+struct HotkeyPressContext: Equatable {
+    let frontmostPID: pid_t?
+    let filterOwners: Set<pid_t>
 }
 
 /// Compares two views of the same modifier press: the physical one, seen by
 /// Whytap's HID-level probe before any session tap, and the delivered one,
 /// seen by the `NSEvent` monitors Whytap's shortcuts use. A press the probe
-/// saw and the monitors never saw held was lost (dropped, or its flags
+/// saw that the monitors never saw held was lost (dropped, or its flags
 /// rewritten) by a tap in between: the precise "blocked press" signal.
 ///
-/// Times are seconds of system uptime, read when each observer handled the
-/// event. The probe runs first in the event pipeline, so a delivered press is
-/// never observed before its physical press; the two arrive on the main
-/// thread in either order, so verdicts are deferred (`decisionDelay`).
+/// Each press is its own record. It is matched only with a delivered press
+/// of the same key carrying the same event timestamp (the same hardware
+/// event), or one whose event time lies inside that press's own interval (an
+/// app that swallows and re-posts the key). A later press never covers an
+/// earlier one. Event times come from the events; `seenAt` times are the
+/// main-thread clock the deadlines use.
+///
+/// Only a press the real monitors could take is judged: the key goes down
+/// alone (`HotkeyFlags.isOnly`), and a press that gains another modifier
+/// while held is retired, as the gesture monitors cancel it.
 struct HotkeyInterceptionDetector {
-    /// After a physical release: time for the delivered event to be handled.
+    /// After a physical release (main-thread time): grace for the delivered
+    /// event to be handled.
     static let decisionDelay: TimeInterval = 0.3
-    /// A press still held this long without delivery is already lost (a
-    /// hold gesture would have started).
+    /// A press still held this long is judged without waiting for its
+    /// release (a hold gesture would have started).
     static let holdDecision: TimeInterval = 0.5
-    /// Clock reads on two threads.
-    static let tolerance: TimeInterval = 0.05
-
-    struct Press: Hashable {
-        let key: HotkeyModifierKey
-        let startedAt: TimeInterval
-    }
+    /// Event-time slack when matching a delivered press to a physical one.
+    static let tolerance: TimeInterval = 0.002
+    /// Records older than this are dropped (a release the probe missed).
+    static let retention: TimeInterval = 30
 
     enum Verdict: Equatable {
         case delivered(HotkeyModifierKey)
         case blocked(HotkeyModifierKey)
     }
 
-    private var physicalPress: [HotkeyModifierKey: Press] = [:]
-    private var deliveredHeld: Set<HotkeyModifierKey> = []
-    private var lastDeliveredDown: [HotkeyModifierKey: TimeInterval] = [:]
-    private var decided: Set<Press> = []
-
-    /// A physical `flagsChanged`. Returns the presses that just began (decide
-    /// them at `startedAt + holdDecision`) and just ended (decide them
-    /// `decisionDelay` from now).
-    mutating func physical(rawFlags: UInt64, at time: TimeInterval,
-                           watched: Set<HotkeyModifierKey>) -> (began: [Press], ended: [Press]) {
-        var began: [Press] = []
-        var ended: [Press] = []
-        for key in HotkeyModifierKey.allCases {
-            let held = HotkeyFlags.isHeld(key, rawFlags)
-            if held, physicalPress[key] == nil, watched.contains(key) {
-                let press = Press(key: key, startedAt: time)
-                physicalPress[key] = press
-                began.append(press)
-            } else if !held, let press = physicalPress.removeValue(forKey: key) {
-                ended.append(press)
-            }
-        }
-        return (began, ended)
+    struct Press: Equatable {
+        let id: Int
+        let key: HotkeyModifierKey
+        let eventTime: TimeInterval
+        let seenAt: TimeInterval
+        var endTime: TimeInterval?
+        var endSeenAt: TimeInterval?
+        var eligible = true
+        var verdict: Verdict?
     }
 
-    /// A `flagsChanged` that reached Whytap's shortcut monitors.
-    mutating func delivered(rawFlags: UInt64, at time: TimeInterval) {
+    enum Change: Equatable {
+        /// Judge at `seenAt + holdDecision` if still held.
+        case began(id: Int, at: TimeInterval)
+        /// Judge at `endSeenAt + decisionDelay`.
+        case ended(id: Int, at: TimeInterval)
+    }
+
+    private(set) var presses: [Int: Press] = [:]
+    private var heldPress: [HotkeyModifierKey: Int] = [:]
+    /// A key that went down with other modifiers: no press until released.
+    private var heldIneligible: Set<HotkeyModifierKey> = []
+    private var deliveredHeld: Set<HotkeyModifierKey> = []
+    private var deliveredDowns: [HotkeyModifierKey: [TimeInterval]] = [:]
+    private var nextID = 0
+
+    /// A physical `flagsChanged` seen by the probe.
+    mutating func physical(rawFlags: UInt64, eventTime: TimeInterval, seenAt: TimeInterval,
+                           watched: Set<HotkeyModifierKey>) -> [Change] {
+        var changes: [Change] = []
+        for key in HotkeyModifierKey.allCases {
+            let held = HotkeyFlags.isHeld(key, rawFlags)
+            if let id = heldPress[key] {
+                if !held {
+                    heldPress[key] = nil
+                    presses[id]?.endTime = eventTime
+                    presses[id]?.endSeenAt = seenAt
+                    if presses[id]?.eligible == true { changes.append(.ended(id: id, at: seenAt)) }
+                } else if !HotkeyFlags.isOnly(key, rawFlags) {
+                    presses[id]?.eligible = false // Shift added: the gesture is cancelled
+                }
+            } else if held {
+                guard !heldIneligible.contains(key) else { continue }
+                guard watched.contains(key), HotkeyFlags.isOnly(key, rawFlags) else {
+                    heldIneligible.insert(key)
+                    continue
+                }
+                let id = nextID
+                nextID += 1
+                presses[id] = Press(id: id, key: key, eventTime: eventTime, seenAt: seenAt)
+                heldPress[key] = id
+                changes.append(.began(id: id, at: seenAt))
+            } else {
+                heldIneligible.remove(key)
+            }
+        }
+        prune(now: seenAt)
+        return changes
+    }
+
+    /// A `flagsChanged` that reached Whytap's shortcut monitors. Returns the
+    /// presses already judged blocked that this delivery proves arrived.
+    mutating func delivered(rawFlags: UInt64, eventTime: TimeInterval) -> [Int] {
+        var reversed: [Int] = []
         for key in HotkeyModifierKey.allCases {
             let held = HotkeyFlags.isHeld(key, rawFlags)
             if held, !deliveredHeld.contains(key) {
                 deliveredHeld.insert(key)
-                lastDeliveredDown[key] = time
+                deliveredDowns[key, default: []].append(eventTime)
+                if deliveredDowns[key]!.count > 32 { deliveredDowns[key]!.removeFirst() }
+                for (id, press) in presses where press.key == key && press.verdict == .blocked(key)
+                    && Self.matches(press, eventTime) {
+                    presses[id]?.verdict = .delivered(key)
+                    reversed.append(id)
+                }
             } else if !held {
                 deliveredHeld.remove(key)
             }
         }
+        return reversed
     }
 
-    /// The verdict for a press, once: nil if it was already given or the
-    /// press is still held and young.
-    mutating func decide(_ press: Press, now: TimeInterval) -> Verdict? {
-        guard !decided.contains(press) else { return nil }
-        if let delivered = lastDeliveredDown[press.key], delivered >= press.startedAt - Self.tolerance {
-            remember(press)
-            return .delivered(press.key)
+    /// The verdict for a press, once it is due: nil before its deadline, for
+    /// a retired or unknown press, or when already given.
+    mutating func decide(_ id: Int, now: TimeInterval) -> Verdict? {
+        guard var press = presses[id], press.eligible, press.verdict == nil else { return nil }
+        if let endSeenAt = press.endSeenAt {
+            guard now - endSeenAt >= Self.decisionDelay - 0.000_1 else { return nil }
+        } else {
+            guard now - press.seenAt >= Self.holdDecision - 0.000_1 else { return nil }
         }
-        if physicalPress[press.key] == press, now - press.startedAt < Self.holdDecision { return nil }
-        remember(press)
-        return .blocked(press.key)
+        let arrived = (deliveredDowns[press.key] ?? []).contains { Self.matches(press, $0) }
+        press.verdict = arrived ? .delivered(press.key) : .blocked(press.key)
+        presses[id] = press
+        return press.verdict
     }
 
-    /// The probe stopped or restarted: a press in progress can no longer be
-    /// judged.
-    mutating func forgetPhysical() {
-        for press in physicalPress.values { remember(press) }
-        physicalPress = [:]
+    /// The probe stopped, restarted or the session went inactive: nothing
+    /// seen so far can be judged any more.
+    mutating func reset() {
+        presses = [:]
+        heldPress = [:]
+        heldIneligible = []
     }
 
-    private mutating func remember(_ press: Press) {
-        decided.insert(press)
-        // Only recent presses can still be asked about.
-        if decided.count > 16 {
-            decided = decided.filter { $0.startedAt >= press.startedAt - 10 }
+    private static func matches(_ press: Press, _ delivered: TimeInterval) -> Bool {
+        if abs(delivered - press.eventTime) <= tolerance { return true }
+        let end = press.endTime ?? .infinity
+        return delivered >= press.eventTime - tolerance && delivered <= end + tolerance
+    }
+
+    private mutating func prune(now: TimeInterval) {
+        for (id, press) in presses where now - press.seenAt > Self.retention {
+            presses[id] = nil
+            if heldPress[press.key] == id { heldPress[press.key] = nil }
         }
     }
 }

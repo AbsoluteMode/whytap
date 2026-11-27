@@ -6,10 +6,10 @@ import os
 @MainActor
 protocol HotkeyPressProbing: AnyObject {
     var isRunning: Bool { get }
-    /// `deliver` gets the raw flags of each hardware `flagsChanged` and the
-    /// uptime the probe saw it at. Returns false when the tap cannot exist
+    /// `deliver` gets the raw flags of each hardware `flagsChanged`, its
+    /// event time (`HotkeyEventTime`) and the uptime the probe saw it at. Returns false when the tap cannot exist
     /// (no Accessibility).
-    func start(deliver: @escaping @MainActor (UInt64, TimeInterval) -> Void,
+    func start(deliver: @escaping @MainActor (UInt64, TimeInterval, TimeInterval) -> Void,
                onFailure: @escaping @MainActor () -> Void) -> Bool
     func stop()
 }
@@ -31,7 +31,7 @@ final class HotkeyPressProbe: HotkeyPressProbing {
 
     var isRunning: Bool { session != nil }
 
-    func start(deliver: @escaping @MainActor (UInt64, TimeInterval) -> Void,
+    func start(deliver: @escaping @MainActor (UInt64, TimeInterval, TimeInterval) -> Void,
                onFailure: @escaping @MainActor () -> Void) -> Bool {
         stop()
         let session = HotkeyPressProbeSession(deliver: deliver, onFailure: onFailure)
@@ -72,13 +72,13 @@ private let activeHotkeyPressProbeSession = OSAllocatedUnfairLock<HotkeyPressPro
 
 private final class HotkeyPressProbeSession: @unchecked Sendable {
     let thread = SpaceHoldMonitor.TapThread(queueLabel: "com.rootwise.sidekey.hotkey-press-probe")
-    let deliver: @MainActor (UInt64, TimeInterval) -> Void
+    let deliver: @MainActor (UInt64, TimeInterval, TimeInterval) -> Void
     let onFailure: @MainActor () -> Void
     let reenables = OSAllocatedUnfairLock(initialState: 0)
     /// Main thread only.
     weak var owner: HotkeyPressProbe?
 
-    init(deliver: @escaping @MainActor (UInt64, TimeInterval) -> Void, onFailure: @escaping @MainActor () -> Void) {
+    init(deliver: @escaping @MainActor (UInt64, TimeInterval, TimeInterval) -> Void, onFailure: @escaping @MainActor () -> Void) {
         self.deliver = deliver
         self.onFailure = onFailure
     }
@@ -106,9 +106,20 @@ private func hotkeyPressProbeCallback(proxy: CGEventTapProxy, type: CGEventType,
     guard event.getIntegerValueField(.eventSourceUnixProcessID) != Int64(hotkeyPressProbeOwnPID) else { return unchanged }
     // The main thread can be busy, so the press keeps the time it was seen.
     let seenAt = ProcessInfo.processInfo.systemUptime
+    let eventTime = HotkeyEventTime.seconds(event.timestamp, fallback: seenAt)
     let flags = event.flags.rawValue
     DispatchQueue.main.async {
-        MainActor.assumeIsolated { session.deliver(flags, seenAt) }
+        MainActor.assumeIsolated { session.deliver(flags, eventTime, seenAt) }
     }
     return unchanged
+}
+
+/// The event's own timestamp, which identifies the same hardware event in
+/// every observer. `CGEventTimestamp` counts nanoseconds since boot (the
+/// clock `NSEvent.timestamp` and `systemUptime` use); a posted event may
+/// carry 0, and then the time it was seen stands in.
+enum HotkeyEventTime {
+    static func seconds(_ timestamp: CGEventTimestamp, fallback: TimeInterval) -> TimeInterval {
+        timestamp == 0 ? fallback : TimeInterval(timestamp) / 1_000_000_000
+    }
 }

@@ -2,11 +2,11 @@
 id: hotkey-interceptor-taps-2026-11-26
 type: decision
 title: Whytap names the app whose event tap swallows a modifier shortcut
-summary: An app such as Punto Switcher bound to Right Option swallows the press with its own event tap and Whytap's Google search silently does nothing. A HID-level probe (flagsChanged only, Accessibility, passes every event) sees the physical press; when Whytap's NSEvent shortcut monitors never see that key held, the press was lost in between. Only then the public tap list names the other app's enabled active flagsChanged filter, and its logo shakes beside the island in the Secure Input badge for about 3 s, then hides; every new lost press shows it again. Never Whytap, never Apple, never a listen-only tap.
+summary: An app such as Punto Switcher bound to Right Option swallows the press with its own event tap and Whytap's Google search silently does nothing. A HID-level probe (flagsChanged only, Accessibility, passes every event) sees the physical press; when Whytap's NSEvent shortcut monitors never see that same press (matched per press by event timestamp, only presses of the key alone) the press was lost in between. Only then the public tap list names, as possible interceptors, the owners of enabled active flagsChanged filters that existed when the press began with the same app in front; the logo shakes beside the island in the Secure Input badge for about 3 s, then hides, and every new lost press shows it again. Never Whytap, never Apple, never a listen-only tap.
 status: confirmed
 tags: [hotkeys, event-tap, island, punto-switcher, accessibility]
 canonical_for: [hotkey-interceptor-indicator]
-verified_at: 2026-11-26
+verified_at: 2026-11-27
 sources:
   - type: user-confirmed
     reference: Spec REV 1 (2026-11-26) from the maintainer - the interceptor's logo must not stay dimmed; on a blocked press it shows with the shake and highlight for about 3 s, then hides, and every new blocked press shows it again and restarts the time. Secure Input's badge keeps its own behaviour.
@@ -14,6 +14,9 @@ sources:
   - type: user-confirmed
     reference: The maintainer's Google search on Right Option silently did nothing; the cause was Punto Switcher intercepting Right Option. He asked that the Secure Input indicator also point at apps intercepting Whytap's hotkeys with their own taps (orchestrator task 45).
     confirmed_at: 2026-11-26
+  - type: trace
+    reference: Builder review of build queue ticket 624 (PR 492 head 109ffcd7, merged onto 85d4d931) - four findings on press/deadline matching, tap and settings lifecycle, shortcut eligibility and attribution, and clipped hover text, with five failing detector assertions.
+    confirmed_at: 2026-11-27
   - type: trace
     reference: CGGetEventTapList and CGEvent.tapCreate probes run from an untrusted helper on the maintainer's Mac (macOS 27.3), 2026-11-26; results in the Measured section.
     confirmed_at: 2026-11-26
@@ -81,30 +84,58 @@ catch it: secure input was off, and the key never reached Whytap at all.
 1. **Exact signal, not a guess.** `HotkeyPressProbe` is an active HID tap,
    head-inserted, on `flagsChanged` only, on its own thread, which returns
    every event untouched. It reads only which modifiers are down and the
-   posting pid, to skip Whytap's own posted events. It runs on
-   Accessibility, as the other taps do; no Input Monitoring request. It
-   exists only while a modifier key is bound to a switched-on shortcut
-   (Right ⌘ Agent, Right ⌥ Google, a modifier Drop or tool).
-2. **Lost press.** `HotkeyInterceptionDetector` compares, per watched key,
-   the press the probe saw with the `NSEvent` view: if Whytap's monitors
-   never saw that key held (dropped, or its right-side flag rewritten), the
-   press was lost between the two. Each side records system uptime when it
-   handled the event; the probe runs first, so the order on the main thread
-   does not matter. A tap is judged 0.3 s after its release, a hold 0.5 s
-   after the press; a judgement that runs late because the main thread was
-   busy waits again (up to three times), since the delivered event may still
-   be queued.
-3. **Name the interceptor only on that signal.** On a lost press the tap
-   list is read: candidates are enabled active filters with flagsChanged in
-   their mask, owned by another process, global or filtering the frontmost
-   app. Whytap's own and Apple's processes (`com.apple.*`, `/System`,
+   posting pid, to skip Whytap's own posted events, and the event's own
+   timestamp. It runs on Accessibility, as the other taps do; no Input
+   Monitoring request. It exists exactly while a modifier key is bound to a
+   switched-on shortcut (Right ⌘ Agent, Right ⌥ Google, a modifier Drop or
+   tool) and the session is interactive. The guard follows shortcut changes
+   (`HotkeyPreferences`), capability switches
+   (`sidekeyCapabilityFlagsChanged`), Accessibility trust changes
+   (`com.apple.accessibility.api`, retried at once), screen lock/unlock and
+   session switches, so the very first press after Google search is switched
+   on is already watched, and switching it off removes the tap at once.
+   Every install or stop bumps a generation: a callback an earlier tap
+   already dispatched, and any verdict still pending, is discarded.
+2. **Lost press, matched per press.** `HotkeyInterceptionDetector` keeps
+   one record per physical press. It is matched only with a delivered press
+   of the same key whose event timestamp is the same hardware event (within
+   2 ms), or lies inside that press's own down-to-up interval (an app that
+   swallows and re-posts the key while it is held). A later delivered press
+   never covers an earlier lost one. Both sides use the events' own
+   timestamps, so a busy main thread does not change the match; deadlines
+   use main-thread time. A released press is judged 0.3 s after the release
+   was seen, never earlier by the 0.5 s hold deadline; a press still held is
+   judged 0.5 s after it began. A judgement that runs late because the main
+   thread was busy waits again (up to three times), and a delivery handled
+   after a blocked verdict takes the badge back. Records older than 30 s
+   (a release the probe never saw) are dropped.
+3. **Only presses the real monitors would take.** A press begins only when
+   its key goes down alone (`HotkeyFlags.isOnly`, the rule of
+   `ModifierOnlyHotkeyMonitor` and the gesture state machine): Shift+Right ⌥
+   or both Options start nothing, and a press that gains another modifier
+   while held is retired unjudged, as the gesture monitors cancel it.
+4. **Name possible interceptors only on that signal, in the press's own
+   context.** When a press begins, the frontmost app and the owners of the
+   modifier filters that could act on it are recorded. On a lost press the
+   tap list is read again: candidates are enabled active filters with
+   flagsChanged in their mask, owned by another process, global or filtering
+   the frontmost app, that already existed when the press began. If another
+   app came to the front in between, nothing is shown. The tap list proves
+   which apps could have taken the press, not which one did, so the text
+   names them as possible interceptors: "Punto Switcher may be intercepting
+   Right Option". Whytap's own and Apple's processes (`com.apple.*`, `/System`,
    `/usr`) are never named; Siri keeps such a filter on every Mac. HID
    filters come first. No candidate: nothing shown, one log line. On a locked
    screen or another console session nothing is judged.
-4. **Show it in the Secure Input badge.** The interceptor's logo appears to
-   the right of the island and shakes; hovering reads "Punto Switcher is
-   intercepting Right Option — change the key in one of the apps" (two
-   candidates: "A or B", more: "A or another app"). **It never stays dimmed
+5. **Show it in the Secure Input badge.** The interceptor's logo appears to
+   the right of the island and shakes; hovering reads "Punto Switcher may be
+   intercepting Right Option" (two candidates: "A or B may be intercepting
+   ...", more: "A or another app may be intercepting ..."). When the hover
+   label does not fit on one line between the island and the screen's right
+   margin, it wraps and the pill grows downward
+   (`SecureInputHolderMetrics.layout`), so the whole text stays readable on
+   small displays; the accessibility label is always the full text. This
+   applies to Secure Input's label too. **It never stays dimmed
    (maintainer's REV 1):** it is presented as a transient badge, shaken and
    at full strength, and the panel hides it after its emphasis time (2.8 s,
    plus a 0.25 s fade: about 3 s; a hover keeps it while the label is read).
@@ -116,7 +147,7 @@ catch it: secure input was off, and the key never reached Whytap at all.
    Input's dimmed logo is up, an interceptor shake covers it for about 3 s and
    then it returns; Secure Input's own behaviour is unchanged. A transient
    badge that another one covers is over and never comes back.
-5. **Keep the probe in front.** A HID filter installed after the probe runs
+6. **Keep the probe in front.** A HID filter installed after the probe runs
    before it and could hide the press from it. After any app launches
    (3 s later) and, at most every 10 s, on a modifier change Whytap receives,
    a new HID modifier filter of another process reinstalls the probe at the
@@ -141,21 +172,41 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (27) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (40) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
-(delivered, swallowed, rewritten flags, delivery handled first, a stale
-delivery, a long hold, an unwatched key); guard (Punto swallowing Right ⌥
+(delivered, swallowed, rewritten flags, delivery handled first, a release
+waits for its own grace, a delivery during that grace resolves it, a later
+delivered press never covers an earlier lost one, a re-posted press inside
+the hold, a late delivery reverses a verdict, Shift+Right ⌥ and both
+Options, a long hold, an unwatched key, reset retires released presses);
+context (a changed frontmost app, a filter installed after the press began);
+guard (Punto swallowing Right ⌥
 shakes its named logo as a transient badge, every lost press presents it
 again, a delivered press or benign taps or a locked screen show nothing, the
 probe stops without modifier shortcuts, is retried 30 s after failing and
 moves back to the head after a launch or a 10 s head check, a busy main
-thread defers the verdict, a hold is judged while held); badge stack (no
+thread defers the verdict, a hold is judged while held, Shift+Right ⌥
+never shakes, a locked session has no probe, a callback from a stopped probe
+is discarded, the first modifier binding installs the probe and the last
+removes it, an Accessibility grant retries at once, a late delivery takes
+the badge back); hover text (a two-candidate label wraps within a narrow
+width and the pill is tall enough for every line); badge stack (no
 window until a badge, the covered badge comes back, neither guard dismisses
 the other's, a faded shake restores the dimmed one, the interceptor's
 transient badge over Secure Input's dimmed logo, a covered transient badge
 never returns).
+
+The builder's review of the first head (queue ticket 624) found: a released
+press judged by the hold deadline before its release grace, a later delivered
+press covering an earlier lost one, a released press from a stopped probe
+still reporting, bindings followed only on delivered modifiers, Shift+Right
+⌥ starting an Option-only candidate, candidates read without the press's
+context, and a two-candidate label (575 pt) running off small displays. Its
+five failing detector assertions are scenarios above; points 1 to 5 answer
+each finding. Removing the eligibility or frontmost-context checks fails
+those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added
 latency. A press made while Whytap's own menu is tracking may not reach its

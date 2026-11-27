@@ -40,7 +40,7 @@ final class SettingsProjectFooterTests: XCTestCase {
         }
 
         layout()
-        XCTAssertEqual(cursorViews(in: host), 3, "no update: only the Whytap, Help and GitHub links")
+        XCTAssertEqual(cursorViews(in: host), 3, "no update: only the Whytap, GitHub and Help links")
 
         controller.handleDiscovered(version: "2.2.27", build: "2000")
         layout()
@@ -78,7 +78,7 @@ final class SettingsProjectFooterTests: XCTestCase {
             return found + view.subviews.flatMap { cursorFrames(in: $0) }
         }
         let rows = cursorFrames(in: host).sorted { $0.maxY > $1.maxY }
-        XCTAssertEqual(rows.count, 3, "Whytap, Help and GitHub")
+        XCTAssertEqual(rows.count, 3, "Whytap, GitHub and Help")
         for row in rows {
             XCTAssertEqual(row.minX, rows[0].minX, accuracy: 0.5, "left-aligned")
             XCTAssertGreaterThan(row.width, 90, "room for the icon and the whole label")
@@ -92,5 +92,18 @@ final class SettingsProjectFooterTests: XCTestCase {
             host.cacheDisplay(in: host.bounds, to: rep)
             try rep.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: path))
         }
+    }
+
+    /// Help is the last link, as is usual on macOS (owner, 2026-11-27):
+    /// Whytap, GitHub, Help from top to bottom.
+    func test_helpIsTheLastFooterLink() throws {
+        let root = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+        let text = try String(contentsOf: root.appendingPathComponent("Sources/Sidekey/Settings/SettingsProjectFooter.swift"),
+                              encoding: .utf8)
+        let marker = "SettingsFooterLink(title: \""
+        let titles = text.components(separatedBy: marker).dropFirst()
+            .compactMap { $0.split(separator: "\"", maxSplits: 1).first.map(String.init) }
+        XCTAssertEqual(titles, ["Whytap", "GitHub", "Help"])
     }
 }

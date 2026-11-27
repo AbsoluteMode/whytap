@@ -277,6 +277,31 @@ display and honours screenshot protection while it is up. A bare key or Space
 leaves no event at all.
 [Decision](../.project-docs/decisions/2026-11-26-secure-input-holder.md).
 
+### Another app intercepts a modifier shortcut: its logo shakes
+
+An app with its own event tap can swallow Right ⌘ or Right ⌥ before Whytap
+sees it; Punto Switcher bound to Right Option silenced Google search this
+way. `HotkeyPressProbe`, an active HID tap on `flagsChanged` only (it passes
+every event and reads only which modifiers are down; Accessibility, no Input
+Monitoring), sees the physical press first. When Whytap's `NSEvent` shortcut
+monitors never see that same press held (matched per press by event
+timestamp; a key pressed together with Shift or another modifier is never
+judged, as the monitors would not take it either), `HotkeyInterceptionGuard`
+reads `CGGetEventTapList` and names the owners of the very enabled active
+flagsChanged filters (by tap id) that existed when the press began, with the
+same app in front, as possible interceptors; a press whose context could not
+be read promptly is not attributed: the logo shakes in the same pill right of the island, at full
+strength, for about 3 s, then hides; it never stays dimmed. Every new lost
+press shows it again and restarts the time. Hovering reads "Punto Switcher
+may be intercepting Right Option"; a label too long for the space beside
+the island wraps and the pill grows downward. The probe follows shortcut,
+capability, Accessibility and session changes at once. Whytap's
+own, Apple's and listen-only taps are never named; with no candidate nothing
+is shown. While Secure Input's dimmed logo is up, the shake covers it for
+those 3 s and it returns. A remap below the taps (Karabiner, `hidutil`),
+Carbon combos and hold-Space are not covered.
+[Decision](../.project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md).
+
 ## Tool hotkeys
 
 Settings → Hotkeys → Tools lists the complete `HoverTool` catalog. Record a

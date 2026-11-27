@@ -579,7 +579,7 @@ The user chose four tabs in one surface: API keys, Models, Costs, API hints.
 Costs first shows the nearby period, then the total, then used features with
 one Price column; USD and ElevenLabs credit values retain explicit units,
 including both lines when a feature used both. Model details appear on the
-feature: hovering anywhere on its row opens them, a click pins them, and the
+feature: hovering anywhere on its row opens them, a click opens or closes them, and the
 detail's header repeats the feature's total (2026-11-19, on the user's
 request: the detail used to open only from the name at the row's left edge,
 and the total sat under the list). Why: compare
@@ -608,14 +608,17 @@ feature expenses without a permanent model-level grid or scattered period contro
   selector uses a local native popup with an enabled-gated highlight drawing;
   shared plain menus are unchanged. Why: its pressed state must be verifiable
   from the real native control, rather than assumed from SwiftUI Menu styling.
-- Hover opens model details after 0.2 s; click pins, keyboard focus opens,
-  Escape closes. One state for the table decides the open row, so a detail
-  is only ever beside the row it describes; with a detail open, entering
-  another row switches at once. Row fill follows the pointer, or the open row
-  while the pointer is on its detail. Leaving both row and detail closes after
-  a 0.3 s grace. While open, the pointer's real window and row are checked, so
-  a detail appearing under the pointer does not blink. A period change, loading,
-  empty or error state retires all detail state, pinned included (2026-11-26,
+- The detail and the row fill always belong to the row under the pointer.
+  Entering the table from outside opens after 0.2 s; with a detail open,
+  moving to another row switches at once, and leaving both the open row and
+  its detail closes it at once. The pointer may rest on the detail where it
+  covers other rows. A click opens at once (a click on the open row closes
+  it); keyboard focus opens and owns the detail until the pointer really
+  moves; Escape or a click off the rows and the detail closes. The detail is
+  an application-defined NSPopover that only the state closes; hiding
+  Settings retires it. Row positions come from SwiftUI
+  frames, never from NSViews inside the ScrollView. A period change, loading,
+  empty or error state retires all detail state (2026-11-27,
   `.project-docs/decisions/2026-11-26-costs-models-popover-hover.md`).
   The model list scrolls at 320 pt while its heading and explanation stay visible.
   Rows retain their geometry during disclosure; no new motion needs reduction.

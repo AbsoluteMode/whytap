@@ -756,10 +756,11 @@ extension SpaceHoldMonitor {
         func installTap(
             mask: CGEventMask = CGEventMask((1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)),
             placement: CGEventTapPlacement = .headInsertEventTap,
+            location: CGEventTapLocation = .cgSessionEventTap,
             callback: @escaping CGEventTapCallBack
         ) -> TapHandle? {
             guard let port = CGEvent.tapCreate(
-                tap: .cgSessionEventTap,
+                tap: location,
                 place: placement,
                 options: .defaultTap,
                 eventsOfInterest: mask,

@@ -882,6 +882,23 @@ Copy text распознаёт текст и числа в выбранном о
 удержание Drop с ⌘ — нет.
 Подробнее: [hotkey.md](hotkey.md#secure-input-the-holders-logo-shakes).
 
+## A hotkey intercepted by another app
+
+When an app with its own event tap (for example Punto Switcher switching
+layouts on Right Option) takes Right Command or Right Option before Whytap,
+Whytap's HID probe sees the physical press but its shortcut handlers never
+receive it. The interceptor's logo then shakes to the right of the island
+(the same badge as for Secure Input) for about 3 seconds and hides; it never
+stays dimmed. Every new intercepted press shows it again and restarts the
+3 seconds. Hovering shows "Punto Switcher may be intercepting Right Option";
+a long label wraps instead of running off a small screen. Only a press the
+shortcut itself would take counts (the key alone, not with Shift). Whytap
+itself, Apple's system processes and listen-only taps are never named, nor
+an app whose filter appeared after the press or when another app came to the
+front meanwhile. Remaps below the taps (Karabiner, `hidutil`), Carbon combos
+and holding Space are not detected.
+Details: [hotkey.md](hotkey.md#another-app-intercepts-a-modifier-shortcut-its-logo-shakes).
+
 ## Управление приложением через агента
 
 Локальный MCP-плагин Whytap читает состояние сборки и активности, маршруты

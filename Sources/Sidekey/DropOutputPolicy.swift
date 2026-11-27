@@ -65,10 +65,65 @@ struct DropOutputPolicy {
     }
 }
 
+/// A Drop take whose paste was refused (`AutoPasteEngine.PasteRefusal`):
+/// its final text is kept in memory so Retry pastes it again without new
+/// processing, until Retry succeeds, the user closes it or a new take
+/// discards it.
+struct DropPasteRetry {
+    let text: String
+    let rawTranscript: String
+    let formatting: SmartFormattingProfile
+    /// The app the refused take was bound to; Retry pastes only there.
+    let target: AutoPasteEngine.RememberedTarget?
+
+    /// The kept take after `engine` refused its paste in a retryable way,
+    /// or nil when the last paste was not a retryable refusal (it pasted,
+    /// or stopped for quit, held modifiers or a failed write).
+    static func make(
+        from outcome: AutoPasteEngine.PasteOutcome,
+        text: String,
+        rawTranscript: String,
+        formatting: SmartFormattingProfile
+    ) -> (retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal)? {
+        guard !outcome.pasted, let refusal = outcome.refusal else { return nil }
+        let retry = DropPasteRetry(
+            text: text, rawTranscript: rawTranscript, formatting: formatting, target: outcome.target
+        )
+        return (retry, refusal)
+    }
+
+    /// The same from the engine's most recently finished paste; only valid
+    /// right after the caller's own awaited paste returned.
+    @MainActor
+    static func make(
+        after engine: AutoPasteEngine,
+        text: String,
+        rawTranscript: String,
+        formatting: SmartFormattingProfile
+    ) -> (retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal)? {
+        engine.lastOutcome.flatMap { make(from: $0, text: text, rawTranscript: rawTranscript, formatting: formatting) }
+    }
+
+    /// The short reason shown next to Retry.
+    static func message(for refusal: AutoPasteEngine.PasteRefusal) -> String {
+        switch refusal {
+        case .targetNotInFront: return "Couldn't paste — app not in front"
+        case .clipboardChanged: return "Couldn't paste — clipboard changed"
+        }
+    }
+}
+
 /// Retained only in memory until Retry succeeds or a new take discards it.
 struct DropProcessingRetry {
     let rawText: String
     let targetApp: String?
     let targetPID: pid_t?
     let mode: TranscriptionMode
+}
+
+/// Carries one take's raw-partial paste outcome from `pasteRaw` to
+/// `parkRefusedPartial` within the same delivery sink.
+@MainActor
+final class DropPasteOutcomeBox {
+    var value: AutoPasteEngine.PasteOutcome?
 }

@@ -74,7 +74,7 @@ DEFAULTS = {
     "undelivered_minutes": 20,     # an author event still unacknowledged
     "alerts_mirror": "",           # optional second JSONL path, e.g. the orchestrator's folder
     # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
-    "validate_while_locked": True,  # review, tests and merge go on behind a locked screen;
+    "validate_while_locked": True,  # tests and merge go on behind a locked screen;
                                     # protected-data tests, packaging and installs wait
     "stale_dependency_minutes": 120,  # return a ticket whose dependency stays blocked
     "preview_lane": False,         # set by `activate --preview-lane`
@@ -345,7 +345,7 @@ def environment(config):
         reason = f"load {load:.0f} on {cpus} CPUs (limit {limit:.0f})"
     # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
     # Only the protected-data tests, signing and the install need an unlocked screen:
-    # review, the suite and the merge may run behind a lock when the load allows.
+    # the suite and the merge may run behind a lock when the load allows.
     return {"clear": not reason, "reason": reason, "screen_locked": locked,
             "load": load, "cpus": cpus, "load_limit": limit,
             "clear_for_validation": not overloaded}
@@ -1370,7 +1370,7 @@ def main():
         "environment", help="Can a build run now (screen and load)? Exit 0 when clear, 3 when not")
     environment_command.add_argument(
         "--for", dest="purpose", choices=("install", "suite"), default="install",
-        help="suite: a locked screen does not stop the review, the full suite or the merge "
+        help="suite: a locked screen does not stop the full suite or the merge "
              "(protected-data tests skip and run before the install); install: it does")
     commands.add_parser("run-preview", help="What the preview LaunchAgent calls")
     activate = commands.add_parser("activate", help="Install and load the LaunchAgent")

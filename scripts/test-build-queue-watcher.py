@@ -1006,8 +1006,8 @@ class WatcherTests(unittest.TestCase):
         self.watcher("run")
         [notice] = self.notices()
         events = self.ticket_events(ticket)
-        self.assertRegex(notice["id"], r"^whytap-build-queue:[0-9a-f]{8}:event:%d$"
-                         % events[-1]["id"])
+        self.assertRegex(notice["id"], r"^whytap-build-queue:[0-9a-f]{8}:events:%d-%d$"
+                         % (events[1]["id"], events[-1]["id"]))
         self.assertEqual((notice["version"], notice["project"], notice["conversation"],
                           notice["source"]), (1, str(self.repo), WORKER, "whytap-build-queue"))
         self.assertIn("blocked", notice["title"])
@@ -1302,6 +1302,100 @@ class WatcherTests(unittest.TestCase):
 
     def test_a_lost_retry_record_is_recovered_from_its_receipt_after_a_transition(self):
         self.check_lost_retry(receipt_only=True, transition=True)
+
+    def check_unpersisted_rejection(self, receipt_only, transition):
+        """The original record still says `sent` on disk: the same failed write lost both
+        the rejection and the retry (#703 review)."""
+        self.fake_whycode()
+        self.configure_watcher(inbox_retry_minutes=0)
+        ticket = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "pending_install", "--note",
+                   "first outcome")
+        self.deliver()
+        [first] = self.notices()
+        self.whycode_answers(first, "rejected", reason="temporary rejection")
+        if transition:
+            self.queue("set", "--ticket", str(ticket), "--status", "done", "--note",
+                       "latest outcome")
+        module = self.watcher_module()
+        with patch.object(module, "write_json", side_effect=OSError("disk full")):
+            self.deliver(module)
+        [retry] = self.notices()
+        self.assertIn("first outcome", retry["text"])
+        self.assertEqual("latest outcome" in retry["text"], transition)
+        state = json.loads((self.root / "whytap-build-queue-inbox.json").read_text())
+        self.assertEqual(state["messages"][first["id"]]["status"], "sent")
+        if receipt_only:
+            self.whycode_answers(retry, "delivered", target={"kind": "session"})
+        self.deliver()
+        self.assertEqual([n["id"] for n in self.notices()], [] if receipt_only else [retry["id"]])
+        if not receipt_only:
+            self.whycode_answers(retry, "delivered", target={"kind": "session"})
+            self.deliver()
+        self.assertTrue(all(e["acknowledged_at"] for e in self.ticket_events(ticket)))
+        self.assertEqual(self.notices(), [])
+
+    def test_an_unpersisted_rejection_and_lost_retry_recover_from_the_file(self):
+        self.check_unpersisted_rejection(receipt_only=False, transition=False)
+
+    def test_an_unpersisted_rejection_and_lost_retry_recover_from_the_file_after_a_transition(self):
+        self.check_unpersisted_rejection(receipt_only=False, transition=True)
+
+    def test_an_unpersisted_rejection_and_lost_retry_recover_from_the_receipt(self):
+        self.check_unpersisted_rejection(receipt_only=True, transition=False)
+
+    def test_an_unpersisted_rejection_and_lost_retry_recover_from_the_receipt_after_a_transition(self):
+        self.check_unpersisted_rejection(receipt_only=True, transition=True)
+
+    def test_a_newer_result_goes_out_while_an_older_notice_waits_for_its_retry(self):
+        self.fake_whycode()
+        self.configure_watcher(inbox_retry_minutes=999)
+        ticket = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "pending_install", "--note",
+                   "pending marker")
+        self.deliver()
+        [first] = self.notices()
+        self.whycode_answers(first, "rejected", reason="rate cap: busy")
+        self.queue("set", "--ticket", str(ticket), "--status", "done", "--note", "done marker")
+        self.deliver()
+        [done] = self.notices()  # not held back by the older notice's retry
+        self.assertIn("done marker", done["text"])
+        self.assertNotIn("pending marker", done["text"])
+        newest = self.ticket_events(ticket)[-1]["id"]
+        self.assertTrue(done["id"].endswith(f":events:{newest}-{newest}"))
+        self.whycode_answers(done, "delivered", target={"kind": "session"})
+        self.configure_watcher(inbox_retry_minutes=0, undelivered_minutes=-1)
+        self.watcher("run")
+        self.assertEqual(self.notices(), [])  # the older result is history now
+        self.assertTrue(all(e["acknowledged_at"] for e in self.ticket_events(ticket)))
+        self.assertNotIn("undelivered:1", [a["condition"] for a in self.alerts()
+                                           if a["state"] == "raised"][-1:])
+
+    def test_structured_but_invalid_record_fields_stop_no_other_notice(self):
+        self.fake_whycode()
+        first = self.cancel(self.enqueue(1))
+        self.deliver()
+        [notice] = self.notices()
+        path = self.root / "whytap-build-queue-inbox.json"
+        original = json.loads(path.read_text())
+        broken = [("events", None), ("events", [[]]), ("events", []), ("events", ["2"]),
+                  ("events", [True]), ("attempt", "invalid"), ("attempt", 0),
+                  ("status", "lost"), ("ticket", "1"), ("sent", "now"), ("payload", []),
+                  ("receipt", "x"), ("reason", 7)]
+        for number, (field, value) in enumerate(broken, 2):
+            with self.subTest(field=field, value=value):
+                state = json.loads(json.dumps(original))
+                state["messages"][notice["id"]][field] = value
+                path.write_text(json.dumps(state))
+                other = self.cancel(self.enqueue(number))
+                result = self.watcher("run")  # delivery and the watchdog read it
+                self.assertNotIn("failed", result.stdout + result.stderr)
+                texts = [n["text"] for n in self.notices()]
+                self.assertTrue(any(f"ticket #{other}:" in text for text in texts))
+                # The dropped record's notice is recovered from its file, not resent.
+                self.assertEqual(sum(f"ticket #{first}:" in text for text in texts), 1)
 
     def test_a_retry_in_flight_clears_the_earlier_rejection_from_the_alert(self):
         self.fake_whycode()

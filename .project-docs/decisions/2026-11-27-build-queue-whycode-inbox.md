@@ -62,9 +62,14 @@ a receipt per id, deduplication across restarts and rate caps.
   under the same id (Whycode's ledger keeps it single). `rejected` raises the
   undelivered alert at once and is retried under a new id (`.r2`, ...) after
   30 minutes, six attempts at most.
-- Ids are `whytap-build-queue:<hash of the Git common directory>:event:<id of
-  the batch's newest event>`, so another clone's queue, which also counts from
-  1, can never collide in Whycode's ledger. `project` is the main checkout.
+- Ids are `whytap-build-queue:<hash of the Git common directory>:events:<first>-<last>`
+  (plus `.r<attempt>` for a retry). The hash keeps another clone's queue, which
+  also counts from 1, out of Whycode's ledger; the range names the exact batch.
+  A notice holds its events while it is on its way or waits for its retry, and
+  a notice rejected for the last time keeps them with the alert. A new batch is
+  every unacknowledged event of its ticket newer than all held ones, so it is a
+  contiguous range and a newer result never waits for an older retry.
+  `project` is the main checkout.
 - Events the author's own `enqueue` writes (its receipt, the supersede of its
   older head, a resubmitted return) are acknowledged by that command: its
   response already told the author, and a notice would wake it for nothing.
@@ -78,23 +83,24 @@ a receipt per id, deduplication across restarts and rate caps.
   origin/main, the builder keeps the earlier Harness Link delivery, so merging
   never leaves authors without any delivery path before `activate`.
 - A notice follows the ticket's newest event. If that event is acknowledged
-  (the author's own command moved the ticket on: a new head, a resubmitted
-  return), the earlier undelivered events are history and are acknowledged
-  without a notice; if it is a start or requeue, they ride along with the next
-  result. A return without review (the ticket's `auto_returned`) asks only to
+  (a delivered notice told it, or the author's own command moved the ticket on:
+  a new head, a resubmitted return), the earlier events not on their way are
+  history and are acknowledged without a notice; if it is a start or requeue,
+  they ride along with the next result. A return without review (the ticket's `auto_returned`) asks only to
   wait for the dependency and resubmit the same head, or to enqueue the newer
   head, never to change code.
 - One notice's failure stops no other: an invalid receipt (wrong shape, id or
   status) is ignored for that notice, and each ticket's batch is handled on its
   own.
-- A notice published while its record failed (a crash, a full disk) is
-  recovered from its file or receipt: the id names the batch's newest event, so
-  the batch is that ticket's unacknowledged events up to it that no notice in
-  flight holds (a rejected attempt holds none, so a lost retry recovers its
-  whole batch), the latest attempt first. It is never sent again under another
-  id. A recovered file or a record that is not a valid object affects only its
-  own notice, and a rejection stops counting for the alert once a later attempt
-  is on its way (second review, ticket 696).
+- A notice published while its record failed (a crash, a full disk, a lost
+  rejection beside it) is recovered from its file or receipt: its id's range is
+  the exact batch, whatever the records on disk still say. It is never sent
+  again under another id. Each record's fields are checked (status, ticket,
+  events, attempt, times, payload, receipt) before any shared calculation, by
+  delivery and the watchdog alike; an invalid one is dropped and its notice
+  recovered from its evidence, so it affects only itself. A rejection stops
+  counting for the alert once a later attempt is on its way (reviews of tickets
+  696 and 703).
 - Title (200) and text (20,000) are counted in UTF-16 units like Whycode's
   JavaScript check, without cutting a character, and the file in bytes
   (128 KB).

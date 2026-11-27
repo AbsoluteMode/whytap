@@ -53,6 +53,7 @@ FINAL_STATUSES = ("blocked", "done", "superseded", "cancelled")
 INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`, in UTF-16 units
 INBOX_FILE_LIMIT = 128 * 1024  # Whycode's limit for the whole file, in bytes
 RECEIPT_STATUSES = ("queued", "delivered", "rejected")
+RECORD_STATUSES = ("sent", "queued", "delivered", "rejected")
 INBOX_KEPT_MESSAGES = 1000    # delivered records kept in the inbox state
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
@@ -620,9 +621,7 @@ def findings(root, config, context, previous, now, inbox=None):
     # a receipt, start or requeue of an open ticket, and anything a newer event replaced,
     # rides along with its next notice. A rejected notice counts at once.
     # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
-    messages = inbox.get("messages") if isinstance(inbox, dict) else None
-    messages = {k: v for k, v in messages.items() if isinstance(v, dict)} \
-        if isinstance(messages, dict) else {}
+    messages = valid_records(inbox.get("messages"))  # the same checks as delivery
     in_flight = {event_id: record for record in messages.values()
                  if record.get("status") in ("sent", "queued")
                  for event_id in record.get("events", [])}
@@ -892,37 +891,60 @@ def read_receipt(inbox, message_id):
     return receipt
 
 
+def notice_id(root, events, attempt):
+    """The id names the batch: its first and last event. A ticket has at most one notice
+    in flight, so a batch is every unacknowledged event of its ticket in that range."""
+    return f"{inbox_sender(root)}:events:{events[0]['id']}-{events[-1]['id']}" + (
+        f".r{attempt}" if attempt > 1 else "")
+
+
+def valid_record(record):
+    """A notice record as this watcher writes it; anything else is dropped and, if it
+    was published, recovered from its file or receipt."""
+    def integer(value):
+        return type(value) is int and value > 0
+    def number(value):
+        return type(value) in (int, float)
+    return (isinstance(record, dict) and record.get("status") in RECORD_STATUSES
+            and integer(record.get("ticket"))
+            and isinstance(record.get("events"), list) and record["events"]
+            and all(integer(e) for e in record["events"])
+            and integer(record.get("attempt", 1))
+            and number(record.get("sent", 0)) and number(record.get("rejected", 0))
+            and number(record.get("delivered", 0))
+            and isinstance(record.get("payload") or {}, dict)
+            and isinstance(record.get("receipt") or {}, dict)
+            and isinstance(record.get("reason", ""), str))
+
+
+def valid_records(messages):
+    return {k: v for k, v in messages.items() if isinstance(k, str) and valid_record(v)} \
+        if isinstance(messages, dict) else {}
+
+
 def recover_published(root, inbox, messages, unacknowledged):
-    """A notice can be published while recording it fails (a crash, a full disk). Its
-    file or receipt is the durable evidence: its id names the batch's newest event, so
-    the batch is that ticket's unacknowledged events up to it. Recovered, it is never
-    sent again under another id."""
-    prefix = inbox_sender(root) + ":event:"
+    """A notice can be published while recording it fails (a crash, a full disk), and an
+    invalid record is dropped. The notice's file or receipt is the durable evidence, and
+    its id names the exact batch whatever the records on disk still say. Recovered, it is
+    never sent again under another id."""
+    prefix = inbox_sender(root) + ":events:"
     names = {path.name[:-len(".json")] for folder in (inbox, inbox / "receipts")
              for path in folder.glob(prefix + "*.json")}
-    # Only a notice still in flight holds its events: a rejected attempt's events are
-    # exactly what a lost retry carried.
-    claimed = {event_id for record in messages.values()
-               if record.get("status") in ("sent", "queued")
-               for event_id in record.get("events", [])}
-    found = []
-    for message_id in names - set(messages):
-        match = re.fullmatch(r"(\d+)(?:\.r(\d+))?", message_id[len(prefix):])
-        if match:
-            found.append((int(match.group(1)), -int(match.group(2) or 1), message_id))
-    # The latest attempt of a batch claims it first; an earlier attempt of it is moot.
-    for newest, negative_attempt, message_id in sorted(found):
+    for message_id in sorted(names - set(messages)):
         try:
-            ticket = ticket_of_event(root, newest)
-            events = [e["id"] for e in unacknowledged if e["ticket"] == ticket
-                      and e["id"] <= newest and e["id"] not in claimed]
-            claimed.update(events)
+            match = re.fullmatch(r"(\d+)-(\d+)(?:\.r(\d+))?", message_id[len(prefix):])
+            if not match:
+                continue
+            first, last = int(match.group(1)), int(match.group(2))
+            ticket = ticket_of_event(root, last)
+            events = [e["id"] for e in unacknowledged
+                      if e["ticket"] == ticket and first <= e["id"] <= last]
             if not events:
                 continue  # already acknowledged: nothing left to cover
             payload = read_json(inbox / (message_id + ".json"), {})
             valid = isinstance(payload, dict) and payload.get("id") == message_id
             messages[message_id] = {"ticket": ticket, "events": events, "status": "sent",
-                                    "sent": time.time(), "attempt": -negative_attempt,
+                                    "sent": time.time(), "attempt": int(match.group(3) or 1),
                                     "payload": payload if valid else None, "recovered": True}
             log(f"inbox: recovered notice {message_id} for #{ticket} (events "
                 f"{', '.join(map(str, events))})")
@@ -988,8 +1010,7 @@ def deliver_notices(root, config, now=None):
         if inbox is None:
             write_json(path, state)
             return state
-        messages = state["messages"] = {k: v for k, v in state["messages"].items()
-                                        if isinstance(v, dict)}
+        messages = state["messages"] = valid_records(state["messages"])
         unacknowledged = inbox_events(root, state["since"])
         recover_published(root, inbox, messages, unacknowledged)
         for message_id, record in list(messages.items()):
@@ -999,34 +1020,40 @@ def deliver_notices(root, config, now=None):
                 except Exception as error:  # this notice only
                     log(f"inbox: {message_id} not settled: {type(error).__name__}: {error}")
         unacknowledged = inbox_events(root, state["since"])  # after the acknowledgements
-        # What the in-flight and recent rejected messages already cover.
-        covered, attempts = set(), {}
+        # A notice holds its events while it is on its way or waits for a retry, and a
+        # notice rejected for the last time keeps them with the alert. A new batch is every
+        # unacknowledged event of its ticket newer than all of those, so it is a contiguous
+        # range of the ticket's events, which its id names.
+        held, flight, attempts = {}, set(), {}
         for record in messages.values():
-            for event_id in record.get("events", []):
-                attempts[event_id] = max(attempts.get(event_id, 0), record.get("attempt", 1))
-                if record.get("status") in ("sent", "queued") or (
-                        record.get("status") == "rejected" and (
-                            record.get("attempt", 1) >= config["inbox_max_attempts"]
-                            or now - record.get("rejected", now)
-                            < config["inbox_retry_minutes"] * 60)):
-                    covered.add(event_id)
-        batches = {}
+            status, attempt = record["status"], record.get("attempt", 1)
+            for event_id in record["events"]:
+                attempts[event_id] = max(attempts.get(event_id, 0), attempt)
+            if status in ("sent", "queued"):
+                flight.update(record["events"])
+            if status in ("sent", "queued") or status == "rejected" and (
+                    attempt >= config["inbox_max_attempts"]
+                    or now - record.get("rejected", now) < config["inbox_retry_minutes"] * 60):
+                held[record["ticket"]] = max([held.get(record["ticket"], 0), *record["events"]])
+        tickets = {}
         for event in unacknowledged:
-            if event["id"] not in covered:
-                batches.setdefault(event["ticket"], []).append(event)
+            tickets.setdefault(event["ticket"], []).append(event)
         stamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
-        for ticket_id, events in batches.items():
+        for ticket_id, pending in tickets.items():
             try:
+                if pending[-1]["newest_acknowledged"]:
+                    # The ticket's latest state already reached the author: a delivered
+                    # notice, or the author's own command (a resubmission, a new head)
+                    # whose response said so. Older events not on their way are history,
+                    # not work to wake the author for.
+                    for event in pending:
+                        if event["id"] not in flight:
+                            acknowledge(root, event["id"], "history: a newer state was told")
+                    continue
+                events = [e for e in pending if e["id"] > held.get(ticket_id, 0)]
+                if not events:
+                    continue  # the newest is on its way; older ones wait for it
                 newest = events[-1]
-                if newest["newest_id"] != newest["id"]:
-                    if newest["newest_acknowledged"] and not any(
-                            newest["newest_id"] in r.get("events", []) for r in messages.values()):
-                        # The author's own later command (a resubmission, a new head) moved
-                        # the ticket on and its response told the author: what came before
-                        # is history, not work to wake the author for.
-                        for event in events:
-                            acknowledge(root, event["id"], "outdated by the author's command")
-                    continue  # otherwise a newer event is in flight; these wait for it
                 if newest["status"] not in NOTICE_STATUSES:
                     continue  # a receipt, start or requeue rides along with the next result
                 youngest = min(age_minutes(e["created_at"], now) for e in events)
@@ -1034,8 +1061,7 @@ def deliver_notices(root, config, now=None):
                         youngest * 60 < config["inbox_settle_seconds"]:
                     continue
                 attempt = max(attempts.get(e["id"], 0) for e in events) + 1
-                message_id = f"{inbox_sender(root)}:event:{newest['id']}" + (
-                    f".r{attempt}" if attempt > 1 else "")
+                message_id = notice_id(root, events, attempt)
                 payload = notice_payload(root, config, message_id, events)
                 write_inbox_file(inbox, message_id, payload)
                 messages[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
@@ -1046,7 +1072,7 @@ def deliver_notices(root, config, now=None):
                 write_json(path, state)  # each published notice is recorded at once
             except Exception as error:  # this ticket only
                 log(f"inbox: no notice for #{ticket_id}: {type(error).__name__}: {error}")
-        done = [k for k, v in messages.items() if v.get("status") == "delivered"]
+        done = [k for k, v in messages.items() if v["status"] == "delivered"]
         for message_id in done[:-INBOX_KEPT_MESSAGES]:
             messages.pop(message_id)
         for record in messages.values():

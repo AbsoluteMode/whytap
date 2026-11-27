@@ -12,12 +12,12 @@ sources:
     reference: On 2026-11-28 the owner reported (orchestrator task 110, screenshot) that typing "e" in the Output Language picker drew a fourth flag row and a lone Spain flag below the glass panel, over other windows.
     confirmed_at: 2026-11-28
   - type: repository
-    reference: Sources/Sidekey/DynamicIsland/IslandDropModeControl.swift (IslandLanguagePickerLayout.grid, languagePickerHoverPanelHeight)
+    reference: Sources/Sidekey/DynamicIsland/IslandDropModeControl.swift
     confirmed_at: 2026-11-28
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandLanguagePickerGridTests.swift
     confirmed_at: 2026-11-28
-related: [2026-10-17-hover-tool-search.md, 2026-10-17-native-hover-glass.md]
+related: []
 ---
 
 # Language picker flags scroll inside a fixed-height drawer

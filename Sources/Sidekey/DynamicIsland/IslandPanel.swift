@@ -1030,6 +1030,16 @@ final class IslandPanel: NSPanel {
         // Use measured control frames instead of the inactive SwiftUI first-
         // mouse bridge. One owned down/drag/up sequence invokes at most once.
         switch event.type {
+        // Right-click or Control-click on a tool: Remove from Hover / Add to Hover.
+        // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+        case .rightMouseDown:
+            if showHoverToolMenu(for: event) { return }
+        case .leftMouseDown where event.modifierFlags.contains(.control):
+            if showHoverToolMenu(for: event) { return }
+            if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
+                                        allowsAnswer: allowsAnswerPointerDispatch) {
+                return
+            }
         case .leftMouseDown:
             if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
                                         allowsAnswer: allowsAnswerPointerDispatch) {
@@ -1131,6 +1141,24 @@ final class IslandPanel: NSPanel {
         }
 
         super.sendEvent(event)
+    }
+
+    /// The tool's context menu, popped up at the pointer. Like every other
+    /// click in this non-key panel, the target is found geometrically (the
+    /// SwiftUI context-menu bridge never sees a first click here). The menu
+    /// holds the drawer open while it tracks and after it closes.
+    private func showHoverToolMenu(for event: NSEvent) -> Bool {
+        guard let store = hoverHitBridge.layoutStore,
+              let target = hoverHitBridge.contextMenuTarget(at: event.locationInWindow, in: self,
+                                                            allowed: allowsHoverPointerDispatch),
+              let view = host ?? contentView else { return false }
+        let items = IslandHoverToolMenu.items(for: target, slots: store.slots)
+        guard !items.isEmpty else { return false }
+        let menu = IslandHoverToolMenu.menu(for: items, bridge: hoverHitBridge)
+        hoverHitBridge.toolMenuWillOpen()
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+        hoverHitBridge.toolMenuDidClose()
+        return true
     }
 
     /// The strip's computed hit rect in window/bounds-space (AppKit y-up,

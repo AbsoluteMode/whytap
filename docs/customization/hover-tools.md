@@ -89,11 +89,12 @@ change and rebuild it with the canonical development script.
 ## Checks
 
 ```bash
-python3 scripts/customize.py test --filter 'HoverToolTests|HoverLayoutStoreTests|HoverSlotRouterTests|HoverHotkeyTests|IslandHoverPanelControlTests|IslandHoverToolSearchTests|IslandHoverHitBridgeTests|HoverToolPresentationTests|IslandHoverPanelHitZoneTests|MonitorDashboardTests|BrightnessHoverToolTests|ScreenBrightnessControllerTests|GammaBrightnessBoostTests|BrightnessBoostFrameTimerTests|BrightnessKeysTests'
+python3 scripts/customize.py test --filter 'HoverToolTests|HoverLayoutStoreTests|HoverSlotRouterTests|HoverHotkeyTests|IslandHoverPanelControlTests|IslandHoverToolSearchTests|IslandHoverHitBridgeTests|HoverToolPresentationTests|IslandHoverPanelHitZoneTests|IslandHoverReorderTests|IslandHoverUnpinTests|MonitorDashboardTests|BrightnessHoverToolTests|ScreenBrightnessControllerTests|GammaBrightnessBoostTests|BrightnessBoostFrameTimerTests|BrightnessKeysTests'
 python3 scripts/customize.py build
 ```
 
-Inspect one row and multiple rows, add/reorder/remove, Settings locking, relaunch
+Inspect one row and multiple rows, add/reorder/remove (in Settings and in the
+drawer: right-click Remove from Hover, More tools -> click), Settings locking, relaunch
 persistence and each tool's own optional hotkey (Settings → Hotkeys → Tools; there
 are no positional shortcuts). Verify that
 scrolling preserves and reaches tool 13+, all drawer/search/inline-panel native
@@ -123,7 +124,14 @@ closing the panel cancels activation. A tile pressed and moved
 the pointer over a cell puts the tool there, the lifted tool holds the drawer
 open, the release never activates it, a release far outside the tools restores
 the earlier order and a layout change the drag did not make ends it
-([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)). Internal search editing transitions must
+([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)).
+A right-click or Control-click on a tile or a More row is found by
+`contextMenuTarget` in `IslandPanel.sendEvent` and pops `IslandHoverToolMenu`;
+More rows and the footer chevron are the `.moreTools`/`.moreToggle` surfaces,
+accepted while `.tile` is active, each with its own measured region. If the
+drawer closes after removing or adding a tool, inspect `IslandHoverEditHold`:
+it must stay `held` until a click outside or the pointer's return
+([decision](../../.project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md)). Internal search editing transitions must
 not resign the key window before the result receives its owned mouse-up.
 
 For flat glass or missing hover feedback, read the current

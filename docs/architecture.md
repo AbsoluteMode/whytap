@@ -915,10 +915,9 @@ Monitor inside hover:
   Hover launch and the legacy openMonitor callback both request inline .monitor
   with programmatic expansion; neither opens a window. The legacy window class
   is retained for compatibility only. Every picker row, Server status included,
-  has an ×
-  (no context menu: the island has no right-click actions; rows have no chevron
-  and the scroller sits in the right margin beside the cards; row and × show
-  hover/press/focus only while enabled). The × asks first
+  has an ×. The picker rows have no context menu or chevron. The scroller sits
+  in the right margin beside the cards. The row and × show hover, press and focus
+  only while enabled. The × asks first
   inside the panel (a card with only the question, Cancel first, red Delete;
   a system alert opened under the island and could not be clicked). The card
   registers its buttons as IslandHoverHitBridge .modal targets and, while
@@ -1614,6 +1613,29 @@ until release (saveLayout); a cancel restores the screen only; any Settings
 Sync reload (externalReloads) ends the drag. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
+Island pin/unpin and More tools: a right-click or Control-click on a tile is
+found geometrically in IslandPanel.sendEvent (IslandHoverHitBridge
+.contextMenuTarget) and pops a native NSMenu (IslandHoverToolMenu): Remove from
+Hover, or a disabled "Settings always stays in Hover"; VoiceOver has the same
+action on the tile. The footer keeps the description on the left and
+IslandHoverMoreToolsToggle on the right ("More tools" with nothing hovered).
+It opens IslandHoverMoreToolsSection below the footer: HoverLayoutStore
+.unpinnedTools in catalog order, three per row, three visible rows then
+scrolling; a click or "Add to Hover" calls HoverLayoutStore.pin (end of the
+island, before Settings) and the grid scrolls to it. Its rows and chevron are
+hit surfaces .moreTools/.moreToggle, accepted together with .tile; the band
+grows with the section (controlsHoverPanelHeight moreTools). The chevron is
+hidden when every tool is in the island; search and drawer close collapse the
+section. After a removal, an addition and while the menu is open the drawer is
+held (IslandHoverEditHold in IslandHoverHitBridge.holdsDrawer) until a click
+outside or Escape (IslandHoverMenuDismissObserver -> dismissAfterEdit ->
+dismissals -> dismissHoverMenu, which closes it even with the pointer over it;
+Escape in another Whytap window passes on), or until the pointer is seen over
+the island or the drawer's final frame and then leaves. Disabled hit targets
+(a Soon tool) still register as inactive: clicks skip them, the context menu
+finds them, so such a tool can be removed but not opened. WHY:
+.project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns
 dynamic SwiftUI/AppKit colors; the shell uses inset groups and text-only sidebar
 rows with a 140 ms background hover fade (immediate with Reduce Motion).
@@ -2217,10 +2239,9 @@ Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
-without deleting other retained rows. Clipboard rows have no Delete and no
-context menu (the island has no right-click actions; the user removed the
-per-entry Delete on 2026-11-21); only the 50-entry cap removes them. History
-key monitors ignore keys while a modal alert is open. WHY:
+without deleting other retained rows. Clipboard rows have no context menu.
+The user removed per-entry Delete on 2026-11-21, so only the 50-entry cap
+removes rows. History key monitors ignore keys while a modal alert is open. WHY:
 .project-docs/decisions/2026-11-21-clipboard-no-entry-delete.md
 Island History pastes several rows in one opening: with a paste target,
 ⌘-click marks rows in click order (a blue numbered badge; ⌘-click again

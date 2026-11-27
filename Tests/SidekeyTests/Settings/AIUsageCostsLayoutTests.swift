@@ -17,7 +17,7 @@ final class AIUsageCostsLayoutTests: XCTestCase {
         let body = text[table.upperBound...]
         let total = try XCTUnwrap(body.range(of: #"Text("Total")"#))
         let header = try XCTUnwrap(body.range(of: #"Text("Feature")"#))
-        let rows = try XCTUnwrap(body.range(of: "AIUsageFeatureCostRow(row: row)"))
+        let rows = try XCTUnwrap(body.range(of: "AIUsageFeatureCostRow(row: row, hover: modelsHover)"))
         XCTAssertLessThan(total.lowerBound, header.lowerBound)
         XCTAssertLessThan(header.lowerBound, rows.lowerBound)
         XCTAssertEqual(body.components(separatedBy: #"Text("Total")"#).count - 1, 1, "one total, not a second one below")
@@ -28,14 +28,19 @@ final class AIUsageCostsLayoutTests: XCTestCase {
     func test_the_whole_row_opens_the_model_detail() throws {
         let text = try source()
         let row = try XCTUnwrap(text.range(of: "private struct AIUsageFeatureCostRow: View"))
-        let end = try XCTUnwrap(text.range(of: "private func scheduleClose()"))
+        let end = try XCTUnwrap(text.range(of: "struct AIUsagePriceLabel: View"))
         let body = String(text[row.upperBound..<end.lowerBound])
         let price = try XCTUnwrap(body.range(of: "AIUsagePriceLabel(events: row.events)"))
         let shape = try XCTUnwrap(body.range(of: ".contentShape(Rectangle())\n        .onHover"))
         XCTAssertLessThan(price.lowerBound, shape.lowerBound, "the hover is on the row that contains the price")
-        XCTAssertTrue(body.contains(".onTapGesture { if isEnabled { togglePinned() } }"), "a click anywhere pins it")
+        XCTAssertTrue(body.contains(".onTapGesture { if isEnabled { hover.send(.clicked(row.id)) } }"), "a click anywhere pins it")
         XCTAssertEqual(body.components(separatedBy: ".onHover").count - 1, 2, "the row and the open detail, nothing on the name alone")
-        XCTAssertTrue(text.contains("!hovered, !overPopover, !focused, !pinned"),
-                      "the detail stays while the pointer is over it, even where it covers the row")
+        XCTAssertFalse(body.contains("@State private var shown"),
+                       "no row owns its own open state; the table's one controller decides (AIUsageModelsHoverTests)")
+        XCTAssertTrue(body.contains("hover.isPresented(row.id)"), "each popover shows only its own row")
+        let table = try XCTUnwrap(text.range(of: "private var table: some View"))
+        let observer = try XCTUnwrap(text.range(of: ".onChange(of: visibleRowIDs, initial: true)"))
+        XCTAssertLessThan(observer.lowerBound, table.lowerBound,
+                          "rows are retired from outside the conditionally shown table (loading, empty, error)")
     }
 }

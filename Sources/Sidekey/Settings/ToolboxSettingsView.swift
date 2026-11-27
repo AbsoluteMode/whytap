@@ -380,7 +380,9 @@ struct ToolboxSettingsView: View {
                 ToolboxHistoryPane(deps: deps)
                     .settingsIslandPreview()
             case .brightness:
-                ToolboxDisplayPane()
+                // Hold, Extra and Brightness keys are on Display's own screen.
+                // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
+                actionPane(tool, title: "Open Display settings") { selection.open(.display) }
             case .tasks, .calendar:
                 VStack(spacing: 14) {
                     if tool.isComingSoon {
@@ -412,6 +414,8 @@ struct ToolboxSettingsView: View {
                 actionPane(tool, title: "Configure hotkeys") { selection.setHighlight(.tab(.hotkeys)) }
             case .notes:
                 actionPane(tool, title: "Open meeting notes") { selection.setHighlight(.tab(.notes)) }
+            case .help:
+                actionPane(tool, title: "Open Help Center") { NSWorkspace.shared.open(BuildConfig.helpCenterURL) }
             case .quit:
                 actionPane(tool, title: "Quit Whytap", action: deps.quitApplication)
             case .settings:

@@ -97,6 +97,7 @@ enum IslandHoverToolSearch {
         case .translate: return "translator translation text llm перевод переводчик текст"
         case .subtitles: return "translator live captions system audio video перевод субтитры системный звук"
         case .screenshot: return "screenshot capture area crop blur text numbers redact annotation screen скриншот снимок область размытие текст числа блюр"
+        case .help: return "help ask question support faq docs contact how to помощь вопрос поддержка спросить"
         case .quit: return "exit выход"
         case .settings: return "preferences настройки"
         }

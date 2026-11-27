@@ -25,6 +25,7 @@ enum HoverTool: String, CaseIterable, Hashable {
     case quit
     case settings
     case screenshot
+    case help
 }
 
 /// Where a `.navigate` tool takes the user.
@@ -115,6 +116,9 @@ enum HoverToolRegistry {
             return HoverToolInfo(title: "Quit", sfSymbol: "rectangle.portrait.and.arrow.right",
                                  kind: .navigate(.quitRow),
                                  description: "Quit Whytap")
+        case .help:
+            return HoverToolInfo(title: "Help", sfSymbol: "questionmark.circle", kind: .action,
+                                 description: "Ask a question in the Whytap Help Center")
         case .settings:
             return HoverToolInfo(title: "Settings", sfSymbol: "slider.horizontal.3",
                                  kind: .action,

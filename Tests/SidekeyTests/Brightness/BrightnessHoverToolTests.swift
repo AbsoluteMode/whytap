@@ -435,7 +435,7 @@ private final class SettingsPaneFixture {
         let brightnessKeys = keys
         host = NSHostingView(rootView: AnyView(
             ToolboxToolViewport {
-                ToolboxDisplayPane(controller: displayController, keys: brightnessKeys)
+                DisplayBrightnessSettings(controller: displayController, keys: brightnessKeys)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
             }
                 .frame(width: Self.width, height: Self.availableHeight)

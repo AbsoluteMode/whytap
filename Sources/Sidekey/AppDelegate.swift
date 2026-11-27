@@ -1211,6 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openTranslate: { [weak self] in self?.openTranslation(.text) },
             openSubtitles: { [weak self] in self?.openTranslation(.subtitles) },
             openScreenshot: { [weak self] in self?.openScreenshot() },
+            openHelpCenter: { NSWorkspace.shared.open(BuildConfig.helpCenterURL) },
             openSettings: { [weak self] in
                 self?.openSettingsWindow(tab: .features)
             },
@@ -1349,6 +1350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 screenshotProtectionChanged: { enabled in
                     IslandPanel.setScreenshotProtectionEnabled(enabled)
                     IslandNotificationPanel.setScreenshotProtectionEnabled(enabled)
+                    SecureInputHolderPanel.setScreenshotProtectionEnabled(enabled)
                 },
                 notesControllerProvider: { [weak self] in
                     self?.meetingsCoordinator?.settingsMeetingsContentController
@@ -1444,6 +1446,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         registerHelpHotkey()
         registerToolHotkeys()
         registerMeetingRecordHotkey()
+        // Points at the app holding Secure Input when a shortcut cannot arrive.
+        SecureInputGuard.shared.start()
         // Brightness keys install their tap only when switched on in Settings -> Toolbox.
         BrightnessKeys.shared.start(showStrip: { [weak self] in self?.showBrightnessGlance() })
         guard hotkey == nil else { return }
@@ -1732,7 +1736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .comingSoon:
             // A tool listed with a "Soon" badge has no effect.
             break
-        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
+        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .openHelpCenter, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty
             // Hover for ~4s (Stage 3 review fix). Run the effect directly

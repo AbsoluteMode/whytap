@@ -301,6 +301,10 @@ final class CarbonHotkeyMonitor {
     /// coordinator's `isMeetingRecording` flag so Option+/ cannot start
     /// dictation while a meeting recorder owns the mic.
     func handleHotKeyEvent() {
+        // The key arrived, so the Secure Input indicator must not blame
+        // anyone for this press, even when the gate drops it.
+        // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
+        HotkeyFireRecorder.noteFired()
         if shouldSuppress?() == true {
             os_log("hotkey suppressed", log: Self.log, type: .info)
             return

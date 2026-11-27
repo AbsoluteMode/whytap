@@ -394,7 +394,7 @@ final class APIAndModelsViewModelTests: XCTestCase {
         let vm = env.makeViewModel()
 
         XCTAssertEqual(vm.chips.map(\.account), [.soniox, .elevenLabs, .openRouter, .server(server.id)])
-        XCTAssertEqual(vm.chips[0], KeyChip(account: .soniox, title: "Soniox", statusText: "Key works", checkedAt: env.now))
+        XCTAssertEqual(vm.chips[0], KeyChip(account: .soniox, title: "Soniox", statusText: "Key works", checkedAt: env.now, keyWorks: true))
         XCTAssertEqual(vm.chips[1].statusText, "Couldn't read the key from the Keychain",
                        "an unreadable key is a key problem, never no key")
         XCTAssertEqual(vm.chips[2].statusText, "Out of credit or key limit reached")

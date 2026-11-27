@@ -67,6 +67,18 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
     ) {
         stop()
 
+        // A gesture the state machine accepted is a shortcut that arrived,
+        // so the Secure Input badge must not count its chord as blocked. A
+        // cancelled one (Right ⌥ then Shift) records nothing.
+        // WHY: .project-docs/decisions/2026-11-26-secure-input-holder.md
+        let arrived = Self.recordingArrival
+        let onTextTap = arrived(onTextTap)
+        let onVoiceTap = arrived(onVoiceTap)
+        let onVoiceHoldStart = arrived(onVoiceHoldStart)
+        let onGoogleTextTap = arrived(onGoogleTextTap)
+        let onGoogleVoiceTap = arrived(onGoogleVoiceTap)
+        let onGoogleHoldStart = arrived(onGoogleHoldStart)
+
         stateMachine.configure(
             onSnapshot: onSnapshot,
             onTap: onTextTap,
@@ -187,6 +199,11 @@ final class RightCmdGestureMonitor: RightCmdGestureMonitoring {
         stateMachine.reset()
         stateMachine.configuration = configuration
         restartAgentComboMonitors()
+    }
+
+    /// Wraps a gesture callback so it records an arrived shortcut first.
+    static func recordingArrival(_ callback: @escaping Callback) -> Callback {
+        { HotkeyFireRecorder.noteFired(); callback() }
     }
 
     private func handleNSEvent(_ event: NSEvent) {

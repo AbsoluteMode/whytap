@@ -123,11 +123,10 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(accepted.usage?.thinking, 0)
     }
 
-    /// Claude Sonnet 5.5 cannot take `disabled`. Without the provider's
-    /// search it gets `between_tools`; in a turn with that search it keeps
-    /// its own thinking at low effort, because with `between_tools` it
-    /// repeats finish_answer after a search.
-    func testSonnetGetsBetweenToolsOnlyInATurnWithoutProviderSearch() async throws {
+    /// Claude Sonnet 5.5 cannot take `disabled`: it gets `between_tools`
+    /// with and without the provider's search (its own default thinking
+    /// held the first byte about 9 s on a weather question, 2026-11-26).
+    func testSonnetGetsBetweenToolsWithAndWithoutProviderSearch() async throws {
         let plain = try await run("160 умножить на 120", anthropic("claude-sonnet-5-5", search: false), [
             json(["stop_reason": "end_turn", "content": [["type": "text", "text": "19 200"]]])
         ])
@@ -143,8 +142,9 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         ])
         XCTAssertEqual(searching.store.status, .ready, searching.store.errorMessage ?? "")
         XCTAssertEqual(searching.bodies.map(effort), ["low", "low"])
-        XCTAssertEqual(searching.bodies.map(thinking), [nil, nil])
-        XCTAssertNil(searching.diagnostics.last?.thinking)
+        XCTAssertEqual(searching.bodies.map(thinking), ["between_tools", "between_tools"])
+        XCTAssertTrue(toolTypes(searching.bodies[0]).contains("web_search_20250305"))
+        XCTAssertEqual(searching.diagnostics.last?.thinking, .betweenTools)
     }
 
     /// The shared table decides per model: Claude Sonnet 5 turns thinking
@@ -476,7 +476,7 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
         XCTAssertEqual(result.bodies.count, 3)
         XCTAssertEqual(result.bodies.map { toolTypes($0).contains("web_search_20250305") }, [true, false, false])
-        XCTAssertEqual(result.bodies.map(thinking), [nil, "between_tools", "between_tools"])
+        XCTAssertEqual(result.bodies.map(thinking), ["between_tools", "between_tools", "between_tools"])
         XCTAssertEqual(result.bodies.map(effort), ["low", "low", "low"])
     }
 
@@ -550,5 +550,207 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         let routed = try await run("hi", options, [upstream, json(routerFinal("Hello."))])
         XCTAssertEqual(routed.store.streamingText, "Hello.")
         XCTAssertEqual(routed.bodies.count, 2)
+    }
+
+    /// 2026-11-26: Claude Sonnet 5.5 with `between_tools` after a search
+    /// may write finish_answer more than once; the first valid call is the
+    /// answer and the turn ends with it. A batch mixing finish_answer with
+    /// another tool still fails, and so do only invalid finish_answer calls.
+    func testRepeatedFinishAnswerTakesTheFirstValidCall() async throws {
+        func use(_ id: String, _ input: [String: Any], name: String = "finish_answer") -> [String: Any] {
+            ["type": "tool_use", "id": id, "name": name, "input": input]
+        }
+        let invalid: [String: Any] = ["status": "answered", "answer": "", "sources": [], "actions": []]
+        let repeated = try await run("погода в спб", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", invalid), use("f2", finish("Около −2°, ясно.")),
+                                                         use("f3", finish("Second copy."))]]),
+            json(anthropicFinal("never")),
+        ])
+        XCTAssertEqual(repeated.store.status, .ready, repeated.store.errorMessage ?? "")
+        XCTAssertEqual(repeated.store.streamingText, "Около −2°, ясно.")
+        XCTAssertEqual(repeated.bodies.count, 1, "the turn ends on the first valid answer")
+
+        let mixed = try await run("hi", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", finish("Hi.")), use("t1", ["path": NSNull()], name: "list_directory")]]),
+        ])
+        XCTAssertEqual(mixed.store.status, .failed)
+        let none = try await run("hi", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [use("f1", invalid), use("f2", invalid)]]),
+        ])
+        XCTAssertEqual(none.store.status, .failed)
+    }
+
+    /// 2026-11-26: Claude copied its search citation tags into the answer
+    /// (`<cite index="1-9">` with no closing tag). They are removed on
+    /// Claude turns, the cited words kept; code and other providers stay.
+    func testClaudeCitationTagsAreRemovedFromTheAnswer() async throws {
+        let search: [String: Any] = ["type": "server_tool_use", "id": "s1", "name": "web_search", "input": ["query": "q"]]
+        let found: [String: Any] = ["type": "web_search_tool_result", "tool_use_id": "s1",
+                                    "content": [["type": "web_search_result", "title": "P", "url": "https://example.com/p", "encrypted_content": "x"]]]
+        func searched(_ input: [String: Any]) -> (Int, [String: String], Data) {
+            json(["stop_reason": "tool_use", "content": [search, found,
+                                                         ["type": "tool_use", "id": "f", "name": "finish_answer", "input": input]]])
+        }
+        let answer = "Около −2°.\n\n- <cite index=\"1-9\">Днём −3…0°, без осадков.</cite>\n- `<cite index=\"1-2\">` stays in code."
+        let result = try await run("погода в спб", anthropic("claude-sonnet-5-5"), [searched(finish(answer))])
+        XCTAssertEqual(result.store.streamingText, "Около −2°.\n\n- Днём −3…0°, без осадков.\n- `<cite index=\"1-2\">` stays in code.")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("a <cite index=\"0-1, 2-3\">b</cite> c"), "a b c")
+        // Builder review, queue #643: ordinary HTML <cite> is not provider
+        // markup, and Insert and Copy payloads are literal.
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("a <cite>Walden</cite> c"), "a <cite>Walden</cite> c")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"x\">a</cite>"), "<cite index=\"x\">a</cite>")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"1-2\">x</cite> and <cite>Walden</cite>"),
+                       "x and <cite>Walden</cite>", "a plain tag keeps its closing tag")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("`<cite index=\"1-2\">` and <cite>Walden</cite>"),
+                       "`<cite index=\"1-2\">` and <cite>Walden</cite>", "an indexed tag in code does not pair")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"1-2\">a <cite>W</cite> b</cite>"), "a <cite>W</cite> b")
+        // Builder review, queue #653: Markdown-escaped tags are literal text.
+        for literal in ["\\<cite index=\"1-2\">a\\</cite>", "\\<cite index=\"1-2\">a</cite>", "x \\</cite> y"] {
+            XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags(literal), literal)
+        }
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("\\\\<cite index=\"1-2\">a</cite>"), "\\\\a",
+                       "an escaped backslash does not escape the tag")
+        XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags("<cite index=\"1-2\">C:\\Users\\</cite>"), "C:\\Users\\",
+                       "a backslash ending the cited text does not keep the provider's closing tag")
+        var html = finish("The tag is below <cite index=\"1-1\">here</cite>.")
+        html["insert_text"] = "<p><cite>Walden</cite> <cite index=\"1-1\">kept</cite></p>"
+        html["actions"] = [["type": "copy", "text": "<cite>Walden</cite>", "description": "HTML"]]
+        let cards = try await run("html", anthropic("claude-sonnet-5-5"), [searched(html)])
+        XCTAssertEqual(cards.store.streamingText, "The tag is below here.")
+        let card = try XCTUnwrap(NativeAgentFinalAnswer(arguments: html, openAICitations: false, anthropicCitations: true))
+        XCTAssertEqual(card.insert?.insertText, "<p><cite>Walden</cite> <cite index=\"1-1\">kept</cite></p>")
+        XCTAssertTrue(card.actions.items.contains { $0.insertText == "<cite>Walden</cite>" })
+        // A Claude turn without a search, and OpenAI, keep the text.
+        let plain = try await run("hi", anthropic("claude-sonnet-5-5", search: false), [json(anthropicFinal("<cite index=\"1-1\">kept</cite>"))])
+        XCTAssertEqual(plain.store.streamingText, "<cite index=\"1-1\">kept</cite>")
+        let openAI = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("<cite index=\"1-1\">kept</cite>"))])
+        XCTAssertEqual(openAI.store.streamingText, "<cite index=\"1-1\">kept</cite>")
+    }
+
+    /// The tools and system prompt are marked for the prompt cache from a
+    /// turn's second request on, where they repeat; a single-request
+    /// question pays no cache write. OpenAI bodies are unchanged.
+    func testAnthropicSystemPromptIsCachedFromTheTurnsSecondRequest() async throws {
+        let result = try await run("what is in my workspace?", anthropic("claude-haiku-5-5"), [
+            json(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "t1", "name": "list_directory", "input": ["path": NSNull()]]]]),
+            json(anthropicFinal("Empty.")),
+        ])
+        XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
+        let systems = try result.bodies.map { try XCTUnwrap($0["system"] as? [[String: Any]]) }
+        XCTAssertEqual(systems.map(\.count), [1, 1])
+        XCTAssertTrue((systems[0][0]["text"] as? String)?.contains("finish_answer") == true)
+        XCTAssertEqual(systems.map { ($0[0]["cache_control"] as? [String: Any])?["type"] as? String }, [nil, "ephemeral"])
+        XCTAssertEqual(systems[0][0]["text"] as? String, systems[1][0]["text"] as? String)
+        let direct = try await run("hi", openAI("gpt-5.5", search: false), [json(openAIFinal("Hello."))])
+        XCTAssertTrue(direct.bodies.first?["instructions"] is String)
+
+        // Builder review, queue #643: a refused first request did not run;
+        // the first accepted, search-free request (its tools and system
+        // changed) gets no breakpoint, the next unchanged step does.
+        let refused = try await run("what is in my workspace?", anthropic("claude-haiku-5-5"), [
+            json(["type": "error", "error": ["type": "invalid_request_error", "message": "Web search is disabled for this organization."]], status: 400),
+            json(["stop_reason": "tool_use", "content": [["type": "tool_use", "id": "t1", "name": "list_directory", "input": ["path": NSNull()]]]]),
+            json(anthropicFinal("Empty.")),
+        ])
+        XCTAssertEqual(refused.store.status, .ready, refused.store.errorMessage ?? "")
+        XCTAssertEqual(refused.bodies.map { (($0["system"] as? [[String: Any]])?.first?["cache_control"] as? [String: Any])?["type"] as? String },
+                       [nil, nil, "ephemeral"])
+    }
+
+    /// Builder review, queue #643: a search still pending beside several
+    /// finish_answer calls is waited for, every call gets the wait result,
+    /// and the answer written after the results is the one shown.
+    func testSeveralFinishAnswersBesideAPendingSearchWaitForIt() async throws {
+        let result = try await run("погода в спб", anthropic("claude-sonnet-5-5"), [
+            json(["stop_reason": "tool_use", "content": [
+                ["type": "server_tool_use", "id": "s1", "name": "web_search", "input": ["query": "q"]],
+                ["type": "tool_use", "id": "f1", "name": "finish_answer", "input": finish("Guess one.")],
+                ["type": "tool_use", "id": "f2", "name": "finish_answer", "input": finish("Guess two.")],
+            ]]),
+            json(["stop_reason": "tool_use", "content": [
+                ["type": "web_search_tool_result", "tool_use_id": "s1",
+                 "content": [["type": "web_search_result", "title": "P", "url": "https://example.com/p", "encrypted_content": "x"]]],
+                ["type": "tool_use", "id": "f3", "name": "finish_answer", "input": finish("Checked.")],
+            ]]),
+        ])
+        XCTAssertEqual(result.store.status, .ready, result.store.errorMessage ?? "")
+        XCTAssertEqual(result.store.streamingText, "Checked.")
+        XCTAssertEqual(result.bodies.count, 2)
+        let waits = ((result.bodies[1]["messages"] as? [[String: Any]])?.last?["content"] as? [[String: Any]])?.compactMap { $0["tool_use_id"] as? String }
+        XCTAssertEqual(waits, ["f1", "f2"])
+    }
+
+    /// Builder review, queue #643: a malformed finish_answer beside a valid
+    /// one does not hide it, on every route and in either order; a malformed
+    /// call of another tool, and only malformed answers, still fail.
+    func testAMalformedFinishAnswerDoesNotHideAValidSibling() async throws {
+        let valid = String(decoding: try JSONSerialization.data(withJSONObject: finish("Valid.")), as: UTF8.self)
+        func openAIBatch(_ arguments: [String]) -> (Int, [String: String], Data) {
+            json(["status": "completed", "output": arguments.enumerated().map { index, args in
+                ["type": "function_call", "call_id": "c\(index)", "name": "finish_answer", "arguments": args] }])
+        }
+        for order in [["{not json", valid], [valid, "{not json"]] {
+            let result = try await run("hi", openAI("gpt-5.5", search: false), [openAIBatch(order)])
+            XCTAssertEqual(result.store.streamingText, "Valid.", "\(order)")
+        }
+        let router = AgentRunOptions(model: "vendor/model", allowActions: false)
+        let routed = try await run("hi", router, [json(["choices": [["finish_reason": "tool_calls", "message": ["role": "assistant", "content": NSNull(),
+            "tool_calls": [["id": "a", "type": "function", "function": ["name": "finish_answer", "arguments": "{oops"]],
+                           ["id": "b", "type": "function", "function": ["name": "finish_answer", "arguments": valid]]]]]]])])
+        XCTAssertEqual(routed.store.streamingText, "Valid.")
+        let claude = try await run("hi", anthropic("claude-haiku-5-5", search: false), [json(["stop_reason": "tool_use", "content": [
+            ["type": "tool_use", "id": "a", "name": "finish_answer", "input": "not an object"],
+            ["type": "tool_use", "id": "b", "name": "finish_answer", "input": finish("Valid.")]]])])
+        XCTAssertEqual(claude.store.streamingText, "Valid.")
+
+        let broken = try await run("hi", openAI("gpt-5.5", search: false), [json(["status": "completed", "output": [
+            ["type": "function_call", "call_id": "c0", "name": "list_directory", "arguments": "{oops"],
+            ["type": "function_call", "call_id": "c1", "name": "finish_answer", "arguments": valid]]])])
+        XCTAssertEqual(broken.store.status, .failed)
+        let none = try await run("hi", openAI("gpt-5.5", search: false), [openAIBatch(["{x", "{y"])])
+        XCTAssertEqual(none.store.status, .failed)
+    }
+
+    /// 2026-11-26, builder queue #643-#660: text after the search is never
+    /// read as the answer (four rounds found source lists and short answers
+    /// misread). An end_turn with text after the search, whatever the text,
+    /// gets the completion request and the structured answer is shown.
+    func testTextAfterTheSearchAlwaysGetsTheCompletionRequest() async throws {
+        let search: [String: Any] = ["type": "server_tool_use", "id": "s1", "name": "web_search", "input": ["query": "погода спб"]]
+        let result: [String: Any] = ["type": "web_search_tool_result", "tool_use_id": "s1",
+                                     "content": [["type": "web_search_result", "title": "Погода", "url": "https://example.com/spb",
+                                                  "encrypted_content": "x"]]]
+        for reply in ["Около −2°, ясно, без осадков.", "See a doctor immediately.", "Sources", "Источники:\n- [Погода](https://example.com/spb)",
+                      #"<ul><li><a href="https://example.com/spb">Погода</a></li></ul>"#, ""] {
+            let turn = try await run("погода в спб", anthropic("claude-haiku-5-5"), [
+                json(["stop_reason": "end_turn", "content": [["type": "text", "text": "Ищу."], search, result]
+                      + (reply.isEmpty ? [] : [["type": "text", "text": reply]])]),
+                json(anthropicFinal("Около −2°.")),
+            ])
+            XCTAssertEqual(turn.store.status, .ready, reply)
+            XCTAssertEqual(turn.store.streamingText, "Около −2°.", reply)
+            XCTAssertEqual(turn.bodies.count, 2, reply)
+            XCTAssertEqual((turn.bodies[1]["messages"] as? [[String: Any]])?.last?["role"] as? String, "user", reply)
+        }
+    }
+
+    /// Builder review, queue #657: the builder's citation fixture inputs.
+    func testBuilderFixtureForCitationPairing() async throws {
+        let citations: [(String, String)] = [
+            (#"Forecast <cite index="1-9">contains the literal \<cite index="2-3"> token</cite>."#,
+             #"Forecast contains the literal \<cite index="2-3"> token."#),
+            (#"Forecast <cite index="1-9">contains the literal \<cite index="2-3">one\</cite> token</cite>."#,
+             #"Forecast contains the literal \<cite index="2-3">one\</cite> token."#),
+            (#"Forecast <cite index="1-9">ends with a backslash \</cite>."#, #"Forecast ends with a backslash \."#),
+            (#"Forecast \\<cite index="1-9">comes from one page</cite>."#, #"Forecast \\comes from one page."#),
+            (#"Syntax \\\<cite index="1-9">literal</cite>."#, #"Syntax \\\<cite index="1-9">literal</cite>."#),
+            (#"Show the escaped literal \<cite index="1-9">Title\</cite>."#, #"Show the escaped literal \<cite index="1-9">Title\</cite>."#),
+            (#"Show \<cite index="1-9">Title</cite> in the example."#, #"Show \<cite index="1-9">Title</cite> in the example."#),
+            (#"Evidence <cite index="1-9">page</cite>; ordinary <cite class="book">title</cite>."#,
+             #"Evidence page; ordinary <cite class="book">title</cite>."#),
+        ]
+        for (raw, expected) in citations {
+            XCTAssertEqual(NativeAgentFinalAnswer.withoutCitationTags(raw), expected, raw)
+        }
     }
 }

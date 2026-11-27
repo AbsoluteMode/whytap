@@ -60,8 +60,7 @@ enum NativeAgentEffort {
             // is sent, the thinking field included.
             guard catalogFlag != false else { return nil }
             let effort = catalogFlag ?? anthropicSupports(model) ? "low" : nil
-            var thinking = SmartDirectReasoning.anthropic(model: model)?.thinking
-            if providerSearch, thinking == "between_tools" { thinking = nil }
+            let thinking = SmartDirectReasoning.anthropic(model: model)?.thinking
             var fields: [String: Any] = [:]
             if let effort { fields["output_config"] = ["effort": effort] }
             if let thinking { fields["thinking"] = ["type": thinking] }

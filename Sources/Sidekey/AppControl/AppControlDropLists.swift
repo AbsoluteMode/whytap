@@ -46,6 +46,8 @@ struct AppControlDropLists {
     private func removeTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
         let vocab = list == "Vocab"
         var remaining = vocab ? vocabulary().terms : fillers().terms()
+        let limit = vocab ? VocabularyCache.maxTermLength : FillerTermsStore.maxTermLength
+        var toRemove: [String] = []
         var rows: [Row] = []
         // Check the whole batch first: one invalid term removes nothing.
         for item in items {
@@ -53,27 +55,35 @@ struct AppControlDropLists {
             let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !term.isEmpty else { return Self.rejected(term, "is empty", change: "removed") }
             guard Self.oneLine(term) else { return Self.rejected(term, "is not one line", change: "removed") }
-            let same = { (other: String) in other.caseInsensitiveCompare(term) == .orderedSame }
+            // The advertised schema limit, checked before anything changes.
+            guard term.count <= limit else {
+                return Self.rejected(term, "is longer than \(limit) characters", change: "removed")
+            }
+            // Both sides without surrounding spaces: a restored backup can
+            // hold "  Word  ", and the editors show it as "Word".
+            let same = { (other: String) in Self.key(other).caseInsensitiveCompare(term) == .orderedSame }
             // Named twice in one request: one row.
-            guard !rows.contains(where: { same($0.term) || same($0.saved) }) else { continue }
-            if let saved = remaining.first(where: same) {
+            guard !rows.contains(where: { same($0.term) }) else { continue }
+            let matches = remaining.filter(same)
+            if let first = matches.first {
                 remaining.removeAll(where: same)
-                rows.append(Row(term: term, result: "removed", saved: saved))
+                toRemove += matches
+                rows.append(Row(term: term, result: "removed", saved: Self.key(first)))
             } else {
                 rows.append(Row(term: term, result: "missing", saved: term))
             }
         }
-        let removed = rows.filter { $0.result == "removed" }
-        if !removed.isEmpty, let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
+        if !toRemove.isEmpty, let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
             return .failure("access_denied", "The user has turned this tool's access to Whytap off. Do not retry.")
         }
-        for row in removed {
-            if vocab { vocabulary().remove(row.saved) } else { fillers().remove(row.saved) }
+        for entry in toRemove {
+            if vocab { vocabulary().remove(entry) } else { fillers().remove(entry) }
         }
-        // Confirm from the saved list, not from the request.
+        // Confirm from the saved list, not from the request: exactly the
+        // named entries are gone and every other entry is still there.
         let saved = vocab ? vocabulary().terms : fillers().terms()
-        guard removed.allSatisfy({ row in !saved.contains { $0.caseInsensitiveCompare(row.saved) == .orderedSame } }) else {
-            return .failure("unconfirmed", "The saved \(list) still contains an entry; nothing is confirmed. Retry.")
+        guard saved == remaining else {
+            return .failure("unconfirmed", "The saved \(list) does not match the change; nothing is confirmed. Retry.")
         }
         return .success(.object([
             "terms": .array(rows.map { .object(["term": .string($0.saved), "result": .string($0.result)]) })
@@ -136,6 +146,11 @@ struct AppControlDropLists {
         return .success(.object([
             "terms": .array(rows.map { .object(["term": .string($0.saved), "result": .string($0.result)]) })
         ]))
+    }
+
+    /// An entry as the editors show and match it.
+    private static func key(_ entry: String) -> String {
+        entry.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     /// One line: no line breaks or control characters. Format characters such

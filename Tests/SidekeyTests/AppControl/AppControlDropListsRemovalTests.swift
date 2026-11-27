@@ -80,4 +80,53 @@ final class AppControlDropListsRemovalTests: XCTestCase {
         XCTAssertEqual(vocabulary.terms, ["um"])
         XCTAssertEqual(fillers.terms(), [])
     }
+
+    // MARK: Length limit, restored spacing, repeats (build-queue probe 722)
+
+    func testFiftyCharactersIsTheLimitForBothListsAndALongerTermRemovesNothing() {
+        let fifty = String(repeating: "a", count: 50)
+        for op in ["vocab_remove", "filler_remove"] {
+            vocabulary.setTerms(["Keep", fifty])
+            fillers.remove("Keep"); fillers.remove(fifty)
+            _ = fillers.add("Keep"); _ = fillers.add(fifty)
+            let atLimit = remove(op, [.string(fifty)])
+            XCTAssertTrue(atLimit.ok, op)
+            XCTAssertEqual(rows(atLimit), [["term": fifty, "result": "removed"]], op)
+            let over = remove(op, [.string("Keep"), .string(fifty + "a")])
+            XCTAssertFalse(over.ok, op)
+            XCTAssertEqual(over.data.object?["code"], .string("invalid_term"), op)
+            XCTAssertEqual(op == "vocab_remove" ? vocabulary.terms : fillers.terms(), ["Keep"], op)
+            let overFirst = remove(op, [.string(fifty + "a"), .string("Keep")])
+            XCTAssertFalse(overFirst.ok, op)
+            XCTAssertEqual(op == "vocab_remove" ? vocabulary.terms : fillers.terms(), ["Keep"], op)
+        }
+    }
+
+    func testRestoredEntriesWithSpacesAreFoundAndOnlyTheyLeave() {
+        vocabulary.setTerms(["  Fixture  ", "Other", " fixture"])
+        let response = remove("vocab_remove", [.string("FIXTURE"), .string("fixture "), .string("absent")])
+        XCTAssertTrue(response.ok)
+        XCTAssertEqual(rows(response), [["term": "Fixture", "result": "removed"], ["term": "absent", "result": "missing"]])
+        XCTAssertEqual(vocabulary.terms, ["Other"])
+        // Retrying the same request is safe: now missing, nothing changes.
+        let again = remove("vocab_remove", [.string("fixture")])
+        XCTAssertEqual(rows(again), [["term": "fixture", "result": "missing"]])
+        XCTAssertEqual(vocabulary.terms, ["Other"])
+    }
+
+    func testRemovalAfterARestoreFindsTheWordAgain() throws {
+        for op in ["vocab_remove", "filler_remove"] {
+            let restore = { (list: [String]) in
+                if op == "vocab_remove" { self.vocabulary.setTerms(list) } else {
+                    for entry in self.fillers.terms() { self.fillers.remove(entry) }
+                    for entry in list { _ = self.fillers.add(entry) }
+                }
+            }
+            restore(["Fixture", "Other"])
+            XCTAssertEqual(rows(remove(op, [.string("fixture")])), [["term": "Fixture", "result": "removed"]], op)
+            restore(["Fixture", "Other"])
+            XCTAssertEqual(rows(remove(op, [.string("fixture")])), [["term": "Fixture", "result": "removed"]], op)
+            XCTAssertEqual(op == "vocab_remove" ? vocabulary.terms : fillers.terms(), ["Other"], op)
+        }
+    }
 }

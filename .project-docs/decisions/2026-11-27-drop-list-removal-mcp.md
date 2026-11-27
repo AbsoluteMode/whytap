@@ -38,11 +38,19 @@ PR 525 and PR 527), so only the MCP tools are kept.
 - Two tools, `whytap_vocab_remove` and `whytap_filler_remove`, each taking
   `terms`, 1–20 entries, through `AppControlDropLists` and the stores' own
   `remove` (`VocabularyCache`, `FillerTermsStore`).
-- Matching as the editors match: trimmed, any letter case. A removed entry is
-  reported as `removed` with the spelling it had; a term that is not there is
-  `missing` and changes nothing. A term named twice is one row.
-- One invalid term (not a string, empty, more than one line) removes nothing.
+- Matching as the editors match: both the request and the saved entries are
+  trimmed, any letter case, so an entry restored from a backup as
+  `"  Word  "` is found by `word`. Every saved spelling that matches leaves;
+  the entry is reported as `removed` with its saved spelling, trimmed; a term
+  that is not there is `missing` and changes nothing. A term named twice is
+  one row. The result is confirmed against the whole saved list: exactly the
+  named entries are gone and every other entry is unchanged.
+- One invalid term (not a string, empty, more than one line, longer than the
+  schema's 50 characters) removes nothing, wherever it is in the batch.
   No `all`, no extra arguments, no way to clear a list.
+- External harnesses only. The built-in Agent (`NativeAgentAppControl`)
+  neither lists nor dispatches them (`externalOnly`), and its copies of the
+  add tools' descriptions do not point at them; it keeps the add tools.
 - The harness's one-time Yes (`HarnessAccessGate.gatedOperations`) covers
   them, and `HarnessConsent.stillAllowed` is checked again right before the
   write. The result is confirmed from the saved list.
@@ -59,7 +67,13 @@ agreement, and naming entries one by one keeps a mistaken request small.
 
 `AppControlDropListsRemovalTests` (case and spacing, missing entries and
 retry, an invalid term in the batch, duplicates, argument checks, the other
-list untouched), `HarnessAccessTests` (denied and mid-request revocation
+list untouched, the 50-character boundary for both lists, restored entries
+with spaces, removal again after a restore), `AppControlDropListsScopeTests`
+and `AppControlDropListsRestoredTests` (from build-queue probe 722: the
+built-in Agent does not get the removal tools, an over-long term in a mixed
+batch changes neither list, restored `"  Fixture  "` is removed by
+`fixture`), `NativeAgentAppControlTests` (the built-in catalog is the MCP
+catalog minus the two removal tools), `HarnessAccessTests` (denied and mid-request revocation
 leave the entries), `AppControlMCPServerTests` and `WhytapMCPServerTests`
 (catalog, annotations, descriptions).
 

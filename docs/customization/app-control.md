@@ -63,6 +63,8 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
 | `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated (needs the Yes) |
 | `whytap_filler_add` | — | Add words Drop removes from dictation (Filler; needs the Yes) |
+| `whytap_vocab_remove` | — | Coding tools only (not the built-in Agent): remove named Vocab entries (needs the Yes) |
+| `whytap_filler_remove` | — | Coding tools only (not the built-in Agent): remove named Filler entries so Drop keeps them (needs the Yes) |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
 | `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
@@ -107,10 +109,13 @@ unfiltered. The Agent shows `Filler + ну`.
 
 `whytap_vocab_remove` and `whytap_filler_remove` take `terms` (1–20) and
 remove exactly those entries, matched in any letter case and without
-surrounding spaces. A removed entry comes back as `removed` with the
-spelling it had; a term that is not in the list is `missing`, which changes
-nothing and is not an error. One invalid entry removes nothing, and there is
-no way to clear a whole list. `whytap_filler_remove` makes Drop keep a word
+surrounding spaces on either side (a restored backup can hold `"  Word  "`).
+A removed entry comes back as `removed` with its saved spelling, trimmed; a
+term that is not in the list is `missing`, which changes nothing and is not
+an error. One invalid entry (empty, more than one line or longer than 50
+characters) removes nothing, and there is no way to clear a whole list.
+Only Claude Code, Codex and other connected coding tools get them; the
+built-in Agent can add entries but not remove them. `whytap_filler_remove` makes Drop keep a word
 again; to cut a word from dictation use `whytap_filler_add`. Coding tools
 need the same one-time Yes.
 

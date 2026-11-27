@@ -19,6 +19,8 @@ related: [2026-11-19-on-demand-build-queue-builder.md, ../processes/shared-app-d
 
 # The builder blocks a PR once with every finding
 
+> Partly superseded on 2026-11-28: the builder no longer reviews code or blocks on review findings; "block once" now applies to failing checks only. See [builder never reviews](2026-11-28-builder-never-reviews.md).
+
 ## Context
 
 The builder blocked PR #374 (one MCP server for the Whytap plugin) seven times

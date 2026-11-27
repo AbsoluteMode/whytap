@@ -31,6 +31,43 @@ and queue messages to the originating sessions. Nothing else.
    configuration, stop or reconfigure the watcher, or touch another session's
    worktree, branch or uncommitted work.
 
+## You never review code (2026-11-28)
+
+You build, test, merge, install and roll back. You never review code, for
+previews, feature PRs or releases: do not judge a diff, run race or
+interleaving probes, write review findings, ask authors for reproducing
+checks or invoke review agents. You block only for a failing build, test or
+documentation check caused by the PR, a merge conflict that needs the
+author's choice, or a moved head. Review is one inquisition per release, run
+by the orchestrator on the tested release candidate; it is not your step.
+The full rule, including owner previews, is "The builder never reviews" in the
+shared workflow and `.project-docs/decisions/2026-11-28-builder-never-reviews.md`.
+
+- An app-changing PR without the owner's `ok` is a preview: compose current
+  `origin/main` + the train (tickets `blocked` with a note starting `PREVIEW
+  AWAITING OWNER` and no decision) + this PR in the integration worktree,
+  build the local arm64 app (step 6's packaging, from that composed commit),
+  verify signature, team, designated requirement, a higher `CFBundleVersion`
+  and `--installation-check`, and install through step 7. No tests before the
+  owner's `ok`. Then `set --status blocked --note "PREVIEW AWAITING OWNER:
+  build <n> = main <sha> + #<pr> <head> [+ train]; not merged; owner checks:
+  <acceptance>"` and tell the author.
+- Read `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-owner-decisions.txt"` at the start of
+  every run (only the orchestrator writes it): `<UTC time> ok|reject PR #<n>
+  <head> build <n> -- <owner's words>`. A resubmitted head is approved when an
+  `ok` names a previewed head of that PR and `git rev-list --no-merges <ok
+  head>..<new head>` lists only empty commits or commits on `origin/main`:
+  run the checks and the full suite (steps 3-4) and merge. `reject`: `set
+  --status cancelled` on the preview ticket, leave it out of the next install,
+  tell the author. A new head without an `ok` is a new preview; the earlier
+  preview ticket becomes `superseded`.
+- Builder tooling and documentation-only PRs: their own tests and the
+  documentation checks, then the merge.
+- Once the maintainer has enabled the preview lane (`activate --preview-lane`;
+  `preview_lane` is true in the watcher configuration),
+  previews belong to that lane and the orchestrator's `approve`/`reject`;
+  the manual `PREVIEW AWAITING OWNER` rule above applies only until then.
+
 ## Your identity and lease
 
 The "This run" block at the end gives `actor`, `lease_pid`, `git_dir`,
@@ -58,8 +95,19 @@ holds it, leave the tickets queued and end your turn.
    Read the last 80 lines of `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"`
    (`tail -n 80`) if it exists: earlier builder sessions leave operational
    facts there; the watcher moves older lines to `whytap-builder-notes.old`.
+   Then read `whytap-owner-decisions.txt` there.
    WHY for this file's quick wins:
    `.project-docs/decisions/2026-11-26-builder-quick-wins.md`.
+   Two lanes share this queue once the maintainer enables the preview lane
+   (WHY: `.project-docs/decisions/2026-11-26-preview-before-validation.md`).
+   Preview tickets (`lane: preview`, `previewing`, `awaiting_approval`) belong
+   to the preview lane, which installs them for the owner's check before the
+   full suite; `claim` never gives you one. Features the owner approved
+   (`approved`) reach you only through a release batch (see "Release batch"):
+   do not re-litigate how an approved feature looks or feels; every
+   correctness, data, permission and test gate below still applies. Without
+   the preview lane `status` shows no `preview_train` and these rules have
+   nothing to act on.
 2. If a ticket is `in_progress`, a previous session of this same builder was
    interrupted. The watcher guarantees that session and its process group are
    gone. Before anything else establish what it reached: is its PR merged, does
@@ -80,7 +128,7 @@ holds it, leave the tickets queued and end your turn.
    on that main (`swift test --filter`) with `environment` (without
    `--for suite`) clear, and record `protected-pending --ticket <id> --passed
    <json> --note <evidence>` on every ticket that lists them. A failure there
-   is a finding against merged code: `set --status pending_install --hold`
+   is a failure of merged code: `set --status pending_install --hold`
    with the failing tests, message the authors, and do not install.
 
 ## Each ticket
@@ -90,9 +138,9 @@ holds it, leave the tickets queued and end your turn.
    skipped tickets waiting for a `--depends-on` PR; deliver their events too.
    Returns made by the watcher before your session are in `events --pending`
    for Codex and Claude Code authors alike: deliver and acknowledge them.
-2. Check the live PR: exact queued head and base, review evidence, checks,
+2. Check the live PR: exact queued head and base, the submitted checks,
    dependencies, overlaps. A moved head is `blocked` with a request to
-   resubmit the reviewed head. To give a ticket back without blaming the PR
+   resubmit the exact head. Never review the code. To give a ticket back without blaming the PR
    (environment, an undeclared dependency not merged yet), use
    `set --status queued --note <reason>`: it keeps its place. Never do that
    after pushing to its branch.
@@ -115,41 +163,29 @@ holds it, leave the tickets queued and end your turn.
    behavior (guidance sync, reciprocal `related` links, formatting) are also
    yours.
    Use `blocked` only when the resolution needs a product choice by the author
-   or the maintainer, when tests fail because of the feature itself, when
-   review evidence is missing, or when a destructive migration or access
-   decision is involved. Say exactly what is needed.
+   or the maintainer, or when the build, a test or a documentation check fails
+   because of the feature itself. Say exactly what is needed.
    A stacked PR (its base is another open PR's branch, or it needs an
    unmerged PR) waits for its parent: `set --status queued` with the parent
-   named, never a review of the stack, and ask its author to add
+   named, never a build of the stack, and ask its author to add
    `--depends-on`.
-   Cheapest checks first; the full suite is the acceptance gate of a merge
-   candidate, not a way to find review problems: review the diff and both
-   features' contracts, run the probes, the documentation checks and
-   `swift test --filter` for the test classes of the touched code. If anything
-   blocks, block now, without the full suite. For every finding give the
-   author a reproducing check (a command, fixture or test, with its inputs)
-   that covers the whole class of the problem, and ask them to add it to the
-   PR's tests before resubmitting.
-   Block once with everything: before `blocked`, finish every probe and
-   check across all paths the PR touches and put all problems into the note
-   as one numbered list; when a probe exposes a class of error, name the
-   whole class and check every instance. On a later attempt of the same PR
-   (earlier tickets and notes are in `status`), block only for a problem the
-   fix itself introduced or a listed item that is still not fixed. A problem
-   that was already there but missing from the previous list is yours to fix
-   when mechanical and safe; otherwise record it as a follow-up in the note
-   and continue.
-4. Validate the final combined candidate only when step 3 found nothing that
-   blocks: documentation checks, and for runtime changes the build and the
+   Cheapest checks first: the documentation checks, the build and
+   `swift test --filter` for the test classes of the touched code. If one
+   fails because of the PR, block now, without the full suite, with the
+   failing command and its output. Block once with everything: every failing
+   check in one numbered list. On a later attempt of the same PR (earlier
+   tickets and notes are in `status`), block only for a check that still fails
+   or one the fix broke.
+4. Validate the final combined candidate only when step 3's checks pass: documentation checks, and for runtime changes the build and the
    full suite. Right before the full suite run, in the integration worktree,
    `python3 scripts/build-queue-watcher.py --git-dir "$WHYTAP_BUILD_QUEUE_GIT_DIR" environment --for suite`
    (an older copy without `--for`: plain `environment`). A locked screen does
-   not stop the review, the suite or the merge. While it reports a load above
+   not stop the suite or the merge. While it reports a load above
    its limit, wait and check
    again (up to 15 minutes) instead of running the suite; if it stays not
    clear, return the ticket with `set --status queued` and a note that the
-   environment, not the PR, stopped it. Do not treat failures from a suite run under such load as PR
-   findings. The full suite is `python3 scripts/test-shards.py --shards 2`
+   environment, not the PR, stopped it. Do not treat failures from a suite run under such load as failures
+   of the PR. The full suite is `python3 scripts/test-shards.py --shards 2`
    (in the background, output to a file): it builds the tests, runs two class
    shards at once, checks that they cover exactly `swift test --list-tests`,
    reruns every failed test alone, and falls back to the serial `swift test`
@@ -161,11 +197,11 @@ holds it, leave the tickets queued and end your turn.
    status other than 0/1, missing tests, no final summary; read the logs it names; never a pass), 3 no real
    failure but `failed_then_passed_alone` is not empty: the runner never
    waives it, you decide by this rule. A test in `failed_then_passed_alone` whose
-   file or code under test the candidate changes is still a finding. Any
-   other test there failed only beside the others: it is not a finding: go on with the ticket, append the test, ticket and
+   file or code under test the candidate changes is still a failure of the PR. Any
+   other test there failed only beside the others: it is not a failure of the PR: go on with the ticket, append the test, ticket and
    date to `whytap-flaky-tests.txt` (one line per rerun: date, ticket, test) in the Git common directory, and name it
    as a follow-up in the ticket note when the file already lists it within
-   the last seven days. A test in `failed` is a finding as before. A test in
+   the last seven days. A test in `failed` is a failure of the PR as before. A test in
    `protected_skipped` ("Protected data is unavailable") ran while the screen
    was locked. Before merging, record its exact name on the ticket:
    `protected-pending --ticket <id> --tests '["Module.Class/test"]'`. The
@@ -174,7 +210,7 @@ holds it, leave the tickets queued and end your turn.
    maintainer's `activate` installs the current helper, the installed one
    refuses `protected-pending`: then follow the earlier rule instead (run
    those tests once `environment` is clear, before merging; a failure there is
-   a finding). Commands that run
+   a failure of the PR). Commands that run
    longer than a few minutes go to the background with output in a file.
 5. Merge through the PR with the exact head and base checked; verify the
    merged tree. A runtime ticket merged while `environment` (without
@@ -220,6 +256,19 @@ holds it, leave the tickets queued and end your turn.
    `--installation-check`, the local manifest's source commit (main's SHA)
    and build, and a higher `CFBundleVersion`. `done` is refused while the
    ticket still lists `protected_pending` tests.
+   When `status` lists a `preview_train`, the owner is checking those
+   unmerged PRs in the running app: build from a local commit of main plus
+   the train heads in order (as the preview lane does), check it with
+   `preview-admit --base <main SHA> --commit <composed SHA>` (anything not
+   admissible: leave that member out, block it with the reasons, recompose),
+   and pass `EXODIA_BUILD_COMPOSITION='{"base": "<main SHA>", "members":
+   [{"ticket": <id>, "head": "<sha>"}, ...]}'`; without a train the
+   composition is main only. List the members under **Preview, not merged**.
+   Take `whytap-app.lock` in the Git common directory (owner.json like the
+   integration lock) around packaging, the install and the receipt; under it,
+   right before the Quit, after `git fetch origin`, `preview-handoff --base
+   <main SHA> --members <json> --build <n>` must be `clear` (it refuses an
+   unreadable installed app and a base behind the current main) (an older helper without it: skip this check).
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. That one gate also refuses a locked
@@ -243,6 +292,41 @@ holds it, leave the tickets queued and end your turn.
    group until a person has acted and it is set `--install-first` again.
 8. `set` the result with evidence and message the author: event ID, what is
    actually running, acceptance steps, what is pending.
+
+## Release batch
+
+WHY: `.project-docs/decisions/2026-11-26-release-batches.md`. When the
+orchestrator relays the owner's "release" (or the watcher's count trigger
+fires), `claim` returns `batch` with every approved feature in its persisted
+merge order, all `releasing`; after any restart `claim` returns the unmerged
+rest as `active_batch` in the same order. Handle the batch as one ticket,
+under the integration lock:
+
+1. Compose `origin/main` + every member head, in that order, in the
+   integration worktree. Conflicts are yours as in step 3 of "Each ticket";
+   one that needs a product choice blocks only the member involved.
+2. No code review ("You never review code"). Run the documentation checks
+   and build the composition. A member whose own diff breaks them (its
+   addition to the composition before it) is blocked with the failing
+   command and output, dropped, and the rest goes on.
+3. One full suite on the final composition (`environment --for suite` first;
+   the flaky-test and protected-data rules are unchanged). A real failure:
+   bisect the ordered members with only the failing tests (`swift test
+   --filter`): main plus the first half, then narrow down. Block the first
+   member whose addition makes them fail, drop it and run the full suite once
+   more on what is left.
+4. Merge the members one by one through their PRs in batch order with the
+   exact heads checked. Right after each merge set that member
+   `pending_install --install-first --note "merged at <SHA>; release <n>
+   member <i> of <k>"`: this is the checkpoint a recovered session continues
+   from. After the last one verify that main's tree equals the tested
+   composition, otherwise stop and investigate before any install.
+5. One install: the local arm64 candidate from main plus the remaining train
+   (previews still awaiting the owner), with every gate of steps 6 and 7 of
+   "Each ticket"; then each merged member `done` with the running build and
+   its acceptance steps (`pending_install` while the gate defers). The
+   environment stopping the whole batch before its first merge sets every
+   member back to `approved`, without blame.
 
 ## One-time cleanup
 

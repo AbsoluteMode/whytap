@@ -31,15 +31,18 @@ final class AIUsageCostsLayoutTests: XCTestCase {
         let end = try XCTUnwrap(text.range(of: "struct AIUsagePriceLabel: View"))
         let body = String(text[row.upperBound..<end.lowerBound])
         let price = try XCTUnwrap(body.range(of: "AIUsagePriceLabel(events: row.events)"))
-        let shape = try XCTUnwrap(body.range(of: ".contentShape(Rectangle())\n        .onHover"))
-        XCTAssertLessThan(price.lowerBound, shape.lowerBound, "the hover is on the row that contains the price")
-        XCTAssertTrue(body.contains(".onTapGesture { if isEnabled { hover.send(.clicked(row.id)) } }"), "a click anywhere pins it")
-        XCTAssertEqual(body.components(separatedBy: ".onHover").count - 1, 2, "the row and the open detail, nothing on the name alone")
+        let frame = try XCTUnwrap(body.range(of: ".onGeometryChange(for: CGRect.self)", options: .backwards))
+        XCTAssertLessThan(price.lowerBound, frame.lowerBound, "the reported frame is the row that contains the price")
+        XCTAssertTrue(body.contains(".onTapGesture { if isEnabled { hover.send(.clicked(row.id)) } }"), "a click anywhere opens it")
+        XCTAssertFalse(body.contains("pointerEnteredRow"), "no per-row hover flag decides where the pointer is")
+        XCTAssertFalse(text.contains("AIUsageHoverProbeView"),
+                       "NSViews inside the ScrollView report the whole window; rows use SwiftUI frames (AIUsageModelsHoverHostingTests)")
         XCTAssertFalse(body.contains("@State private var shown"),
                        "no row owns its own open state; the table's one controller decides (AIUsageModelsHoverTests)")
-        XCTAssertTrue(body.contains("hover.isPresented(row.id)"), "each popover shows only its own row")
+        XCTAssertFalse(body.contains(".popover("),
+                       "rows own no popover; the controller presents one application-defined detail (AIUsageModelsHoverTests)")
         let table = try XCTUnwrap(text.range(of: "private var table: some View"))
-        let observer = try XCTUnwrap(text.range(of: ".onChange(of: visibleRowIDs, initial: true)"))
+        let observer = try XCTUnwrap(text.range(of: ".onChange(of: visibleRows, initial: true)"))
         XCTAssertLessThan(observer.lowerBound, table.lowerBound,
                           "rows are retired from outside the conditionally shown table (loading, empty, error)")
     }

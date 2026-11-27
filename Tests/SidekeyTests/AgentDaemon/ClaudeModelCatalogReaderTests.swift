@@ -84,6 +84,30 @@ final class ClaudeModelCatalogReaderTests: XCTestCase {
         }
     }
 
+    func testNoAgentFolderMeansClaudeCodeNeverStarts() throws {
+        let marker = FileManager.default.temporaryDirectory.appendingPathComponent("started-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: marker) }
+        let script = try fakeClaude(": > '\(marker.path)'\nread -r ignored\n")
+        struct NoFolder: Error {}
+        XCTAssertThrowsError(try ClaudeModelCatalogReader.defaultHandshake(
+            binary: script, timeout: 0.6, workspace: { throw NoFolder() })) { error in
+            XCTAssertEqual(error as? ClaudeModelCatalogError, .workspaceUnavailable)
+        }
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path),
+                       "neither the CLI nor its SessionStart hooks run outside the Agent's folder")
+    }
+
+    func testHandshakeRunsInTheAgentFolder() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("agent-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: folder) }
+        let answer = Self.fixture.replacingOccurrences(of: "'", with: "")
+        let script = try fakeClaude("read -r request\npwd -P > cwd.txt\nprintf '%s\\n' '\(answer)'\ncat > /dev/null\n")
+        _ = try ClaudeModelCatalogReader.defaultHandshake(binary: script, timeout: 5, workspace: { folder })
+        let cwd = try String(contentsOf: folder.appendingPathComponent("cwd.txt"), encoding: .utf8)
+        XCTAssertTrue(cwd.trimmingCharacters(in: .whitespacesAndNewlines).hasSuffix("/" + folder.lastPathComponent))
+    }
+
     func testMissingClaudeCodeIsNotInstalled() async {
         do {
             _ = try await ClaudeModelCatalogReader(locate: { nil }).read()

@@ -122,7 +122,17 @@ when the model takes it, else Low when it takes Low, else no `--effort`.
   no longer end the turn; top-level `error` and `turn.failed` still do.
 - The final stdout chunk at exit is split into lines before parsing.
 - A cancelled Claude turn's late result or exit can no longer close or clear
-  the next turn's stdin.
+  the next turn's stdin. A result or exit that arrives while the child is
+  still starting is kept and applied to that turn's own writer once it is
+  registered (`TurnHandleBox`, locked).
+- Model discovery fails closed like a turn: without the Agent's folder in
+  Application Support, Claude Code is not started at all (it would load that
+  folder's settings and run SessionStart hooks), and Settings says so.
+- The sign-in checks (`ProcessOneShot`) have one deadline for the whole call:
+  a child that ignores TERM is killed and the check counts as failed, and a
+  helper that inherited the pipes cannot hold the call open.
+- A saved Claude model missing from a loaded model list keeps its name but
+  gets no `--effort`: nothing shows it accepts one.
 
 ## Why
 

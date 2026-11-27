@@ -138,7 +138,21 @@ final class AgentSettingsStoreTests: XCTestCase {
         s.updateClaudeCatalog(Self.claudeCatalog)
         XCTAssertNil(s.selectedClaudeOption)
         XCTAssertEqual(s.options(for: .claude).model, "claude-retired-1")
-        XCTAssertEqual(s.options(for: .claude).effort, "low")
+        XCTAssertNil(s.options(for: .claude).effort, "the loaded list gives no evidence the model takes --effort")
+    }
+
+    func testSavedUnlistedClaudeModelDoesNotAssumeEffortSupport() {
+        let d = freshDefaults(#function)
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        s.claudeModel = "saved-unlisted-fixture"
+        s.claudeEffort = "xhigh"
+        XCTAssertEqual(s.options(for: .claude).effort, "xhigh", "before discovery: the user's pick among Claude Code's levels")
+        s.updateClaudeCatalog(.init(models: [
+            ClaudeModelOption(value: "default", displayName: "Default", supportedEffortLevels: ["low"]),
+            ClaudeModelOption(value: "fixture-no-effort", displayName: "Fixture"),
+        ], cliVersion: nil))
+        XCTAssertEqual(s.options(for: .claude).model, "saved-unlisted-fixture")
+        XCTAssertNil(s.options(for: .claude).effort)
     }
 
     func testClaudeCatalogFailureKeepsTheLastGoodListAndSaysWhy() async {

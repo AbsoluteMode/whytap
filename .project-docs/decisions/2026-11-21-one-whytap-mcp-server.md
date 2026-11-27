@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: plugins/whytap/mcp.json
     confirmed_at: 2026-11-21
-related: [2026-10-21-app-control-plugin.md, 2026-10-21-case-connect-claude-code.md, 2026-11-20-harness-access.md, 2026-11-24-drop-live-for-dictation-clients.md, 2026-11-25-helper-follows-new-build.md]
+related: [2026-10-21-app-control-plugin.md, 2026-10-21-case-connect-claude-code.md, 2026-11-20-harness-access.md, 2026-11-24-drop-live-for-dictation-clients.md, 2026-11-25-helper-follows-new-build.md, 2026-11-26-coding-tools-switches.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 ## Context

@@ -39,7 +39,8 @@ struct SwitchFeatureScreen<Settings: View>: View {
         case .googleSearch: return SettingsOtherView.googleSearchVideoShortcuts(configuration)
         case .meetings:
             return [FeatureVideoShortcut(label: "Record", contents: configuration.meetingRecordShortcut.contents)]
-        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor: return []
+        case .drop, .translateSubtitles, .screenshots, .history, .display, .todo, .calendar, .caseVault, .hover,
+             .notify, .monitor: return []
         }
     }
 }
@@ -88,7 +89,8 @@ final class FeatureSwitchModel: ObservableObject {
         case .googleSearch:
             isOn = on
             environment.setGoogle(on)
-        case .drop, .translateSubtitles, .screenshots, .todo, .caseVault, .hover, .notify, .monitor:
+        case .drop, .translateSubtitles, .screenshots, .history, .display, .todo, .calendar, .caseVault, .hover,
+             .notify, .monitor:
             break
         }
         return nil
@@ -100,13 +102,22 @@ final class FeatureSwitchModel: ObservableObject {
 struct AgentFeatureSettings: View {
     @ObservedObject var settings: AgentSettingsStore
 
+    /// Whether the Sources section and Add source… appear.
+    static var showsSources: Bool { AgentSourcesGate.isEnabled }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "Settings")
             MacCard {
                 MacRow(title: AgentOtherSection.actionsTitle, subtitle: AgentOtherSection.actionsSubtitle) {
-                    MacSwitch(isOn: $settings.openCodeAllowActions, label: AgentOtherSection.actionsTitle)
+                    MacSwitch(isOn: $settings.allowActions, label: AgentOtherSection.actionsTitle)
                 }
+            }
+            // Gated off until the owner decides whether sources stay.
+            // WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+            if Self.showsSources {
+                AgentSourcesSection(controller: SourcesController.shared)
+                    .padding(.top, 18)
             }
         }
     }

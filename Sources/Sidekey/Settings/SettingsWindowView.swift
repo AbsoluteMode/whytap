@@ -24,13 +24,11 @@ struct SettingsWindowView: View {
     /// What the Features screens read besides the view models; tests and
     /// previews replace it to show a Mac in another state.
     let featuresEnvironment: FeaturesEnvironment?
+    /// Integrations' Coding tools; tests pass fixed answers.
+    let codingTools: CodingToolsAccess?
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
-    /// Lil Bro, the guide drawn over the window. Held, not observed: only
-    /// his layer and sidebar entry redraw when he moves, never the window.
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-    @State private var lilBro: LilBroController
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var focusedSidebarControl: String?
 
@@ -53,7 +51,7 @@ struct SettingsWindowView: View {
         privacyPreferences: PrivacyPreferences? = nil,
         screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
         featuresEnvironment: FeaturesEnvironment? = nil,
-        lilBro: LilBroController? = nil
+        codingTools: CodingToolsAccess? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
@@ -70,7 +68,7 @@ struct SettingsWindowView: View {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
-        _lilBro = State(initialValue: lilBro ?? LilBroController(selection: selection))
+        self.codingTools = codingTools
     }
 
     /// The live environment: this window's own switches and Drop mode.
@@ -83,6 +81,8 @@ struct SettingsWindowView: View {
             },
             language: toolboxDeps.currentLanguage,
             setLanguage: toolboxDeps.setLanguage,
+            targetLanguage: toolboxDeps.currentTargetLanguage,
+            setTargetLanguage: toolboxDeps.setTargetLanguage,
             volumeDuck: otherVolumeDuckConfig,
             openHoverPanel: toolboxDeps.openHoverPanel,
             agentOn: { AgentOtherSection.isOn(enabled: agentEnabled(),
@@ -130,16 +130,7 @@ struct SettingsWindowView: View {
                 detailPane
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .lilBroSpot(.pane)
         }
-        // The overlay goes inside the named space, so it shares the
-        // coordinates the rows and cards report.
-        .overlay { LilBroLayer(controller: lilBro) }
-        .coordinateSpace(name: LilBroSpace.name)
-        .onPreferenceChange(LilBroSpotsKey.self) { lilBro.update(spots: $0) }
-        .onPreferenceChange(LilBroBlocksKey.self) { lilBro.update(blocks: $0) }
-        .onAppear { lilBro.startWandering() }
-        .onDisappear { lilBro.stopWandering() }
     }
 
     @ViewBuilder
@@ -156,11 +147,6 @@ struct SettingsWindowView: View {
                 .padding(.vertical, SettingsSidebarStyle.verticalPadding)
             }
             .frame(maxHeight: .infinity, alignment: .top)
-            .lilBroSpot(.sidebar)
-
-            LilBroSidebarEntry(controller: lilBro)
-                .padding(.horizontal, SettingsSidebarStyle.horizontalPadding)
-                .padding(.bottom, 8)
 
             // Pinned project footer and Quit row stay visible even when the settings
             // tab list grows beyond the available window height.
@@ -218,7 +204,6 @@ struct SettingsWindowView: View {
         .buttonStyle(SettingsSidebarButtonStyle(isSelected: isSelected && !isHighlighted,
                                                 focused: focusedSidebarControl == tab.id))
         .focused($focusedSidebarControl, equals: tab.id)
-        .lilBroSpot(.tab(tab))
         .accessibilityAddTraits(isSelected ? .isSelected : [])
         .accessibilityLabel(tab.title)
     }
@@ -269,7 +254,7 @@ struct SettingsWindowView: View {
                              initialSection: selection.requestedAPISection ?? .models)
                 .onAppear { selection.requestedAPISection = nil }
         case .hotkeys:
-            HotkeysSettingsView(focusedRow: selection.focusedRow)
+            HotkeysSettingsView()
         case .permissions:
             SettingsPermissionsView(viewModel: permissionsViewModel)
         case .notes:
@@ -297,7 +282,7 @@ struct SettingsWindowView: View {
                 deps: toolboxDeps
             )
         case .integrations:
-            SettingsIntegrationsView()
+            SettingsIntegrationsView(codingTools: codingTools ?? .shared)
         case .backup:
             SettingsBackupView(openIntegrations: { selection.select(.integrations) })
         }
@@ -390,9 +375,6 @@ final class SettingsWindowSelection: ObservableObject {
     @Published var focusedTool: HoverTool?
     /// The feature whose own screen Features shows; nil is the list.
     @Published var shownFeature: AppFeature?
-    /// The row Lil Bro led to (`LilBroRow.id`): its tab scrolls to it while
-    /// it is set. Any other tab choice clears it.
-    @Published var focusedRow: String?
     /// The part of Keys & models to open on next (API keys from a feature's
     /// screen); Keys & models takes it once and clears it.
     @Published var requestedAPISection: APIAndModelsSection?
@@ -425,15 +407,7 @@ final class SettingsWindowSelection: ObservableObject {
         // A link to the old Agents or Notifications tab opens the Agent's or
         // Notify's own screen.
         if availableTab == .features { shownFeature = tab.featureScreen }
-        focusedRow = nil
         selectedTab = availableTab
-    }
-
-    /// Opens a row's tab scrolled to that row (Lil Bro's lead).
-    // WHY: .project-docs/decisions/2026-11-24-lil-bro.md (REV 12)
-    func focus(_ row: LilBroRow) {
-        if selectedTab != row.tab.resolved { select(row.tab) }
-        focusedRow = row.id
     }
 
     /// Opens a feature from the Features list: its own screen when it has one,

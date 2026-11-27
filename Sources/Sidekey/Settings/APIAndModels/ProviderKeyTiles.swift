@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// Provider identities stay visible even before the first key is added. The
-/// selected square opens its form directly below its row, at the full width.
+/// selected tile opens its form directly below its row, at the full width.
 @MainActor
 struct ProviderKeyTiles: View {
     enum Target: Hashable {
@@ -78,6 +78,8 @@ struct ProviderKeyTiles: View {
         let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key")
             : chip?.statusText ?? (provider == .openAICompatible ? "Add server" : "Add API key")
         let hasKey = target == .tavily ? tavily.configured : chip != nil
+        // Only a verified key turns green; limited, rejected or unchecked keys keep the secondary colour.
+        let keyWorks = chip?.keyWorks == true
         let selected = expanded == target
         return Button {
             if opensServerSheet(target) {
@@ -87,38 +89,45 @@ struct ProviderKeyTiles: View {
                 expanded = selected ? nil : target
             }
         } label: {
-            Color.clear.aspectRatio(1, contentMode: .fit)
-                .overlay {
-                    VStack(spacing: 9) {
-                        if let provider { ProviderKindIcon(kind: provider, size: 28) }
-                        else if target == .tavily { ProviderKindIcon(assetName: "tavily", size: 28) }
-                        else { Image(systemName: "globe").font(.system(size: 28)).frame(width: 28, height: 28).accessibilityHidden(true) }
-                        Text(title)
-                            .font(.system(size: 13, weight: .semibold))
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                        Text(provider?.keyTileDetail ?? "Web search")
-                            .font(.system(size: 11.5))
-                            .foregroundStyle(MacSettingsTheme.text2)
-                        Text(status)
-                            .font(.system(size: 11))
-                            .foregroundStyle(!hasKey && !selected ? MacSettingsTheme.accent : MacSettingsTheme.text2)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.center)
-                    }
-                    .padding(12)
+            // WHY: .project-docs/decisions/2026-11-27-compact-key-tiles.md
+            HStack(alignment: .top, spacing: 10) {
+                Group {
+                    if let provider { ProviderKindIcon(kind: provider, size: 22) }
+                    else if target == .tavily { ProviderKindIcon(assetName: "tavily", size: 22) }
+                    else { Image(systemName: "globe").font(.system(size: 20)).accessibilityHidden(true) }
                 }
-                .foregroundStyle(MacSettingsTheme.text)
-                .background(selected ? MacSettingsTheme.accent.opacity(0.07) : MacSettingsTheme.fieldBg,
-                            in: RoundedRectangle(cornerRadius: 12))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(selected || focused == target ? MacSettingsTheme.accent : MacSettingsTheme.sep,
-                                      lineWidth: selected || focused == target ? 1.5 : 0.5)
+                .frame(width: 22, height: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(title)
+                        .font(.system(size: 13, weight: .semibold))
+                        .lineLimit(1)
+                    Text(provider?.keyTileDetail ?? "Web search")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(MacSettingsTheme.text2)
+                        .lineLimit(1)
+                    Text(status)
+                        .font(.system(size: 11))
+                        .foregroundStyle(keyWorks ? MacSettingsTheme.green
+                            : !hasKey && !selected ? MacSettingsTheme.accent : MacSettingsTheme.text2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 3)
                 }
-                .contentShape(RoundedRectangle(cornerRadius: 12))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 11)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .foregroundStyle(MacSettingsTheme.text)
+            .background(selected ? MacSettingsTheme.accent.opacity(0.07) : MacSettingsTheme.fieldBg,
+                        in: RoundedRectangle(cornerRadius: 10))
+            .overlay {
+                RoundedRectangle(cornerRadius: 10)
+                    .strokeBorder(selected || focused == target ? MacSettingsTheme.accent : MacSettingsTheme.sep,
+                                  lineWidth: selected || focused == target ? 1.5 : 0.5)
+            }
+            .contentShape(RoundedRectangle(cornerRadius: 10))
         }
-        .buttonStyle(APIModelFeedbackStyle(cornerRadius: 12))
+        .help("\(title): \(status)")
+        .buttonStyle(APIModelFeedbackStyle(cornerRadius: 10))
         .disabled(busy || tavily.saving)
         .focused($focused, equals: target)
         .accessibilityLabel(title)
@@ -159,24 +168,52 @@ struct ProviderKeyTiles: View {
 
 /// Layout computes the column count directly from the proposed width. Resizing
 /// never recreates the form or loses an entered key while a request is pending.
+/// Tiles are compact rows of icon, name, use and status: each row of the grid
+/// is as tall as its tallest tile, so a long status wraps instead of being cut,
+/// and the whole tab fits the Settings window without scrolling.
 private struct ProviderGrid: Layout {
     let tileCount: Int
     let expandedIndex: Int?
-    private let spacing: CGFloat = 12
+    private let spacing: CGFloat = 10
 
-    private func metrics(width: CGFloat, subviews: Subviews) -> (columns: Int, side: CGFloat, formHeight: CGFloat) {
+    private struct Metrics {
+        let columns: Int
+        let side: CGFloat
+        let rowHeights: [CGFloat]
+        let formHeight: CGFloat
+    }
+
+    private func metrics(width: CGFloat, subviews: Subviews) -> Metrics {
         let columns = width >= 700 ? 4 : (width >= 450 ? 3 : 2)
         let side = max(1, (width - CGFloat(columns - 1) * spacing) / CGFloat(columns))
+        let count = min(tileCount, subviews.count)
+        let rows = (count + columns - 1) / columns
+        let rowHeights = (0..<rows).map { row in
+            (row * columns..<min(count, (row + 1) * columns))
+                .map { subviews[$0].sizeThatFits(.init(width: side, height: nil)).height }
+                .max() ?? 0
+        }
         let height = expandedIndex != nil && subviews.count > tileCount
             ? subviews[tileCount].sizeThatFits(.init(width: width, height: nil)).height : 0
-        return (columns, side, height)
+        return Metrics(columns: columns, side: side, rowHeights: rowHeights, formHeight: height)
+    }
+
+    /// The top of each row, with the form pushed in below the expanded row.
+    private func rowTops(_ m: Metrics, expandedRow: Int?) -> [CGFloat] {
+        var y: CGFloat = 0
+        return m.rowHeights.indices.map { row in
+            defer {
+                y += m.rowHeights[row] + spacing
+                if row == expandedRow { y += m.formHeight + spacing }
+            }
+            return y
+        }
     }
 
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         let width = max(1, proposal.width ?? 516)
         let m = metrics(width: width, subviews: subviews)
-        let rows = (tileCount + m.columns - 1) / m.columns
-        let height = CGFloat(rows) * m.side + CGFloat(max(0, rows - 1)) * spacing
+        let height = m.rowHeights.reduce(0, +) + CGFloat(max(0, m.rowHeights.count - 1)) * spacing
             + (expandedIndex == nil ? 0 : m.formHeight + spacing)
         return CGSize(width: width, height: height)
     }
@@ -184,16 +221,16 @@ private struct ProviderGrid: Layout {
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
         let m = metrics(width: bounds.width, subviews: subviews)
         let expandedRow = expandedIndex.map { $0 / m.columns }
+        let tops = rowTops(m, expandedRow: expandedRow)
         for index in 0..<min(tileCount, subviews.count) {
             let row = index / m.columns
-            let extra = expandedRow.map { row > $0 ? m.formHeight + spacing : 0 } ?? 0
             subviews[index].place(at: CGPoint(x: bounds.minX + CGFloat(index % m.columns) * (m.side + spacing),
-                                              y: bounds.minY + CGFloat(row) * (m.side + spacing) + extra),
-                                  anchor: .topLeading, proposal: .init(width: m.side, height: m.side))
+                                              y: bounds.minY + tops[row]),
+                                  anchor: .topLeading, proposal: .init(width: m.side, height: m.rowHeights[row]))
         }
-        if let expandedRow, subviews.count > tileCount {
+        if let expandedRow, expandedRow < tops.count, subviews.count > tileCount {
             subviews[tileCount].place(at: CGPoint(x: bounds.minX,
-                                                 y: bounds.minY + CGFloat(expandedRow + 1) * (m.side + spacing)),
+                                                 y: bounds.minY + tops[expandedRow] + m.rowHeights[expandedRow] + spacing),
                                      anchor: .topLeading, proposal: .init(width: bounds.width, height: m.formHeight))
         }
     }

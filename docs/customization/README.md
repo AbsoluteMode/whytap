@@ -47,6 +47,7 @@ credentials or the user's transcripts. Missing prerequisites cause a nonzero exi
 | Settings page | `Settings/SettingsWindowTab.swift` | `Settings/SettingsWindowView.swift` detail switch |
 | Persistence, keys or migrations | [Local data](local-data.md) | use existing stores rather than new raw file writes |
 | Agent execution | `AgentDaemon/NativeAgentProvider.swift`, `AgentDaemon/NativeAgentModel.swift`, `AgentDaemon/NativeAgentTools.swift`, `Agent/AgentController.swift` | Direct selected model, local tools, web search (`AgentDaemon/NativeAgentWebSearch.swift`: provider's own or Tavily), bounded context and action policy |
+| Agent sources (MCP), gated off by `AgentSourcesGate` | `Assistant/Connections/AgentSourcesGate.swift`, `Assistant/Connections/SourcesController.swift`, `Assistant/Connections/MCPClient.swift`, `AgentDaemon/NativeAgentSources.swift`, `Settings/Features/AgentSourcesSettings.swift` | Keychain-only secrets, Read-only tools for the Agent, taint rule, import from other apps |
 | Dictation | `Streaming/`, `PostProcessor.swift` | preserve graceful finish, retained audio and delivery recovery |
 | Meeting notes | `Meetings/MeetingsCoordinator.swift` | capture, staged audio, processing checkpoints and notes |
 

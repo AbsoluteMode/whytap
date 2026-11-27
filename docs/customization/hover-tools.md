@@ -36,7 +36,7 @@ All paths below start at `Sources/Sidekey/`.
 | Floating text translation and system-audio subtitles | `Translation/TranslationWindowController.swift`, `Translation/LiveSubtitleModel.swift` |
 | Inline monitoring, picker and refresh lifecycle | `Monitor/MonitorHoverPanel.swift`, `Monitor/MonitorStore.swift` |
 | Inline brightness strip, backlight hold, Extra boost (display table + EDR trigger) | `Brightness/IslandBrightnessStrip.swift`, `Brightness/ScreenBrightnessController.swift`, `Brightness/GammaBrightnessBoost.swift`, `Brightness/BrightnessHeadroomTrigger.swift` |
-| Brightness keys (event tap, steps, Extra gesture) and the Settings -> Toolbox -> Display pane | `Brightness/BrightnessKeys.swift`, `Brightness/BrightnessKeyEventTap.swift`, `Brightness/ToolboxDisplayPane.swift` |
+| Brightness keys (event tap, steps, Extra gesture) and the Settings -> Features -> Display settings | `Brightness/BrightnessKeys.swift`, `Brightness/BrightnessKeyEventTap.swift`, `Brightness/DisplayBrightnessSettings.swift` |
 | Measured pointer targets, viewport clipping and down/up ownership | `DynamicIsland/IslandHoverHitBridge.swift`, `DynamicIsland/IslandPanel.swift` |
 | Catalog search, aliases, AppKit search field and keyboard commands | `DynamicIsland/IslandHoverToolSearch.swift` |
 | Drag/drop catalog, fixed Add and selected layout | `Settings/ToolboxSettingsView.swift` |
@@ -89,11 +89,13 @@ change and rebuild it with the canonical development script.
 ## Checks
 
 ```bash
-python3 scripts/customize.py test --filter 'HoverToolTests|HoverLayoutStoreTests|HoverSlotRouterTests|HoverHotkeyTests|IslandHoverPanelControlTests|IslandHoverToolSearchTests|IslandHoverHitBridgeTests|HoverToolPresentationTests|IslandHoverPanelHitZoneTests|MonitorDashboardTests|BrightnessHoverToolTests|ScreenBrightnessControllerTests|GammaBrightnessBoostTests|BrightnessBoostFrameTimerTests|BrightnessKeysTests'
+python3 scripts/customize.py test --filter 'HoverToolTests|HoverLayoutStoreTests|HoverSlotRouterTests|HoverHotkeyTests|IslandHoverPanelControlTests|IslandHoverToolSearchTests|IslandHoverHitBridgeTests|HoverToolPresentationTests|IslandHoverPanelHitZoneTests|IslandHoverReorderTests|IslandHoverUnpinTests|MonitorDashboardTests|BrightnessHoverToolTests|ScreenBrightnessControllerTests|GammaBrightnessBoostTests|BrightnessBoostFrameTimerTests|BrightnessKeysTests'
 python3 scripts/customize.py build
 ```
 
-Inspect one row and multiple rows, add/reorder/remove, Settings locking, relaunch
+Inspect one row and multiple rows, add/reorder/remove (in Settings and in the
+drawer: drag a tile out of the panel, right-click Remove from Hover, More tools strip -> click),
+Settings locking, relaunch
 persistence and each tool's own optional hotkey (Settings → Hotkeys → Tools; there
 are no positional shortcuts). Verify that
 scrolling preserves and reaches tool 13+, all drawer/search/inline-panel native
@@ -121,9 +123,21 @@ must refer to the same unchanged control; dragging out, changing context or
 closing the panel cancels activation. A tile pressed and moved
 `dragThreshold` (4 pt) lifts instead (`liftPressedTool`): the grid's cells are measured once at the lift,
 the pointer over a cell puts the tool there, the lifted tool holds the drawer
-open, the release never activates it, a release far outside the tools restores
-the earlier order and a layout change the drag did not make ends it
-([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)). Internal search editing transitions must
+open, the release never activates it, a release outside the drawer removes the
+tool (`removeLiftedTool`), Escape restores the earlier order and a layout change
+the drag did not make ends it
+([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)).
+A right-click or Control-click on a tile or a More row is found by
+`contextMenuTarget` in `IslandPanel.sendEvent` and pops `IslandHoverToolMenu`;
+More rows and the footer chevron are the `.moreTools`/`.moreToggle` surfaces,
+accepted while `.tile` is active, each with its own measured region. If the
+drawer closes after removing or adding a tool, inspect `IslandHoverEditHold`:
+it must stay held (`held`, `away`, `reentered`) until a click outside, or the
+pointer leaving, returning and leaving again. For a stuttering add/remove, run
+`IslandHoverDrawerMotionTests` with `WHYTAP_HOVER_MOTION_DIR` set: it hosts the
+real drawer offscreen, reports main-thread time per change and writes frame
+strips ([decision](../../.project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md))
+([decision](../../.project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md)). Internal search editing transitions must
 not resign the key window before the result receives its owned mouse-up.
 
 For flat glass or missing hover feedback, read the current

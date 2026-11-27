@@ -74,7 +74,9 @@ def logo(asset, color, x, y, size):
     svg = re.sub(r"#(?:111111|000000)", color, svg)
     if 'fill="' not in svg.split(">", 1)[0]:
         svg = svg.replace("<svg ", f'<svg fill="{color}" ', 1)
-    return svg.replace("<svg ", f'<svg x="{x}" y="{y}" width="{size}" height="{size}" ', 1)
+    head, rest = svg.split(">", 1)  # drop the mark's own size so ours is the only one
+    head = re.sub(r'\s(?:width|height)="[^"]*"', "", head)
+    return (head + ">" + rest).replace("<svg ", f'<svg x="{x}" y="{y}" width="{size}" height="{size}" ', 1)
 
 
 def short(cadence):
@@ -227,17 +229,18 @@ def responsive(kind, alt, width):
 # with Anthropic"; the mark is the Anthropic one used by the plan cards).
 # The providers appear only in the logo row: column headers and cells name
 # models alone (Maxim, 2026-11-22: "remove the providers everywhere"). Agent stands for the Agent and its voice;
-# Google is the voice search, which needs speech only. Subtitles run only on
-# GPT-Realtime-Translate, which hears and translates in one model, so that row
-# spans the speech and model columns and needs the OpenAI key
-# (.project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md). The
+# Google is the voice search, which needs speech only. Subtitles run on
+# Soniox stt-rt-v6 live translation (since 2026-11-25; the owner confirmed it on
+# 2026-11-26), which hears and translates in one model, so that row spans the
+# speech and model columns and uses the Soniox key
+# (.project-docs/decisions/2026-11-25-subtitle-soniox-engine.md). The
 # keys line names only the keys this set uses, without plan or free claims.
 # Reviewed monthly together with the offers.
-SETUP_CHECKED = "2026-11-22"
+SETUP_CHECKED = "2026-11-26"
 SPEECH = "Scribe v3 Live"
 MODEL = "Claude Sonnet 5.5"
 SETUP_KEYS = [("elevenlabs", None, "ElevenLabs"), ("claude-code", "#d97757", "Anthropic"),
-              ("openai", None, "OpenAI")]  # logo, logo colour (None = ink), key
+              ("soniox", None, "Soniox")]  # logo, logo colour (None = ink), key
 SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (feature, text)
     ("Drop Fast", SPEECH, None),
     ("Drop Smart", SPEECH, MODEL),
@@ -245,7 +248,7 @@ SETUP_ROWS = [  # feature, speech model, language model; a one-model row is (fea
     ("Agent", SPEECH, MODEL),           # voice requests and the Agent itself
     ("Google", SPEECH, None),           # voice search: speech only
     ("Translation", None, MODEL),
-    ("Subtitles", "GPT-Realtime-Translate"),
+    ("Subtitles", "stt-rt-v6"),
 ]
 SETUP_COLUMNS = ["Feature", "Speech", "Model"]  # providers only in the logo row (Maxim, 2026-11-22)
 
@@ -304,7 +307,8 @@ def setup_alt():
 # wrap one under the other on a narrow one.
 # WHY: .project-docs/decisions/2026-11-21-free-api-report.md
 PLANS_TITLE = "Already paying for an OpenAI or Anthropic subscription?"
-PLAN_ORDER = ["openai", "claude-code"]  # as the title names them
+PLAN_ORDER = ["model-openai", "claude-code"]  # as the title names them
+PLAN_MARK = {"model-openai": "openai"}  # the app renamed this asset; the card keeps its published mark
 PLAN_LOGO = {"claude-code": "#d97757"}  # Anthropic's mark in its colour, as in My setup
 PLAN_SIZE = {"wide": (410, 76), "phone": (300, 64)}
 
@@ -324,7 +328,7 @@ def plan_card(o, theme, layout):
     color = PLAN_LOGO.get(o["assetName"], c["ink"])
     return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="0 0 {w} {h}">
   <rect x="0.5" y="0.5" width="{w-1}" height="{h-1}" rx="14" fill="{c['bg']}" stroke="{c['border']}"/>
-  {logo(o["assetName"], color, pad, h / 2 - ls / 2, ls)}
+  {logo(PLAN_MARK.get(o["assetName"], o["assetName"]), color, pad, h / 2 - ls / 2, ls)}
   <text x="{pad + ls + 10}" y="{h / 2 + ns * 0.36:.1f}" font-family="{FONT}" font-size="{ns}" font-weight="600" fill="{c['ink']}">{e(o['provider'])}</text>
   <text x="{w - pad}" y="{h / 2 + (4 if wide else 3)}" text-anchor="end" font-family="{FONT}" font-size="{amt}" font-weight="700" fill="{c['ink']}">{e(o['allowance'])}</text>
   <text x="{w - pad}" y="{h / 2 + (22 if wide else 18)}" text-anchor="end" font-family="{FONT}" font-size="{cad}" fill="{c['sub']}">{e(o['cadence'])}</text>

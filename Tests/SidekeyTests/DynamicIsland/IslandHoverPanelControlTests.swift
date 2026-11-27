@@ -190,19 +190,28 @@ final class IslandHoverPanelControlTests: XCTestCase {
                       "controls must iterate hoverStore.slots")
     }
 
-    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
-    func test_controls_slide_on_reorder_without_a_replacement_tail() throws {
-        let source = try Self.source("Sources/Sidekey/DynamicIsland/IslandView.swift")
-        let body = try XCTUnwrap(Self.varBody(named: "controls", in: source))
+    /// The body of `private func gridTile`, one tile of the drawer's grid.
+    private static func gridTileBody(in source: String) throws -> String {
+        let start = try XCTUnwrap(source.range(of: "private func gridTile("))
+        let end = try XCTUnwrap(source.range(of: "\n    }\n", range: start.upperBound..<source.endIndex))
+        return String(source[start.lowerBound..<end.lowerBound])
+    }
 
+    // WHY: .project-docs/decisions/2026-11-25-island-hover-reorder.md
+    // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
+    func test_controls_slide_on_reorder_and_scale_in_and_out_on_add_or_remove() throws {
+        let source = try Self.source("Sources/Sidekey/DynamicIsland/IslandView.swift")
+        let tiles = try XCTUnwrap(Self.varBody(named: "tiles", in: source))
         XCTAssertTrue(
-            body.contains("ForEach(hoverStore.slots, id: \\.self)"),
+            tiles.contains("ForEach(hoverStore.slots, id: \\.self)"),
             "Tiles are identified by tool, so holding and dragging one slides the others instead of redrawing each cell."
         )
-        XCTAssertTrue(
-            body.contains(".transition(.identity)"),
-            "Replacing a tool (Case with another) must not fade the old tile out as a visible tail after the animation."
-        )
+        XCTAssertTrue(tiles.contains("IslandHoverTileGridLayout"), "A plain Layout, not a lazy grid, places the tiles")
+        let tile = try Self.gridTileBody(in: source)
+        XCTAssertTrue(tile.contains(".transition(Self.tileTransition)"),
+                      "An added or removed tile scales and fades instead of popping")
+        XCTAssertTrue(tile.contains(".opacity(hoverHitBridge.reorderingTool == tool || hoverHitBridge.settlingTool == tool ? 0 : 1)"),
+                      "A lifted or thrown-out tile's cell is invisible, so its transition leaves no tail")
     }
 
     func test_hoverDescriptionUsesSmartModeLanguageContext() throws {
@@ -261,10 +270,7 @@ final class IslandHoverPanelControlTests: XCTestCase {
         // description strip. A silent revert to always-visible hints keeps
         // every data-level test green, so pin the callsite gate itself.
         let source = try Self.source("Sources/Sidekey/DynamicIsland/IslandView.swift")
-        let body = try XCTUnwrap(
-            Self.varBody(named: "controls", in: source),
-            "IslandView must keep the controls builder."
-        )
+        let body = try Self.gridTileBody(in: source)
         XCTAssertTrue(
             body.contains(".opacity(hoveredTool == tool && !hoverHitBridge.isReordering ? 1 : 0)"),
             "Hover-slot hints must be visible only for the hovered tile, hidden via opacity so the layout slot stays reserved."

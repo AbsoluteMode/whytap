@@ -26,7 +26,7 @@ struct HoverFeatureView: View {
 
     static let about = "Small tools that open when you hover the notch. The island shows them in this order, "
         + "left to right, row by row. To change the order, hold a tool in the island and drag it; "
-        + "switch off the ones you don’t need here. "
+        + "switch off the ones you don’t need here, or drag one out of the island. "
         + "Search all tools in the island still finds a tool that is off, and its shortcut keeps working."
 
     var body: some View {
@@ -84,16 +84,33 @@ struct HoverFeatureView: View {
 
     /// Where a tool's own settings are: its feature's screen, or its pane in
     /// Toolbox. Tools that only act (Quit) have none.
+    // WHY: .project-docs/decisions/2026-11-26-every-feature-in-features.md
     private func destination(for tool: HoverTool) -> HoverToolRow.Destination? {
         switch tool {
         case .notifs: return .init(title: "Customize") { selection.shownFeature = .notify }
         case .monitor: return .init(title: "Customize") { selection.shownFeature = .monitor }
         case .translate, .subtitles: return .init(title: "Set up") { selection.open(.translateSubtitles) }
         case .screenshot: return .init(title: "Set up") { selection.open(.screenshots) }
-        case .dropMode: return .init(title: "Drop settings") { selection.open(.drop) }
+        // Drop's mode, languages and words are on Drop's screen.
+        case .dropMode, .vocab, .filler, .inputLang, .outputLang:
+            return .init(title: "Drop settings") { selection.open(.drop) }
+        case .meetingRecord, .notes: return .init(title: "Meeting Notes settings") { selection.open(.meetings) }
         case .quit, .settings: return nil
-        default: return .init(title: "Open in Toolbox") { selection.focus(tool) }
+        default:
+            if let feature = Self.feature(for: tool) {
+                return .init(title: "\(FeatureCatalog.info(for: feature).name) settings") { selection.open(feature) }
+            }
+            return .init(title: "Open in Toolbox") { selection.focus(tool) }
         }
+    }
+
+    /// The feature whose own screen shows this island tool (Subtitles is
+    /// Translate & Subtitles', the second of its tools).
+    static func feature(for tool: HoverTool) -> AppFeature? {
+        FeatureCatalog.all.first { info in
+            if case .islandTools(let tools) = info.activation { return tools.contains(tool) }
+            return false
+        }?.feature
     }
 }
 
@@ -106,7 +123,7 @@ struct HoverToolLayout: Equatable {
 
     init(slots: [HoverTool]) {
         inIsland = slots.filter { $0 != .settings }
-        offIsland = HoverTool.allCases.filter { $0 != .settings && !slots.contains($0) }
+        offIsland = HoverLayoutStore.unpinnedTools(from: slots)
     }
 
     static func countText(_ count: Int) -> String {
@@ -126,7 +143,7 @@ struct HoverToolLayout: Equatable {
     /// A switched-on tool joins the end of the island, before Settings.
     @MainActor
     func set(_ tool: HoverTool, on: Bool, in store: HoverLayoutStore) {
-        if on { store.placeTool(tool, at: store.lockSlotIndex) } else { store.removeTool(tool) }
+        if on { store.pin(tool) } else { store.unpin(tool) }
     }
 
     /// One place up (-1), down (+1), or to the top (`Int.min`).

@@ -1211,6 +1211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             openTranslate: { [weak self] in self?.openTranslation(.text) },
             openSubtitles: { [weak self] in self?.openTranslation(.subtitles) },
             openScreenshot: { [weak self] in self?.openScreenshot() },
+            openHelpCenter: { NSWorkspace.shared.open(BuildConfig.helpCenterURL) },
             openSettings: { [weak self] in
                 self?.openSettingsWindow(tab: .features)
             },
@@ -1735,7 +1736,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .comingSoon:
             // A tool listed with a "Soon" badge has no effect.
             break
-        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit:
+        case .openSettings, .openHotkeys, .openNotes, .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .openHelpCenter, .quit:
             // Action/navigate tools open their own surfaces (window / toggle)
             // instantly — forcing the drawer open here would flash an empty
             // Hover for ~4s (Stage 3 review fix). Run the effect directly
@@ -4014,6 +4015,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // need no harness prompt. WHY:
         // .project-docs/decisions/2026-11-22-native-agent-app-control.md
         NativeAgentAppControl.installed = { [controls] request in await controls.handle(request) }
+        // Connected sources' read tools for the Agent, gated off until the
+        // owner decides. WHY: .project-docs/decisions/2026-11-26-agent-sources.md,
+        // .project-docs/decisions/2026-11-27-agent-sources-gated.md
+        if AgentSourcesGate.isEnabled {
+            NativeAgentSources.installed = { SourcesController.shared.agentCatalog() }
+        }
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)

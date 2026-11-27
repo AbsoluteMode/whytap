@@ -484,7 +484,8 @@ order across model ID/provider, ignoring case and separators (`qwen 27` and
 closes. Opening the picker automatically refreshes stale or failed catalogs;
 cached results remain available offline. There are no Refresh models or Other
 model ID actions. Search and refresh keep the current route until an explicit
-verified pick. API keys shows all providers as square tiles; clicking a tile
+verified pick. API keys shows all providers as compact tiles (icon, name, use, key status) that
+fit the default Settings window without scrolling; clicking a tile
 opens its inline form with only Save and Remove. Validation stays automatic;
 the only result message is a brief Key accepted / Key not accepted notice. Failed or unreachable checks preserve the
 previous key and keep the form open. OpenAI and Anthropic are available to all

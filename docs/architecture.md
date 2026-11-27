@@ -1418,10 +1418,12 @@ equal dates and empty queries keep catalog order. Older caches refresh once for 
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
 Refresh models or Other model ID actions. Custom servers offer only the models
-added in their window, typed or from /models. API keys uses square provider tiles opening an
+added in their window, typed or from /models. API keys uses compact provider tiles (rows as tall as their
+tallest tile, the tab fits the default window unscrolled) opening an
 inline Save/Remove form (a server's tile opens its window instead) with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;
+.project-docs/decisions/2026-11-27-compact-key-tiles.md;
 .project-docs/decisions/2026-10-20-model-search.md
 
 Other selection menus use MacMenu/MacPopup: a 30 pt neutral control with 8 pt corners

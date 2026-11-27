@@ -9,6 +9,8 @@ struct KeyChip: Equatable, Identifiable {
     let checkedAt: Date?
     /// A server's added models, in the order added; `nil` for other accounts.
     var serverModels: [ServerModel]? = nil
+    /// The last check said the key works: its tile shows the status in green.
+    var keyWorks = false
     var id: String { account.storageID }
 }
 
@@ -1155,7 +1157,7 @@ final class APIAndModelsViewModel: ObservableObject {
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt, serverModels: models
+            checkedAt: record?.checkedAt, serverModels: models, keyWorks: record?.status == .valid
         )
     }
 

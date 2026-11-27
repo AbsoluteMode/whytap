@@ -31,6 +31,45 @@ and queue messages to the originating sessions. Nothing else.
    configuration, stop or reconfigure the watcher, or touch another session's
    worktree, branch or uncommitted work.
 
+## Owner preview first (2026-11-28)
+
+The owner checks an app change in the working app before anyone reviews or
+tests it. This outranks "Each ticket" steps 3 and 4 below; the full rule is
+"Owner preview first" in the shared workflow and
+`.project-docs/decisions/2026-11-28-owner-preview-first.md`.
+
+- An app-changing PR without the owner's OK gets only a preview: compose
+  current `origin/main` + the train (PRs whose preview still awaits the
+  owner: tickets `blocked` with a note starting `PREVIEW AWAITING OWNER` and
+  no decision) + this PR in the integration worktree, resolve routine
+  conflicts, build the local arm64 app (step 6's packaging, from that
+  composed commit), check only build, strict signature, team and designated
+  requirement, higher `CFBundleVersion`, `--installation-check`, and install
+  through step 7 (meeting gate, rollback bundle). No independent deep review,
+  no race or interleaving probes, no full suite, no `swift test`. Then `set
+  --status blocked --note "PREVIEW AWAITING OWNER: build <n> = main <sha> +
+  #<pr> <head> [+ train members]; not merged; owner checks: <acceptance>"`,
+  add it under **Preview, not merged** in `build/CURRENT_BUILD.md` and tell
+  the author.
+- Read `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-owner-decisions.txt"` at the start
+  of every run. Only the orchestrator writes it, one line per owner decision:
+  `<UTC time> ok|reject PR #<n> <head> build <n> -- <owner's words>`.
+- A resubmitted head is an approved one only when an `ok` line names a
+  previewed head of that PR and every non-merge commit after it is empty or
+  already on `origin/main` (`git rev-list --no-merges <ok head>..<new head>`).
+  Then: full suite (step 4), review limited to real data loss, security and
+  privacy, merge, normal install of main + the remaining train. Any other
+  finding (races or interleavings that lose no data, robustness, style,
+  missing tests) goes into the ticket note and a PR comment as a follow-up;
+  it never blocks.
+- `reject`: `set --status cancelled` on the preview ticket with the owner's
+  words; the next install leaves that PR out; tell the author. A new head
+  without an `ok` is a new preview; the earlier preview ticket becomes
+  `superseded`.
+- Builder tooling and documentation-only PRs have nothing to preview: their
+  own tests, documentation checks, the same limited review, merge; other
+  findings are follow-ups.
+
 ## Your identity and lease
 
 The "This run" block at the end gives `actor`, `lease_pid`, `git_dir`,
@@ -58,6 +97,7 @@ holds it, leave the tickets queued and end your turn.
    Read the last 80 lines of `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"`
    (`tail -n 80`) if it exists: earlier builder sessions leave operational
    facts there; the watcher moves older lines to `whytap-builder-notes.old`.
+   Then read `whytap-owner-decisions.txt` there (see "Owner preview first").
    WHY for this file's quick wins:
    `.project-docs/decisions/2026-11-26-builder-quick-wins.md`.
 2. If a ticket is `in_progress`, a previous session of this same builder was
@@ -122,6 +162,10 @@ holds it, leave the tickets queued and end your turn.
    unmerged PR) waits for its parent: `set --status queued` with the parent
    named, never a review of the stack, and ask its author to add
    `--depends-on`.
+   For an app-changing PR without the owner's OK, stop here and preview it
+   ("Owner preview first"); with the OK, or for tooling and docs, the review
+   below is limited to data loss, security and privacy, and everything else
+   is a follow-up.
    Cheapest checks first; the full suite is the acceptance gate of a merge
    candidate, not a way to find review problems: review the diff and both
    features' contracts, run the probes, the documentation checks and

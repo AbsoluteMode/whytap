@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-23
+verified_at: 2026-11-28
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-28 (orchestrator card 42) the owner decided "rule now, code later" - an app-changing PR is built and installed as an owner preview with only the minimal safety checks; deep review, race probes and the full suite wait for the owner's OK, and after it only data loss, security and privacy findings block the merge.
+    confirmed_at: 2026-11-28
   - type: user-confirmed
     reference: On 2026-11-23 the maintainer approved starting the builder-queue rework with a model-free watchdog, a load and screen-lock gate, current builder rules and a baseline measurement.
     confirmed_at: 2026-11-23
@@ -68,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-owner-preview-first.md]
 ---
 
 # Parallel development, one working Whytap
@@ -370,6 +373,53 @@ the queue change within about a minute. Where a builder chat is still
 configured, the worker sends it a short request containing the ticket ID. The
 queue survives downtime.
 
+### Owner preview first
+
+Since 2026-11-28 this section outranks the review and validation steps of
+the builder turn below
+([owner preview first decision](../decisions/2026-11-28-owner-preview-first.md)).
+
+1. **Preview.** A PR that changes the app is first built and installed as
+   an unmerged preview: current `origin/main`, plus every PR whose preview
+   still awaits the owner (the train), plus this PR, composed in the
+   integration worktree with routine conflicts resolved, packaged as the local
+   arm64 app (`EXODIA_LOCAL_INSTALL=1`). Only the minimal safety checks
+   apply: the build succeeds; strict signature, the same Developer ID team and
+   designated requirement as the installed app; a higher `CFBundleVersion`;
+   native `--installation-check`; the meeting gate right before the Quit (no
+   recording, dictation or agent work in progress); one signed rollback
+   bundle kept. No independent deep review, no race or interleaving probes,
+   no full suite and no `swift test` before the owner's OK. After the
+   verified install set the ticket `blocked` with a note that starts
+   `PREVIEW AWAITING OWNER` and names the installed build, the main base and
+   each member PR with its exact head, list them under **Preview, not
+   merged** in `build/CURRENT_BUILD.md`, and message the author with the
+   acceptance steps for the owner. This `blocked` is not a finding. A train
+   member that no longer merges cleanly is left out and its author is told.
+2. **Owner decisions.** The orchestrator appends each decision of the owner
+   as one line to `whytap-owner-decisions.txt` in the Git common directory:
+   `<UTC time> ok|reject PR #<n> <exact head> build <preview build> -- <owner's words>`.
+   Nobody else writes it. The builder reads it at the start of every run.
+3. **After an OK: validation.** The author resubmits the PR with current main
+   merged into its branch (an empty commit if main did not move), so the
+   watcher starts a session. The builder accepts the OK only when an `ok`
+   line names a previewed head and every non-merge commit after that head is
+   empty or already on `origin/main`; anything else is a new preview. Then it
+   runs the full suite (step 4 of the builder turn), reviews only for real
+   data loss, security and privacy problems, merges and installs main plus
+   the remaining train as usual. Every other finding (races and
+   interleavings that lose no data, robustness, style, missing edge-case
+   tests) goes into the ticket note and a PR comment as a follow-up and never
+   blocks. "Block once" still applies to the findings that may block.
+4. **Reject.** Cancel the preview ticket (`blocked` to `cancelled`) with the
+   owner's words, leave the PR out of the next install and tell its author.
+5. A new head of a PR whose preview awaits the owner, without an `ok`, is a
+   new preview; the earlier preview ticket becomes `superseded`.
+6. A PR with nothing to preview (builder tooling, documentation only) skips
+   the preview: its own tests, the documentation checks and the same limited
+   review (data loss, security, privacy), then the merge. Other findings are
+   follow-ups.
+
 ### Builder turn
 
 1. Read `status` and `events --pending`. Deliver queued receipts to their
@@ -404,7 +454,9 @@ queue survives downtime.
    steps when notified. The worker may inspect, diagnose and report problems;
    it must not merge, package, install or acquire a competing integration lock.
 4. Inspect the exact live PR head/base, review evidence, dependencies, overlaps
-   and source. Follow all integration/signature/version/activity/rollback gates
+   and source. For an app-changing PR without the owner's OK this step is
+   only the preview of "Owner preview first" above; the review and suite
+   rules below apply after the OK, limited as described there. Follow all integration/signature/version/activity/rollback gates
    below. Queue membership is a request, never proof that gates passed. A moved
    head needs new review; block the ticket and ask its worker to resubmit the
    reviewed result. To give a claimed ticket back without blaming the PR (the

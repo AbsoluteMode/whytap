@@ -6,7 +6,7 @@ summary: Scope and mandatory reading for sessions working in AbsoluteMode/whytap
 status: confirmed
 tags: [team, agents, worktrees, builder, queue, shared-app, guidance]
 canonical_for: [team-session-scope, team-guidance-entry]
-verified_at: 2026-11-22
+verified_at: 2026-11-28
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer agreed to rework the documentation for people who receive the repository; the task asked for a short AGENTS.md for outside users and contributors and a separate, explicitly scoped runbook for the team process, losing no rule.
@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-builder-prompt.md
     confirmed_at: 2026-11-22
-related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md]
+related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-28-owner-preview-first.md]
 ---
 
 # Whytap team runbook
@@ -113,6 +113,13 @@ feature sessions with regular checked integration and one working application.
   `git rev-parse --git-common-dir` for protected operations. Queue claims never
   replace that lock or any validation gate. Preserve all other sessions' WIP;
   use a clean integration worktree when the primary checkout is occupied.
+- Owner preview first (2026-11-28): the builder installs an app-changing PR
+  as an unmerged preview with only the minimal safety checks (signature and
+  identity, newer build number, no activity in progress, rollback bundle
+  kept). Deep review, race probes and the full suite wait for the owner's OK,
+  which the orchestrator records in `whytap-owner-decisions.txt`; after it
+  only data loss, security and privacy findings block the merge, the rest are
+  follow-ups. WHY: .project-docs/decisions/2026-11-28-owner-preview-first.md
 - Review overlaps, validate the final combined candidate and merge through a
   PR with exact head/base checks. Routine checked integration/local refresh
   needs no repeated approval. Public publishing remains a separate action.

@@ -1997,19 +1997,228 @@ extension AutoPasteEngineTests {
         XCTAssertEqual(board, original)
     }
 
-    /// Fallback kept from before: a live target that could not be brought
-    /// to the front (activation refused) does not stop the paste; it goes
-    /// to the app that has focus, as long as that app keeps it until V-down.
-    func testLiveTargetThatCannotTakeFocusKeepsTheFrontmostFallback() async {
+    /// A live target that could not be brought to the front (activation
+    /// refused): the dictation is not pasted into the app that is in front.
+    /// The take stops as a retryable refusal with the clipboard given back,
+    /// and Retry pastes the same text once the target is in front again.
+    func testLiveTargetThatCannotTakeFocusRefusesAndRetryPastesItWhenItIsBack() async {
         let env = makeRestoreEnv()
         let engine = env.makeEngine()
         engine.rememberTargetBeforeRecording()          // target A
-        env.frontmost = Self.targetB                     // focus moved before the paste; A refuses activation
+        env.frontmost = Self.targetB                     // focus moved; A refuses activation
+
+        let refused = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertFalse(refused)
+        XCTAssertEqual(engine.lastPasteRefusal, .targetNotInFront)
+        XCTAssertFalse(env.postedEvents.contains { $0.keyCode == Self.v && $0.down }, "nothing reaches the app in front")
+        XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems, "the clipboard comes back at once")
+        XCTAssertEqual(env.activatedPids, [Self.targetA.pid])
+        XCTAssertEqual(DropPasteRetry.message(for: .targetNotInFront), "Couldn't paste — app not in front")
+
+        env.frontmost = Self.targetA                     // the user returns to A and presses Retry
+        let retried = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertTrue(retried)
+        XCTAssertNil(engine.lastPasteRefusal)
+        XCTAssertEqual(env.postedEvents.filter { $0.keyCode == Self.v && $0.down }.count, 1)
+        XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems)
+    }
+
+    /// The documented fallback stays: when the take's target quit, the
+    /// paste goes to the app that has focus.
+    func testTerminatedTargetStillPastesWhereFocusIs() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()          // target A
+        env.frontmost = Self.targetB
+        env.terminatedPids = [Self.targetA.pid]
 
         let result = await engine.paste("dictated")
         await engine.waitForPendingRestore()
 
         XCTAssertTrue(result)
+        XCTAssertNil(engine.lastPasteRefusal)
         XCTAssertEqual(env.postedEvents.filter { $0.keyCode == Self.v && $0.down }.count, 1)
+    }
+
+    /// Which stops are retryable refusals: a clipboard change is; quit and
+    /// held modifiers are not.
+    func testOnlyFocusAndClipboardStopsAreRetryableRefusals() async {
+        let changed = makeRestoreEnv()
+        changed.onAsyncSleep = { [unowned changed] in
+            if changed.asyncSleepCalls.count == 1 { changed.userCopies("newer copy") }
+        }
+        let changedEngine = changed.makeEngine()
+        _ = await changedEngine.paste("dictated")
+        XCTAssertEqual(changedEngine.lastPasteRefusal, .clipboardChanged)
+        XCTAssertEqual(DropPasteRetry.message(for: .clipboardChanged), "Couldn't paste — clipboard changed")
+
+        let quitting = makeRestoreEnv()
+        let quittingEngine = quitting.makeEngine()
+        quitting.onAsyncSleep = { [unowned quitting, weak quittingEngine] in
+            if quitting.asyncSleepCalls.count == 1 { quittingEngine?.flushPendingRestore() }
+        }
+        _ = await quittingEngine.paste("dictated")
+        XCTAssertNil(quittingEngine.lastPasteRefusal)
+
+        let held = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[.maskCommand]], permission: true)
+        let heldEngine = held.makeEngine()
+        _ = await heldEngine.paste("dictated")
+        XCTAssertNil(heldEngine.lastPasteRefusal)
+    }
+}
+
+// MARK: - Build-queue review of ticket 704
+
+
+extension AutoPasteEngineTests {
+    func testBuilder704FailedSuccessorRevalidatesItsOwnClearAfterReadingPreviousClaim() async {
+        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+        let marker = PromisedPasteboardPayload.transientMarker.rawValue
+        let ledger = PasteboardWriteLedger()
+        var board = original
+        var generation = 10
+        var injectAfterSamplingClear = false
+        var restoreCalls = 0
+        var waitingForPreviousTake = false
+        var suppressThrough: [Int] = []
+        let engine = AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { Self.targetA },
+            activate: { _ in true }, isTerminated: { _ in false },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { text in
+                let before = generation
+                generation += 1
+                if text == "first" {
+                    board = PasteboardSnapshot(items: [[marker: Data(), "public.utf8-plain-text": Data(text.utf8)]])
+                    return (before: before, after: generation)
+                }
+                board = PasteboardSnapshot(items: [])
+                ledger.recordFailedWrite(ownedChangeCount: generation)
+                injectAfterSamplingClear = true
+                return nil
+            },
+            postEvent: { _, _, _ in }, sleepUs: { _ in },
+            asyncSleepMs: { ms in
+                if ms == 1 {
+                    while !waitingForPreviousTake { await Task.yield() }
+                }
+            },
+            nowMs: { 0 },
+            logEmit: { _, message in
+                if message.contains("waiting_for_previous_paste") { waitingForPreviousTake = true }
+            },
+            pasteboardSnapshot: { board },
+            pasteboardRestore: {
+                restoreCalls += 1
+                board = $0
+                generation += 1
+            },
+            suppressClipboardThrough: { suppressThrough.append($0) },
+            currentChangeCount: {
+                let sampled = generation
+                if injectAfterSamplingClear {
+                    injectAfterSamplingClear = false
+                    board = external
+                    generation += 1
+                }
+                return sampled
+            },
+            restoreTiming: .init(pollMs: 1, afterReadMs: 1, fallbackMs: 2),
+            writeLedger: ledger
+        )
+        let first = await engine.paste("first")
+        XCTAssertTrue(first)
+        let second = await engine.paste("second")
+        XCTAssertTrue(waitingForPreviousTake, "Use an inherited clipboard claim")
+        XCTAssertFalse(second)
+        XCTAssertEqual(board, external, "Recheck the clear after inspecting the previous claim")
+        XCTAssertEqual(restoreCalls, 0)
+        XCTAssertEqual(suppressThrough, [11])
+    }
+
+    func testBuilder704ExternalCopyDuringLastForegroundSampleDoesNotPostV() async {
+        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+        var board = original
+        var generation = 10
+        var commandWasPosted = false
+        var didPostV = false
+        let engine = AutoPasteEngine(
+            flagsState: { [] },
+            frontmostAppInfo: {
+                if commandWasPosted {
+                    board = external
+                    generation = 12
+                }
+                return Self.targetA
+            },
+            activate: { _ in true }, isTerminated: { _ in false },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { text in
+                board = PasteboardSnapshot(items: [["public.utf8-plain-text": Data(text.utf8)]])
+                generation = 11
+                return (before: 10, after: 11)
+            },
+            postEvent: { key, down, _ in
+                if key == Self.cmd && down { commandWasPosted = true }
+                if key == Self.v && down { didPostV = true }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardSnapshot: { board },
+            pasteboardRestore: { board = $0; generation += 1 },
+            currentChangeCount: { generation }
+        )
+        engine.rememberTargetBeforeRecording()
+        let result = await engine.paste("fixture")
+        await engine.waitForPendingRestore()
+        XCTAssertFalse(result)
+        XCTAssertFalse(didPostV, "The final foreground query must not create an unchecked clipboard window")
+        XCTAssertEqual(board, external)
+    }
+}
+
+extension AutoPasteEngineTests {
+    /// The no-target fallback keeps the same final boundary: a copy that
+    /// arrives during the last foreground lookup is not pasted.
+    func testExternalCopyDuringLastForegroundSampleWithoutATargetDoesNotPostV() async {
+        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+        var board = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+        var generation = 10
+        var commandWasPosted = false
+        var didPostV = false
+        let engine = AutoPasteEngine(
+            flagsState: { [] },
+            frontmostAppInfo: {
+                if commandWasPosted { board = external; generation = 12 }
+                return Self.targetB
+            },
+            activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true },
+            pasteboardWrite: { text in
+                board = PasteboardSnapshot(items: [["public.utf8-plain-text": Data(text.utf8)]])
+                generation = 11
+                return (before: 10, after: 11)
+            },
+            postEvent: { key, down, _ in
+                if key == Self.cmd && down { commandWasPosted = true }
+                if key == Self.v && down { didPostV = true }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardSnapshot: { board },
+            pasteboardRestore: { board = $0; generation += 1 },
+            currentChangeCount: { generation }
+        )
+
+        let result = await engine.paste("fixture")
+        await engine.waitForPendingRestore()
+
+        XCTAssertFalse(result)
+        XCTAssertFalse(didPostV)
+        XCTAssertEqual(board, external)
+        XCTAssertEqual(engine.lastPasteRefusal, .clipboardChanged)
     }
 }

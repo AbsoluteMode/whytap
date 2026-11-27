@@ -65,6 +65,24 @@ struct DropOutputPolicy {
     }
 }
 
+/// A Drop take whose paste was refused (`AutoPasteEngine.PasteRefusal`):
+/// its final text is kept in memory so Retry pastes it again without new
+/// processing, until Retry succeeds, the user closes it or a new take
+/// discards it.
+struct DropPasteRetry {
+    let text: String
+    let rawTranscript: String
+    let formatting: SmartFormattingProfile
+
+    /// The short reason shown next to Retry.
+    static func message(for refusal: AutoPasteEngine.PasteRefusal) -> String {
+        switch refusal {
+        case .targetNotInFront: return "Couldn't paste — app not in front"
+        case .clipboardChanged: return "Couldn't paste — clipboard changed"
+        }
+    }
+}
+
 /// Retained only in memory until Retry succeeds or a new take discards it.
 struct DropProcessingRetry {
     let rawText: String

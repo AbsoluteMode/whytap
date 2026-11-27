@@ -65,10 +65,25 @@ clipboard png/tiff only. The target pasted the old screenshot.
   as foreign: not restored over and not hidden from clipboard history.
 - One foreground sample after the settle decides both the focus check and
   the Cmd+V recipient. Between Command-down and V-down the ownership check
-  (which may read the pasteboard) runs first and the foreground is sampled
-  last. A live target that could not be brought to the front at all keeps
-  the earlier fallback: the paste goes to the app with focus, if it keeps
-  focus until V-down.
+  (which may read the pasteboard) and the foreground lookup are each sampled
+  twice, interleaved, so a clipboard change during a foreground lookup or a
+  focus change during an ownership check is caught by the next check.
+- A failed write re-checks, right before restoring, the generation that
+  justified the restore (its own clear or the previous take's dictation):
+  the checks themselves read the pasteboard, and anything that arrived
+  meanwhile is newer.
+- A live target must be in front for the paste. When it lost focus, or could
+  not be brought to the front at all (activation refused), Drop does not
+  paste into whichever app is in front: the take stops as a retryable
+  refusal (`AutoPasteEngine.PasteRefusal`), the clipboard comes back, the
+  text is kept in Drop history and in memory (`DropPasteRetry`), and the
+  island shows "Couldn't paste — app not in front" with Retry, which pastes
+  the same text again without new processing. A clipboard change under the
+  paste is the same kind of refusal ("Couldn't paste — clipboard changed").
+  Only a take without a target, or whose target quit, still pastes where
+  focus is. Quit, held modifiers and a failed write keep their earlier
+  handling. Decided by the maintainer's orchestrator on 2026-11-27: pasting
+  dictation into an app the user did not target is the worse outcome.
 - Drop pastes run one at a time. A take that starts while the previous one
   waits for its read waits too (up to the 2 s fallback), so the previous
   target reads its own dictation, then inherits the snapshot; if its write
@@ -130,7 +145,13 @@ review of ticket 697: an external copy inside the writer (both observation
 boundaries, with and without Drop's own clear, plain and rich, with and
 without a previous take) is never claimed, restored over or hidden; a focus
 change between the boundary check and the recipient capture, or during the
-final ownership check, posts no V. On a named pasteboard: promise read counting
+final ownership check, posts no V. Then: a live target that cannot take
+focus refuses (no V, clipboard back, `targetNotInFront`) and the same text
+pastes once it is in front; a quit target still pastes where focus is; only
+focus and clipboard stops are retryable refusals. After the review of
+ticket 704: a failed successor write does not restore over a copy that
+arrives while it inspects the previous take, and a copy during the last
+foreground lookup (with and without a target) posts no V. On a named pasteboard: promise read counting
 and cache, `ClipboardWatcher` skipping the item unread, and an end-to-end
 run where a separate `osascript` process reads 300 ms after Cmd+V from an
 image-only pasteboard. With the timing forced back to 120 ms that process
@@ -145,6 +166,9 @@ and the image came back.
   change the user's clipboard.
 - Detecting the paste through the target's text (Accessibility): not
   available in many Electron/web editors.
+- Pasting into the frontmost app when a live target could not be brought to
+  the front (the earlier fallback): the dictation lands in an app the user
+  did not target.
 
 ## Limits
 

@@ -128,6 +128,17 @@ final class AutoPasteEngine {
     /// section 7: shorter than this and some apps coalesce / drop events.
     static let keyEventGapUs: UInt32 = 12_000
 
+    /// Why the last `paste(_:)` stopped without pasting, when the take can
+    /// be retried as is (its text kept): the take's target was not in
+    /// front, or newer content replaced the dictation on the clipboard.
+    /// nil after a paste, or after a refusal that is not retryable (quit,
+    /// held modifiers, a failed write).
+    enum PasteRefusal: Equatable {
+        case targetNotInFront
+        case clipboardChanged
+    }
+    private(set) var lastPasteRefusal: PasteRefusal?
+
     /// When the user's clipboard comes back after a Drop paste.
     struct RestoreTiming: Equatable {
         /// How often the pending restore checks for reads and replacements.
@@ -383,6 +394,8 @@ final class AutoPasteEngine {
             return inserted
         }
 
+        lastPasteRefusal = nil
+
         // The take's target is fixed for this paste: a newer take that
         // captures another app while this one waits must not redirect it.
         let target = remembered
@@ -435,10 +448,19 @@ final class AutoPasteEngine {
         guard let counts = written else {
             let ownClear = writeLedger.takeFailedWrite()
             logEmit(.error, "autopaste_failed step=pasteboard reason=write_returned_nil")
-            let ownClearStands = ownClear.map { $0 == currentChangeCount() } ?? false
-            let previousTakeHolds = inherited && claim.map(clipboardIsOwned(by:)) == true
+            let previous = inherited ? claim : nil
             if claim != nil { claim = nil }
-            if ownClearStands || previousTakeHolds {
+            // The generation that justifies a restore: this write's own
+            // clear, or the previous take's dictation.
+            var justified: Int?
+            if let ownClear, currentChangeCount() == ownClear {
+                justified = ownClear
+            } else if let previous, clipboardIsOwned(by: previous) {
+                justified = previous.ownedChangeCount
+            }
+            // The checks above read the pasteboard; anything that arrived
+            // meanwhile is newer. Re-check right before restoring.
+            if let justified, currentChangeCount() == justified {
                 pasteboardRestore(snapshot)
                 suppressClipboardThrough(currentChangeCount())
             } else if ownClear != nil || inherited {
@@ -459,6 +481,7 @@ final class AutoPasteEngine {
         self.claim = claim
         guard currentChangeCount() == counts.after else {
             self.claim = nil
+            lastPasteRefusal = .clipboardChanged
             logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_after_write")
             return false
         }
@@ -512,6 +535,7 @@ final class AutoPasteEngine {
         }
         guard clipboardIsOwned(by: claim) else {
             self.claim = nil
+            lastPasteRefusal = .clipboardChanged
             logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
             return false
         }
@@ -521,14 +545,18 @@ final class AutoPasteEngine {
             return false
         }
         // One foreground sample decides both the focus check and the
-        // recipient: a live target that holds focus is the recipient for
-        // the whole sequence; without a live target, or when focus could
-        // not be restored to it, the paste goes where focus is (fallback).
+        // recipient. A live target must hold focus: if it lost focus in
+        // the settle, or could not be brought to the front at all, nothing
+        // is pasted into whichever app is in front instead; the take stops
+        // with its text kept for Retry. Only without a target, or when the
+        // target quit, does the paste go where focus is (fallback).
+        // WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
         let frontmostAtBoundary = frontmostAppInfo()
         let liveTarget = target.flatMap { isTerminated($0.pid) ? nil : $0 }
-        if let liveTarget, frontmostBeforeSettle?.pid == liveTarget.pid,
-           frontmostAtBoundary?.pid != liveTarget.pid {
-            logEmit(.error, "autopaste_failed step=focus reason=target_lost_focus")
+        if let liveTarget, frontmostAtBoundary?.pid != liveTarget.pid {
+            let lostInSettle = frontmostBeforeSettle?.pid == liveTarget.pid
+            logEmit(.error, "autopaste_failed step=focus reason=\(lostInSettle ? "target_lost_focus" : "target_not_frontmost")")
+            lastPasteRefusal = .targetNotInFront
             giveBack(claim, after: "failure")
             return false
         }
@@ -575,18 +603,25 @@ final class AutoPasteEngine {
     private func postDropCmdV(recipient: RememberedTarget?, claim: ClipboardClaim) -> Bool {
         postEvent(Self.commandKeyCode, true, [])
         sleepUs(Self.keyEventGapUs)
-        // The ownership check can read the pasteboard; the foreground is
-        // sampled after it, as the last thing before V-down.
-        let owned = self.claim === claim && clipboardIsOwned(by: claim)
-        let recipientReady = recipient.map { frontmostAppInfo()?.pid == $0.pid } ?? true
+        // Each check can take time (the ownership check may read the
+        // pasteboard), so both are sampled twice, interleaved: a clipboard
+        // change during a foreground lookup, or a focus change during an
+        // ownership check, is seen by the next check of the other kind.
+        let ownedFirst = self.claim === claim && clipboardIsOwned(by: claim)
+        let frontFirst = frontmostAppInfo()?.pid
+        let owned = ownedFirst && self.claim === claim && currentChangeCount() == claim.ownedChangeCount
+        let frontLast = frontmostAppInfo()?.pid
+        let recipientReady = recipient.map { frontFirst == $0.pid && frontLast == $0.pid } ?? true
         guard recipientReady, owned else {
             postEvent(Self.commandKeyCode, false, [])
             if self.claim !== claim {
                 logEmit(.error, "autopaste_failed step=paste reason=clipboard_given_back")
             } else if !owned {
                 self.claim = nil
+                lastPasteRefusal = .clipboardChanged
                 logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
             } else {
+                lastPasteRefusal = .targetNotInFront
                 logEmit(.error, "autopaste_failed step=focus reason=recipient_lost_focus")
                 giveBack(claim, after: "failure")
             }

@@ -213,7 +213,12 @@ Voice flow (Drop / dictation):
             a remembered target (fixed when the paste starts) that loses
             focus during the 80 ms non-blocking settle stops it too, and
             ownership plus the frontmost recipient are rechecked between
-            Command-down and V-down (V is never sent otherwise). Quit stops
+            Command-down and V-down (V is never sent otherwise). A live
+            target that is not in front (lost focus or refused activation)
+            or a clipboard change stops the take as a retryable refusal:
+            "Couldn't paste — app not in front / clipboard changed" with
+            Retry pasting the kept text (DropPasteRetry); only a missing or
+            quit target pastes where focus is. Quit stops
             every Drop paste that began before it. The clipboard comes back
             asynchronously 150 ms after the last read of the dictation after
             Cmd+V, or after 2 s without one. Drop pastes run one at a time;

@@ -71,8 +71,10 @@ final class InputLanguageSuggestionTests: XCTestCase {
         let raw = try XCTUnwrap(source.range(of: "let pasted = await self.autoPasteEngine.paste(raw)"))
         let tail = source[raw.upperBound...].prefix(260)
         XCTAssertTrue(tail.contains("self.noteDeliveredDropForLanguageOffer(raw)"))
-        XCTAssertEqual(source.components(separatedBy: "noteDeliveredDropForLanguageOffer(").count - 1, 3,
-                       "the definition and exactly the two delivered paths")
+        // A refused paste counts only once its Retry actually pasted.
+        XCTAssertTrue(source.contains("if pasted { self.noteDeliveredDropForLanguageOffer(pending.rawTranscript) }"))
+        XCTAssertEqual(source.components(separatedBy: "noteDeliveredDropForLanguageOffer(").count - 1, 4,
+                       "the definition and exactly the three delivered paths")
     }
 
     func test_a_chosen_input_language_is_never_second_guessed() {

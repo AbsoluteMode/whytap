@@ -173,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// leaves captured audio stranded in memory.
     private var pendingRetryPCM: Data?
     private var pendingProcessingRetry: DropProcessingRetry?
+    private var pendingPasteRetry: DropPasteRetry?
     private var pendingRetryTarget: (app: String?, pid: pid_t?)?
     /// True while a manual Retry's batch recovery is in flight. Gates
     /// `retryPendingDelivery` (via `shouldBeginRetry`) so a second press can't
@@ -1393,6 +1394,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
             failDropTurnTelemetry(reason: "local_editor_unavailable")
+        } else if !pasted, let refusal = autoPasteEngine.lastPasteRefusal {
+            // The target was not in front, or the clipboard changed under the
+            // paste: nothing was pasted elsewhere. Keep the text for Retry.
+            // WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
+            dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+            failDropTurnTelemetry(reason: "paste_refused")
+            parkRefusedPaste(
+                DropPasteRetry(text: cleaned, rawTranscript: rawTranscript, formatting: formatting),
+                refusal: refusal
+            )
+            return
         } else {
             if !pasted {
                 os_log("autopaste_external_delivery_failed", log: Self.log, type: .info)
@@ -1404,6 +1416,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    private func parkRefusedPaste(_ retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal) {
+        pendingPasteRetry = retry
+        AppState.shared.dropDeliveryFailureMessage = DropPasteRetry.message(for: refusal)
+        AppState.shared.phase = .deliveryFailed
     }
 
     /// Only a take whose text reached the user counts towards the input
@@ -3527,6 +3545,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingRetryPCM = nil
         pendingRetryTarget = nil
         pendingProcessingRetry = nil
+        pendingPasteRetry = nil
         AppState.shared.dropDeliveryFailureMessage = nil
     }
 
@@ -3536,6 +3555,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard AppState.shared.phase == .deliveryFailed, !retryInFlight else { return }
         discardPendingRetry()
         AppState.shared.phase = .idle
+    }
+
+    /// Retry for a refused paste (`DropPasteRetry`): pastes the kept text
+    /// again, without new processing. A new refusal parks it again.
+    private func retryRefusedPaste(_ pending: DropPasteRetry) {
+        guard !retryInFlight else { return }
+        retryInFlight = true
+        AppState.shared.phase = .inserting
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let pasted = await self.deliverDropTranscript(pending.text, formatting: pending.formatting)
+            self.retryInFlight = false
+            if !pasted, let refusal = self.autoPasteEngine.lastPasteRefusal {
+                self.parkRefusedPaste(pending, refusal: refusal)
+                return
+            }
+            self.discardPendingRetry()
+            if pasted { self.noteDeliveredDropForLanguageOffer(pending.rawTranscript) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if AppState.shared.phase == .inserting { AppState.shared.phase = .idle }
+        }
     }
 
     /// Manual retry for a total-offline degraded Drop (Task 7). Re-runs
@@ -3553,6 +3593,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in-flight phase (routed to `.noop`), never the escapable terminal: that
     /// closes the window where a stale retry could paste over a new turn.
     func retryPendingDelivery() {
+        if let pending = pendingPasteRetry { return retryRefusedPaste(pending) }
         if let pending = pendingProcessingRetry {
             guard !retryInFlight else { return }
             retryInFlight = true

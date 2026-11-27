@@ -38,7 +38,7 @@ related: [2026-10-19-config-backup.md]
 ## Context
 
 The build queue installs some pull requests in the owner's app for a check by the owner
-before review and the full suite (the preview lane). Until now a preview was
+before the full suite and the merge (the preview lane). Until now a preview was
 admitted only when it could not reach stored state at all: no settings, no
 stores, no files. That admitted 1 of the last 40 and 5 of the last 100 main
 commits, because almost every feature reads or writes a setting. The owner

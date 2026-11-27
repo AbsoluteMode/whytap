@@ -2,7 +2,7 @@ import AppKit
 import Darwin
 import Foundation
 
-/// Local restore points around builds the owner previews before code review.
+/// Local restore points around builds the owner previews before they are merged.
 ///
 /// The outgoing, already verified app makes one right before a preview build
 /// replaces it (`--restore-point create`), with Whytap quit: a same-Mac,

@@ -1485,7 +1485,13 @@ it shows changes: Notify and Monitor reach it through
 FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
 Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
-(.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
+(.project-docs/decisions/2026-11-25-settings-features-refresh.md).
+SettingsWindowController keeps that APIAndModelsViewModel for the app's life
+but presents it only while the window is open: closed, a UserDefaults write
+(the island's Drop Mode or language controls) only marks it stale instead of
+rereading every key on the main thread mid-animation, and `show` recomputes
+it once before the first frame
+(.project-docs/decisions/2026-11-27-settings-models-recompute-while-hidden.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
 present place. Every feature has its own screen now. The sidebar
 (SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,

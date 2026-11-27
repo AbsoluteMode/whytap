@@ -200,6 +200,11 @@ final class APIAndModelsViewModel: ObservableObject {
     private var sharedChecking: Set<SharedModelKind> = []
     private var sharedNotes: [SharedModelKind: [String]] = [:]
     private var observers: Set<AnyCancellable> = []
+    /// Whether a window shows this model. Other owners (onboarding, the app
+    /// control plugin) keep the default and recompute on every change.
+    private var isPresented = true
+    /// A defaults change arrived while nothing showed the model.
+    private var staleWhileHidden = false
 
     /// The `.shared` stores and the input language are main-actor state, so
     /// their defaults are applied in the body (Swift 5 evaluates default
@@ -247,7 +252,7 @@ final class APIAndModelsViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
             .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.recompute() }
+                MainActor.assumeIsolated { self?.defaultsChanged() }
             }
             .store(in: &observers)
         NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
@@ -1070,6 +1075,28 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     // MARK: - Derived state
+
+    /// The Settings window shows (`true`) or no longer shows (`false`) this
+    /// model. While hidden, a defaults change only marks it stale: the
+    /// recompute reads every provider key from the Keychain on the main
+    /// thread (about 40 ms with a full set of keys), and the island writes
+    /// defaults from its own controls (Drop Mode, languages) while their
+    /// animations run. Showing the model brings it up to date before it draws.
+    // WHY: .project-docs/decisions/2026-11-27-settings-models-recompute-while-hidden.md
+    func setPresented(_ presented: Bool) {
+        isPresented = presented
+        guard presented, staleWhileHidden else { return }
+        staleWhileHidden = false
+        recompute()
+    }
+
+    private func defaultsChanged() {
+        guard isPresented else {
+            staleWhileHidden = true
+            return
+        }
+        recompute()
+    }
 
     private func recompute() {
         let chips = keyedAccounts().map(chip(for:))

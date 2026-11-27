@@ -126,7 +126,10 @@ when the model takes it, else Low when it takes Low, else no `--effort`.
   still starting is kept and applied to that turn's own writer once it is
   registered (`TurnHandleBox`, locked). Publication of the writer and the
   exit's clear both run on the provider's serial session queue, and the exit
-  is recorded first, so an exited writer never becomes the active one.
+  is recorded first, so an exited writer never becomes the active one. A new
+  turn takes ownership before its child starts, and only the latest turn may
+  publish or clear the active writer, so a replacement that fails to start or
+  exits early never leaves an earlier turn's writer active.
 - Model discovery fails closed like a turn: without the Agent's folder in
   Application Support, Claude Code is not started at all (it would load that
   folder's settings and run SessionStart hooks), and Settings says so.

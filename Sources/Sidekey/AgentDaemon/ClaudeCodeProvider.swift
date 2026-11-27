@@ -117,6 +117,11 @@ final class ClaudeCodeProvider: CLIProvider {
     /// The writable stdin handle for the currently-running process.
     /// Guarded by `sessionQueue`, like `lastSessionID`.
     private var activeHandle: ClaudeStdinWriting?
+    /// The latest turn. Only it may publish or clear `activeHandle`: a new
+    /// turn takes ownership before its child starts, so an earlier turn's
+    /// writer never stays active, even when the new child fails to start or
+    /// exits before its writer is registered. Guarded by `sessionQueue`.
+    private var currentTurn: TurnHandleBox?
 
     init(
         locate: @escaping () -> URL? = { ClaudeBinaryLocator().locate() },
@@ -283,6 +288,11 @@ final class ClaudeCodeProvider: CLIProvider {
             // This turn's own child. A cancelled turn's late result or exit
             // must not close or clear the next turn's stdin.
             let ownHandle = TurnHandleBox()
+            // Ownership first, before anything of the child can run.
+            sessionQueue.async {
+                self.currentTurn = ownHandle
+                self.activeHandle = nil
+            }
 
             let handle = runStreaming(binary, args, workingDir, { [weak self] line in
                 watchdog?.kick()   // any stdout = alive
@@ -307,7 +317,8 @@ final class ClaudeCodeProvider: CLIProvider {
                 }
             }, { [weak self] exitCode in
                 watchdog?.cancel()
-                self?.clearActiveHandle(ifItIs: ownHandle.markExited())
+                ownHandle.markExited()
+                self?.releaseTurn(ownHandle)
                 if exitCode != 0 && !resultSeen {
                     continuation.yield(.error(
                         code: "process_exit_\(exitCode)",
@@ -344,11 +355,13 @@ final class ClaudeCodeProvider: CLIProvider {
             ownHandle.register(handle)
             wd.start()
 
-            // Publication and the exit's clear both run on the serial session
-            // queue. The exit is recorded in the box before its clear is
-            // queued, so whichever runs first, an exited writer never stays
-            // active: publication skips it, or the later clear removes it.
-            sessionQueue.async { if !ownHandle.hasExited { self.activeHandle = handle } }
+            // Publication and the exit's release both run on the serial
+            // session queue, and only for the latest turn. The exit is
+            // recorded in the box before its release is queued, so whichever
+            // runs first, an exited writer never stays active.
+            sessionQueue.async {
+                if self.currentTurn === ownHandle, !ownHandle.hasExited { self.activeHandle = handle }
+            }
 
             // Terminate the child whenever the consumer goes away — cancelled
             // (Esc / panel dismiss / new turn / app quit -> AgentController.stop()
@@ -361,17 +374,19 @@ final class ClaudeCodeProvider: CLIProvider {
             continuation.onTermination = { [weak self] _ in
                 wd.cancel()
                 handle.terminate()
-                self?.clearActiveHandle(ifItIs: handle)
+                self?.releaseTurn(ownHandle)
             }
 
             handle.writeLine(ControlProtocol.userMessage(prompt))
         }
     }
 
-    private func clearActiveHandle(ifItIs handle: ClaudeStdinWriting?) {
-        guard let handle else { return }
+    /// A turn ended (exit, cancel or finish): its writer stops receiving
+    /// answers, unless a newer turn already owns the provider.
+    private func releaseTurn(_ turn: TurnHandleBox) {
         sessionQueue.async {
-            if self.activeHandle === handle { self.activeHandle = nil }
+            guard self.currentTurn === turn else { return }
+            self.activeHandle = nil
         }
     }
 
@@ -516,11 +531,10 @@ final class TurnHandleBox: @unchecked Sendable {
         writer?.closeStdin()
     }
 
-    /// Records the exit; returns the writer if it is already registered.
-    func markExited() -> ClaudeStdinWriting? {
+    /// Records the exit.
+    func markExited() {
         lock.lock()
-        defer { lock.unlock() }
         exited = true
-        return handle
+        lock.unlock()
     }
 }

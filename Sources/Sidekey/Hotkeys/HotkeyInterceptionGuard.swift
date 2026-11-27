@@ -136,6 +136,11 @@ final class HotkeyInterceptionGuard {
         // new value on the next turn.
         preferencesObservation = HotkeyPreferences.shared.objectWillChange.sink { [weak self] _ in
             let writtenAt = ProcessInfo.processInfo.systemUptime
+            // The write time is recorded before any queued probe callback can
+            // run, so such a callback is judged against it.
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { self?.bindingsWillChange(at: writtenAt) }
+            }
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     self?.bindingsWillChange(at: writtenAt)
@@ -185,8 +190,8 @@ final class HotkeyInterceptionGuard {
         for change in changes {
             switch change {
             case .began(let id, let at):
-                if let key = detector.presses[id]?.key, let changed = bindingChangedAt[key], seenAt < changed {
-                    detector.retire(id) // seen under the former binding
+                if let press = detector.presses[id], !belongsToCurrentBinding(press) {
+                    detector.retire(id)
                     continue
                 }
                 let front = system.frontmostPID()
@@ -208,6 +213,25 @@ final class HotkeyInterceptionGuard {
         if contexts.count > 64 {
             contexts = contexts.filter { detector.presses[$0.key] != nil }
         }
+    }
+
+    /// Whether a press began under the binding its key has now, judged by the
+    /// press's own event time against the transition boundary, whatever
+    /// order its callback and the deferred sync run in. A key the last sync
+    /// did not watch became a shortcut since: its boundary is the recorded
+    /// preference write, and with no recorded write the moment is unknown,
+    /// so the press is not judged.
+    private func belongsToCurrentBinding(_ press: HotkeyInterceptionDetector.Press) -> Bool {
+        let boundary: TimeInterval?
+        if lastWatched.contains(press.key) {
+            boundary = bindingChangedAt[press.key]
+        } else if let writtenAt = pendingWriteAt {
+            boundary = max(bindingChangedAt[press.key] ?? writtenAt, writtenAt)
+        } else {
+            return false
+        }
+        guard let boundary else { return true }
+        return press.eventTime >= boundary
     }
 
     /// A shortcut preference was written at `time` (uptime); the sync that

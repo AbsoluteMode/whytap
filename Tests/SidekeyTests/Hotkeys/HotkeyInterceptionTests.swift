@@ -1081,6 +1081,9 @@ extension HotkeyInterceptionTests {
         let writeTime = world.uptime + 0.010
         world.advance(to: writeTime)
         world.watched = [.rightCommand, .rightOption]
+        // The preference observer records the write as it happens; the sync
+        // that reads the new value runs on a later main-thread turn.
+        guard_.bindingsWillChange(at: writeTime)
         let pressTime = writeTime + pressOffset
         let syncTime = writeTime + 0.020
         if !callbackAfterSync {
@@ -1105,6 +1108,31 @@ extension HotkeyInterceptionTests {
 
     func testPressBeforeTheWriteIsNeverJudgedWhenTheSyncIsDeferred() {
         XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: true), 0)
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: false), 0,
+                       "callback queued before the preference handler, run before the sync")
+    }
+
+    func testANewlyWatchedKeyWithNoRecordedWriteIsNotJudgedBeforeItsSync() {
+        // The value changed by a path that recorded no write time: the
+        // transition moment is unknown until the sync, so a press whose
+        // callback runs in between is not judged.
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        world.advance(to: world.uptime + 0.01)
+        world.watched = [.rightCommand, .rightOption]
+        let pressTime = world.uptime
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.01)
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "after the sync, presses are judged")
     }
 
     func testRemovalStillRetiresAPressSeenWhileItsSyncWasQueued() {
@@ -1127,5 +1155,14 @@ extension HotkeyInterceptionTests {
         probeSees(probe, world, noModifiers)
         world.advance(to: world.uptime + 1)
         XCTAssertTrue(presenter.presented.isEmpty, "seen while Right Option was not a shortcut")
+    }
+}
+
+/// Regression from the builder's review of queue ticket 705.
+
+extension HotkeyInterceptionTests {
+    func testBuilder705PressBeforeWriteCannotBecomeEligibleWhenCallbackPrecedesSync() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: false), 0,
+                       "A pre-write press was queued before the preference handler; its callback running first must not classify it under the new binding")
     }
 }

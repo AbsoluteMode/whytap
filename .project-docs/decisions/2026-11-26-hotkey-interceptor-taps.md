@@ -131,7 +131,13 @@ catch it: secure input was off, and the key never reached Whytap at all.
    enabling Right Option is judged whether its callback runs before or after
    that deferred sync, and a press before the write is not. A key that
    stops being a shortcut keeps the sync's time, so a press seen while the
-   removal was still queued is retired.
+   removal was still queued is retired. The write time is recorded by the
+   preference observer as the write happens, before any probe callback that
+   was already queued runs, and every press is judged by its own event time
+   against that boundary, never by callback order: a press 5 ms before the
+   write is retired even when its callback runs after the write and before
+   the deferred sync. A key that became watched with no recorded write is
+   not judged until the sync.
 4. **Name possible interceptors only on that signal, in the press's own
    context.** When a press begins, the frontmost app and the exact filters
    (tap ids) that could act on it are recorded. Both are read when the
@@ -195,7 +201,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (58) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (60) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -250,7 +256,12 @@ Right Option and pressing it before the deferred sync ran retired a valid
 first press. Its regression (`testBuilder699...`) is in the suite, with the
 timing class: a press after the write with its callback before or after the
 sync is judged, a press before the write is not, and a removal still
-retires a press seen while its sync was queued. Removing the eligibility or frontmost-context checks fails
+retires a press seen while its sync was queued. Its fifth review (ticket
+705) found the remaining order: a pre-write press whose callback, queued
+before the preference handler, ran after the write but before the sync was
+still judged. Its regression (`testBuilder705...`) is in the suite; the
+timing matrix now covers both callback orders before and after the write,
+and a newly watched key with no recorded write. Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

@@ -42,7 +42,7 @@ final class CodexProviderTests: XCTestCase {
         let provider = CodexProvider(
             locate: { nil },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, _, _, _, _ in CodexProcessHandle.noop })
+            runStreaming: { _, _, _, _, _, _ in CodexProcessHandle.noop })
         var sawNotInstalled = false
         for await event in provider.run(prompt: "hi", resumeSessionID: nil) {
             if case .error(let code, _, _) = event, code == "not_installed" { sawNotInstalled = true }

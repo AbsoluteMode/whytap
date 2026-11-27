@@ -29,10 +29,25 @@ final class CodexStreamParsingTests: XCTestCase {
         let line = #"{"type":"item.completed","item":{"id":"i0","type":"error","message":"Under-development features enabled: child_agents_md. Under-development features are incomplete and may behave unpredictably. To suppress this warning, set `suppress_unstable_features_warning = true` in /Users/maxim/.codex/config.toml."}}"#
         XCTAssertNil(CodexStreamJSONParser.parse(line: line))
     }
-    func testRealItemErrorStillSurfaces() {
-        // A genuine failure carries none of the benign markers — must surface.
-        let line = #"{"type":"item.completed","item":{"id":"i0","type":"error","message":"model not supported"}}"#
-        XCTAssertEqual(CodexStreamJSONParser.parse(line: line), .streamError("model not supported"))
+    func testItemLevelErrorsAreNoticesNotFailures() {
+        // Seen live with codex-cli 0.171.0 and a user's own config: each is an
+        // item-level error, and the turn still completes.
+        for message in ["Codex is ignoring 2 unrecognized configuration settings.",
+                        "clamping SessionEnd hook timeout to 3s in /Users/u/.codex/hooks.json",
+                        "Configured service tier `priority` is not advertised as supported for model `m`",
+                        "Codex could not update marketplace `x`: git ls-remote failed"] {
+            let item: [String: Any] = ["type": "item.completed", "item": ["id": "i0", "type": "error", "message": message]]
+            let line = String(decoding: try! JSONSerialization.data(withJSONObject: item), as: UTF8.self)
+            XCTAssertNil(CodexStreamJSONParser.parse(line: line), message)
+        }
+    }
+
+    func testTopLevelErrorAndFailedTurnStillSurface() {
+        let error = #"{"type":"error","message":"The 'x' model is not supported when using Codex with a ChatGPT account."}"#
+        XCTAssertEqual(CodexStreamJSONParser.parse(line: error),
+                       .streamError("The 'x' model is not supported when using Codex with a ChatGPT account."))
+        let failed = #"{"type":"turn.failed","error":{"message":"usage limit reached"}}"#
+        XCTAssertEqual(CodexStreamJSONParser.parse(line: failed), .streamError("usage limit reached"))
     }
     func testPlainTextLineIgnored() {
         XCTAssertNil(CodexStreamJSONParser.parse(line: "Reading additional input from stdin..."))

@@ -17,16 +17,20 @@ final class NativeAgentProvider: CLIProvider {
     private let reasoningRefusals: SmartReasoningRefusals
     private let workspace: () throws -> URL
     private let appControl: @MainActor () -> NativeAgentAppControl.Handler?
+    /// Read tools of connected sources. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+    private let sources: @MainActor () -> AgentSourceCatalog?
 
     init(keys: ProviderKeyStore = ProviderKeyStore(), http: NativeAgentHTTP = NativeAgentHTTP(),
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
          appControl: @escaping @MainActor () -> NativeAgentAppControl.Handler? = { NativeAgentAppControl.installed },
+         sources: @escaping @MainActor () -> AgentSourceCatalog? = { NativeAgentSources.offered() },
          usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
          diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record,
          reasoningRefusals: SmartReasoningRefusals = NativeAgentEffort.refusals) {
         self.keys = keys; self.http = http; self.workspace = workspace; self.usageSink = usageSink
         self.reasoningRefusals = reasoningRefusals
         self.appControl = appControl
+        self.sources = sources
         self.diagnosticsSink = diagnosticsSink
     }
 
@@ -105,10 +109,12 @@ final class NativeAgentProvider: CLIProvider {
         // an honest "no web search". WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
         let tavilyConnected = keys.read(account: TavilySearch.keychainAccount) != nil
         var search = NativeAgentWebSearch.resolve(options: options, tavilyConnected: tavilyConnected)
+        let catalog = sources()
         let baseSystem = Self.systemPrompt + "\nWorkspace: \(directory.path)\n"
             + WhytapCustomizationContext.promptInstructions + "\n"
             + WhytapCustomizationContext.notificationInstructions
             + (appControl == nil ? "" : "\n" + NativeAgentAppControl.instructions)
+            + (catalog.map { "\n" + NativeAgentSources.prompt($0) } ?? "")
         var model = NativeAgentModel(options: options, key: key, system: baseSystem + "\n" + search.promptLine,
                                      history: history, prompt: prompt, http: http, usageSink: usageSink,
                                      diagnosticsSink: diagnosticsSink)
@@ -119,9 +125,31 @@ final class NativeAgentProvider: CLIProvider {
         // Completion is one validated tool object, never free text beside cards.
         // The terminal tool also works on endpoints without response_format.
         // WHY: .project-docs/decisions/2026-10-22-native-agent.md (Structured completion)
-        var definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
-                                                                 appControl: appControl != nil,
-                                                                 tavilySearch: search == .tavily)
+        // After a source result (taint), writes, commands and web access leave
+        // the catalog for the rest of the turn. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+        // A conversation that read a source keeps the restriction for its
+        // later requests: its history carries source-derived text.
+        var readSources = Set(conversation.sourceReads ?? [])
+        var tainted: Bool { !readSources.isEmpty }
+        // Addresses sources returned verbatim: the only cards a tainted turn may return.
+        var sourceLinks = Set<String>()
+        if tainted { model.builtInSearch = false }
+        // A tainted request may only go back to the sources it already read.
+        var sourceCatalog: AgentSourceCatalog? {
+            guard let catalog else { return nil }
+            return tainted ? NativeAgentSources.narrowed(catalog, to: readSources) : catalog
+        }
+        func catalogNow() -> [[String: Any]] {
+            var tools = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions && !tainted,
+                                                               appControl: appControl != nil && !tainted,
+                                                               tavilySearch: search == .tavily && !tainted)
+            if tainted { tools.removeAll { NativeAgentSources.closedAfterSourceRead.contains($0["name"] as? String ?? "") } }
+            if let sourceCatalog, !sourceCatalog.tools.isEmpty {
+                tools.insert(NativeAgentSources.definition(sourceCatalog), at: max(0, tools.count - 1))
+            }
+            return tools
+        }
+        var definitions = catalogNow()
         var actionsAttempted = false
         var accepted = false
         // Confirmed Whytap changes, shown by the app above the model's answer.
@@ -152,9 +180,7 @@ final class NativeAgentProvider: CLIProvider {
                     search = .refused
                     model.builtInSearch = false
                     model.system = baseSystem + "\n" + search.promptLine
-                    definitions = NativeAgentTools.structuredDefinitions(allowActions: options.allowActions,
-                                                                         appControl: appControl != nil,
-                                                                         tavilySearch: search == .tavily)
+                    definitions = catalogNow()
                     (text, calls) = try await model.next(tools: definitions, structuredCompletion: true)
                 }
                 accepted = true
@@ -186,25 +212,34 @@ final class NativeAgentProvider: CLIProvider {
                 guard options.openCodeProvider == .anthropic, model.plainTextReply,
                       let plain = try? NativeAgentFinalAnswer(arguments: ["status": "answered", "answer": text,
                                                                          "sources": [], "actions": []],
-                                                              openAICitations: false)
+                                                              openAICitations: false, anthropicCitations: model.searchesUsed > 0)
                 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
                 completion = plain
-            } else if calls.count == 1, calls[0].name == NativeAgentFinalAnswer.toolName, model.pendingSearch {
+            } else if calls.allSatisfy({ $0.name == NativeAgentFinalAnswer.toolName }), model.pendingSearch {
                 // Anthropic runs a search requested beside a function call only
-                // in the next request; an answer written now has not seen it.
-                model.append(results: [(calls[0], .init(text: "Your web search has not returned yet. Call finish_answer again after its results."))])
+                // in the next request; an answer written now has not seen it,
+                // however many finish_answer calls came with it.
+                model.append(results: calls.map { ($0, .init(text: "Your web search has not returned yet. Call finish_answer again after its results.")) })
                 continue
             } else if calls.contains(where: { $0.name == NativeAgentFinalAnswer.toolName }) {
                 // Reject a mixed batch before executing it: a final response
                 // cannot know whether a sibling write/command will succeed.
-                guard calls.count == 1 else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
-                do {
-                    completion = try NativeAgentFinalAnswer(
-                        arguments: calls[0].arguments,
-                        openAICitations: options.openCodeProvider == .openAI
-                            || (options.openCodeProvider == .openRouter && options.model?.lowercased().hasPrefix("openai/") == true))
+                // Several finish_answer calls alone (Claude Sonnet 5.5 with
+                // between_tools after a search has repeated it): the first
+                // valid one is the answer and the turn ends there.
+                // WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+                guard calls.allSatisfy({ $0.name == NativeAgentFinalAnswer.toolName }) else {
+                    throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted)
                 }
-                catch { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                let modelID = options.model?.lowercased() ?? ""
+                let openAI = options.openCodeProvider == .openAI || (options.openCodeProvider == .openRouter && modelID.hasPrefix("openai/"))
+                // Citation tags come only from a turn that ran the search.
+                let claude = model.searchesUsed > 0 && (options.openCodeProvider == .anthropic
+                    || (options.openCodeProvider == .openRouter && modelID.hasPrefix("anthropic/")))
+                guard let first = calls.lazy.compactMap({
+                    try? NativeAgentFinalAnswer(arguments: $0.arguments, openAICitations: openAI, anthropicCitations: claude)
+                }).first else { throw NativeAgentFinalAnswer.invalid(actionsAttempted: actionsAttempted) }
+                completion = first
             } else {
                 completion = nil
             }
@@ -216,8 +251,11 @@ final class NativeAgentProvider: CLIProvider {
                 let cited = NativeAgentWebSearch.fallbackLinks(model.searchSources, existing: final.actions)
                 let answerActions = cited.isEmpty ? final.actions
                     : NativeAgentAnswerArtifacts.merging(final.actions, UsefulActionsBlock(items: cited))
-                let actions = NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: answerActions,
-                                                                 insert: final.insert) ?? answerActions
+                let actions = tainted
+                    ? NativeAgentSources.taintedActions(answerActions, answer: final.visibleText,
+                                                        allowed: sourceLinks.union(model.searchSources.map(\.url.absoluteString)))
+                    : NativeAgentAnswerArtifacts.collect(from: final.visibleText, existing: answerActions,
+                                                         insert: final.insert) ?? answerActions
                 // Persist only after a complete successful turn. A disk error must
                 // not hide a valid answer or repeat any actions.
                 // Returned card destinations are part of the answer too: the
@@ -233,6 +271,7 @@ final class NativeAgentProvider: CLIProvider {
                     return "- " + (item.description.map { $0 + ": " } ?? "") + item.insertText
                 }.joined(separator: "\n")
                 let historyAnswer = [text, returnedItems].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                if tainted { conversation.sourceReads = readSources.sorted() }
                 try? conversation.append(user: prompt, assistant: historyAnswer, directory: directory)
                 lock.withLock { sessionID = conversation.id }
                 continuation.yield(.finalAnswer(text: text))
@@ -246,15 +285,31 @@ final class NativeAgentProvider: CLIProvider {
             for call in calls {
                 try Task.checkCancellation()
                 let appOperation = appControl == nil ? nil : NativeAgentAppControl.operation(of: call)
-                continuation.yield(.toolExecuting(tool: call.name, label: appOperation.map { NativeAgentAppControl.label($0.name) }
-                                                  ?? Self.label(call.name)))
+                let label = call.name == NativeAgentSources.toolName ? NativeAgentSources.label(call, catalog: catalog)
+                    : appOperation.map { NativeAgentAppControl.label($0.name) } ?? Self.label(call.name)
+                continuation.yield(.toolExecuting(tool: call.name, label: label))
                 let appWrite = appOperation?.writes == true
+                let refused = tainted && NativeAgentSources.blockedAfterSourceRead(
+                    call, appControl: appControl != nil && call.name == NativeAgentAppControl.toolName)
                 if call.name == "web_search" { searchCount += 1 }
                 if call.name == "capture_screen" { screenCount += 1 }
-                if options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
-                if appWrite { actionsAttempted = true }
+                if !refused, options.allowActions, ["write_file", "run_command"].contains(call.name) { actionsAttempted = true }
+                if !refused, appWrite { actionsAttempted = true }
                 let result: NativeAgentToolResult
-                if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
+                if refused { result = .init(text: NativeAgentSources.taintRefusal) }
+                else if call.name == NativeAgentSources.toolName {
+                    if let sourceCatalog {
+                        let (sourceResult, readFrom) = await NativeAgentSources.execute(call, catalog: sourceCatalog)
+                        result = sourceResult
+                        if let readFrom {
+                            readSources.insert(readFrom)
+                            sourceLinks.formUnion(NativeAgentSources.links(in: sourceResult.text))
+                            // The provider's own search is an exit too.
+                            model.builtInSearch = false
+                        }
+                    } else { result = .init(text: "Tool failed: no sources are connected.") }
+                }
+                else if call.name == "show_actions" { result = .init(text: "Use finish_answer to return the answer and all cards together.") }
                 else if call.name == "web_search", search != .tavily {
                     // Tavily is offered only when the model has no search of its
                     // own; a call to the absent function never reaches Tavily.
@@ -273,6 +328,7 @@ final class NativeAgentProvider: CLIProvider {
                 results.append((call, result))
             }
             model.append(results: results)
+            if tainted { definitions = catalogNow() }
         }
         throw NativeAgentError.message("The agent reached its step limit. Try a smaller task.")
     }
@@ -297,7 +353,10 @@ final class NativeAgentProvider: CLIProvider {
     Finish after all tools have completed. Free text outside finish_answer is not a final answer.
     Simple timeless questions need no evidence tools; finish directly. Search the web for current external facts,
     normally one search and at most two; cite the supporting URLs. Without web search, say so
-    briefly instead of inventing recent facts.
+    briefly instead of inventing recent facts. Write the answer as plain prose: no <cite> tags
+    or citation markup; the pages go into finish_answer.sources. After a search, call
+    finish_answer in the same response; do not write the answer as text. A simple factual question
+    (weather, a time, a price, a number) gets 1-3 sentences: no table, list or callout.
     You have a dedicated workspace with AGENTS.md for concise durable preferences and facts.
     Its relevant contents are supplied at the start; no bootstrap command or directory scan
     is needed. Save useful new facts there only when file edits are enabled. Never save secrets.

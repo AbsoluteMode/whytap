@@ -44,12 +44,12 @@ PROJECTS = [
        "to running sessions and persistent Claude consultations."]),
      (["Claude Code · Codex ·", "Antigravity"],
       ["Shared rooms, messages", "to running sessions and", "persistent Claude", "consultations."])),
-    ("orchestrator", "Orchestrator", None,
-     ("Claude Code plugin",
-      ["Ten chats in one window: it keeps the task list, starts the",
-       "sessions and writes to you only when it needs you."]),
-     (["Claude Code plugin"],
-      ["Ten chats in one window:", "it keeps the task list", "and writes to you only", "when it needs you."])),
+    ("whycode", "Whycode", "https://github.com/AbsoluteMode/whycode",
+     ("macOS app · Claude Code · Codex · Antigravity",
+      ["One window: Claude Code orchestrates agents and tasks,",
+       "and writes to you only when something needs you."]),
+     (["macOS app · Claude Code ·", "Codex · Antigravity"],
+      ["One window where Claude", "Code hands tasks to", "agents and writes to you", "only when it needs you."])),
 ]
 
 THEMES = {  # the Tools and Free to use cards' palette

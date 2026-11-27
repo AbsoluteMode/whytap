@@ -308,6 +308,10 @@ struct FeatureShortcutsGroup: View {
         case .agentClose: return "Hides the Agent’s answer."
         case .googleText: return "Opens a field to type a search."
         case .meetingRecord: return "Works any time, also when no call was detected."
+        case .agentLinkInsert: return "While an answer shows links: pastes the chosen one where you were typing."
+        case .agentLinkOpen: return "While an answer shows links: opens the chosen one."
+        case .agentLinkNext: return "While an answer shows links: chooses the next one."
+        case .agentLinkPrevious: return "While an answer shows links: chooses the previous one."
         case .tool(let tool):
             return hotkey.shortcut(in: configuration) == nil
                 ? "No shortcut yet. Record one, or open \(HoverToolRegistry.info(for: tool).title) from the island."

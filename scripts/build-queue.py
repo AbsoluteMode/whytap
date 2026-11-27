@@ -539,8 +539,7 @@ def installed_app():
     try:
         composition = json.loads(info.get("ExodiaBuildComposition") or "{}")
         base = str(composition.get("base") or base)
-        members = [{"ticket": int(m["ticket"]), "head": str(m["head"])}
-                   for m in composition.get("members", [])]
+        members = strict_members(composition.get("members", []))
     except (ValueError, TypeError, KeyError, AttributeError):
         members = None  # unreadable: never a basis for a decision
     try:
@@ -549,6 +548,37 @@ def installed_app():
         restore_points = 0
     return {"build": str(info.get("CFBundleVersion", "")), "base": base, "members": members,
             "restore_points": restore_points}
+
+
+SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def strict_members(members):
+    """A composition's members exactly: a list of {ticket, head} with unique positive
+    integer tickets (never a Boolean) and full commit SHAs. Anything else raises."""
+    if not isinstance(members, list):
+        raise ValueError("members")
+    result, seen = [], set()
+    for member in members:
+        if not isinstance(member, dict) or set(member) != {"ticket", "head"}:
+            raise ValueError("member")
+        ticket, head = member["ticket"], member["head"]
+        if type(ticket) is not int or ticket <= 0 or ticket in seen \
+                or not isinstance(head, str) or not SHA.fullmatch(head):
+            raise ValueError("member")
+        seen.add(ticket)
+        result.append({"ticket": ticket, "head": head})
+    return result
+
+
+def ancestor(older, newer):
+    """True / False when git can tell; None when it cannot (a missing object, no repo)."""
+    try:
+        code = subprocess.run(["git", "merge-base", "--is-ancestor", older, newer],
+                              capture_output=True).returncode
+    except OSError:
+        return None
+    return {0: True, 1: False}.get(code)
 
 
 TRAIN = "(status IN ('awaiting_approval', 'approved', 'releasing') OR " \
@@ -795,22 +825,33 @@ def handoff_problems(db, base, members, ticket=None, build=None):
     if pairs(members) != expected:
         problems.append("the composition is not the current train: expected " +
                         json.dumps(sorted(expected)))
+    # What the owner's app is now, and what main is now. Anything unknown stops the
+    # Quit: an install must never put older code over data a newer build migrated.
     app = installed_app()
-    if build is not None and app and app["build"].isdigit() and int(app["build"]) >= build:
+    if not app or app["members"] is None or not app["build"].isdigit() \
+            or not SHA.fullmatch(app["base"] or ""):
+        problems.append("the installed app's build, base or composition cannot be read: "
+                        "check the app before replacing it")
+    elif build is not None and int(app["build"]) >= build:
         problems.append("the installed app is already build %s: rebuild with a higher number"
                         % app["build"])
-    if app and app["base"] and subprocess.run(
-            ["git", "merge-base", "--is-ancestor", app["base"], base],
-            capture_output=True).returncode != 0:
+    if app and SHA.fullmatch(app["base"] or "") and ancestor(app["base"], base) is not True:
         problems.append("the installed app's main %s is not in this base %s: recompose"
                         % (app["base"][:12], base[:12]))
+    try:
+        main = subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/main"],
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        main = ""
+    if not SHA.fullmatch(main) or ancestor(main, base) is not True:
+        problems.append("this base %s does not contain the current main %s: fetch and recompose"
+                        % (base[:12], main[:12] or "unknown"))
     for member in members:
-        try:
-            if subprocess.run(["git", "merge-base", "--is-ancestor", member["head"], base],
-                              capture_output=True).returncode == 0:
-                problems.append("#%d is already in main: recompose" % member["ticket"])
-        except OSError:
+        state = ancestor(member["head"], base)
+        if state is None:
             problems.append("the composition could not be read")
+        elif state:
+            problems.append("#%d is already in main: recompose" % member["ticket"])
     return problems
 
 
@@ -1354,8 +1395,7 @@ def run(args):
             # Under the app lock, right before the Quit, for every install that carries
             # the train (previews, rebuilds, the builder's installs).
             try:
-                members = json.loads(args.members)
-                pairs(members)
+                members = strict_members(json.loads(args.members))
             except (ValueError, TypeError, KeyError):
                 raise ValueError("--members is a JSON list of {\"ticket\": id, \"head\": sha}")
             problems = handoff_problems(db, args.base, members, args.ticket, args.build)

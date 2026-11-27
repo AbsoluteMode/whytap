@@ -52,6 +52,10 @@ struct FeaturesFixture {
     let hoverStore: HoverLayoutStore
     let notifySupervisor: NotifyScriptSupervisor
     let monitor: MonitorStore
+    /// Calendar's sources in the temporary defaults: the usual Mac shows one
+    /// calendar of a fake EventKit, a fresh install none. Nothing reads the
+    /// Mac's own calendars or asks macOS.
+    let calendars: CalendarConnections
     let files: URL
     let clipboard = CopiedText()
     private let suite: String
@@ -119,8 +123,18 @@ struct FeaturesFixture {
         notifySupervisor = NotifyScriptSupervisor(directory: notifyRoot, hub: hub)
         monitor = MonitorStore(root: files.appendingPathComponent("Monitor", isDirectory: true),
                                collector: { _ in throw CancellationError() })
+        defaults.set(usual, forKey: CalendarAccountSettings.appleEnabledKey)
+        let workFeed = CalendarFeed(id: "apple:work", accountID: nil, remoteID: "work", title: "Work · iCloud",
+                                    provider: .apple, displayService: nil, sourceTitle: "iCloud",
+                                    calendarTitle: "Work", sourceID: "icloud")
+        calendars = CalendarConnections(
+            defaults: defaults, oauth: CalendarOAuthClient(storage: PlannerMemoryCredentials()),
+            apple: AppleCalendarAccess(status: { usual ? .fullAccess : .notDetermined }, request: { false },
+                                       read: { _ in ([workFeed], []) }, list: { [workFeed] }))
+        // As Features Home does on appear: the access and the list, no events.
+        calendars.prepareMacCalendars()
         let clipboard = clipboard
-        environment = FeaturesEnvironment(
+        var environment = FeaturesEnvironment(
             dropMode: { dropMode },
             volumeDuck: VolumeDuckConfig(defaults: defaults),
             autoStop: DropAutoStopPreferences(defaults: defaults),
@@ -135,6 +149,8 @@ struct FeaturesFixture {
             monitor: monitor,
             notifyRoot: notifyRoot,
             copyText: { clipboard.texts.append($0) })
+        environment.calendarConnections = calendars
+        self.environment = environment
     }
 
     func cleanUp() {
@@ -155,20 +171,14 @@ struct FeaturesFixture {
     }
 
     /// The whole Settings shell on `tab`.
-    /// Lil Bro always asks whytap.ai; fixtures answer with a fixed "offline"
-    /// reply so no test reaches the network.
-
-    func shell(selection: SettingsWindowSelection, lilBro: LilBroController? = nil) -> SettingsWindowView {
+    func shell(selection: SettingsWindowSelection) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
             selection: selection, agentModeViewModel: agent,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
             featuresEnvironment: environment,
-            lilBro: lilBro ?? LilBroController(selection: selection,
-                                               preferences: LilBroPreferences(defaults: defaults),
-                                               remote: LilBroFixedBrain(reply: .offline),
-                                               reduceMotion: { true }))
+            codingTools: .fixed())
     }
 
     /// Draws `view` in a window that never reaches the screen and returns the

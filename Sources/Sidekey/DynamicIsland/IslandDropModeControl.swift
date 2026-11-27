@@ -107,10 +107,14 @@ enum IslandDropModeControl {
     static let hoverPanelHeight: CGFloat = 145
 
     /// Derive the host hit band from the same row geometry used by the view.
-    static func controlsHoverPanelHeight(toolCount: Int) -> CGFloat {
+    /// `moreTools`: the number of tools in the expanded More section, or nil
+    /// while it is collapsed; the band grows with the section so its rows
+    /// stay inside the hover zone.
+    static func controlsHoverPanelHeight(toolCount: Int, moreTools: Int? = nil) -> CGFloat {
         detachedPanelGap + IslandHoverToolSearch.searchBandHeight
             + IslandHoverControlsLayout.gridHeight(toolCount: toolCount)
             + IslandHoverControlsLayout.dividerHeight + IslandHoverControlsLayout.descriptionHeight
+            + (moreTools.map { IslandHoverMoreToolsLayout.sectionHeight(toolCount: $0) } ?? 0)
     }
     static let modeCircleSize: CGFloat = IslandHoverPanelIconStyle.circleSize
     /// Gap between the compact island and the detached hover panel.

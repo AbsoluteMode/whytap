@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/OnDevice/OnDeviceDictationTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md, 2026-11-21-on-device-everywhere.md, 2026-11-21-first-launch-onboarding.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md, 2026-11-21-on-device-everywhere.md, 2026-11-21-first-launch-onboarding.md, 2026-11-27-compact-key-tiles.md]
 ---
 
 ## Context

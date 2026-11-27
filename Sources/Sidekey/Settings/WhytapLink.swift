@@ -120,7 +120,8 @@ enum WhytapLink {
         case .subtitles: return .translation(.subtitles)
         // Toolbox shows the pane; the mode switch, recording and capture
         // stay behind its explicit buttons.
-        case .dropMode, .meetingRecord, .screenshot: return .toolboxTool(tool)
+        // Opening a web page stays behind the pane's explicit button.
+        case .dropMode, .meetingRecord, .screenshot, .help: return .toolboxTool(tool)
         }
     }
 
@@ -141,7 +142,7 @@ enum WhytapLink {
             return false
         case .dropMode, .clipboard, .notifs, .vocab, .caseVault, .filler, .inputLang,
              .outputLang, .hotkeys, .notes, .meetingRecord, .monitor, .brightness, .tasks,
-             .calendar, .translate, .subtitles, .settings, .screenshot:
+             .calendar, .translate, .subtitles, .settings, .screenshot, .help:
             return true
         }
     }

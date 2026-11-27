@@ -3,7 +3,9 @@ import Combine
 import SwiftUI
 
 struct IslandHoverHitTargetID: Hashable {
-    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer }
+    /// `moreTools` (the More rows) and `moreToggle` (the footer chevron) take
+    /// clicks together with `tile`: they are on screen with the grid.
+    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer, moreTools, moreToggle }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
@@ -12,6 +14,7 @@ struct IslandHoverHitTargetID: Hashable {
     private enum Control: Hashable {
         case tool(HoverTool), back(String), update(UpdateAction), display(DisplayAction)
         case deliveryFailure(DeliveryFailureAction), tableDisclosure(UUID), modal(ModalAction)
+        case moreToolsToggle
     }
     let surface: Surface
     private let control: Control
@@ -24,6 +27,9 @@ struct IslandHoverHitTargetID: Hashable {
     init(back destination: String) { surface = .navigation; control = .back(destination) }
     init(display action: DisplayAction) { surface = .navigation; control = .display(action) }
     init(modal action: ModalAction) { surface = .navigation; control = .modal(action) }
+    /// The footer chevron that shows and hides the More tools section.
+    static let moreToolsToggle = IslandHoverHitTargetID(surface: .moreToggle, control: .moreToolsToggle)
+    private init(surface: Surface, control: Control) { self.surface = surface; self.control = control }
     /// While a modal question is shown, only its own buttons take clicks.
     var isModal: Bool { if case .modal = control { return true }; return false }
 }
@@ -87,8 +93,12 @@ struct IslandHoverReorder: Equatable {
     let original: [HoverTool]
     /// Cell frames in window coordinates by slot index, measured at the lift.
     let cells: [Int: CGRect]
+    /// The drawer's frame in window coordinates at the lift. Letting go
+    /// outside it takes the tool out of the island.
+    var panel: CGRect? = nil
 
-    /// How far past the grid a release still counts as "in the grid".
+    /// How far past the grid a release still counts as "in the grid" when
+    /// the drawer's frame is unknown.
     static let releaseMargin: CGFloat = 24
 
     /// The slot under the pointer, or nil outside the grid (the tool stays).
@@ -96,9 +106,12 @@ struct IslandHoverReorder: Equatable {
         cells.filter { $0.value.contains(point) }.keys.min()
     }
 
-    /// Letting go well outside the tools puts them back as they were: the
-    /// pointer's way to cancel, since the island is not key during a drag.
-    func cancelsRelease(at point: CGPoint) -> Bool {
+    /// The pointer is outside the hover: letting go here throws the tool
+    /// out of the island. Inside the drawer (search, footer, More) a release
+    /// keeps it, so dropping back inside is the pointer's way to cancel.
+    // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
+    func removesRelease(at point: CGPoint) -> Bool {
+        if let panel, !panel.isNull, !panel.isEmpty { return !panel.contains(point) }
         let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
         guard !grid.isNull else { return false }
         return !grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin).contains(point)
@@ -132,7 +145,20 @@ final class IslandHoverReorderMotion: ObservableObject {
         if next != translation { translation = next }
     }
 
-    func reset() { if translation != .zero { translation = .zero } }
+    /// The pointer is outside the hover: letting go removes the tool.
+    @Published private(set) var outside = false
+
+    func setOutside(_ value: Bool) {
+        guard outside != value else { return }
+        withAnimation(IslandHoverHitBridge.reducesMotion ? nil : IslandHoverReorderMotionCurve.removeHint) {
+            outside = value
+        }
+    }
+
+    func reset() {
+        if translation != .zero { translation = .zero }
+        if outside { outside = false }
+    }
 }
 
 /// The reporters are geometry sources, never mouse catchers. Dispatch remains
@@ -151,7 +177,8 @@ final class IslandHoverHitBridge: ObservableObject {
     /// one display pass still change the generation, so the new lift gets its
     /// own picture.
     struct ReorderPhase: Equatable {
-        enum State: Equatable { case idle, lifted, settling }
+        /// `removed`: let go outside the hover; the tile vanishes in place.
+        enum State: Equatable { case idle, lifted, settling, removed }
         var state: State = .idle
         var tool: HoverTool?
         var generation = 0
@@ -162,11 +189,21 @@ final class IslandHoverHitBridge: ObservableObject {
     var isReordering: Bool { reorderingTool != nil }
     /// The tool flying into its cell after a release or cancel, until the
     /// island reports the landing done (`didSettle`) or a fallback ends it.
-    var settlingTool: HoverTool? { reorderPhase.state == .settling ? reorderPhase.tool : nil }
+    var settlingTool: HoverTool? {
+        reorderPhase.state == .settling || reorderPhase.state == .removed ? reorderPhase.tool : nil
+    }
     /// Counts lifts, so an older landing never ends a newer one.
     var reorderGeneration: Int { reorderPhase.generation }
-    /// The drawer stays open through the drag and its landing.
-    var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil }
+    /// The drawer stays open through the drag and its landing, while a
+    /// tool's context menu is open, and after the island's tools changed
+    /// until the person clicks outside or comes back and leaves again.
+    var holdsDrawer: Bool { reorderingTool != nil || settlingTool != nil || showsToolMenu || editHold.holdsDrawer }
+    /// A tool's context menu (Remove from Hover / Add to Hover) is open.
+    @Published private(set) var showsToolMenu = false
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+    @Published private(set) var editHold = IslandHoverEditHold()
+    /// The last hover signal: the pointer over the island or its drawer.
+    private(set) var pointerInside = false
     /// The floating tile's picture and place, drawn above the drawer's clip.
     let stage = IslandHoverReorderStage()
     /// The tile pressed at mouse-down that may still become a drag, kept
@@ -200,6 +237,8 @@ final class IslandHoverHitBridge: ObservableObject {
 
     func setEnabled(_ enabled: Bool) {
         self.enabled = enabled
+        // The drawer closed: nothing is left to hold open.
+        if !enabled, !showsToolMenu { editHold.release() }
         if !enabled, tracking.captured?.id.surface != .agentAnswer { cancelPress() }
         // The drawer closed for another reason (an agent, a meeting): the
         // order reached so far is already saved.
@@ -221,6 +260,74 @@ final class IslandHoverHitBridge: ObservableObject {
         pressedID = nil
         finishReorder()
     }
+
+    // MARK: - Pin / unpin from the drawer
+    // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+
+    /// Takes a tool out of the island; neighbours slide into its place.
+    @discardableResult
+    func unpin(_ tool: HoverTool) -> Bool {
+        guard reorder == nil, let store = layoutStore else { return false }
+        var changed = false
+        withAnimation(Self.reorderAnimation) { changed = store.unpin(tool) }
+        if changed { editHold.edited(pointerInside: pointerInside) }
+        return changed
+    }
+
+    /// Adds a tool from More at the end of the island, before Settings.
+    @discardableResult
+    func pin(_ tool: HoverTool) -> Bool {
+        guard reorder == nil, let store = layoutStore else { return false }
+        var changed = false
+        withAnimation(Self.reorderAnimation) { changed = store.pin(tool) }
+        if changed { editHold.edited(pointerInside: pointerInside) }
+        return changed
+    }
+
+    /// The tool a right-click or Control-click at `point` is about: a tile
+    /// or a More row. Nothing while a tool is lifted.
+    func contextMenuTarget(at point: CGPoint, in window: NSWindow, allowed: Bool) -> IslandHoverHitTargetID? {
+        guard reorder == nil, allowed else { return nil }
+        // A tool whose own action is off (Calendar shown as Soon) can still be
+        // removed: the menu is about its place in Hover, not about opening it.
+        return snapshots(in: window, allowsHover: true, allowsAnswer: false, includesInactive: true)
+            .first { ($0.id.surface == .tile || $0.id.surface == .moreTools) && $0.frame.contains(point) }?.id
+    }
+
+    /// The menu takes the pointer to another window; the drawer must not
+    /// read that as the pointer leaving.
+    func toolMenuWillOpen() {
+        cancelPress()
+        showsToolMenu = true
+        editHold.edited(pointerInside: pointerInside)
+    }
+
+    /// Whatever the menu did, the pointer has not come back yet.
+    func toolMenuDidClose() {
+        showsToolMenu = false
+        editHold.edited(pointerInside: pointerInside)
+    }
+
+    /// The pointer is (or is not) over the island and its drawer.
+    func notePointer(inside: Bool) {
+        pointerInside = inside
+        var next = editHold
+        next.pointer(inside: inside)
+        if next != editHold { editHold = next }
+    }
+
+    /// A click outside the drawer or Escape after an edit: end the hold and
+    /// ask the island to close the drawer through its explicit dismissal,
+    /// even with the pointer still over the pill or the drawer.
+    func dismissAfterEdit() {
+        // Escape during a drag only cancels that drag (`escapeBelongsToDrag`).
+        guard !showsToolMenu, !isReordering, editHold.holdsDrawer else { return }
+        editHold.release()
+        dismissals.send()
+    }
+
+    /// Fires when the drawer must close now (`IslandView.dismissHoverMenu`).
+    let dismissals = PassthroughSubject<Void, Never>()
 
     // MARK: - Press-and-drag reorder
 
@@ -249,9 +356,10 @@ final class IslandHoverHitBridge: ObservableObject {
         for tile in live where tile.id.surface == .tile && tile.context == candidate.context {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
-        reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells)
+        reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells, panel: drawerFrame(in: window))
         liftPoint = pressPoint
         motion.reset()
+        startEscapeWatch()
         // Settings Sync, Settings or the MCP tool changed the layout: keep
         // theirs. A sync reload counts even when it equals the preview.
         let ended: () -> Void = { [weak self] in
@@ -271,10 +379,26 @@ final class IslandHoverHitBridge: ObservableObject {
         return true
     }
 
+    /// The drawer's visible frame in window coordinates (its navigation
+    /// region covers the whole drawer).
+    private func drawerFrame(in window: NSWindow) -> CGRect? {
+        guard let region = regions[.navigation]?.view, region.window === window,
+              !region.isHiddenOrHasHiddenAncestor else { return nil }
+        let frame = region.convert(region.visibleRect, to: nil)
+        return frame.isEmpty ? nil : frame
+    }
+
     /// The lifted tool takes the place of the cell under the pointer at once.
+    /// Outside the hover the tile shows that letting go removes it.
     func moveLiftedTool(to point: CGPoint) {
         guard let reorder else { return }
         if let liftPoint { motion.follow(from: liftPoint, to: point) }
+        let outside = reorder.removesRelease(at: point)
+        if outside != motion.outside {
+            motion.setOutside(outside)
+            dragEffects.cursor(outside)
+        }
+        guard !outside else { return }
         guard let store = layoutStore, let slot = reorder.slot(at: point),
               let current = store.slots.firstIndex(of: reorder.tool), current != slot else { return }
         writeLayout { _ = store.placeTool(reorder.tool, at: slot, persist: false) }
@@ -284,24 +408,133 @@ final class IslandHoverHitBridge: ObservableObject {
     /// tile then lands; the drawer stays until it has.
     func finishReorder(save: Bool = true) {
         layoutWatch = nil
+        stopEscapeWatch()
         guard let reorder else { return }
+        if motion.outside { motion.setOutside(false); dragEffects.cursor(false) }
         if save, let store = layoutStore, store.slots != reorder.original { store.saveLayout() }
         self.reorder = nil
         liftPoint = nil
         reorderPhase = ReorderPhase(state: .settling, tool: reorder.tool, generation: reorderPhase.generation)
-        let generation = reorderGeneration
         // If the island never reports the landing (it closed), let go anyway.
+        scheduleSettleFallback(reorderGeneration)
+    }
+
+    /// Let go outside the hover: the tool leaves the island where it was
+    /// dropped, with a poof, and its neighbours close the gap. The drawer
+    /// stays (the edit hold) until a click outside or the pointer's return.
+    // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
+    func removeLiftedTool(at point: CGPoint, in window: NSWindow?) {
+        guard let reorder else { return }
+        layoutWatch = nil
+        stopEscapeWatch()
+        self.reorder = nil
+        liftPoint = nil
+        motion.setOutside(false)
+        dragEffects.cursor(false)
+        let generation = reorderGeneration
+        var removed = false
+        if let store = layoutStore {
+            writeLayout { removed = store.unpin(reorder.tool) }
+        }
+        guard removed else {
+            // Settings Sync took it out meanwhile: nothing left to remove.
+            reorderPhase = ReorderPhase(state: .settling, tool: reorder.tool, generation: generation)
+            scheduleSettleFallback(generation)
+            return
+        }
+        // Let go outside the hover: the pointer is out, so its return and
+        // next leave (or a click outside) close the drawer.
+        pointerInside = false
+        editHold.edited(pointerInside: false)
+        reorderPhase = ReorderPhase(state: .removed, tool: reorder.tool, generation: generation)
+        NSHapticFeedbackManager.defaultPerformer.perform(.generic, performanceTime: .now)
+        if !Self.reducesMotion, let window {
+            let screen = window.convertPoint(toScreen: point)
+            dragEffects.poof(screen)
+        }
+        scheduleSettleFallback(generation)
+    }
+
+    private func scheduleSettleFallback(_ generation: Int) {
         Task { @MainActor [weak self] in
             try? await Task.sleep(for: .milliseconds(900))
             self?.didSettle(generation: generation)
         }
     }
 
+    static var reducesMotion: Bool { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
+
+    /// What a drag shows outside SwiftUI: the cursor and the system poof.
+    /// Tests replace them; the poof is a window of its own.
+    struct DragEffects {
+        var cursor: (_ removing: Bool) -> Void
+        var poof: (_ screenPoint: CGPoint) -> Void
+
+        static let live = DragEffects(
+            cursor: { removing in (removing ? NSCursor.disappearingItem : NSCursor.arrow).set() },
+            poof: { point in NSAnimationEffect.poof.show(centeredAt: point, size: .zero) }
+        )
+        static let silent = DragEffects(cursor: { _ in }, poof: { _ in })
+    }
+
+    var dragEffects = DragEffects.live
+
+    // Escape cancels a drag. The island is not key while the pointer drags,
+    // so the key is watched for the drag's duration only and never consumed.
+    private var escapeMonitors: [Any] = []
+
+    private func startEscapeWatch() {
+        stopEscapeWatch()
+        let handler: (NSEvent) -> Void = { [weak self] event in
+            MainActor.assumeIsolated { self?.handleDragKey(event) }
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { handler($0); return $0 }) {
+            escapeMonitors.append(local)
+        }
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handler) {
+            escapeMonitors.append(global)
+        }
+    }
+
+    /// The Escape that cancelled the last drag. The edit-dismiss observer can
+    /// see the same key before or after the drag's monitor does.
+    private var lastDragEscape: TimeInterval?
+    /// That Escape may still be held: its auto-repeats belong to the drag
+    /// too, until a new press (not a repeat) arrives.
+    private var dragEscapeHeld = false
+
+    /// Escape while a tool is lifted belongs to the drag alone: it puts the
+    /// tools back and never also closes a drawer held by an earlier edit.
+    func handleDragKey(_ event: NSEvent) {
+        guard event.type == .keyDown, event.keyCode == 53, isReordering else { return }
+        lastDragEscape = event.timestamp
+        dragEscapeHeld = true
+        cancelReorder()
+    }
+
+    /// True for an Escape the drag owns, whether the drag's monitor has
+    /// already handled it or not, including auto-repeats of the same held
+    /// key; other observers must leave it alone. A new press is not the
+    /// drag's once no tile is lifted.
+    func escapeBelongsToDrag(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 53 else { return false }
+        if isReordering || event.timestamp == lastDragEscape { return true }
+        if event.isARepeat { return dragEscapeHeld }
+        dragEscapeHeld = false
+        return false
+    }
+
+    private func stopEscapeWatch() {
+        escapeMonitors.forEach(NSEvent.removeMonitor)
+        escapeMonitors = []
+    }
+
     /// The island finished landing the tile of `generation`.
     func didSettle(generation: Int) {
         // The picture of that lift goes too (a newer lift keeps its own).
         stage.clear(generation: generation)
-        guard generation == reorderGeneration, reorder == nil, reorderPhase.state == .settling else { return }
+        guard generation == reorderGeneration, reorder == nil,
+              reorderPhase.state == .settling || reorderPhase.state == .removed else { return }
         reorderPhase = ReorderPhase(state: .idle, tool: nil, generation: generation)
     }
 
@@ -377,7 +610,10 @@ final class IslandHoverHitBridge: ObservableObject {
     /// must also intersect its measured viewport, never the search/footer.
     /// While a modal question is shown in this window, targets under it
     /// (Back, tiles) are left out and only the question's buttons remain.
-    private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool) -> [IslandHoverHitSnapshot] {
+    /// `includesInactive`: also targets whose primary action is disabled;
+    /// only the context menu asks for them, clicks never reach them.
+    private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool,
+                           includesInactive: Bool = false) -> [IslandHoverHitSnapshot] {
         targets = targets.filter { $0.value.view != nil }
         modals = modals.filter { $0.value.view != nil }
         let modalShown = modals.values.contains { entry in
@@ -386,6 +622,7 @@ final class IslandHoverHitBridge: ObservableObject {
         }
         return targets.values.compactMap { entry in
             guard let view = entry.view,
+                  view.activates || includesInactive,
                   !modalShown || view.targetID.isModal,
                   accepts(view, allowsHover: allowsHover, allowsAnswer: allowsAnswer),
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
@@ -408,7 +645,14 @@ final class IslandHoverHitBridge: ObservableObject {
         let surface = view.targetID.surface
         if surface == .agentAnswer { return allowsAnswer }
         return allowsHover && view.targetContext == context
-            && (surface == .update || surface == .deliveryFailure || (enabled && surface == activeSurface))
+            && (surface == .update || surface == .deliveryFailure
+                || (enabled && (surface == activeSurface || Self.isCompanion(surface, of: activeSurface))))
+    }
+
+    /// Surfaces on screen together with the tool grid.
+    static func isCompanion(_ surface: IslandHoverHitTargetID.Surface,
+                            of active: IslandHoverHitTargetID.Surface) -> Bool {
+        active == .tile && (surface == .moreTools || surface == .moreToggle)
     }
 
     func mouseDown(at point: CGPoint, in window: NSWindow, allowed: Bool, allowsAnswer: Bool = false) -> Bool {
@@ -446,8 +690,9 @@ final class IslandHoverHitBridge: ObservableObject {
                 // the cell under an ineligible release.
                 finishReorder()
                 tracking.discardSequence()
-            } else if reorder.cancelsRelease(at: point) {
-                cancelReorder()
+            } else if reorder.removesRelease(at: point) {
+                removeLiftedTool(at: point, in: window)
+                tracking.discardSequence()
             } else {
                 moveLiftedTool(to: point)
                 finishReorder()
@@ -494,10 +739,11 @@ private struct IslandHoverHitTargetModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.islandHoverNativePressed, isEnabled && bridge.pressedID == id)
+            // A disabled control still reports its frame, marked inactive, so
+            // its context menu (Remove from Hover) works; clicks skip it.
             .background {
-                if isEnabled {
-                    IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context, action: action)
-                }
+                IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context,
+                                             activates: isEnabled, action: action)
             }
     }
 }
@@ -552,6 +798,7 @@ private struct IslandHoverHitTargetReporter: NSViewRepresentable {
     let bridge: IslandHoverHitBridge
     let id: IslandHoverHitTargetID
     let context: String
+    let activates: Bool
     let action: () -> Void
 
     func makeNSView(context: Context) -> IslandHoverHitTargetView {
@@ -562,6 +809,7 @@ private struct IslandHoverHitTargetReporter: NSViewRepresentable {
         view.bridge = bridge
         view.targetID = id
         view.targetContext = self.context
+        view.activates = activates
         view.activate = action
         if view.window != nil { bridge.register(view) }
     }
@@ -579,6 +827,8 @@ fileprivate final class IslandHoverHitTargetView: NSView {
     weak var bridge: IslandHoverHitBridge?
     var targetID = IslandHoverHitTargetID(surface: .tile, tool: .settings)
     var targetContext = ""
+    /// False while the control is disabled: only its context menu sees it.
+    var activates = true
     var activate: () -> Void = {}
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

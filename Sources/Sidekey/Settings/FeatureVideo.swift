@@ -18,6 +18,10 @@ enum FeatureVideo: String, CaseIterable {
     case screenshot
     case translate
     case subtitles
+    // Set up through the agent prompt, then the result in the island.
+    // WHY: .project-docs/decisions/2026-11-24-feature-screen-videos.md
+    case notify
+    case monitor
 
     static let subdirectory = "FeatureVideos"
     /// Where the clips are looked up. Offscreen render tests point it at a
@@ -36,6 +40,8 @@ enum FeatureVideo: String, CaseIterable {
         case .screenshot: return "Shot"
         case .translate: return "Translate"
         case .subtitles: return "Subtitles"
+        case .notify: return "Notify"
+        case .monitor: return "Monitor"
         }
     }
 
@@ -54,6 +60,8 @@ enum FeatureVideo: String, CaseIterable {
         case .screenshot: return 10
         case .translate: return 8
         case .subtitles: return 14
+        case .notify: return 16
+        case .monitor: return 18
         }
     }
 

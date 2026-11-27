@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="421" height="112" viewBox="0 0 421 112">
+  <rect x="0.5" y="0.5" width="420" height="111" rx="14" fill="#151b23" stroke="#2d333b"/>
+  <text x="18" y="34" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="#f0f6fc">Whycode</text>
+  <g transform="translate(389 21.0) scale(0.6667)" fill="none" stroke="#9198a1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 7h10v10"/><path d="M7 17 17 7"/></g>
+  <text x="18" y="58" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#b8adff">macOS app · Claude Code · Codex · Antigravity</text>
+  <text x="18" y="80" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">One window: Claude Code orchestrates agents and tasks,</text>
+  <text x="18" y="98" text-anchor="start" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9198a1">and writes to you only when something needs you.</text>
+</svg>

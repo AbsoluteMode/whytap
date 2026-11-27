@@ -24,6 +24,9 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
         "Sources/Sidekey/AIRouting/ProviderKeyChecker.swift",
         "Sources/Sidekey/AIRouting/ModelProbe.swift",
         "Sources/Sidekey/AgentDaemon/NativeAgentDiagnostics.swift",
+        "Sources/Sidekey/AgentDaemon/ClaudeCodeProvider.swift",
+        "Sources/Sidekey/AgentDaemon/CodexProvider.swift",
+        "Sources/Sidekey/AgentDaemon/ClaudeModelCatalogReader.swift",
     ]
 
     /// Identifiers whose VALUE is user/model content. If an `os_log` call passes
@@ -49,6 +52,43 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
                 XCTAssertFalse(source.contains(call), "\(relativePath): \(call) bypasses CleanupDiagnostics")
             }
             XCTAssertTrue(source.contains("diagnostics(") , "\(relativePath): expected a CleanupDiagnostics line")
+        }
+    }
+
+    /// Agent sources carry tool results, arguments and secrets: that code
+    /// writes nothing to the log at all. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
+    func test_agentSourcesNeverLog() throws {
+        let files = ["MCPValue", "MCPError", "MCPProcess", "MCPTransport", "MCPClient", "SourceModel",
+                     "SourceToolClassifier", "MiniTOML", "MCPConfigImporter", "FolderSource", "SourcePresets",
+                     "SourcesController"].map { "Sources/Sidekey/Assistant/Connections/\($0).swift" }
+            + ["Sources/Sidekey/AgentDaemon/NativeAgentSources.swift"]
+        for relativePath in files {
+            let source = try readProjectFile(relativePath)
+            for call in ["os_log(", "Logger(", "NSLog(", "print(", "OSLog(", "debugPrint("] {
+                XCTAssertFalse(source.contains(call), "\(relativePath): \(call)")
+            }
+        }
+    }
+
+    /// The user's Claude Code / Codex write prompts, answers, paths and account
+    /// details to stdout/stderr. Their providers log exit codes and counts only.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+    func test_harnessProvidersNeverLogChildOutputOrPaths() throws {
+        for relativePath in ["Sources/Sidekey/AgentDaemon/ClaudeCodeProvider.swift",
+                             "Sources/Sidekey/AgentDaemon/CodexProvider.swift",
+                             "Sources/Sidekey/AgentDaemon/ClaudeModelCatalogReader.swift"] {
+            let source = try readProjectFile(relativePath)
+            for call in Self.osLogCalls(in: source) {
+                let arguments = Self.strippingStringLiterals(from: call)
+                for token in ["tail", "stderr", "stdout", "line", "path", "binary", "message", "account", "args"] {
+                    for hit in Self.wholeWordOccurrences(of: token, in: arguments) where !Self.isAllowedMetricUsage(hit) {
+                        XCTFail("\(relativePath) logs '\(token)' (\(hit)): \(call)")
+                    }
+                }
+            }
+            for call in ["NSLog(", "print(", "Logger("] {
+                XCTAssertFalse(source.contains(call), "\(relativePath): \(call)")
+            }
         }
     }
 

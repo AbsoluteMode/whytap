@@ -22,9 +22,6 @@ struct MacCard<Content: View>: View {
             .shadow(color: needsSetup && !reduceTransparency
                     ? MacSettingsTheme.setupGlow.opacity(colorScheme == .dark ? 0.18 : 0.12) : .clear,
                     radius: 5)
-            // Every card is a block Lil Bro can stand on in Settings.
-            // WHY: .project-docs/decisions/2026-11-24-lil-bro.md
-            .lilBroBlock()
     }
 }
 

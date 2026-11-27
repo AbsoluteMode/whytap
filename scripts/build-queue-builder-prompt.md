@@ -240,8 +240,9 @@ holds it, leave the tickets queued and end your turn.
    composition is main only. List the members under **Preview, not merged**.
    Take `whytap-app.lock` in the Git common directory (owner.json like the
    integration lock) around packaging, the install and the receipt; under it,
-   right before the Quit, `preview-handoff --base <main SHA> --members
-   <json> --build <n>` must be `clear` (an older helper without it: skip this check).
+   right before the Quit, after `git fetch origin`, `preview-handoff --base
+   <main SHA> --members <json> --build <n>` must be `clear` (it refuses an
+   unreadable installed app and a base behind the current main) (an older helper without it: skip this check).
 7. Install only at a safe handoff: run `python3 scripts/build-queue-meeting-gate.py`
    from checked main immediately before the normal quit; only exit 0 with a
    fresh `status: clear` allows it. That one gate also refuses a locked

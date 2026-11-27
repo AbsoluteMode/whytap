@@ -3,7 +3,7 @@ id: lil-bro-answers-from-whytap-2026-11-24
 type: decision
 title: Lil Bro always asks whytap.ai (Claude Sonnet 5.5), the first Whytap server the app talks to
 summary: The "no Whytap servers" invariant gets one exception. Each question a person asks Lil Bro, the Settings screen and up to three earlier exchanges go to whytap.ai's Ask endpoint, answered by claude-sonnet-5-5. Since REV 13 (2026-11-26, the maintainer's decision) there is no switch to turn answers off and no "What is sent" item; Lil Bro works only through Sonnet. No keys, dictated text or identifiers are sent. Offline, unavailable and the daily limit are said plainly and change nothing.
-status: confirmed
+status: stale
 tags: [settings, lil-bro, privacy, network, invariant, ask]
 canonical_for: [lil-bro-answers]
 verified_at: 2026-11-24
@@ -14,14 +14,17 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-26, looking at build 1772's ⋯ menu with "What is sent to whytap.ai" and "Turn off answers from whytap.ai", the maintainer said to remove them because Lil Bro works only through Sonnet (orchestrator task 107, REV 13).
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Sources/Sidekey/Settings/LilBro/LilBroRemoteBrain.swift
+  - type: commit
+    reference: 6d6edabc8912c847af634a6d15da1274dbf0af78:Sources/Sidekey/Settings/LilBro/LilBroRemoteBrain.swift
     confirmed_at: 2026-11-24
-  - type: repository
-    reference: Tests/SidekeyTests/Settings/LilBro/LilBroRemoteBrainTests.swift
+  - type: commit
+    reference: 6d6edabc8912c847af634a6d15da1274dbf0af78:Tests/SidekeyTests/Settings/LilBro/LilBroRemoteBrainTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-24-lil-bro.md]
+related: [2026-11-24-lil-bro.md, 2026-11-26-lil-bro-removed.md]
 ---
+
+> Lil Bro was removed on 2026-11-26: see
+> [2026-11-26-lil-bro-removed.md](2026-11-26-lil-bro-removed.md). This record is history.
 
 # Lil Bro's answers from whytap.ai
 

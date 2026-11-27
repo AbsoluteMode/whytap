@@ -1185,6 +1185,8 @@ class QueueTests(unittest.TestCase):
         handoff = lambda build=1801: self.call("preview-handoff", "--base", self.head,
                                                "--members", members, "--ticket",
                                                str(ticket["id"]), "--build", str(build))
+        self.assertFalse(handoff()["clear"])  # no installed app to compare with
+        self.install([], 1800)
         self.assertTrue(handoff()["clear"])
         self.install([], 1801)  # another install got there first
         self.assertIn("already build 1801", handoff()["problems"][0])
@@ -1200,6 +1202,57 @@ class QueueTests(unittest.TestCase):
         self.assertEqual(self.ticket(ticket["id"])["status"], "superseded")
         self.assertEqual(fix["queued_at"], ticket["queued_at"])  # the fix keeps its place
         self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+
+    def test_the_final_handoff_refuses_whatever_it_cannot_prove(self):  # 655 item 3
+        """Never older code over newer data: an unreadable installed app or a base
+        behind the current main stops the Quit."""
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        members = json.dumps([{"ticket": ticket["id"], "head": ticket["head"]}])
+        handoff = lambda base=None: self.call(
+            "preview-handoff", "--base", base or self.head, "--members", members,
+            "--ticket", str(ticket["id"]), "--build", "1801")
+        self.install([], 1800)
+        self.assertTrue(handoff()["clear"])
+        plist = self.app / "Contents" / "Info.plist"
+        good = plist.read_bytes()
+        broken = [
+            None,  # missing
+            b"not a plist",
+            plistlib.dumps({"CFBundleVersion": "18x0", "ExodiaSourceRevision": self.head}),
+            plistlib.dumps({"CFBundleVersion": "1800"}),  # no base
+            plistlib.dumps({"CFBundleVersion": "1800", "ExodiaSourceRevision": self.head,
+                            "ExodiaBuildComposition": "{not json"}),
+        ] + [plistlib.dumps({"CFBundleVersion": "1800", "ExodiaSourceRevision": self.head,
+                             "ExodiaBuildComposition": json.dumps({"base": self.head,
+                                                                   "members": m})})
+             for m in ([{"ticket": True, "head": ticket["head"]}],
+                       [{"ticket": -1, "head": ticket["head"]}],
+                       [{"ticket": 1, "head": ticket["head"]}] * 2,
+                       [{"ticket": 1, "head": "abc"}], "x")]
+        for index, data in enumerate(broken):
+            with self.subTest(case=index):
+                if data is None:
+                    plist.unlink()
+                else:
+                    plist.write_bytes(data)
+                self.assertFalse(handoff()["clear"])
+                plist.write_bytes(good)
+        # main moved on: a base without it is refused until recomposed.
+        old = self.head
+        later = self.change("Sources/App/Runtime.swift", "struct Migrates {}")
+        self.git("update-ref", "refs/remotes/origin/main", later)
+        problems = handoff(old)["problems"]
+        self.assertTrue(any("does not contain the current main" in p for p in problems), problems)
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        self.assertFalse(handoff(old)["clear"])  # main unknown
+        self.git("update-ref", "refs/remotes/origin/main", old)
+        self.assertTrue(handoff(old)["clear"])
+        for bad in ([{"ticket": True, "head": ticket["head"]}],
+                    [{"ticket": ticket["id"], "head": ticket["head"]}] * 2):
+            self.call("preview-handoff", "--base", old, "--members", json.dumps(bad),
+                      "--build", "1801", ok=False)
 
     def test_a_recovered_preview_waits_behind_a_local_install(self):  # 628 item 3
         self.lane()

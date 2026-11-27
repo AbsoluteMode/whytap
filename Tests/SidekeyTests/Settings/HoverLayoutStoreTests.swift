@@ -175,4 +175,54 @@ final class HoverLayoutStoreTests: XCTestCase {
         store.replaceEditableSlots(with: [])
         XCTAssertEqual(store.slots, [.settings])
     }
+    // MARK: - Pin / unpin (island drawer)
+
+    func test_unpin_removes_tool_and_persists_and_neighbours_close_the_gap() {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HoverLayoutStore(defaults: defaults)
+        XCTAssertTrue(store.unpin(.meetingRecord))
+        XCTAssertEqual(store.slots, [.inputLang, .notes, .hotkeys, .monitor, .settings])
+        XCTAssertEqual(HoverLayoutStore(defaults: defaults).slots, store.slots, "Survives a restart")
+        XCTAssertFalse(store.unpin(.meetingRecord), "Removing a tool that is not there changes nothing")
+    }
+
+    func test_settings_cannot_be_unpinned() {
+        let store = makeStore()
+        XCTAssertFalse(HoverLayoutStore.canUnpin(.settings))
+        XCTAssertFalse(store.unpin(.settings))
+        XCTAssertEqual(store.slots.last, .settings)
+    }
+
+    func test_pin_appends_before_settings_and_keeps_other_places() {
+        let suiteName = "test.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        let store = HoverLayoutStore(defaults: defaults)
+        let before = store.slots
+        XCTAssertTrue(store.pin(.vocab))
+        XCTAssertEqual(store.slots, Array(before.dropLast()) + [.vocab, .settings])
+        XCTAssertEqual(HoverLayoutStore(defaults: defaults).slots, store.slots)
+        XCTAssertFalse(store.pin(.vocab), "A tool already in the island is not added twice")
+        XCTAssertFalse(store.pin(.settings))
+    }
+
+    func test_unpinned_tools_are_the_catalog_minus_the_island_in_catalog_order() {
+        let store = makeStore()
+        XCTAssertEqual(store.unpinnedTools, HoverTool.allCases.filter { !store.slots.contains($0) })
+        XCTAssertFalse(store.unpinnedTools.contains(.settings))
+        store.unpin(.notes)
+        XCTAssertTrue(store.unpinnedTools.contains(.notes))
+        store.pin(.notes)
+        XCTAssertFalse(store.unpinnedTools.contains(.notes))
+    }
+
+    func test_pinning_everything_leaves_nothing_to_add_and_unpinning_everything_leaves_settings() {
+        let store = makeStore()
+        for tool in store.unpinnedTools { store.pin(tool) }
+        XCTAssertTrue(store.unpinnedTools.isEmpty)
+        XCTAssertEqual(store.slots.count, HoverTool.allCases.count)
+        XCTAssertEqual(store.slots.last, .settings)
+        for tool in store.slots { store.unpin(tool) }
+        XCTAssertEqual(store.slots, [.settings])
+    }
 }

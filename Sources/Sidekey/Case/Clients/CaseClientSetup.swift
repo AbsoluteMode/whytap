@@ -116,6 +116,24 @@ final class CaseClientSetup: CaseClientConfiguring {
         }.value
     }
 
+    /// Whether `client` is on this Mac, and its `whytap` MCP entry compared
+    /// with the one Connect writes for this app's helper. Read only: nothing is
+    /// written and no client setting changes.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    func presence(of client: CaseKnownClient) async -> (installed: Bool, entry: WhytapEntryState) {
+        guard let connector = connectors[client] else { return (false, .none) }
+        let helperURL = helperURL
+        return await Task.detached {
+            guard connector.isInstalled() else { return (false, .none) }
+            // Without a helper that runs, no entry is Whytap's working one:
+            // an entry that names it (or a blank command) is just an entry.
+            guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
+                return (true, connector.whytapEntry(helperPath: "\u{0}") == .none ? .none : .custom)
+            }
+            return (true, connector.whytapEntry(helperPath: helperURL.path))
+        }.value
+    }
+
     func connect(_ identity: CaseAppIdentity) async -> CaseClientSetupReport {
         guard let helperURL, FileManager.default.isExecutableFile(atPath: helperURL.path) else {
             return CaseClientSetupReport(problems: [Self.helperMissingMessage])

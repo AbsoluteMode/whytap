@@ -8,7 +8,8 @@ import XCTest
 /// a click still opens a tool; pressing a tile and moving it a few points
 /// lifts it at once, moving the pointer over another tile puts it there, letting go keeps the order the
 /// island shows (and Settings -> Features -> Hover shows the same order);
-/// letting go far outside the tools puts everything back. Events go through
+/// letting go outside the hover throws the tool out of it, and Escape puts
+/// everything back. Events go through
 /// the same window-level dispatch as in the app, against an offscreen window that is never shown.
 @MainActor
 final class IslandHoverReorderTests: XCTestCase {
@@ -28,6 +29,7 @@ final class IslandHoverReorderTests: XCTestCase {
         store = HoverLayoutStore(defaults: defaults)
         store.replaceEditableSlots(with: tools)
         bridge = IslandHoverHitBridge()
+        bridge.dragEffects = .silent
         bridge.layoutStore = store
         bridge.setEnabled(true)
         bridge.setSurface(.tile)
@@ -182,20 +184,62 @@ final class IslandHoverReorderTests: XCTestCase {
 
     // MARK: - Ways out
 
-    /// The island is not key while the tools are shown, so a key cannot reach
-    /// it without taking focus from the person's app. Letting go well outside
-    /// the tools is the cancel, through the same window events as a drop.
-    func testReleasingFarOutsideTheToolsPutsEveryToolBack() {
+    /// REV 4: throwing a tool out of the hover removes it. Outside, the tile
+    /// says so before the release; dropping it back inside keeps it.
+    func testThrowingAToolOutOfTheHoverRemovesItAndKeepsTheOrderReached() {
         XCTAssertTrue(down(0))
         XCTAssertTrue(bridge.liftPressedTool())
         drag(to: point(2))
         XCTAssertEqual(store.slots, [.notes, .monitor, .inputLang, .settings])
-        up(at: CGPoint(x: point(2).x, y: point(2).y + 200))
-        XCTAssertEqual(store.slots, tools)
-        XCTAssertEqual(restored(), tools)
+        let outside = CGPoint(x: point(2).x, y: point(2).y + 200)
+        drag(to: outside)
+        XCTAssertTrue(bridge.motion.outside, "The tile shows it will be removed")
+        XCTAssertEqual(store.slots, [.notes, .monitor, .inputLang, .settings], "Outside, nothing moves")
+        up(at: outside)
+        XCTAssertEqual(store.slots, [.notes, .monitor, .settings])
+        XCTAssertEqual(restored(), [.notes, .monitor, .settings], "Saved like Settings -> Hover")
         XCTAssertFalse(bridge.isReordering)
         XCTAssertFalse(bridge.consumesPointerSequence)
+        XCTAssertFalse(bridge.motion.outside)
+        XCTAssertEqual(bridge.reorderPhase.state, .removed, "The picture puffs away where it was let go")
+        XCTAssertEqual(bridge.editHold.phase, .away, "The drawer stays until a click outside or a return")
+        XCTAssertTrue(bridge.holdsDrawer)
         XCTAssertEqual(activated, [])
+    }
+
+    func testComingBackInsideBeforeLettingGoKeepsTheTool() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        drag(to: CGPoint(x: point(1).x, y: point(1).y + 200))
+        XCTAssertTrue(bridge.motion.outside)
+        drag(to: point(1))
+        XCTAssertFalse(bridge.motion.outside, "Back inside, the remove hint goes")
+        up(at: point(1))
+        XCTAssertEqual(store.slots, [.notes, .inputLang, .monitor, .settings])
+        XCTAssertEqual(bridge.editHold.phase, .free, "A reorder is not an edit that holds the drawer")
+    }
+
+    func testTheDrawersFrameDecidesWhatOutsideMeans() {
+        let cells = [0: CGRect(x: 0, y: 0, width: 60, height: 44)]
+        let drawer = CGRect(x: -20, y: -80, width: 300, height: 200)
+        let reorder = IslandHoverReorder(tool: .notes, original: tools, cells: cells, panel: drawer)
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 250, y: 100)), "Footer or search: still inside")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 290, y: 100)))
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 30, y: 130)), "Above the drawer (over the pill)")
+        let unmeasured = IslandHoverReorder(tool: .notes, original: tools, cells: cells)
+        XCTAssertFalse(unmeasured.removesRelease(at: CGPoint(x: 30, y: 44 + IslandHoverReorder.releaseMargin - 1)))
+        XCTAssertTrue(unmeasured.removesRelease(at: CGPoint(x: 30, y: 44 + IslandHoverReorder.releaseMargin + 1)))
+    }
+
+    func testEscapeDuringADragPutsEverythingBack() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        drag(to: CGPoint(x: point(2).x, y: point(2).y + 200))
+        bridge.cancelReorder()
+        up(at: CGPoint(x: point(2).x, y: point(2).y + 200))
+        XCTAssertEqual(store.slots, tools, "Escape is the other way out; nothing is removed")
+        XCTAssertEqual(restored(), tools)
+        XCTAssertFalse(bridge.motion.outside)
     }
 
     /// Escape reaches the island only when it already has keyboard focus
@@ -251,7 +295,7 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertEqual(reorder.restoredOrder(current: [.notes, .inputLang, .monitor, .settings]), tools)
         XCTAssertNil(reorder.restoredOrder(current: [.inputLang, .monitor, .settings]))
         XCTAssertNil(reorder.restoredOrder(current: tools + [.vocab]))
-        XCTAssertFalse(reorder.cancelsRelease(at: .zero), "Without measured cells a release is never a cancel")
+        XCTAssertFalse(reorder.removesRelease(at: .zero), "Without measured cells a release never removes")
     }
 
     func testTheDrawerClosingOrTheIslandHidingEndsTheDragWithTheOrderSoFar() {
@@ -421,24 +465,26 @@ final class IslandHoverReorderTests: XCTestCase {
         drag(to: point(1))
         XCTAssertNotEqual(store.slots, original)
         XCTAssertNil(defaults.object(forKey: HoverLayoutStore.defaultsKey))
-        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        bridge.cancelReorder()  // Escape
+        up(at: point(1))
         XCTAssertEqual(store.slots, original)
         XCTAssertNil(defaults.object(forKey: HoverLayoutStore.defaultsKey), "A cancel writes nothing")
     }
 
-    func testTheCancelFlightStartsWhereThePointerLetGo() {
+    func testAThrownOutTileVanishesWhereThePointerLetGo() {
         XCTAssertTrue(down(0))
         drag(to: point(1))
         let released = CGPoint(x: point(1).x + 8, y: point(1).y + 105)
         up(at: released)
-        XCTAssertEqual(store.slots, tools)
+        XCTAssertEqual(store.slots, [.notes, .monitor, .settings])
         XCTAssertEqual(bridge.motion.translation, CGSize(width: 68, height: -105))
     }
 
     func testTheDrawerStaysUntilTheTileHasLanded() async throws {
         XCTAssertTrue(down(0))
         drag(to: point(1))
-        up(at: CGPoint(x: point(1).x, y: point(1).y + 200))
+        bridge.cancelReorder()  // Escape: the tile flies back
+        up(at: point(1))
         XCTAssertFalse(bridge.isReordering)
         XCTAssertEqual(bridge.settlingTool, .inputLang)
         XCTAssertTrue(bridge.holdsDrawer, "The fly-back stays visible")

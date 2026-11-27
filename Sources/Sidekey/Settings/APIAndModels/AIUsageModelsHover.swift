@@ -4,30 +4,35 @@ import Foundation
 import SwiftUI
 
 /// Which Costs row shows its "Models used" detail. One state for the whole
-/// table, so two rows can never both believe they are open and the detail is
-/// always the one anchored to the row it describes.
+/// table: the detail and the row fill belong to the row under the pointer.
 ///
 /// WHY: .project-docs/decisions/2026-11-26-costs-models-popover-hover.md —
-/// each row used to own its popover; the detail opens beside the name and
-/// lands under the pointer, so the row lost hover, closed it and reopened it
-/// (flicker), and a closing row and an opening row raced for one window.
+/// per-row popover state blinked and showed another row's models (first
+/// report); the next version located the pointer with NSView frames that
+/// SwiftUI's ScrollView reports as the whole window, so every row matched
+/// and an arbitrary one (Meetings while the pointer was on Drop Fast) stayed
+/// open (second report, 2026-11-27).
 struct AIUsageModelsHoverState: Equatable {
-    /// From rest the detail waits briefly, so sweeping across rows opens nothing.
+    /// Entering the table from outside waits briefly, so passing over it
+    /// opens nothing. With a detail open, moving to another row is immediate.
     static let openDelay: TimeInterval = 0.2
-    /// Leaving the row and the detail closes it after this grace period, long
-    /// enough to cross the gap between the row and the detail.
-    static let closeGrace: TimeInterval = 0.3
-    /// A click on the open row right after the system closed its transient
-    /// detail (that same mouse-down) means "close", not "open again".
+    /// A click on a row right after the system closed that row's detail on
+    /// the same mouse-down means "close", not "open again".
     static let reopenSuppression: TimeInterval = 0.4
 
+    /// Where the pointer is, resolved from geometry by the controller.
+    enum Pointer: Equatable {
+        case outside
+        case row(String)
+        /// On the open detail's window, which may cover other rows.
+        case detail
+    }
+
     enum Event: Equatable {
-        case pointerEnteredRow(String)
-        case pointerExitedRow(String)
-        case pointerEnteredDetail
-        case pointerExitedDetail
+        case pointer(Pointer)
         case focused(String)
         case unfocused(String)
+        /// Click on a row or Return/Space on its focused name: open it now.
         case clicked(String)
         case escape
         case dismissedBySystem(String)
@@ -39,151 +44,141 @@ struct AIUsageModelsHoverState: Equatable {
     }
 
     struct Pending: Equatable {
-        /// nil closes the detail.
-        var target: String?
+        var target: String
+        var at: Date
+    }
+
+    struct Dismissal: Equatable {
+        var row: String
         var at: Date
     }
 
     private(set) var open: String?
-    private(set) var pinned = false
-    /// The row under the pointer in the Settings window itself.
-    private(set) var pointerRow: String?
-    /// The pointer is over the open detail, which may cover other rows.
-    private(set) var pointerOnDetail = false
-    private(set) var focusedRow: String?
+    private(set) var pointer: Pointer = .outside
+    /// The row opened from the keyboard; a pointer move over the table replaces it.
+    private(set) var keyboardRow: String?
     private(set) var pending: Pending?
-    private var lastDismissal: (id: String, at: Date)?
+    /// Escape or a click outside closed this row's detail while the pointer
+    /// stayed on it; it reopens after the pointer leaves the row, or on click.
+    private(set) var dismissed: Dismissal?
 
-    static func == (lhs: Self, rhs: Self) -> Bool {
-        lhs.open == rhs.open && lhs.pinned == rhs.pinned && lhs.pointerRow == rhs.pointerRow
-            && lhs.pointerOnDetail == rhs.pointerOnDetail && lhs.focusedRow == rhs.focusedRow
-            && lhs.pending == rhs.pending && lhs.lastDismissal?.id == rhs.lastDismissal?.id
-            && lhs.lastDismissal?.at == rhs.lastDismissal?.at
-    }
+    var pointerRow: String? { if case .row(let id) = pointer { return id } else { return nil } }
 
-    /// The row painted with the hover fill: the one under the pointer, or the
-    /// open one while the pointer is on its detail.
+    /// The row painted with the hover fill.
     func highlighted(_ id: String) -> Bool {
-        pointerRow == id || (pointerRow == nil && open == id)
+        switch pointer {
+        case .row(let row): return row == id
+        case .detail: return open == id
+        case .outside: return open == id && keyboardRow == id
+        }
     }
 
     mutating func send(_ event: Event, now: Date) {
         switch event {
-        case .pointerEnteredRow(let id):
-            pointerRow = id
-            if open == id {
+        case .pointer(let location):
+            guard location != pointer else { return }
+            let previous = pointer
+            pointer = location
+            switch location {
+            case .detail:
+                // Only an open detail can be under the pointer.
+                if open == nil { pointer = .outside }
                 pending = nil
-            } else if pinned {
-                // A pinned detail stays until a click, Escape or a click outside.
-                pending = nil
-            } else if open != nil {
-                // Warm: another detail is already showing, so follow the pointer
-                // at once instead of leaving the wrong row's detail on screen.
-                open = id; pending = nil
-            } else {
-                pending = Pending(target: id, at: now.addingTimeInterval(Self.openDelay))
-            }
-        case .pointerExitedRow(let id):
-            // Enter of the next row can arrive before exit of the previous one.
-            if pointerRow == id { pointerRow = nil }
-            if pending?.target == id { pending = nil }
-            scheduleCloseIfUnheld(now: now)
-        case .pointerEnteredDetail:
-            // The pointer is in the detail's window, so on no row of Settings.
-            pointerOnDetail = true; pointerRow = nil
-            pending = nil
-        case .pointerExitedDetail:
-            pointerOnDetail = false
-            if let row = pointerRow, row != open, !pinned {
-                open = row; pending = nil
-            } else {
-                scheduleCloseIfUnheld(now: now)
+            case .row(let id):
+                keyboardRow = nil
+                if let gone = dismissed, gone.row != id { dismissed = nil }
+                if dismissed != nil { pending = nil; return }
+                if open == id {
+                    pending = nil
+                } else if open != nil || previous == .detail {
+                    // A detail is showing: follow the pointer at once and
+                    // never leave the previous row's detail on screen.
+                    open = id; pending = nil
+                } else {
+                    pending = Pending(target: id, at: now.addingTimeInterval(Self.openDelay))
+                }
+            case .outside:
+                // Off the open row and off its detail: close now.
+                dismissed = nil; pending = nil; keyboardRow = nil; open = nil
             }
         case .focused(let id):
-            focusedRow = id
-            if !(pinned && open != id) { open = id; pending = nil }
+            guard pointer == .outside else { return }
+            keyboardRow = id; open = id; pending = nil
         case .unfocused(let id):
-            if focusedRow == id { focusedRow = nil }
-            scheduleCloseIfUnheld(now: now)
+            if keyboardRow == id {
+                keyboardRow = nil
+                if open == id, pointer == .outside { open = nil }
+            }
         case .clicked(let id):
             pending = nil
-            if open == id && pinned {
-                close()
-            } else if open == nil, let last = lastDismissal, last.id == id,
-                      now.timeIntervalSince(last.at) < Self.reopenSuppression {
-                lastDismissal = nil
-            } else {
-                open = id; pinned = true
+            if let gone = dismissed, gone.row == id, now.timeIntervalSince(gone.at) < Self.reopenSuppression {
+                dismissed = nil
+                return
             }
+            dismissed = nil
+            open = id
+            if pointer == .outside { keyboardRow = id }
         case .escape:
+            dismissed = pointerRow.map { Dismissal(row: $0, at: .distantPast) }
             close()
         case .dismissedBySystem(let id):
             guard open == id else { return }
-            lastDismissal = pinned ? (id, now) : nil
+            dismissed = Dismissal(row: pointerRow ?? id, at: now)
             close()
-            // A transient detail closes on a click outside it; the pointer
-            // may still rest on a row, which must not reopen it by itself.
         case .disabled:
             self = Self()
         case .rowsChanged(let ids):
             let shown = Set(ids)
             if let id = open, !shown.contains(id) { close() }
-            if let id = pointerRow, !shown.contains(id) { pointerRow = nil }
-            if let id = focusedRow, !shown.contains(id) { focusedRow = nil }
+            if let id = pointerRow, !shown.contains(id) { pointer = .outside }
+            if open == nil, pointer == .detail { pointer = .outside }
+            if let id = keyboardRow, !shown.contains(id) { keyboardRow = nil }
             if let target = pending?.target, !shown.contains(target) { pending = nil }
-            if let last = lastDismissal, !shown.contains(last.id) { lastDismissal = nil }
-            if shown.isEmpty { pointerOnDetail = false }
+            if let gone = dismissed, !shown.contains(gone.row) { dismissed = nil }
         case .tick:
             guard let due = pending, now >= due.at else { return }
             pending = nil
-            if let target = due.target {
-                if pointerRow == target || focusedRow == target { open = target }
-            } else if !held {
-                close()
-            }
+            if pointerRow == due.target { open = due.target }
         }
-    }
-
-    private var held: Bool {
-        pinned || pointerOnDetail || (open != nil && (pointerRow == open || focusedRow == open))
-    }
-
-    private mutating func scheduleCloseIfUnheld(now: Date) {
-        guard open != nil, !held else { return }
-        if let row = pointerRow, row != open {
-            // The pointer already rests on another row: show that one.
-            open = row; pending = nil
-            return
-        }
-        pending = Pending(target: nil, at: now.addingTimeInterval(Self.closeGrace))
     }
 
     private mutating func close() {
-        open = nil; pinned = false; pending = nil; pointerOnDetail = false
+        open = nil; pending = nil; keyboardRow = nil
+        if pointer == .detail { pointer = .outside }
     }
 }
 
-/// Drives `AIUsageModelsHoverState` with real time and the real pointer.
-/// SwiftUI hover is tracked per window: a detail appearing under a resting
-/// pointer gets no "entered" until the pointer leaves and returns, and rows
-/// it covers keep stale hover. So while a detail is open the controller also
-/// reads which window is topmost under the pointer and which row's visible
-/// frame contains it, and turns differences into the same events.
+/// Resolves the pointer from geometry and drives `AIUsageModelsHoverState`.
+///
+/// Row frames come from SwiftUI (`onGeometryChange` in the table's named
+/// coordinate space) and are mapped to the screen through one anchor NSView
+/// placed outside the ScrollView. NSViews inside SwiftUI's ScrollView report
+/// the whole window as their frame, so they are never used for geometry.
+/// Hover callbacks, mouse events and a short poll while a detail is open or
+/// pending only trigger a fresh resolution; none of them is trusted for
+/// where the pointer is.
 @MainActor
 final class AIUsageModelsHoverController: ObservableObject {
-    struct PointerProbe { var row: String?; var onDetail: Bool }
+    static let coordinateSpace = "AIUsageCostsTable"
 
     @Published private(set) var state = AIUsageModelsHoverState()
     private let now: () -> Date
-    private var probeOverride: (() -> PointerProbe)?
+    private let mouseLocation: () -> NSPoint
+    private let topWindowNumber: (NSPoint) -> Int
+    private var rowFrames: [String: CGRect] = [:]
+    private var rowOrder: [String] = []
+    private weak var anchor: NSView?
+    private weak var detailView: NSView?
+    /// Tests stand in for the popover window, which they cannot show.
+    var detailScreenFrameOverride: (() -> NSRect?)?
     private var timer: Task<Void, Never>?
     private var poll: Task<Void, Never>?
-    private var rowViews: [String: WeakView] = [:]
-    private weak var detailView: NSView?
-    private struct WeakView { weak var view: NSView? }
+    private var monitor: Any?
 
-    init(now: @escaping () -> Date = Date.init, probe: (() -> PointerProbe)? = nil) {
-        self.now = now; self.probeOverride = probe
+    init(now: @escaping () -> Date = Date.init,
+         mouseLocation: @escaping () -> NSPoint = { NSEvent.mouseLocation },
+         topWindowNumber: @escaping (NSPoint) -> Int = { NSWindow.windowNumber(at: $0, belowWindowWithWindowNumber: 0) }) {
+        self.now = now; self.mouseLocation = mouseLocation; self.topWindowNumber = topWindowNumber
     }
 
     func isPresented(_ id: String) -> Bool { state.open == id }
@@ -195,45 +190,72 @@ final class AIUsageModelsHoverController: ObservableObject {
         reschedule()
     }
 
+    // MARK: Geometry
+
+    func setAnchor(_ view: NSView) { anchor = view }
+    var anchorView: NSView? { anchor }
+    func registerDetail(_ view: NSView) { detailView = view }
+    func setRowFrame(_ frame: CGRect, for id: String) { rowFrames[id] = frame }
+
     /// A period change can remove rows or the whole table (loading, empty,
     /// error); no open, pending, pointer or focus state may outlive its row.
     func retain(rows ids: [String]) {
+        rowOrder = ids
+        rowFrames = rowFrames.filter { ids.contains($0.key) }
         send(.rowsChanged(ids))
-        rowViews = rowViews.filter { ids.contains($0.key) }
     }
 
-    func register(row id: String, view: NSView) { rowViews[id] = WeakView(view: view) }
-    func registerDetail(_ view: NSView) { detailView = view }
+    /// A row's visible frame on screen; nil when it is scrolled out of view.
+    func screenFrame(of id: String) -> NSRect? {
+        guard let frame = rowFrames[id], let anchor, let window = anchor.window else { return nil }
+        let local = NSRect(x: frame.minX, y: anchor.isFlipped ? frame.minY : anchor.bounds.height - frame.maxY,
+                           width: frame.width, height: frame.height)
+        let visible = local.intersection(anchor.bounds)
+        guard !visible.isNull, !visible.isEmpty else { return nil }
+        return window.convertToScreen(anchor.convert(visible, to: nil))
+    }
 
-    /// Reconciles hover with the pointer's actual position (see type comment).
-    func checkPointer() {
-        guard state.open != nil, let probe = probeOverride?() ?? liveProbe() else { return }
-        if probe.row != state.pointerRow {
-            if let old = state.pointerRow { send(.pointerExitedRow(old)) }
-            if let new = probe.row { send(.pointerEnteredRow(new)) }
+    func resolve(_ point: NSPoint) -> AIUsageModelsHoverState.Pointer {
+        let top = topWindowNumber(point)
+        if state.open != nil, let detail = detailScreenFrame(), detail.contains(point),
+           detailScreenFrameOverride != nil || top == detailView?.window?.windowNumber {
+            return .detail
         }
-        if probe.onDetail != state.pointerOnDetail {
-            send(probe.onDetail ? .pointerEnteredDetail : .pointerExitedDetail)
+        guard let window = anchor?.window, top == window.windowNumber else { return .outside }
+        for id in rowOrder {
+            if let frame = screenFrame(of: id), frame.contains(point) { return .row(id) }
+        }
+        return .outside
+    }
+
+    /// Re-reads the pointer and applies any change.
+    func checkPointer(at point: NSPoint? = nil) {
+        send(.pointer(resolve(point ?? mouseLocation())))
+    }
+
+    private func detailScreenFrame() -> NSRect? {
+        if let override = detailScreenFrameOverride { return override() }
+        guard let window = detailView?.window, window.isVisible else { return nil }
+        return window.frame
+    }
+
+    // MARK: Event sources
+
+    /// Mouse moves anywhere in the app (the Settings window or the detail)
+    /// trigger a resolution, including moves that cross between windows.
+    func start() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.mouseMoved, .scrollWheel, .mouseEntered, .mouseExited]) { [weak self] event in
+            self?.checkPointer()
+            return event
         }
     }
 
     func stop() {
         timer?.cancel(); poll?.cancel(); timer = nil; poll = nil
-    }
-
-    private func liveProbe() -> PointerProbe? {
-        let point = NSEvent.mouseLocation
-        let top = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
-        if let detail = detailView?.window, detail.isVisible, detail.windowNumber == top {
-            return PointerProbe(row: nil, onDetail: true)
-        }
-        let row = rowViews.first { _, box in
-            guard let view = box.view, let window = view.window, window.windowNumber == top else { return false }
-            let visible = view.visibleRect
-            guard !visible.isEmpty else { return false }
-            return window.convertToScreen(view.convert(visible, to: nil)).contains(point)
-        }?.key
-        return PointerProbe(row: row, onDetail: false)
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
     }
 
     private func reschedule() {
@@ -243,16 +265,18 @@ final class AIUsageModelsHoverController: ObservableObject {
             timer = Task { @MainActor [weak self] in
                 try? await Task.sleep(for: .milliseconds(Int(delay * 1000) + 1))
                 guard !Task.isCancelled, let self else { return }
-                if due.target == nil { self.checkPointer() }
+                self.checkPointer()
                 self.send(.tick)
             }
         }
-        if state.open == nil {
+        if state.open == nil && state.pending == nil {
             poll?.cancel(); poll = nil
         } else if poll == nil {
+            // Backstop for moves no event reports (a window appearing under a
+            // resting pointer, scrolling by keyboard).
             poll = Task { @MainActor [weak self] in
                 while !Task.isCancelled {
-                    try? await Task.sleep(for: .milliseconds(100))
+                    try? await Task.sleep(for: .milliseconds(80))
                     guard !Task.isCancelled, let self else { return }
                     self.checkPointer()
                 }
@@ -261,15 +285,15 @@ final class AIUsageModelsHoverController: ObservableObject {
     }
 }
 
-/// A background AppKit view that tells the controller where a row or the open
-/// detail is on screen. It never takes hits or draws.
-struct AIUsageHoverProbeView: NSViewRepresentable {
+/// A background AppKit view that gives the controller a window and a
+/// coordinate origin. Use it only outside a ScrollView. It never takes hits.
+struct AIUsageHoverAnchorView: NSViewRepresentable {
     let register: (NSView) -> Void
     func makeNSView(context: Context) -> NSView {
-        let view = ProbeNSView(); register(view); return view
+        let view = AnchorNSView(); register(view); return view
     }
     func updateNSView(_ nsView: NSView, context: Context) { register(nsView) }
-    private final class ProbeNSView: NSView {
+    private final class AnchorNSView: NSView {
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }

@@ -42,13 +42,17 @@ was being reworked for the Agent harness (task 106).
   key is missing shows "— no key", and the menu ends with "Add a Soniox key…"
   or "Add an OpenAI key…" for the chosen engine.
 - **Storage.** `subtitles.engine` in UserDefaults (`soniox` / `openai`).
-  Absent means no choice yet.
+  Absent means no choice yet. It belongs to the Keys & models section of
+  backups and Settings Sync, so a restore or another Mac keeps the chosen
+  engine; a profile without a choice restores "by the keys". Start reads it
+  from UserDefaults each time, so a synced choice applies without relaunch.
 - **Default.** Without a stored choice the rule of 2026-11-25 is unchanged:
   Soniox when its key can be read, otherwise OpenAI, otherwise Start names
   both keys.
 - **A choice is binding.** `SubtitleAudioTranslate.engine(choice:soniox:openAI:)`
   and `engineAndKey(from:choice:)` run the chosen engine only with its own
-  key. A chosen engine without a key does not fall back to the other one:
+  key, and read only the Keychain accounts they need: the chosen engine's
+  alone, and without a choice OpenAI's only when Soniox has no usable key. A chosen engine without a key does not fall back to the other one:
   Start says "Subtitles on OpenAI need an OpenAI key. Add it in Keys &
   models." (or the Soniox variant), and Features shows "No OpenAI key" /
   "No Soniox key" with an "Add a/an … key" action.
@@ -73,6 +77,10 @@ was being reworked for the Agent harness (task 106).
   names the chosen engine's key.
 - Rendered the Models page with Subtitles open in light and dark (test
   render, the app was not launched).
+- `HarnessAndSubtitleRouteTests` and `SubtitleEngineRestoreTests` (from
+  build-queue probe 725): Keychain reads per choice, missing and unreadable
+  keys, both engines through a Keys & models restore, an older profile
+  without a choice, and a live change read by the next Start.
 - Not tested live: a Subtitles session with each engine after switching.
 
 ## Rejected

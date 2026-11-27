@@ -203,6 +203,14 @@ Not measured: answer latency against the native agent.
    `agent.activeProvider` is read only to show the one-time "choose a harness"
    ask (`agent.harness.chosen` stops it from returning) and is never written
    or removed, so a rollback build finds its native connection as it was.
+   A pick's or Check again's result applies only if no newer pick or check
+   started and the active harness did not change meanwhile (a synced
+   selection), and a failed pick is re-checked only while the harness that
+   was active when it was made still is; an older result never replaces a
+   newer choice (`HarnessAndSubtitleRouteTests`, build-queue probe 725). The
+   disclosure row and Check again use the shared interaction surface: hover,
+   press, keyboard focus, and Check again stays visible but disabled while a
+   check runs (`HarnessCardInteractionTests`).
    Right Command dispatches only to Claude Code or Codex; without a harness the
    island says "Choose a harness" and opens Models. The onboarding language
    model step uses the shared LLM row's features instead of the Agent route.

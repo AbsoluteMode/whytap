@@ -37,7 +37,8 @@ enum ConfigBackupRegistry {
             "sidekey.models.openRouterModel", "sidekey.models.customLLMBaseURL", "sidekey.models.customLLMModel",
             "sidekey.preferences.transcriptionMode", "sidekey.preferences.selectedLanguage", "sidekey.preferences.selectedLanguageVariant", "sidekey.preferences.targetLanguage", "com.sidekey.meetings.preferredLanguage"])
         add(.models, .string, ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "sidekey.models.byokModel." + $0 })
-        add(.models, .string, ["sidekey.translation.textTarget", "sidekey.translation.subtitleTarget", "sidekey.translation.source"])
+        add(.models, .string, ["sidekey.translation.textTarget", "sidekey.translation.subtitleTarget", "sidekey.translation.source",
+            SubtitleAudioTranslate.engineChoiceKey])
         add(.models, .bool, ["sidekey.translation.original"])
         add(.models, .data, [aiRoutingKey])
         add(.models, .propertyList, [aiRoutingPreservedKey])

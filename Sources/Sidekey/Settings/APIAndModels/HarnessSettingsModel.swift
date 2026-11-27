@@ -21,9 +21,20 @@ final class HarnessSettingsModel: ObservableObject {
     let store: AgentProviderStore
     let settings: AgentSettingsStore
     @Published private(set) var statuses: [CLIProviderID: HarnessStatus] = [:]
-    /// The harness the last pick or check was about, so its problem is shown
-    /// even when it did not become active.
-    @Published private(set) var attempted: CLIProviderID?
+    /// A pick that has not become active (still checking, or its check
+    /// failed), with the harness that was active when it was made. It is
+    /// shown and re-checked only while that harness is still the active one:
+    /// a newer choice (another pick, a synced selection) supersedes it.
+    @Published private var pending: (id: CLIProviderID, over: CLIProviderID?)?
+    /// Each pick or check gets a number; a result arriving after a newer one
+    /// started is not applied.
+    private var generation = 0
+
+    /// The pick whose problem the row shows instead of the active harness.
+    var attempted: CLIProviderID? {
+        guard let pending, pending.over == store.activeProvider else { return nil }
+        return pending.id
+    }
 
     private let probe: (CLIProviderID) async -> ConnectOutcome
     private let refreshClaude: (AgentSettingsStore) async -> Void
@@ -69,21 +80,41 @@ final class HarnessSettingsModel: ObservableObject {
     /// The user picked a harness in the menu: check its sign-in, then make it
     /// the Agent's harness. A failed check leaves the previous one in place.
     func choose(_ id: CLIProviderID) async {
-        attempted = id
-        guard await check(id) else { return }
+        let before = active
+        pending = (id, before)
+        guard let ok = await checkIfStillCurrent(id, activeBefore: before) else { return }
+        guard ok else { return }
+        pending = nil
         store.markConnected(id)
         await refreshCatalog(id)
     }
 
     /// "Check again", and the first time the row opens: the active harness
-    /// (or the last pick that failed) and its model list.
+    /// (or a pick that failed and is still the newest choice) and its model
+    /// list. It never brings back a harness a newer choice replaced.
     func refresh() async {
-        guard let id = attempted ?? active else { return }
-        let ok = await check(id)
+        let pick = attempted
+        guard let id = pick ?? active else { return }
+        let before = active
+        guard let ok = await checkIfStillCurrent(id, activeBefore: before), ok else { return }
         // A pick that failed before (not installed, signed out) becomes the
         // Agent's harness once it passes: the user chose it.
-        if ok, attempted == id, active != id { store.markConnected(id) }
-        if ok { await refreshCatalog(id) }
+        if pick == id {
+            pending = nil
+            if active != id { store.markConnected(id) }
+        }
+        await refreshCatalog(id)
+    }
+
+    /// The check's result, or nil when a newer pick or check started, or the
+    /// active harness changed (a synced selection), while it ran.
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+    private func checkIfStillCurrent(_ id: CLIProviderID, activeBefore: CLIProviderID?) async -> Bool? {
+        generation += 1
+        let mine = generation
+        let ok = await check(id)
+        guard mine == generation, active == activeBefore else { return nil }
+        return ok
     }
 
     @discardableResult

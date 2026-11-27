@@ -96,16 +96,25 @@ enum SubtitleAudioTranslate {
     }
 
     /// The engine and its key for a Subtitles start, or why there is none.
+    /// Reads only the Keychain accounts it needs: the chosen engine's alone,
+    /// and without a choice OpenAI's only when Soniox has no usable key.
     static func engineAndKey(from keys: ProviderKeyStore = ProviderKeyStore(),
                              choice: Engine? = nil) throws -> (Engine, String) {
-        let soniox = keys.lookup(account: BYOKKeyStore.account(for: .soniox))
-        let openAI = keys.lookup(account: keychainAccount)
-        let candidates: [(Engine, ProviderKeyStore.KeyLookup)] = choice.map { [($0, $0 == .soniox ? soniox : openAI)] }
-            ?? [(.soniox, soniox), (.openAI, openAI)]
-        for (engine, lookup) in candidates {
-            if case .key(let key) = lookup { return (engine, key) }
+        if let choice {
+            let lookup = keys.lookup(account: keychainAccount(for: choice))
+            if case .key(let key) = lookup { return (choice, key) }
+            throw KeyState(lookup) == .unreadable ? Unavailable.unreadableKey(choice) : Unavailable.missingKey(choice)
         }
-        throw unavailable(choice: choice, soniox: KeyState(soniox), openAI: KeyState(openAI))
+        let soniox = keys.lookup(account: keychainAccount(for: .soniox))
+        if case .key(let key) = soniox { return (.soniox, key) }
+        let openAI = keys.lookup(account: keychainAccount(for: .openAI))
+        if case .key(let key) = openAI { return (.openAI, key) }
+        throw unavailable(choice: nil, soniox: KeyState(soniox), openAI: KeyState(openAI))
+    }
+
+    /// The Keychain account that holds an engine's key.
+    static func keychainAccount(for engine: Engine) -> String {
+        engine == .soniox ? BYOKKeyStore.account(for: .soniox) : keychainAccount
     }
 
     /// The OpenAI key (the fallback engine's), or why there is none.

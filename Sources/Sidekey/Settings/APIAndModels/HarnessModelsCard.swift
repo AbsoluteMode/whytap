@@ -7,6 +7,9 @@ import SwiftUI
 @MainActor
 struct HarnessModelsCard: View {
     static let groupID = "shared.harness"
+    static let checkAgainID = "shared.harness.checkAgain"
+    static let headerHeight: CGFloat = 54
+    static let headerCornerRadius: CGFloat = 8
     static let title = "Harness"
     static let caption = "Runs the Agent"
     private static let labelWidth: CGFloat = 72
@@ -83,10 +86,14 @@ struct HarnessModelsCard: View {
                     .accessibilityHidden(true)
             }
             .padding(.horizontal, 14)
-            .frame(height: 54)
+            .frame(height: Self.headerHeight)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        // The whole 54 pt row answers the pointer, a press and keyboard focus,
+        // like the other Models controls.
+        .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.text,
+                                               focused: focused.wrappedValue == Self.groupID,
+                                               cornerRadius: Self.headerCornerRadius))
         .focused(focused, equals: Self.groupID)
         .accessibilityLabel(Self.title)
         .accessibilityValue(accessibilityValue)
@@ -206,10 +213,21 @@ struct HarnessModelsCard: View {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if model.isChecking { ProgressView().controlSize(.mini) }
                 Text(line.text).fixedSize(horizontal: false, vertical: true)
-                if (model.attempted ?? model.active) != nil, !model.isChecking {
-                    Button("Check again") { Task { await model.refresh() } }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(MacSettingsTheme.accent)
+                if (model.attempted ?? model.active) != nil {
+                    // Stays in place while a check runs, disabled, so the line
+                    // does not jump; hover, press and focus as other links.
+                    Button { Task { await model.refresh() } } label: {
+                        Text("Check again")
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                    }
+                    .buttonStyle(MacButtonInteractionStyle(highlight: MacSettingsTheme.accent,
+                                                           focused: focused.wrappedValue == Self.checkAgainID,
+                                                           cornerRadius: 5))
+                    .foregroundStyle(MacSettingsTheme.accent)
+                    .focused(focused, equals: Self.checkAgainID)
+                    .disabled(model.isChecking)
+                    .opacity(model.isChecking ? 0.42 : 1)
                 }
             }
             .font(.system(size: 11.5))

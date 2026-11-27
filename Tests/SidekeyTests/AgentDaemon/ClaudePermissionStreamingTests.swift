@@ -53,12 +53,12 @@ final class ClaudePermissionStreamingTests: XCTestCase {
             locate: { URL(fileURLWithPath: "/usr/bin/true") },
             runOneShot: { _, _ in nil },
             runStreaming: { _, args, _, onLine, _ in
-                // Skip-permission mode: bypass every check, and do NOT register
-                // the stdio prompt tool (there is no UI to answer it yet).
+                // The user's actions policy, never a blanket bypass, and do
+                // NOT register the stdio prompt tool (no UI answers it yet).
                 XCTAssertTrue(args.contains("--permission-mode"))
-                XCTAssertTrue(args.contains("bypassPermissions"))
+                XCTAssertFalse(args.contains("bypassPermissions"))
                 XCTAssertFalse(args.contains("--permission-prompt-tool"),
-                               "skip-permission mode must not register the stdio prompt tool")
+                               "must not register the stdio prompt tool")
                 XCTAssertFalse(args.contains("acceptEdits"))
                 XCTAssertTrue(args.contains("--input-format"))
                 captured = onLine

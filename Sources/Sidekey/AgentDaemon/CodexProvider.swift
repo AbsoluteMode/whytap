@@ -1,8 +1,8 @@
 import Foundation
 import os.log
 
-/// SIGTERM handle for a spawned codex child. Codex runs one-shot with
-/// stdin=nullDevice (no stdin protocol to close), so termination is just a
+/// SIGTERM handle for a spawned codex child. Codex runs one-shot: it reads the
+/// prompt from stdin, which is closed at once, so termination is just a
 /// guarded `Process.terminate()`. Returned by `runStreaming` and held by `run`
 /// so the stream's `onTermination` can stop the CLI on cancel / dismiss / new
 /// turn / quit — before this, codex had NO way to be stopped at all and a
@@ -42,9 +42,8 @@ final class CodexProcessHandle: CodexProcessTerminating {
 ///
 /// Drives `codex exec --json` (one-shot JSONL stream) per turn, parses events
 /// with `CodexStreamJSONParser` + `CodexEventMapper`, and streams the resulting
-/// `AgentSSEEvent`s. During the testing phase it runs with
-/// `--dangerously-bypass-approvals-and-sandbox`: every action runs with NO
-/// approval prompt and NO sandbox (full machine access). See `run(...)`.
+/// `AgentSSEEvent`s. The prompt goes through stdin, never argv, and the
+/// permission flags come from the user's Agent settings (`AgentHarnessFlags`).
 final class CodexProvider: CLIProvider {
     let id: CLIProviderID = .codex
     let displayName = "Codex"
@@ -57,6 +56,7 @@ final class CodexProvider: CLIProvider {
         _ binary: URL,
         _ args: [String],
         _ workingDir: URL?,
+        _ stdin: Data,
         _ onLine: @escaping (String) -> Void,
         _ onExit: @escaping (Int32) -> Void
     ) -> CodexProcessTerminating
@@ -84,11 +84,12 @@ final class CodexProvider: CLIProvider {
 
     init(
         locate: @escaping () -> URL? = { CodexBinaryLocator().locate() },
-        runOneShot: @escaping (_ binary: URL, _ args: [String]) -> ProcessResult? = ClaudeCodeProvider.defaultRunOneShot,
+        runOneShot: @escaping (_ binary: URL, _ args: [String]) -> ProcessResult? = CodexProvider.defaultRunOneShot,
         runStreaming: @escaping (
             _ binary: URL,
             _ args: [String],
             _ workingDir: URL?,
+            _ stdin: Data,
             _ onLine: @escaping (String) -> Void,
             _ onExit: @escaping (Int32) -> Void
         ) -> CodexProcessTerminating = CodexProvider.defaultRunStreaming,
@@ -136,34 +137,33 @@ final class CodexProvider: CLIProvider {
                 return
             }
 
-            let workingDir = try? AgentDaemonWorkingDirectory.ensure()
+            // Fail closed: without the Agent's own folder the CLI would run
+            // (and, with actions on, write) in whatever folder Whytap has.
+            guard let workingDir = options.workingDirectory ?? (try? AgentDaemonWorkingDirectory.ensure()) else {
+                continuation.yield(.error(code: "workspace_unavailable",
+                                          message: AgentHarnessMessages.workspaceUnavailable,
+                                          retryable: true))
+                continuation.yield(.done(sources: []))
+                continuation.finish()
+                return
+            }
 
-            // Arg order: exec [resume] --json --skip-git-repo-check
-            //     -c sandbox_mode=workspace-write [<thread_id>] <prompt>
-            // CRITICAL: `codex exec resume` does NOT accept -s/--sandbox or
-            // -C/--cd (those are exec-only) — passing them makes every
-            // follow-up turn exit 2. So the sandbox goes through
-            // `-c sandbox_mode=workspace-write` (valid on both exec and resume,
-            // verified to actually block out-of-workspace writes) and the
-            // working dir through the process cwd (set in defaultRunStreaming).
-            // "resume" is a subcommand right after "exec"; thread_id + prompt
-            // are trailing positionals.
-            _ = workingDir  // used below for the process cwd, not as a -C flag
+            // Arg order: exec [resume] --json --skip-git-repo-check <flags>
+            //     [<thread_id>] -
+            // `codex exec resume` takes no -s/--sandbox, -C/--cd or
+            // --approve-for-me (they make a follow-up exit 2), so the policy
+            // goes through `-c` overrides valid on both, and the working dir
+            // through the process cwd (set in defaultRunStreaming).
+            // The prompt is `-`: read from stdin, so selected text and the
+            // request never appear in argv, where any local process can read
+            // them. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
             var args = ["exec"]
             if resumeSessionID != nil { args.append("resume") }
             args += ["--json", "--skip-git-repo-check"]
-            // Skip-permission mode (testing phase): run every action with NO
-            // approval prompt AND NO sandbox. `codex exec` does not expose
-            // `-a/--ask-for-approval` and does not honour `-c
-            // approval_policy=never`, so an MCP tool ask — e.g. creating a
-            // Linear issue — kept getting auto-cancelled ("user cancelled MCP
-            // tool call"). `--dangerously-bypass-approvals-and-sandbox` is the
-            // one switch that skips ALL confirmations, and it is accepted on
-            // BOTH `exec` and `exec resume`. It also drops the workspace-write
-            // sandbox — Codex gets full machine access. Disclosed to the user
-            // at connect (AgentModeView). The deferred in-island approval bar
-            // is where we will re-introduce a sandbox + per-call approval.
-            args += ["--dangerously-bypass-approvals-and-sandbox"]
+            args += AgentHarnessFlags.codex(allowActions: options.allowActions)
+            if let command = options.whytapMCPCommand {
+                args += AgentHarnessFlags.codexMCPConfig(command: command)
+            }
             if let model = options.model { args += ["-m", model] }
             if let effort = options.effort { args += ["-c", "model_reasoning_effort=\(effort)"] }
             if let tier = options.serviceTier {
@@ -172,7 +172,7 @@ final class CodexProvider: CLIProvider {
                 }
             }
             if let tid = resumeSessionID { args.append(tid) }
-            args.append(prompt)
+            args.append("-")
 
             continuation.yield(.started(
                 turnId: UUID().uuidString,
@@ -190,7 +190,7 @@ final class CodexProvider: CLIProvider {
             // race, so leave the order as-is.
             var watchdog: ProcessIdleWatchdog?
 
-            let handle = runStreaming(binary, args, workingDir, { [weak self] line in
+            let handle = runStreaming(binary, args, workingDir, Data(prompt.utf8), { [weak self] line in
                 watchdog?.kick()   // any stdout = alive
                 guard let event = CodexStreamJSONParser.parse(line: line) else { return }
                 if case .threadStarted(let tid) = event {
@@ -234,7 +234,7 @@ final class CodexProvider: CLIProvider {
                     // bufferQueue-only.
                     continuation.yield(.error(
                         code: "agent_timeout",
-                        message: "Агент завис и был остановлен — нет ответа. Повторить?",
+                        message: AgentHarnessMessages.stalled,
                         retryable: true))
                     continuation.finish()
                     handle.terminate()
@@ -253,6 +253,10 @@ final class CodexProvider: CLIProvider {
                 handle.terminate()
             }
         }
+    }
+
+    static func defaultRunOneShot(binary: URL, args: [String]) -> ProcessResult? {
+        ProcessOneShot.run(binary: binary, args: args, environment: childEnvironment())
     }
 
     /// Capabilities are validated by AgentSettingsStore. Preserve registry IDs;
@@ -298,18 +302,18 @@ final class CodexProvider: CLIProvider {
     ///
     /// Mirrors `ClaudeCodeProvider.defaultRunStreaming`'s single serial
     /// `bufferQueue` pattern (the data-race fix), with these differences:
-    /// - `process.standardInput = FileHandle.nullDevice` — codex reads stdin
-    ///   to append to the prompt and hangs if stdin stays open; nullDevice
-    ///   gives immediate EOF.
+    /// - the prompt (`stdin`) is written to the child's stdin, which is then
+    ///   closed: codex reads it to EOF and would hang on an open pipe.
     /// - Returns a `CodexProcessHandle` (not a stdin writer) so the stream can
-    ///   SIGTERM the child on cancel; codex is one-shot, the prompt is a CLI
-    ///   arg, so there is no stdin protocol to close.
+    ///   SIGTERM the child on cancel; codex is one-shot, so there is no stdin
+    ///   protocol to keep open.
     /// - `childEnvironment` scrub targets OPENAI_*/DOPPLER_* (billing) plus the
     ///   shared Anthropic/Claude markers, not just CLAUDECODE.
     static func defaultRunStreaming(
         binary: URL,
         args: [String],
         workingDir: URL?,
+        stdin: Data,
         onLine: @escaping (String) -> Void,
         onExit: @escaping (Int32) -> Void
     ) -> CodexProcessTerminating {
@@ -325,8 +329,9 @@ final class CodexProvider: CLIProvider {
         // documented `doppler run` dev launcher). See `childEnvironment`.
         process.environment = Self.childEnvironment()
 
-        // codex must see stdin EOF immediately or it hangs reading additional input.
-        process.standardInput = FileHandle.nullDevice
+        // The prompt, then EOF: codex reads stdin to the end.
+        let stdinPipe = Pipe()
+        process.standardInput = stdinPipe
 
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
@@ -340,12 +345,11 @@ final class CodexProvider: CLIProvider {
             label: "com.sidekey.codexprovider.buffer",
             qos: .userInitiated
         )
-        var buffer = Data()
+        var lines = ProcessLineBuffer()
 
         // Continuously drain stderr so its pipe buffer can never fill and wedge
-        // codex mid-turn. Chunks are accumulated in a bounded buffer (last 16 KB)
-        // and logged on nonzero exit for diagnostics; funnelled through bufferQueue
-        // to avoid cross-queue mutation of stderrTail.
+        // codex mid-turn. Only its size is logged: it can carry paths, prompts
+        // or MCP server output.
         var stderrTail = BoundedStderrBuffer()
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
@@ -357,14 +361,7 @@ final class CodexProvider: CLIProvider {
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
             bufferQueue.async {
-                buffer.append(chunk)
-                // Split on newlines, emit complete lines.
-                while let newlineRange = buffer.range(of: Data("\n".utf8)) {
-                    let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
-                    buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
-                    let line = String(decoding: lineData, as: UTF8.self)
-                    onLine(line)
-                }
+                for line in lines.append(chunk) { onLine(line) }
             }
         }
 
@@ -377,24 +374,15 @@ final class CodexProvider: CLIProvider {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
                 let remaining = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                if !remaining.isEmpty {
-                    buffer.append(remaining)
-                }
-                if !buffer.isEmpty {
-                    onLine(String(decoding: buffer, as: UTF8.self))
-                    buffer = Data()
-                }
+                for line in lines.finish(with: remaining) { onLine(line) }
                 // Drain any final stderr bytes so the captured tail is complete
                 // (the readabilityHandler was niled above, so nothing else appends).
                 let remainingErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 if !remainingErr.isEmpty { stderrTail.append(remainingErr) }
                 if proc.terminationStatus != 0 {
-                    let tail = stderrTail.tail
-                    if !tail.isEmpty {
-                        os_log("agent codex stderr (exit=%{public}d): %{public}@",
-                               log: CodexProvider.log, type: .error,
-                               proc.terminationStatus, String(tail.suffix(2000)))
-                    }
+                    os_log("agent codex exit=%{public}d stderr_bytes=%{public}d",
+                           log: CodexProvider.log, type: .error,
+                           proc.terminationStatus, stderrTail.byteCount)
                 }
                 onExit(proc.terminationStatus)
             }
@@ -405,6 +393,15 @@ final class CodexProvider: CLIProvider {
         } catch {
             onExit(-1)
             return CodexProcessHandle.noop
+        }
+        // Write off the caller's thread: a prompt larger than the pipe buffer
+        // blocks until codex reads it. A child that already exited raises
+        // EPIPE here; the exit path reports the turn.
+        let writer = stdinPipe.fileHandleForWriting
+        _ = fcntl(writer.fileDescriptor, F_SETNOSIGPIPE, 1)
+        DispatchQueue.global(qos: .userInitiated).async {
+            try? writer.write(contentsOf: stdin)
+            try? writer.close()
         }
 
         // Hand the live process to the handle so the stream's onTermination can

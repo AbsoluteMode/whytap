@@ -56,8 +56,16 @@ itself: remove a tile there, and add one from the tools that are not shown.
   `IslandHoverHitBridge.holdsDrawer`): `edited()` after a removal, an addition,
   the menu opening and the menu closing -> `held`; the pointer seen over the
   island or the drawer's final frame -> `reentered`; leaving then -> `free`
-  and the normal hover exit applies. A click outside (or Escape) releases at
-  once; closing the drawer for another reason releases it too.
+  and the normal hover exit applies. A click outside or Escape closes the
+  drawer at once through its explicit dismissal (`dismissAfterEdit` ->
+  `dismissals` -> `IslandView.dismissHoverMenu`), even with the pointer still
+  over the pill or the drawer; Escape typed into another Whytap window
+  (Settings) is passed on to that window. Closing the drawer for another
+  reason releases the hold too.
+- **A tool whose own action is off** (Calendar configured as Soon) keeps its
+  click disabled but can still be removed: a disabled hit target still reports
+  its frame, marked inactive; clicks and drags skip it and only
+  `contextMenuTarget` sees it, the same split as the switches in Settings.
 
 ## Why
 
@@ -96,6 +104,10 @@ itself: remove a tile there, and add one from the tools that are not shown.
   tool keeps its shortcut, search and Settings state.
 - `HoverLayoutStoreTests`: pin/unpin, persistence, Settings locked, empty and
   full states.
+- Builder review (ticket 618) found two gaps, now covered by tests: Escape
+  after an edit only dropped the hold, so with the pointer over the drawer the
+  gate kept it open; and a Soon Calendar tile had no menu because disabled
+  targets were never registered.
 - Not verified here: the live menu in the installed island, hover and click
   feel, and Liquid Glass rendering of the section (offscreen render only).
 

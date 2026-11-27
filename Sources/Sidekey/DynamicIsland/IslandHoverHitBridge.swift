@@ -263,7 +263,9 @@ final class IslandHoverHitBridge: ObservableObject {
     /// or a More row. Nothing while a tool is lifted.
     func contextMenuTarget(at point: CGPoint, in window: NSWindow, allowed: Bool) -> IslandHoverHitTargetID? {
         guard reorder == nil, allowed else { return nil }
-        return snapshots(in: window, allowsHover: true, allowsAnswer: false)
+        // A tool whose own action is off (Calendar shown as Soon) can still be
+        // removed: the menu is about its place in Hover, not about opening it.
+        return snapshots(in: window, allowsHover: true, allowsAnswer: false, includesInactive: true)
             .first { ($0.id.surface == .tile || $0.id.surface == .moreTools) && $0.frame.contains(point) }?.id
     }
 
@@ -288,11 +290,17 @@ final class IslandHoverHitBridge: ObservableObject {
         if next != editHold { editHold = next }
     }
 
-    /// A click outside the drawer (or Escape) ends the hold.
-    func noteOutsideClick() {
+    /// A click outside the drawer or Escape after an edit: end the hold and
+    /// ask the island to close the drawer through its explicit dismissal,
+    /// even with the pointer still over the pill or the drawer.
+    func dismissAfterEdit() {
         guard !showsToolMenu, editHold.holdsDrawer else { return }
         editHold.release()
+        dismissals.send()
     }
+
+    /// Fires when the drawer must close now (`IslandView.dismissHoverMenu`).
+    let dismissals = PassthroughSubject<Void, Never>()
 
     // MARK: - Press-and-drag reorder
 
@@ -449,7 +457,10 @@ final class IslandHoverHitBridge: ObservableObject {
     /// must also intersect its measured viewport, never the search/footer.
     /// While a modal question is shown in this window, targets under it
     /// (Back, tiles) are left out and only the question's buttons remain.
-    private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool) -> [IslandHoverHitSnapshot] {
+    /// `includesInactive`: also targets whose primary action is disabled;
+    /// only the context menu asks for them, clicks never reach them.
+    private func snapshots(in window: NSWindow, allowsHover: Bool, allowsAnswer: Bool,
+                           includesInactive: Bool = false) -> [IslandHoverHitSnapshot] {
         targets = targets.filter { $0.value.view != nil }
         modals = modals.filter { $0.value.view != nil }
         let modalShown = modals.values.contains { entry in
@@ -458,6 +469,7 @@ final class IslandHoverHitBridge: ObservableObject {
         }
         return targets.values.compactMap { entry in
             guard let view = entry.view,
+                  view.activates || includesInactive,
                   !modalShown || view.targetID.isModal,
                   accepts(view, allowsHover: allowsHover, allowsAnswer: allowsAnswer),
                   view.window === window, !view.isHiddenOrHasHiddenAncestor,
@@ -573,10 +585,11 @@ private struct IslandHoverHitTargetModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.islandHoverNativePressed, isEnabled && bridge.pressedID == id)
+            // A disabled control still reports its frame, marked inactive, so
+            // its context menu (Remove from Hover) works; clicks skip it.
             .background {
-                if isEnabled {
-                    IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context, action: action)
-                }
+                IslandHoverHitTargetReporter(bridge: bridge, id: id, context: context,
+                                             activates: isEnabled, action: action)
             }
     }
 }
@@ -631,6 +644,7 @@ private struct IslandHoverHitTargetReporter: NSViewRepresentable {
     let bridge: IslandHoverHitBridge
     let id: IslandHoverHitTargetID
     let context: String
+    let activates: Bool
     let action: () -> Void
 
     func makeNSView(context: Context) -> IslandHoverHitTargetView {
@@ -641,6 +655,7 @@ private struct IslandHoverHitTargetReporter: NSViewRepresentable {
         view.bridge = bridge
         view.targetID = id
         view.targetContext = self.context
+        view.activates = activates
         view.activate = action
         if view.window != nil { bridge.register(view) }
     }
@@ -658,6 +673,8 @@ fileprivate final class IslandHoverHitTargetView: NSView {
     weak var bridge: IslandHoverHitBridge?
     var targetID = IslandHoverHitTargetID(surface: .tile, tool: .settings)
     var targetContext = ""
+    /// False while the control is disabled: only its context menu sees it.
+    var activates = true
     var activate: () -> Void = {}
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }

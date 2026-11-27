@@ -1629,8 +1629,12 @@ grows with the section (controlsHoverPanelHeight moreTools). The chevron is
 hidden when every tool is in the island; search and drawer close collapse the
 section. After a removal, an addition and while the menu is open the drawer is
 held (IslandHoverEditHold in IslandHoverHitBridge.holdsDrawer) until a click
-outside or Escape (IslandHoverMenuDismissObserver), or until the pointer is
-seen over the island or the drawer's final frame and then leaves. WHY:
+outside or Escape (IslandHoverMenuDismissObserver -> dismissAfterEdit ->
+dismissals -> dismissHoverMenu, which closes it even with the pointer over it;
+Escape in another Whytap window passes on), or until the pointer is seen over
+the island or the drawer's final frame and then leaves. Disabled hit targets
+(a Soon tool) still register as inactive: clicks skip them, the context menu
+finds them, so such a tool can be removed but not opened. WHY:
 .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
 
 Settings follows macOS light/dark appearance while open. MacSettingsTheme owns

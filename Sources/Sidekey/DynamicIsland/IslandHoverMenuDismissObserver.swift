@@ -5,6 +5,9 @@ import SwiftUI
 /// swallowing the outside click or Escape sent to another application.
 struct IslandHoverMenuDismissObserver: NSViewRepresentable {
     var enabled: Bool
+    /// False: Escape typed into another Whytap window (Settings) is passed
+    /// on to it after dismissing; only Escape aimed at the island is consumed.
+    var consumesEscapeElsewhere = true
     var onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -13,6 +16,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
     func updateNSView(_ view: NSView, context: Context) {
         context.coordinator.view = view
         context.coordinator.onDismiss = onDismiss
+        context.coordinator.consumesEscapeElsewhere = consumesEscapeElsewhere
         context.coordinator.setEnabled(enabled)
     }
 
@@ -24,6 +28,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
     final class Coordinator {
         weak var view: NSView?
         var onDismiss: () -> Void = {}
+        var consumesEscapeElsewhere = true
         private var local: Any?
         private var global: Any?
         private var menuObservers: [NSObjectProtocol] = []
@@ -45,7 +50,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
             local = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
                 guard let self, self.shouldDismiss(event) else { return event }
                 self.onDismiss()
-                return event.type == .keyDown ? nil : event
+                return self.consumes(event) ? nil : event
             }
             global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
                 MainActor.assumeIsolated {
@@ -65,6 +70,12 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
                     }
                 }
             ]
+        }
+
+        /// Escape aimed at the island ends there; a click always passes on.
+        func consumes(_ event: NSEvent) -> Bool {
+            guard event.type == .keyDown else { return false }
+            return consumesEscapeElsewhere || event.window == nil || event.window === view?.window
         }
 
         func shouldDismiss(_ event: NSEvent, at screenPoint: NSPoint? = nil) -> Bool {

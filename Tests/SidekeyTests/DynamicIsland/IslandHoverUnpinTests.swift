@@ -19,29 +19,33 @@ final class IslandHoverUnpinTests: XCTestCase {
     private var window: NSWindow!
     private var host: NSView!
     private var toggled = 0
+    private var activatedTiles: [HoverTool] = []
 
     override func setUp() async throws {
         suiteName = "IslandHoverUnpinTests.\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)
         store = HoverLayoutStore(defaults: defaults)
-        store.replaceEditableSlots(with: [.inputLang, .notes, .monitor])
+        store.replaceEditableSlots(with: [.inputLang, .notes, .monitor, .calendar])
         bridge = IslandHoverHitBridge()
         bridge.layoutStore = store
         bridge.setEnabled(true)
         bridge.setSurface(.tile)
         bridge.setContext("grid")
         toggled = 0
+        activatedTiles = []
         // Row 0 (top): the grid's tiles. Row 1: the footer chevron.
         // Row 2: More rows for two tools that are not in the island.
         let width = cell, bridge = bridge!
-        let tiles: [HoverTool] = [.inputLang, .notes, .monitor, .settings]
+        // Calendar stands for a tool whose own action is off (shown as Soon).
+        let tiles: [HoverTool] = [.inputLang, .notes, .monitor, .settings, .calendar]
         let more: [HoverTool] = [.vocab, .filler]
         let view = VStack(spacing: 0) {
             HStack(spacing: 0) {
                 ForEach(tiles, id: \.self) { tool in
                     Color.clear.frame(width: width, height: 40)
                         .islandHoverHitTarget(bridge: bridge, id: .init(surface: .tile, tool: tool), context: "grid",
-                                              action: {})
+                                              action: { [unowned self] in activatedTiles.append(tool) })
+                        .disabled(tool == .calendar)
                 }
             }
             .islandHoverHitRegion(bridge: bridge, surface: .tile)
@@ -51,7 +55,7 @@ final class IslandHoverUnpinTests: XCTestCase {
                                           action: { [unowned self] in toggled += 1 })
                 Spacer(minLength: 0)
             }
-            .frame(width: width * 4)
+            .frame(width: width * 5)
             .islandHoverHitRegion(bridge: bridge, surface: .moreToggle)
             HStack(spacing: 0) {
                 ForEach(more, id: \.self) { tool in
@@ -61,15 +65,15 @@ final class IslandHoverUnpinTests: XCTestCase {
                 }
                 Spacer(minLength: 0)
             }
-            .frame(width: width * 4)
+            .frame(width: width * 5)
             .islandHoverHitRegion(bridge: bridge, surface: .moreTools)
         }
         let hosting = NSHostingView(rootView: view)
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: cell * 4, height: 120),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: cell * 5, height: 120),
                           styleMask: .borderless, backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = hosting
-        hosting.frame = NSRect(x: 0, y: 0, width: cell * 4, height: 120)
+        hosting.frame = NSRect(x: 0, y: 0, width: cell * 5, height: 120)
         for _ in 0..<3 { hosting.layoutSubtreeIfNeeded(); RunLoop.main.run(until: Date().addingTimeInterval(0.01)) }
         host = hosting
     }
@@ -166,23 +170,75 @@ final class IslandHoverUnpinTests: XCTestCase {
         XCTAssertTrue(bridge.holdsDrawer, "The open menu holds the drawer")
         menu.performActionForItem(at: 0)
         bridge.toolMenuDidClose()
-        XCTAssertEqual(store.slots, [.inputLang, .monitor, .settings])
+        XCTAssertEqual(store.slots, [.inputLang, .monitor, .calendar, .settings])
         XCTAssertEqual(HoverLayoutStore(defaults: defaults).slots, store.slots, "Saved like Settings -> Hover")
         XCTAssertTrue(bridge.holdsDrawer, "The pointer may now be outside the smaller drawer")
         XCTAssertTrue(store.unpinnedTools.contains(.notes), "It is in More now")
 
         bridge.notePointer(inside: false)
         XCTAssertTrue(bridge.holdsDrawer)
-        bridge.noteOutsideClick()
+        bridge.dismissAfterEdit()
         XCTAssertFalse(bridge.holdsDrawer)
+    }
+
+    func testEscapeOrAClickOutsideAfterAnEditAsksTheIslandToCloseTheDrawer() {
+        var dismissals = 0
+        let watch = bridge.dismissals.sink { dismissals += 1 }
+        defer { watch.cancel() }
+        XCTAssertTrue(bridge.unpin(.notes))
+        // The pointer is still over the drawer: the hover gate alone would keep it open.
+        bridge.notePointer(inside: true)
+        bridge.dismissAfterEdit()
+        XCTAssertEqual(dismissals, 1, "Escape/outside click closes through the explicit dismissal")
+        XCTAssertFalse(bridge.holdsDrawer)
+        bridge.dismissAfterEdit()
+        XCTAssertEqual(dismissals, 1, "Without an edit to protect, Escape is not the hold's business")
+        XCTAssertTrue(bridge.pin(.notes))
+        bridge.toolMenuWillOpen()
+        bridge.dismissAfterEdit()
+        XCTAssertEqual(dismissals, 1, "A click inside the open menu never closes the drawer")
+        bridge.toolMenuDidClose()
+    }
+
+    func testTheEditObserverConsumesEscapeOnlyWhenItIsAimedAtTheIsland() throws {
+        let island = window!
+        let settings = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 50, height: 50),
+                                styleMask: .borderless, backing: .buffered, defer: false)
+        settings.isReleasedWhenClosed = false
+        defer { settings.close() }
+        let coordinator = IslandHoverMenuDismissObserver.Coordinator()
+        coordinator.view = island.contentView
+        coordinator.consumesEscapeElsewhere = false
+        func escape(in window: NSWindow) throws -> NSEvent {
+            try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0,
+                                           windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                                           charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+        }
+        XCTAssertTrue(coordinator.consumes(try escape(in: island)))
+        XCTAssertFalse(coordinator.consumes(try escape(in: settings)), "Settings keeps its own Escape")
+        coordinator.consumesEscapeElsewhere = true
+        XCTAssertTrue(coordinator.consumes(try escape(in: settings)), "Open panels keep their earlier behaviour")
+    }
+
+    func testAToolWhoseActionIsOffCanStillBeRemovedButNotOpened() {
+        let calendar = point(row: 0, column: 4)
+        XCTAssertFalse(bridge.mouseDown(at: calendar, in: window, allowed: true), "Its click stays off")
+        bridge.mouseUp(at: calendar, in: window, allowed: true)
+        XCTAssertTrue(activatedTiles.isEmpty)
+        let target = bridge.contextMenuTarget(at: calendar, in: window, allowed: true)
+        XCTAssertEqual(target, IslandHoverHitTargetID(surface: .tile, tool: .calendar))
+        XCTAssertEqual(target.map { IslandHoverToolMenu.items(for: $0, slots: store.slots) }, [.remove(.calendar)])
+        XCTAssertTrue(IslandHoverToolMenu.perform(.remove(.calendar), bridge: bridge))
+        XCTAssertFalse(store.slots.contains(.calendar))
+        XCTAssertTrue(store.unpinnedTools.contains(.calendar), "It goes back to More")
     }
 
     func testAMenuClosedWithoutChoosingStillHoldsUntilThePointerReturns() {
         bridge.toolMenuWillOpen()
-        bridge.noteOutsideClick()
+        bridge.dismissAfterEdit()
         XCTAssertTrue(bridge.holdsDrawer, "A click inside the menu is not a click outside the drawer")
         bridge.toolMenuDidClose()
-        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .settings])
+        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .calendar, .settings])
         bridge.notePointer(inside: true)
         XCTAssertTrue(bridge.holdsDrawer)
         bridge.notePointer(inside: false)
@@ -200,7 +256,7 @@ final class IslandHoverUnpinTests: XCTestCase {
         XCTAssertFalse(bridge.unpin(.settings))
         XCTAssertFalse(bridge.unpin(.vocab))
         XCTAssertFalse(bridge.holdsDrawer, "Nothing changed, nothing to hold")
-        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .settings])
+        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .calendar, .settings])
     }
 
     func testRemovingTheLiftedToolsOrderIsRefusedDuringADrag() {
@@ -226,7 +282,7 @@ final class IslandHoverUnpinTests: XCTestCase {
 
     func testClickingAMoreRowAddsItBeforeSettingsAndHoldsTheDrawer() {
         click(point(row: 2, column: 0))
-        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .vocab, .settings])
+        XCTAssertEqual(store.slots, [.inputLang, .notes, .monitor, .calendar, .vocab, .settings])
         XCTAssertFalse(store.unpinnedTools.contains(.vocab), "It leaves More at once")
         XCTAssertEqual(HoverLayoutStore(defaults: defaults).slots, store.slots)
         XCTAssertTrue(bridge.holdsDrawer, "The grid and the section changed size under the pointer")

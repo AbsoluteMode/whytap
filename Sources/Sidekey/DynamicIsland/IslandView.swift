@@ -1261,11 +1261,15 @@ struct IslandView: View {
                                 && !(hoverPanelMode == .calendar && appState.calendarHoverConnectionActive),
                             onDismiss: dismissHoverMenu
                         ))
-                        // After removing or adding a tool, a click outside ends the hold.
+                        // After removing or adding a tool, a click outside or Escape
+                        // closes the drawer (dismissals -> dismissHoverMenu). Escape
+                        // typed into another Whytap window still reaches it.
                         .background(IslandHoverMenuDismissObserver(
                             enabled: hoverHitBridge.editHold.holdsDrawer && !hoverHitBridge.showsToolMenu,
-                            onDismiss: { hoverHitBridge.noteOutsideClick() }
+                            consumesEscapeElsewhere: false,
+                            onDismiss: { hoverHitBridge.dismissAfterEdit() }
                         ))
+                        .onReceive(hoverHitBridge.dismissals) { dismissHoverMenu() }
                         // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
                         // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
                         .islandHoverGlassSurface()

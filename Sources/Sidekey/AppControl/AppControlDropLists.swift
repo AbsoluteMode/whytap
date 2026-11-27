@@ -1,20 +1,23 @@
 import Foundation
 import WhytapCaseKit
 
-/// Adds entries to Drop's hand-filled lists for the application controls,
-/// each through the store and checks the app itself uses:
-/// - Vocab (`vocab_add`): `VocabularyCache.add`, the island editor's rules;
-///   words dictation should spell right.
-/// - Filler (`filler_add`): `FillerTermsStore.add`, the Filler editor's rules;
-///   words Drop removes from a take.
+/// Adds entries to and removes them from Drop's hand-filled lists for the
+/// application controls, each through the store and checks the app itself
+/// uses:
+/// - Vocab (`vocab_add`, `vocab_remove`): `VocabularyCache.add` / `remove`,
+///   the island editor's rules; words dictation should spell right.
+/// - Filler (`filler_add`, `filler_remove`): `FillerTermsStore.add` /
+///   `remove`, the Filler editor's rules; words Drop removes from a take.
 /// The editors reload from the stores' change notifications and every take
-/// reads the lists again. Additive and retry-safe: an entry already there is
-/// reported with its saved form, never rewritten. No read, no removal.
+/// reads the lists again. Retry-safe: an entry already there is reported
+/// with its saved form, never rewritten, and an entry that is not there is
+/// reported as missing. No read.
 /// External harnesses reach these only through `HarnessAccessGate`.
 // WHY: .project-docs/decisions/2026-11-23-agent-drop-lists.md
+// WHY: .project-docs/decisions/2026-11-27-drop-list-removal-mcp.md
 @MainActor
 struct AppControlDropLists {
-    static let operations: Set<String> = ["vocab_add", "filler_add"]
+    static let operations: Set<String> = ["vocab_add", "filler_add", "vocab_remove", "filler_remove"]
     static let maxBatch = 20
 
     let vocabulary: () -> VocabularyCache
@@ -33,7 +36,48 @@ struct AppControlDropLists {
         guard Set(args.keys) == ["terms"], let items = args["terms"]?.array, (1...Self.maxBatch).contains(items.count) else {
             return .failure("invalid_arguments", "Pass terms: 1–\(Self.maxBatch) entries.")
         }
-        return addTerms(items, list: operation == "vocab_add" ? "Vocab" : "Filler")
+        let list = operation.hasPrefix("vocab") ? "Vocab" : "Filler"
+        return operation.hasSuffix("_remove") ? removeTerms(items, list: list) : addTerms(items, list: list)
+    }
+
+    /// Removes the named entries, matched as the editors match them: without
+    /// surrounding spaces and in any letter case. An entry that is not in
+    /// the list is `missing`; it changes nothing and is not an error.
+    private func removeTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
+        let vocab = list == "Vocab"
+        var remaining = vocab ? vocabulary().terms : fillers().terms()
+        var rows: [Row] = []
+        // Check the whole batch first: one invalid term removes nothing.
+        for item in items {
+            guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
+            let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { return Self.rejected(term, "is empty", change: "removed") }
+            guard Self.oneLine(term) else { return Self.rejected(term, "is not one line", change: "removed") }
+            let same = { (other: String) in other.caseInsensitiveCompare(term) == .orderedSame }
+            // Named twice in one request: one row.
+            guard !rows.contains(where: { same($0.term) || same($0.saved) }) else { continue }
+            if let saved = remaining.first(where: same) {
+                remaining.removeAll(where: same)
+                rows.append(Row(term: term, result: "removed", saved: saved))
+            } else {
+                rows.append(Row(term: term, result: "missing", saved: term))
+            }
+        }
+        let removed = rows.filter { $0.result == "removed" }
+        if !removed.isEmpty, let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
+            return .failure("access_denied", "The user has turned this tool's access to Whytap off. Do not retry.")
+        }
+        for row in removed {
+            if vocab { vocabulary().remove(row.saved) } else { fillers().remove(row.saved) }
+        }
+        // Confirm from the saved list, not from the request.
+        let saved = vocab ? vocabulary().terms : fillers().terms()
+        guard removed.allSatisfy({ row in !saved.contains { $0.caseInsensitiveCompare(row.saved) == .orderedSame } }) else {
+            return .failure("unconfirmed", "The saved \(list) still contains an entry; nothing is confirmed. Retry.")
+        }
+        return .success(.object([
+            "terms": .array(rows.map { .object(["term": .string($0.saved), "result": .string($0.result)]) })
+        ]))
     }
 
     private func addTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
@@ -103,8 +147,8 @@ struct AppControlDropLists {
         }
     }
 
-    private static func rejected(_ entry: String, _ reason: String) -> AppControlResponse {
+    private static func rejected(_ entry: String, _ reason: String, change: String = "added") -> AppControlResponse {
         let shown = entry.count > 60 ? String(entry.prefix(60)) + "…" : entry
-        return .failure("invalid_term", "\"\(shown)\" \(reason). Nothing was added.")
+        return .failure("invalid_term", "\"\(shown)\" \(reason). Nothing was \(change).")
     }
 }

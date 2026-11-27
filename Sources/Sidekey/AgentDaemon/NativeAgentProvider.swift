@@ -23,7 +23,7 @@ final class NativeAgentProvider: CLIProvider {
     init(keys: ProviderKeyStore = ProviderKeyStore(), http: NativeAgentHTTP = NativeAgentHTTP(),
          workspace: @escaping () throws -> URL = AgentDaemonWorkingDirectory.ensure,
          appControl: @escaping @MainActor () -> NativeAgentAppControl.Handler? = { NativeAgentAppControl.installed },
-         sources: @escaping @MainActor () -> AgentSourceCatalog? = { NativeAgentSources.installed?() },
+         sources: @escaping @MainActor () -> AgentSourceCatalog? = { NativeAgentSources.offered() },
          usageSink: @escaping (AIUsageEvent) -> Void = AIUsageRecorder.record,
          diagnosticsSink: @escaping (NativeAgentDiagnostics.Event) -> Void = NativeAgentDiagnostics.record,
          reasoningRefusals: SmartReasoningRefusals = NativeAgentEffort.refusals) {

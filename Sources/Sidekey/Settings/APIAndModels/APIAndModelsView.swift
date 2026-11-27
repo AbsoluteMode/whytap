@@ -768,7 +768,7 @@ struct ProviderKindIcon: View {
         self.size = size
     }
 
-    /// A key tile outside the model providers (Tavily web search) draws its bundled mark the same way.
+    /// A mark outside the model providers draws its bundled asset the same way.
     init(assetName: String, size: CGFloat = 16) {
         self.assetName = assetName
         systemName = "globe"

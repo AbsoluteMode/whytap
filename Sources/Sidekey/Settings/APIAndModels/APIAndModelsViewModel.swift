@@ -193,8 +193,6 @@ final class APIAndModelsViewModel: ObservableObject {
     private let keys: ProviderKeyStore
     private let agentSettings: AgentSettingsStore
 
-    func makeTavilySettings() -> TavilySettings { TavilySettings(keys: keys) }
-
     /// Keys & models → Models → Subtitles: the engine, kept even before its key exists.
     func selectSubtitlesEngine(_ engine: SubtitleAudioTranslate.Engine) {
         subtitleDefaults.set(engine.rawValue, forKey: SubtitleAudioTranslate.engineChoiceKey)
@@ -275,9 +273,6 @@ final class APIAndModelsViewModel: ObservableObject {
         // publisher), so opening the window right after a write sees it.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
             .sink { [weak self] _ in Self.onMain { self?.defaultsChanged() } }
-            .store(in: &observers)
-        NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
-            .sink { [weak self] _ in Self.onMain { self?.tavilyKeyChanged() } }
             .store(in: &observers)
     }
 
@@ -1120,12 +1115,6 @@ final class APIAndModelsViewModel: ObservableObject {
         }
         pendingDefaultsRecompute = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.defaultsDebounce, execute: work)
-    }
-
-    /// Saved or removed locally or by Settings Sync: immediate while shown.
-    private func tavilyKeyChanged() {
-        guard isPresented else { return }
-        recompute()
     }
 
     private func cancelPendingDefaultsRecompute() {

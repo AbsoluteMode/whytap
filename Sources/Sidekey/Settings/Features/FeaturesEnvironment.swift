@@ -27,8 +27,8 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
-    /// The switches of the features that have one. The Agent's connects the
-    /// native Agent and returns why it did not turn on.
+    /// The switches of the features that have one. The Agent's turns the
+    /// chosen harness on and returns why it did not turn on.
     var setAgent: @MainActor (Bool) async -> String?
     var setMeetings: (Bool) -> Void
     var setGoogle: (Bool) -> Void

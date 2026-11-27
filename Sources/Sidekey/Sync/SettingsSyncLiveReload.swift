@@ -8,13 +8,8 @@ import Foundation
 @MainActor
 enum SettingsSyncLiveReload {
     static func reload(items: Set<String>, defaults: UserDefaults = .standard) {
-        // The Tavily key decides the Agent's search and the Models → Search row.
-        if items.compactMap(SettingsSyncItem.secretAccount).contains(TavilySearch.keychainAccount) {
-            NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
-        }
         let keys = Set(items.compactMap(SettingsSyncItem.preferenceKey))
         guard !keys.isEmpty else { return }
-        if keys.contains(AgentSettingsStore.webSearchChoiceKey) { AgentSettingsStore.shared.reloadWebSearchChoice() }
         // A synced harness on a Mac without that CLI says "not installed" at the turn; never the other CLI.
         if keys.contains(AgentProviderStore.key) { AgentProviderStore.shared.reload() }
         if keys.contains(ConfigBackupRegistry.aiRoutingKey) { AIRoutingStore.shared.reloadFromDefaults() }

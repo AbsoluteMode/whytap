@@ -81,7 +81,7 @@ final class CodingToolsRegressionTests: XCTestCase {
             "whytap", command: helper.path, args: ["mcp"], settings: ["enabled": false])
         let connector = CodexCaseConnector(home: root, runner: runner, reader: runner, locate: { helper })
         let setup = CaseClientSetup(helperURL: helper, binDir: root.appendingPathComponent("bin"),
-                                    flavorName: "dev", connectors: [.codex: connector], builtInAgentAvailable: { false })
+                                    flavorName: "dev", connectors: [.codex: connector])
         let store = HarnessAccessStore(persistence: nil)
         let tools = CodingToolsAccess(store: { store }, probe: .live(setup: setup))
         let client = try XCTUnwrap(CodingToolsAccess.harnessClient(.codex))
@@ -104,7 +104,7 @@ final class CodingToolsRegressionTests: XCTestCase {
         let connector = ClaudeCodeCaseConnector(home: root, socketPath: root.appendingPathComponent("sock").path,
                                                runner: runner, locate: { helper })
         let setup = CaseClientSetup(helperURL: helper, binDir: root.appendingPathComponent("bin"),
-                                    flavorName: "dev", connectors: [.claudeCode: connector], builtInAgentAvailable: { false })
+                                    flavorName: "dev", connectors: [.claudeCode: connector])
         let config = root.appendingPathComponent(".claude.json")
         for contents in [#"{"mcpServers":{"whytap":null}}"#, #"{"mcpServers":{"whytap":{}}}"#] {
             let original = Data(contents.utf8)

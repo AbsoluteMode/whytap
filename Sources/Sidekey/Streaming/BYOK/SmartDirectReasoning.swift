@@ -7,7 +7,6 @@ import Foundation
 /// with the field goes again without it. OpenRouter keeps its catalog policy
 /// (`OpenRouterReasoningPolicy`); custom servers, translation and meetings get
 /// nothing from here. The model and provider are never changed.
-/// The built-in Agent reads the same tables (`NativeAgentEffort`).
 // WHY: .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
 // WHY: .project-docs/decisions/2026-11-24-agent-minimal-reasoning.md
 enum SmartDirectReasoning {
@@ -21,10 +20,33 @@ enum SmartDirectReasoning {
     ///   o-series model not listed here is asked for `low`, which all of them
     ///   take).
     /// GPT-4.1 and GPT-4o refuse the argument; chat snapshots, pro models and
-    /// any other generation get none, as for the Agent. Families match by
+    /// any other generation get none. Families match by
     /// prefix: a variant (`gpt-5.1-codex`) gets its family's level.
+    /// Families on Anthropic's effort page (checked 2026-11-23): Fable 5.x,
+    /// Mythos 5.x and Preview, Opus 5.x and 4.5–4.8, Sonnet 5.x and 4.6,
+    /// Haiku 5.5. Aliases and dated IDs share the prefix.
+    static func anthropicSupports(_ model: String) -> Bool {
+        let id = model.lowercased()
+        let families = ["claude-fable-5", "claude-mythos-5", "claude-mythos-preview", "claude-opus-5",
+                        "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
+                        "claude-sonnet-5", "claude-sonnet-4-6", "claude-haiku-5-5"]
+        return families.contains { id == $0 || id.hasPrefix($0 + "-") }
+    }
+
+    /// OpenAI reasoning models take `reasoning.effort`; current ones accept
+    /// `low` (some refuse only `none` or `minimal`). Pro models may take only
+    /// `high`, so they get no parameter. A fine-tuned `ft:` ID is judged by
+    /// its base model.
+    static func openAIReasoning(_ model: String) -> Bool {
+        var id = model.lowercased()
+        if id.hasPrefix("ft:") { id = String(id.dropFirst(3).split(separator: ":").first ?? "") }
+        let family = ["gpt-5", "gpt-6", "o1", "o3", "o4"].contains { id == $0 || id.hasPrefix($0 + "-") || id.hasPrefix($0 + ".") }
+        let excluded = ["-chat", "-pro", "o1-mini", "o1-preview"].contains { id.contains($0) }
+        return family && !excluded
+    }
+
     static func openAIEffort(model: String) -> String? {
-        guard NativeAgentEffort.openAIReasoning(model) else { return nil }
+        guard openAIReasoning(model) else { return nil }
         let id = openAIBase(model)
         let off = ["gpt-5.1", "gpt-5.2", "gpt-5.4", "gpt-5.5", "gpt-5.6", "gpt-6-luna", "gpt-6-sol", "gpt-6.1-terra"]
         if off.contains(where: { id == $0 || id.hasPrefix($0 + "-") }) { return "none" }
@@ -45,7 +67,7 @@ enum SmartDirectReasoning {
 
     /// Fields for direct Anthropic Messages, or `nil` to send none.
     /// - `output_config.effort: low` on the models of Anthropic's effort page
-    ///   (the list the Agent uses).
+    ///   (`anthropicSupports`).
     /// - Thinking off where the model has a setting for it: Claude Sonnet 5.5
     ///   takes `between_tools` (it refuses `disabled`); Claude Haiku 5.5 and
     ///   Claude Sonnet 5 take `disabled`.
@@ -56,7 +78,7 @@ enum SmartDirectReasoning {
     ///   unless asked, so they get effort only. Older models get nothing.
     static func anthropic(model: String) -> Anthropic? {
         let id = model.lowercased()
-        var fields = Anthropic(effort: NativeAgentEffort.anthropicSupports(model) ? "low" : nil, thinking: nil)
+        var fields = Anthropic(effort: anthropicSupports(model) ? "low" : nil, thinking: nil)
         if isFamily(id, "claude-sonnet-5-5") {
             fields.thinking = "between_tools"
         } else if isFamily(id, "claude-haiku-5-5") || isRelease(id, "claude-sonnet-5") {

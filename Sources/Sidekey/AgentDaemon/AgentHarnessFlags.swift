@@ -96,6 +96,6 @@ enum AgentHarnessFlags {
     /// The running app's helper started as `whytap mcp`, or nil outside a
     /// packaged app (tests, `swift run`).
     static var bundledWhytapMCPCommand: [String]? {
-        CaseBuiltInAgentAccess.bundledHelperURL.map { [$0.path, "mcp"] }
+        WhytapBundledHelper.bundledHelperURL.map { [$0.path, "mcp"] }
     }
 }

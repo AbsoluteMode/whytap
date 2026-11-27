@@ -243,7 +243,6 @@ final class SwitchFeatureScreensTests: XCTestCase {
         XCTAssertEqual(toggled, [true, false])
         XCTAssertEqual(store.activeProvider, .codex, "turning the Agent off keeps the harness")
         XCTAssertTrue(AgentOtherSection.isOn(enabled: true, activeProvider: .claude))
-        XCTAssertFalse(AgentOtherSection.isOn(enabled: true, activeProvider: .native), "the native agent no longer counts")
         XCTAssertFalse(AgentOtherSection.isOn(enabled: false, activeProvider: .codex))
     }
 }

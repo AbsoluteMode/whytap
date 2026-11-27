@@ -70,19 +70,12 @@ final class OnboardingPreviewTests: XCTestCase {
         await model.useLLMKey("sk-ant-0123456789abcdef", provider: .anthropic)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
         model.next()
-        XCTAssertEqual(model.step, .keyboard, "Anthropic searches the web itself: no Tavily step")
+        XCTAssertEqual(model.step, .keyboard)
         model.back()
         XCTAssertEqual(model.step, .llmKey)
         model.useOwnServer(.languageModel)
         await model.saveServer(OnboardingServerDraft(address: "localhost:1234/v1", model: "qwen3"), on: .languageModel)
         XCTAssertTrue(model.outcome(.llmKey).isDone)
-        model.next()
-        XCTAssertEqual(model.step, .search, "a server's model has no known search")
-        await model.useSearchKey("tvly-bad-0123456789abcdef")
-        XCTAssertEqual(model.keyProblems[.search], .refused, "the stubbed Tavily check refuses it")
-        await model.useSearchKey("tvly-preview-0123456789abcdef")
-        XCTAssertTrue(model.outcome(.search).isDone, "the stubbed Tavily check passes without a network request")
-
         model.next()
         // Each access step: Allow, back without the switch (Not on yet),
         // Allow again, allowed (REV 57).
@@ -196,11 +189,6 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(OnboardingKeyProvider.detect("sk-proj-0123456789abcdef", among: llm)?.kind, .provider(.openAI))
         XCTAssertNil(OnboardingKeyProvider.detect(elevenLabs, among: llm), "a speech key is not a language model")
         XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-0123", among: llm), "too short to be a key")
-
-        let search = [OnboardingKeyProvider.tavily]
-        XCTAssertEqual(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: search)?.kind, .tavily)
-        XCTAssertNil(OnboardingKeyProvider.detect("sk-ant-api03-0123456789abcdef", among: search), "only Tavily's own format")
-        XCTAssertNil(OnboardingKeyProvider.detect("tvly-dev-0123456789abcdef", among: llm), "a Tavily key is not a language model")
     }
 
     /// The owner typed in the Russian layout and saw
@@ -573,7 +561,6 @@ final class OnboardingPreviewTests: XCTestCase {
         let server = OnboardingServerDraft(address: "dsfadfdas", model: "dafdasfdasf")
         await model.saveServer(server, on: .languageModel)
         XCTAssertEqual(model.accepted[.llmKey]?.route, .server)
-        XCTAssertTrue(model.steps.contains(.search))
         let serverAccount = llmRoute(model)
 
         // The owner's screenshot: Anthropic after the server.
@@ -582,7 +569,6 @@ final class OnboardingPreviewTests: XCTestCase {
         XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .idle,
                        "no \"Anthropic · dsfadfdas · dafdasfdasf\": the server's line is the server's")
         XCTAssertEqual(llmRoute(model), serverAccount, "the server still runs the LLM")
-        XCTAssertTrue(model.steps.contains(.search), "the Tavily step goes only after a provider's key")
         XCTAssertEqual(model.outcome(.llmKey, for: .server), .done("dsfadfdas · dafdasfdasf"))
 
         model.useOwnServer(.languageModel)
@@ -591,7 +577,6 @@ final class OnboardingPreviewTests: XCTestCase {
 
         await model.useLLMKey("sk-ant-good-0123456789abcdef", provider: .anthropic)
         XCTAssertEqual(llmRoute(model), account(.anthropic))
-        XCTAssertFalse(model.steps.contains(.search))
         XCTAssertEqual(model.outcome(.llmKey, for: .server), .idle)
     }
 
@@ -607,12 +592,10 @@ final class OnboardingPreviewTests: XCTestCase {
         guard case .failed = model.outcome(.llmKey, for: .server) else { return XCTFail("the server's own failure") }
         XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .done("claude-sonnet-5-5"))
         XCTAssertEqual(llmRoute(model), account(.anthropic))
-        XCTAssertFalse(model.steps.contains(.search))
 
         await model.saveServer(OnboardingServerDraft(address: "localhost:11434/v1", model: "qwen3:8b"), on: .languageModel)
         XCTAssertEqual(model.accepted[.llmKey]?.route, .server)
         XCTAssertNotEqual(llmRoute(model), account(.anthropic))
-        XCTAssertTrue(model.steps.contains(.search))
         XCTAssertEqual(model.outcome(.llmKey, for: .provider(.anthropic)), .idle)
     }
 

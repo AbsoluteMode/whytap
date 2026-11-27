@@ -3,18 +3,9 @@ import Foundation
 /// Per-provider model / reasoning / speed settings chosen in Settings,
 /// persisted in UserDefaults. Codex models and controls come from its registry;
 /// the same resolution feeds both the Settings UI and per-turn CLI flags.
-/// The Agent's web search pick in Keys & models → Models → Search.
-enum AgentWebSearchChoice: String, Sendable {
-    /// The Agent model's built-in search; Tavily for a model without it.
-    case auto
-    /// Tavily, when its key exists; otherwise as `.auto`.
-    case tavily
-}
-
 @MainActor
 final class AgentSettingsStore: ObservableObject {
     static let shared = AgentSettingsStore()
-    static let webSearchChoiceKey = "agent.native.webSearch"
     /// Claude's reasoning when the user has not picked one and the model takes it.
     static let defaultEffort = "low"
     /// Claude Code's levels, used only until its catalog has loaded; then the
@@ -30,10 +21,6 @@ final class AgentSettingsStore: ObservableObject {
     /// agents used, so the user's choice carries over unchanged.
     /// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
     @Published var allowActions: Bool { didSet { defaults.set(allowActions, forKey: Keys.allowActions) } }
-    /// Keys & models → Models → Search. `.auto` (default): the Agent model's
-    /// built-in search, else Tavily. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-    @Published var webSearchChoice: AgentWebSearchChoice { didSet { defaults.set(webSearchChoice.rawValue, forKey: Keys.webSearchChoice) } }
-
     private enum Keys {
         static let claudeModel = "agent.claude.model"
         static let claudeEffort = "agent.claude.effort"
@@ -41,7 +28,6 @@ final class AgentSettingsStore: ObservableObject {
         static let codexEffort = "agent.codex.effort"
         static let codexServiceTier = "agent.codex.serviceTier"
         static let allowActions = "agent.opencode.allowActions"
-        static let webSearchChoice = AgentSettingsStore.webSearchChoiceKey
     }
 
     @Published private(set) var claudeCatalog: [ClaudeModelOption] = []
@@ -55,24 +41,15 @@ final class AgentSettingsStore: ObservableObject {
     private var catalogUpdatedAt: Date?
     private var codexConfig: CodexConfigSnapshot
     private let defaults: UserDefaults
-    /// `nil` means the shared store, looked up when the model is read.
-    private let injectedRouting: AIRoutingStore?
-    private var routing: AIRoutingStore { injectedRouting ?? .shared }
-    private let injectedCatalogs: ModelCatalogStore?
-    private var catalogs: ModelCatalogStore { injectedCatalogs ?? .shared }
     /// The running app's `whytap mcp` helper for Claude Code and Codex turns.
     private let whytapMCPCommand: () -> [String]?
 
-    init(defaults: UserDefaults = .standard, codexConfig: CodexConfigSnapshot = CodexConfigReader().read(), routing: AIRoutingStore? = nil,
-         catalogs: ModelCatalogStore? = nil,
+    init(defaults: UserDefaults = .standard, codexConfig: CodexConfigSnapshot = CodexConfigReader().read(),
          whytapMCPCommand: @escaping () -> [String]? = { AgentHarnessFlags.bundledWhytapMCPCommand }) {
         self.codexConfig = codexConfig
         self.defaults = defaults
-        self.injectedRouting = routing
-        self.injectedCatalogs = catalogs
         self.whytapMCPCommand = whytapMCPCommand
         self.allowActions = defaults.object(forKey: Keys.allowActions) as? Bool ?? true
-        self.webSearchChoice = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
         // Property observers do not fire on initial assignment in init, so this
         // load does not write back. A stored model is kept exactly as saved.
         self.claudeModel = defaults.string(forKey: Keys.claudeModel)
@@ -80,12 +57,6 @@ final class AgentSettingsStore: ObservableObject {
         self.codexModel = defaults.string(forKey: Keys.codexModel)
         self.codexEffort = defaults.string(forKey: Keys.codexEffort)
         self.codexServiceTier = defaults.string(forKey: Keys.codexServiceTier)
-    }
-
-    /// A choice that arrived by settings sync (SettingsSyncLiveReload).
-    func reloadWebSearchChoice() {
-        let stored = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
-        if stored != webSearchChoice { webSearchChoice = stored }
     }
 
     /// Resolve the overrides for one provider into the run-time options struct.
@@ -108,79 +79,6 @@ final class AgentSettingsStore: ObservableObject {
                 allowActions: allowActions,
                 whytapMCPCommand: whytapMCPCommand()
             )
-        case .native:
-            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: allowActions,
-                                   openCodeModelSpec: selectedOpenCodeModelSpec,
-                                   openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
-                                   openRouterProvider: selectedOpenCodeProvider == .openRouter
-                                       ? routing.route(for: .agent)?.provider : nil,
-                                   // Read from defaults: a synced choice applies at once.
-                                   preferTavilySearch: defaults.string(forKey: Keys.webSearchChoice) == AgentWebSearchChoice.tavily.rawValue,
-                                   webSearchSupport: selectedWebSearchSupport,
-                                   lowEffortSupport: selectedCatalogEntry?.supportsLowEffort,
-                                   openRouterReasoning: selectedOpenCodeProvider == .openRouter
-                                       ? selectedCatalogEntry?.reasoning : nil,
-                                   outputTokenLimit: selectedCatalogEntry?.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil })
-        case .opencode:
-            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: allowActions,
-                                   openCodeModelSpec: selectedOpenCodeModelSpec,
-                                   openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
-                                   caseMCPCommand: CaseBuiltInAgentAccess.currentMCPCommand(),
-                                   screenMCPCommand: CaseBuiltInAgentAccess.bundledHelperURL.map {
-                                       [$0.path, "app", "screen-mcp"]
-                                   },
-                                   openRouterProvider: selectedOpenCodeProvider == .openRouter
-                                       ? routing.route(for: .agent)?.provider : nil)
-        }
-    }
-
-    /// The OpenCode provider of the `Agent` route: OpenRouter or Anthropic, or
-    /// `nil` for no route or a route OpenCode cannot run.
-    var selectedOpenCodeProvider: OpenCodeModelProvider? {
-        routing.route(for: .agent).flatMap { OpenCodeModelProvider(account: $0.account) }
-    }
-
-    /// The model OpenCode runs: the `Agent` feature's route when it is on
-    /// OpenRouter or Anthropic, else none. The old `agent.opencode.model`
-    /// preference is only read by the routing migration.
-    var selectedOpenCodeModel: String? {
-        guard let route = routing.route(for: .agent), selectedOpenCodeProvider != nil else { return nil }
-        let value = OpenCodeEnvironment.normalizeModel(route.model)
-        guard !value.isEmpty, !value.contains(where: \.isWhitespace) else { return nil }
-        return value
-    }
-
-    /// `"<provider> · <model id>"` for the agent route, or `nil` without a
-    /// usable model. New agent providers add a case to `OpenCodeModelProvider`.
-    var selectedOpenCodeModelLabel: String? {
-        guard let route = routing.route(for: .agent), let model = selectedOpenCodeModel else { return nil }
-        return "\(route.account.kind.displayName) · \(model)"
-    }
-
-    /// The selected model's limits from the route provider's catalog snapshot;
-    /// `nil` when the catalog does not give a context length.
-    var selectedOpenCodeModelSpec: OpenCodeModelSpec? {
-        guard let id = selectedOpenCodeModel, let provider = selectedOpenCodeProvider,
-              let entry = catalogs.snapshot(for: provider.account)?.models.first(where: {
-                  OpenCodeEnvironment.normalizeModel($0.id) == id
-              }),
-              let context = entry.contextLength else { return nil }
-        return OpenCodeModelSpec(toolCall: entry.supportsTools ?? true,
-                                 reasoning: entry.supportsReasoning ?? false,
-                                 contextLimit: context,
-                                 outputLimit: entry.maxOutputTokens ?? 16_384)
-    }
-
-    /// The catalog's built-in web search flag for the Agent model, independent
-    /// of whether the catalog gives token limits (the Search row and the next
-    /// turn must agree). WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-    var selectedWebSearchSupport: Bool? { selectedCatalogEntry?.supportsWebSearch }
-
-    /// The Agent model's entry in its route provider's catalog snapshot.
-    var selectedCatalogEntry: CatalogModel? {
-        guard let id = selectedOpenCodeModel, let provider = selectedOpenCodeProvider else { return nil }
-        return catalogs.snapshot(for: provider.account)?.models.first {
-            OpenCodeEnvironment.normalizeModel($0.id) == id
         }
     }
 

@@ -15,7 +15,7 @@ final class AgentProviderStore: ObservableObject {
     /// AppDelegate so harness selection and turn dispatch see the same state.
     static let shared = AgentProviderStore()
 
-    static let harnesses: [CLIProviderID] = [.claude, .codex]
+    static let harnesses: [CLIProviderID] = CLIProviderID.allCases
 
     /// The harness every turn dispatches to. Written only by an explicit,
     /// probe-backed pick. WHY: docs/decisions/2026-08-02-onboarding-connect-is-probe-backed.md
@@ -30,6 +30,9 @@ final class AgentProviderStore: ObservableObject {
     /// Earlier builds' key; read-only here.
     static let legacyKey = "agent.activeProvider"
     private static let legacyNeedsSetupKey = "agent.opencode.needsSetup"
+    /// What earlier builds stored under `legacyKey`: the in-app agent
+    /// (`native`, before it `opencode`) or Claude Code / Codex.
+    private static let legacyValues: Set<String> = ["native", "opencode", "claude", "codex"]
     /// Set at the first harness pick: the one-time ask never returns.
     private static let chosenKey = "agent.harness.chosen"
 
@@ -38,13 +41,13 @@ final class AgentProviderStore: ObservableObject {
         let active = Self.storedHarness(defaults)
         if active == nil, defaults.object(forKey: Self.key) != nil { defaults.removeObject(forKey: Self.key) }
         self.activeProvider = active
-        let hadAgent = defaults.string(forKey: Self.legacyKey).flatMap(CLIProviderID.init) != nil
+        let hadAgent = defaults.string(forKey: Self.legacyKey).map(Self.legacyValues.contains) == true
             || defaults.bool(forKey: Self.legacyNeedsSetupKey)
         self.needsHarnessChoice = active == nil && hadAgent && !defaults.bool(forKey: Self.chosenKey)
     }
 
     private static func storedHarness(_ defaults: UserDefaults) -> CLIProviderID? {
-        defaults.string(forKey: key).flatMap(CLIProviderID.init).flatMap { harnesses.contains($0) ? $0 : nil }
+        defaults.string(forKey: key).flatMap(CLIProviderID.init)
     }
 
     func markConnected(_ id: CLIProviderID) {

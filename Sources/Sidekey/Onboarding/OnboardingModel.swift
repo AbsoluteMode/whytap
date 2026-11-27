@@ -47,8 +47,6 @@ final class OnboardingModel: ObservableObject {
     let demo = OnboardingDropDemo()
     /// The key card's store of keys and routes; built when the speech page shows.
     private(set) lazy var models: APIAndModelsViewModel = injectedModels ?? APIAndModelsViewModel()
-    /// The Tavily search key, saved the way Settings -> API keys saves it.
-    private(set) lazy var tavily: TavilySettings = models.makeTavilySettings()
     private let injectedModels: APIAndModelsViewModel?
     /// The user chose Set up later on the speech page.
     private var speechSkipped = false

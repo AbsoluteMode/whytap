@@ -181,7 +181,7 @@ enum AIProviderKind: String, CaseIterable, Codable, Sendable {
     case elevenLabs
     case openRouter
     case openAI
-    /// Anthropic's own Messages API and OpenCode's `anthropic` provider.
+    /// Anthropic's own Messages API.
     case anthropic
     case openAICompatible
     /// Speech recognition by a model downloaded to this Mac: no key, no network.

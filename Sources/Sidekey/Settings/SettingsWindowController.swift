@@ -11,7 +11,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private let permissionsViewModel: PermissionsSettingsViewModel
     private let apiAndModelsViewModel: APIAndModelsViewModel
     let selection = SettingsWindowSelection()
-    private let agentModeViewModel: AgentModeViewModel
     private var toolboxDeps = ToolboxDeps()
     /// Deps threaded into the Other tab via `configureOtherDeps(...)`.
     /// Capability seeds are live getters so `SettingsOtherView` reads the
@@ -44,24 +43,6 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
 
-        let store = AgentProviderStore.shared
-        let agentModeViewModel = AgentModeViewModel(
-            store: store,
-            probe: { id in
-                switch id {
-                case .claude:
-                    return await ClaudeCodeProvider().probe()
-                case .codex:
-                    return await CodexProvider().probe()
-                case .opencode, .native:
-                    return await NativeAgentProvider().probe()
-                }
-            },
-            notify: { notice in
-                Self.postLocalNotification(for: notice)
-            }
-        )
-        self.agentModeViewModel = agentModeViewModel
 
         selection.notesControllerProvider = { notesControllerProvider() }
 
@@ -155,76 +136,11 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         selection.ensureNotesController()?.selectMeeting(id: id)
     }
 
-    private static func postLocalNotification(for notice: AgentConnectNotice) {
-        let content = UNMutableNotificationContent()
-        switch notice {
-        case .connected(let id):
-            content.title = "\(Self.label(id)) connected"
-            content.body = "Your agent is active. Right-Cmd to invoke."
-        case .notInstalled(let id):
-            content.title = "\(Self.label(id)) not found"
-            content.body = Self.installHint(id)
-        case .notLoggedIn(let id):
-            content.title = "\(Self.label(id)) not logged in"
-            content.body = Self.loginHint(id)
-        case .billing(let id):
-            content.title = "\(Self.label(id)) billing issue"
-            content.body = id == .claude
-                ? "Your Claude credit is exhausted. Top up or connect your own API key."
-                : "Your OpenAI credit is exhausted. Check your ChatGPT plan or API billing."
-        case .failed(let id, let message):
-            content.title = "\(Self.label(id)) connection failed"
-            content.body = message
-        }
-        let request = UNNotificationRequest(
-            identifier: "agent.connect.\(UUID().uuidString)",
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request, withCompletionHandler: nil)
-    }
-
-    private static func label(_ id: CLIProviderID) -> String {
-        switch id {
-        case .claude: return "Claude Code"
-        case .codex: return "Codex"
-        case .opencode: return "OpenCode"
-        case .native: return "Whytap Agent"
-        }
-    }
-
-    private static func installHint(_ id: CLIProviderID) -> String {
-        switch id {
-        case .claude:
-            return "Install Claude Code, sign in, then press Connect again. See docs.claude.com/claude-code."
-        case .codex:
-            return "Install Codex, run `codex login`, then press Connect again. See developers.openai.com/codex."
-        case .native:
-            return "Whytap Agent is included in the app. Choose a model in Keys & models."
-        case .opencode:
-            return "Install OpenCode, then turn on Agent in Settings → Features → Agent."
-        }
-    }
-
-    private static func loginHint(_ id: CLIProviderID) -> String {
-        switch id {
-        case .claude:
-            return "Open a terminal, run `claude`, log in, then press Connect again."
-        case .codex:
-            return "Open a terminal, run `codex login`, sign in, then press Connect again."
-        case .native:
-            return "Add the selected provider’s key in Settings → Keys & models, then connect."
-        case .opencode:
-            return "Add your OpenRouter key in Settings → Keys & models, then press Connect."
-        }
-    }
-
     private func makeRootView() -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissionsViewModel,
             apiAndModelsViewModel: apiAndModelsViewModel,
             selection: selection,
-            agentModeViewModel: agentModeViewModel,
             toolboxDeps: toolboxDeps,
             agentEnabled: agentEnabled,
             onAgentToggle: onAgentToggle,

@@ -49,7 +49,6 @@ final class HarnessSettingsModel: ObservableObject {
         switch id {
         case .claude: return await ClaudeCodeProvider().probe()
         case .codex: return await CodexProvider().probe()
-        case .opencode, .native: return .notInstalled
         }
     }
 
@@ -57,8 +56,6 @@ final class HarnessSettingsModel: ObservableObject {
         switch id {
         case .claude: return "Claude Code"
         case .codex: return "Codex"
-        case .opencode: return "OpenCode"
-        case .native: return "Whytap Agent"
         }
     }
 
@@ -106,7 +103,6 @@ final class HarnessSettingsModel: ObservableObject {
         switch id {
         case .claude: await refreshClaude(settings)
         case .codex: await refreshCodex(settings)
-        case .opencode, .native: break
         }
     }
 
@@ -125,7 +121,6 @@ final class HarnessSettingsModel: ObservableObject {
             parts.append(settings.selectedCodexOption?.label ?? settings.selectedCodexModel ?? "Default model")
             if let effort = settings.options(for: .codex).effort { parts.append(Self.effortLabel(effort)) }
             if fastModeOn { parts.append("Fast") }
-        case .opencode, .native: break
         }
         return parts
     }

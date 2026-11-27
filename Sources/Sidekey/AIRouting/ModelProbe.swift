@@ -228,8 +228,8 @@ struct ModelProbe: ModelProbing {
             return await probeAnthropic(route, withTools: withTools)
         case .openAI:
             guard let key else { return .inconclusive(reason: "Key problem") }
-            // The Agent (the only tool-use feature) runs on the Responses API;
-            // newer reasoning models refuse function tools on Chat Completions.
+            // A tool-use check runs on the Responses API: newer reasoning
+            // models refuse function tools on Chat Completions.
             // WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
             if withTools { return await probeOpenAIResponses(route, key: key) }
             url = URL(string: "https://api.openai.com/v1")!
@@ -290,8 +290,8 @@ struct ModelProbe: ModelProbing {
 
     // MARK: - OpenAI Responses
 
-    /// The shape of the Agent's own OpenAI request (`NativeAgentModel`): the
-    /// Responses API with one function tool, nothing stored. Any 2xx passes,
+    /// An OpenAI Responses request with one function tool, nothing stored
+    /// (the shape a tool-using text feature sends). Any 2xx passes,
     /// an `incomplete` answer cut off at `max_output_tokens` included.
     private func probeOpenAIResponses(_ route: ResolvedRoute, key: String) async -> ProbeOutcome {
         let body: [String: Any] = [

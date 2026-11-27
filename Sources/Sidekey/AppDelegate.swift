@@ -2041,7 +2041,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 switch AgentProviderStore.shared.activeProvider {
                 case .claude: return claudeProvider
                 case .codex: return codexProvider
-                case .opencode, .native, nil: return nil
+                case nil: return nil
                 }
             },
             audioTranscriber: BatchAgentAudioTranscriber(batch: agentBatchTranscriber),
@@ -4014,17 +4014,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             source: { [weak self] in self?.meetingsStore },
             open: { [weak self] id in self?.showMeetingNote(id: id) ?? .unavailable }))
         appControlController = controls
-        // The built-in agent uses this same controller in process: one
-        // allowlist, one write lock. Its user is at this Mac, so meetings
-        // need no harness prompt. WHY:
-        // .project-docs/decisions/2026-11-22-native-agent-app-control.md
-        NativeAgentAppControl.installed = { [controls] request in await controls.handle(request) }
-        // Connected sources' read tools for the Agent, gated off until the
-        // owner decides. WHY: .project-docs/decisions/2026-11-26-agent-sources.md,
-        // .project-docs/decisions/2026-11-27-agent-sources-gated.md
-        if AgentSourcesGate.isEnabled {
-            NativeAgentSources.installed = { SourcesController.shared.agentCatalog() }
-        }
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)
@@ -4059,8 +4048,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let broker = CaseBroker(
             service: CaseVaultService.shared,
             resolver: CaseSystemCallerResolver(
-                inspector: inspector,
-                builtInOpenCodePIDs: { CaseBuiltInAgentProcesses.shared.pids }),
+                inspector: inspector),
             approvals: approvals,
             authenticator: LocalCaseAuthenticator(),
             appControl: { [controls] request in await controls.handle(request) },

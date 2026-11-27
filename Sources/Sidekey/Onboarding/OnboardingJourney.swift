@@ -13,8 +13,6 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     case speechKey
     /// Your key: an optional language model key. Its pick sets the shared LLM row.
     case llmKey
-    /// An optional web search for the Agent. Shown only with a language model.
-    case search
     /// Accessibility ("Keyboard control"): the Drop shortcut, the Agent key and paste.
     case keyboard
     /// Microphone: Drop, Agent voice and Meetings.
@@ -35,7 +33,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     /// "Set up later" in the window; this marks the ones that are a real choice.
     var isOptional: Bool {
         switch self {
-        case .llmKey, .search, .screenRecording, .tryDrop: return true
+        case .llmKey, .screenRecording, .tryDrop: return true
         default: return false
         }
     }
@@ -43,7 +41,7 @@ enum OnboardingStep: String, CaseIterable, Equatable {
     /// The four acts of the progress bar: wider gaps separate them.
     var act: OnboardingAct {
         switch self {
-        case .source, .speechKey, .llmKey, .search, .language: return .engine
+        case .source, .speechKey, .llmKey, .language: return .engine
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return .access
         case .tryDrop: return .tryDrop
         case .toolbox, .thanks: return .island
@@ -56,7 +54,6 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         case .source: return "Speech"
         case .speechKey: return "Speech key"
         case .llmKey: return "Language model"
-        case .search: return "Web search"
         case .language: return "Language"
         case .keyboard: return "Keyboard"
         case .microphone: return "Microphone"
@@ -77,7 +74,6 @@ enum OnboardingStep: String, CaseIterable, Equatable {
         // The padlock plays to the end first: the key turns, the shackle opens
         // and settles (the design pass moves on after 1.15 s).
         case .speechKey, .llmKey: return 1.15
-        case .search: return 0.78
         // The access figure plays its click first (the design pass moves on
         // after 1.05 s).
         case .keyboard, .microphone, .inputMonitoring, .screenRecording: return 1.05
@@ -111,8 +107,6 @@ struct OnboardingStart: Equatable {
     var speechReady = false
     /// The shared LLM already has a working route.
     var llmReady = false
-    /// A search for the Agent already works.
-    var searchReady = false
     /// The input language is set (not Auto).
     var languageChosen = false
     var keyboardGranted = false
@@ -131,10 +125,6 @@ struct OnboardingStart: Equatable {
 /// the facts that change which steps are on the way.
 struct OnboardingProgress: Equatable {
     var source: OnboardingSpeechSource?
-    /// The language model runs on the person's own server (Self-hosted on
-    /// the language model step, or set so before the window opened). Such a
-    /// server has no web search of its own, so the Agent's Tavily step shows.
-    var languageModelSelfHosted = false
     /// The Drop shortcut reports that it needs Input Monitoring.
     var needsInputMonitoring = false
     /// Speech is on the way: a working route, or the local model downloading.
@@ -162,11 +152,6 @@ enum OnboardingJourney {
             return !start.onDeviceSupported || progress.source != .onThisMac
         case .llmKey:
             return !start.llmReady
-        case .search:
-            // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-            // Only after Self-hosted: Anthropic, OpenAI and OpenRouter search
-            // the web themselves (the owner, 2026-11-22).
-            return !start.searchReady && progress.languageModelSelfHosted
         case .language:
             return !start.languageChosen
         case .keyboard:
@@ -247,7 +232,7 @@ extension OnboardingJourney {
         return order.enumerated().compactMap { index, step in
             let onTheWay = isOnTheWay(step, start: start, progress: progress)
             // Steps that show only in one case have no segment otherwise.
-            if step == .inputMonitoring || step == .search, !onTheWay { return nil }
+            if step == .inputMonitoring, !onTheWay { return nil }
             let state: OnboardingSegmentState
             if step == current {
                 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -269,7 +254,6 @@ extension OnboardingJourney {
         switch step {
         case .source, .speechKey: return start.speechReady
         case .llmKey: return start.llmReady
-        case .search: return start.searchReady
         case .language: return start.languageChosen
         case .keyboard: return start.keyboardGranted
         case .microphone: return start.microphoneGranted

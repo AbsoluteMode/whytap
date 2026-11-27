@@ -162,7 +162,7 @@ final class IslandAgentFlowStore: ObservableObject {
         },
         agentProviderBrand: @escaping @MainActor () -> TranscriptionProviderBrand? = {
             AgentProviderStore.shared.activeProvider.map {
-                TranscriptionProviderBrand.agent($0, route: AIRoutingStore.shared.route(for: .agent))
+                TranscriptionProviderBrand.agent($0)
             }
         }
     ) {

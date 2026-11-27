@@ -59,7 +59,7 @@ final class APIAndModelsPresentationTests: XCTestCase {
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil },
             onDevice: OnDeviceSpeechReadiness(isReady: { false }),
-            agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs)
+            agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init())
         )
     }
 

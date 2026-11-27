@@ -841,14 +841,13 @@ final class OnboardingTests: XCTestCase {
     func testKeyCardOffersEveryProviderWithItsAPIHintsOffer() {
         let offers = OnboardingKeyOffer.all
         XCTAssertEqual(offers.map(\.target), [.provider(.soniox), .provider(.deepgram), .provider(.elevenLabs),
-                                               .provider(.openRouter), .provider(.openAI), .provider(.anthropic), .tavily],
-                       "Speech first, then language models, then search")
+                                               .provider(.openRouter), .provider(.openAI), .provider(.anthropic)],
+                       "Speech first, then language models")
         func offer(_ target: OnboardingKeyTarget) -> OnboardingKeyOffer? { offers.first { $0.target == target } }
         XCTAssertEqual(offer(.provider(.deepgram))?.short, "$200 credit")
         XCTAssertEqual(offer(.provider(.deepgram))?.url?.host, "deepgram.com")
         XCTAssertEqual(offer(.provider(.elevenLabs))?.short, "10k credits/mo")
         XCTAssertEqual(offer(.provider(.openRouter))?.short, "50/day free")
-        XCTAssertEqual(offer(.tavily)?.short, "1k credits/mo")
         XCTAssertEqual(offer(.provider(.anthropic))?.needsPlan, true, "Claude Max credit needs the plan")
         XCTAssertEqual(offer(.provider(.openAI))?.needsPlan, true, "ChatGPT Pro credit needs the plan")
         XCTAssertNil(offer(.provider(.soniox))?.short, "No offer is invented where API hints list none")
@@ -910,8 +909,7 @@ final class OnboardingTests: XCTestCase {
                                                      locate: { URL(fileURLWithPath: "/usr/local/bin/claude") }),
                 .codex: CodexCaseConnector(home: home, runner: codexRunner, reader: codexRunner,
                                            locate: { URL(fileURLWithPath: "/usr/local/bin/codex") }),
-            ],
-            builtInAgentAvailable: { true })
+            ])
         let tools = OnboardingCodingTools(detect: { await setup.installed(among: OnboardingCodingTools.offered) },
                                           connect: { await setup.connect($0.identity) })
 

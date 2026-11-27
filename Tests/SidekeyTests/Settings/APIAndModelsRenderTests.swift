@@ -63,8 +63,7 @@ final class APIAndModelsRenderTests: XCTestCase {
             routing.setRoute(FeatureRoute(account: .elevenLabs, model: ModelRegistry.elevenLabsRealtimeModel), for: .dropFast)
             let stub = NoNetwork(list: [])
             let catalogs = ModelCatalogStore(fileURL: file, fetcher: stub)
-            let settings = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
-                                              catalogs: catalogs, whytapMCPCommand: { nil })
+            let settings = AgentSettingsStore(defaults: defaults, codexConfig: .init(), whytapMCPCommand: { nil })
             let store = AgentProviderStore(defaults: defaults)
             let harness = HarnessSettingsModel(
                 store: store, settings: settings,
@@ -394,59 +393,6 @@ final class APIAndModelsRenderTests: XCTestCase {
             size: NSSize(width: 360, height: 150),
             to: directory.appendingPathComponent("provider-menu-items.png")
         )
-    }
-
-    func test_render_tavily_api_keys() async throws {
-        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
-            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
-        }
-        let directory = URL(fileURLWithPath: output, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        ProviderBrandIconAsset.clearCacheForTesting()
-        ProviderBrandIconAsset.setResourceDirectoryForTesting(root.appendingPathComponent("Resources/UsefulLinkIcons"))
-        defer {
-            ProviderBrandIconAsset.clearCacheForTesting()
-            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
-        }
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let catalog = directory.appendingPathComponent("tavily-catalog.json")
-        try Data("{}".utf8).write(to: catalog)
-        defer { try? FileManager.default.removeItem(at: catalog) }
-        let routing = AIRoutingStore(defaults: defaults)
-        let box = InMemoryTokenStore.Box()
-        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
-        let offline = NoNetwork(list: [])
-        let vm = APIAndModelsViewModel(routing: routing, keys: keys,
-            catalogs: ModelCatalogStore(fileURL: catalog, fetcher: offline), checks: ModelCheckStore(defaults: defaults),
-            keyStatuses: KeyStatusStore(defaults: defaults), keyChecker: offline, probe: offline, endpoints: offline)
-        for connected in [false, true] {
-            if connected { try keys.save("existing-fixture-key", account: TavilySearch.keychainAccount) }
-            else { try keys.delete(account: TavilySearch.keychainAccount) }
-            for dark in [false, true] {
-                for width in [560.0, 760.0] {
-                    let settings = vm.makeTavilySettings()
-                    XCTAssertEqual(settings.configured, connected, "The moved form uses the same credential account")
-                    if connected { settings.draftKey = "fixture-replacement" }
-                    try await render(ProviderKeyTiles(viewModel: vm, initiallyExpanded: .tavily, tavily: settings)
-                        .padding(18), size: NSSize(width: width, height: 850), dark: dark,
-                        to: directory.appendingPathComponent("tavily-keys-\(connected ? "connected" : "new")-\(dark ? "dark" : "light")-\(Int(width)).png"),
-                        inspect: { window in
-                            settings.draftKey = "fixture-draft"
-                            let unrelated = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
-                            unrelated.isReleasedWhenClosed = false
-                            unrelated.close()
-                            XCTAssertFalse(settings.draftKey.isEmpty)
-                            window.close()
-                            XCTAssertTrue(settings.draftKey.isEmpty)
-                            XCTAssertNil(settings.message)
-                        })
-                }
-            }
-        }
     }
 
     /// The one server window (a new server, an LLM and a transcription model,

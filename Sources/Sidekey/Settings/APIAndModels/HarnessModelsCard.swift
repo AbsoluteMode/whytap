@@ -127,7 +127,7 @@ struct HarnessModelsCard: View {
             switch model.active {
             case .claude: claudeControls
             case .codex: codexControls
-            case .opencode, .native, nil: EmptyView()
+            case nil: EmptyView()
             }
         }
     }
@@ -230,7 +230,6 @@ private struct HarnessMark: View {
         switch id {
         case .claude: ProviderBrandIcon(brand: .agent(.claude), size: 13)
         case .codex: ProviderBrandIcon(brand: .agent(.codex), size: 13)
-        case .opencode, .native: EmptyView()
         }
     }
 }

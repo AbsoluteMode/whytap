@@ -102,9 +102,6 @@ final class FeatureSwitchModel: ObservableObject {
 struct AgentFeatureSettings: View {
     @ObservedObject var settings: AgentSettingsStore
 
-    /// Whether the Sources section and Add source… appear.
-    static var showsSources: Bool { AgentSourcesGate.isEnabled }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "Settings")
@@ -112,12 +109,6 @@ struct AgentFeatureSettings: View {
                 MacRow(title: AgentOtherSection.actionsTitle, subtitle: AgentOtherSection.actionsSubtitle) {
                     MacSwitch(isOn: $settings.allowActions, label: AgentOtherSection.actionsTitle)
                 }
-            }
-            // Gated off until the owner decides whether sources stay.
-            // WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
-            if Self.showsSources {
-                AgentSourcesSection(controller: SourcesController.shared)
-                    .padding(.top, 18)
             }
         }
     }

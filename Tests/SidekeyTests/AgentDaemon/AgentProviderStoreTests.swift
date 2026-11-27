@@ -24,11 +24,10 @@ final class AgentProviderStoreTests: XCTestCase {
     }
 
     func testOnlyClaudeCodeAndCodexCanBeChosen() {
+        XCTAssertEqual(AgentProviderStore.harnesses, [.claude, .codex])
         let d = defaults()
-        let store = AgentProviderStore(defaults: d)
-        store.markConnected(.native)
-        store.markConnected(.opencode)
-        XCTAssertNil(store.activeProvider)
+        d.set("native", forKey: "agent.harness.active")
+        XCTAssertNil(AgentProviderStore(defaults: d).activeProvider, "an unknown stored value is no harness")
         XCTAssertNil(d.string(forKey: "agent.harness.active"))
     }
 

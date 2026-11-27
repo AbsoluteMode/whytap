@@ -69,14 +69,14 @@ enum ConfigBackupRegistry {
         add(.other, .strings, [CalendarAccountSettings.hiddenFeedsKey])
         add(.other, .bool, [CalendarAccountSettings.appleEnabledKey])
         add(.other, .propertyList, ["notifications.sourceSounds"])
-        add(.agents, .string, ["agent.native.webSearch", "agent.opencode.model", "agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier", AgentProviderStore.key])
+        add(.agents, .string, ["agent.claude.model", "agent.claude.effort", "agent.codex.model", "agent.codex.effort", "agent.codex.serviceTier", AgentProviderStore.key])
         add(.agents, .bool, ["agent.opencode.allowActions"])
         return result
     }()
 
     static let credentialAccounts: Set<String> = Set(
         ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "byok." + $0 + ".api_key" }
-        + ["byok.openrouter.llm_api_key", "byok.custom_llm.api_key", "byok.anthropic.api_key", "byok.openai.llm_api_key", TavilySearch.keychainAccount])
+        + ["byok.openrouter.llm_api_key", "byok.custom_llm.api_key", "byok.anthropic.api_key", "byok.openai.llm_api_key"])
 
     /// No Keychain enumeration or caller-controlled account names. Only server
     /// IDs registered in the routing document add accounts to the export.

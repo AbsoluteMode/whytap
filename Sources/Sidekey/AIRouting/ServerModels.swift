@@ -22,7 +22,7 @@ struct ServerModel: Codable, Equatable, Hashable, Sendable {
         /// (`/v1/audio/transcriptions`, batch recovery) alike.
         var uses: Set<ModelUse> {
             switch self {
-            case .llm: return [.chat, .chatWithTools]
+            case .llm: return [.chat]
             case .transcription: return [.realtimeSTT, .asyncSTT]
             }
         }
@@ -31,8 +31,8 @@ struct ServerModel: Codable, Equatable, Hashable, Sendable {
         init?(_ feature: AIFeature) {
             switch feature.modelUse(on: .openAICompatible) {
             case .realtimeSTT?, .asyncSTT?: self = .transcription
-            case .chat?, .chatWithTools?: self = .llm
-            case .decision?, .speechTranslation?, nil: return nil
+            case .chat?: self = .llm
+            case .decision?, .speechTranslation?, .retiredChatWithTools?, nil: return nil
             }
         }
     }

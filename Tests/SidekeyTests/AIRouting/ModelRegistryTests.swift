@@ -31,8 +31,10 @@ final class ModelRegistryTests: XCTestCase {
         // Scribe v2 was replaced, not kept beside v3.
         XCTAssertFalse(ModelRegistry.isVerified("scribe_v2", kind: .elevenLabs, use: .asyncSTT))
         XCTAssertFalse(ModelRegistry.isVerified("scribe_v2_realtime", kind: .elevenLabs, use: .realtimeSTT))
-        XCTAssertTrue(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .chatWithTools))
-        XCTAssertFalse(ModelRegistry.isVerified("google/gemini-3.8-flash", kind: .openRouter, use: .chatWithTools))
+        XCTAssertTrue(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .chat))
+        // Anthropic's direct text model is checked when picked, as before.
+        XCTAssertFalse(ModelRegistry.isVerified(ModelRegistry.anthropicAgentModel, kind: .anthropic, use: .chat))
+        XCTAssertFalse(ModelRegistry.isVerified("anthropic/claude-sonnet-5.5", kind: .openRouter, use: .retiredChatWithTools))
         XCTAssertFalse(ModelRegistry.isVerified("nova-3", kind: .soniox, use: .realtimeSTT))
         XCTAssertTrue(ModelRegistry.isVerified("nova-3", kind: .deepgram, use: .asyncSTT))
         XCTAssertEqual(ModelRegistry.models.filter(\.diarization).map(\.id), ["stt-async-v6", "nova-3", "scribe_v3"])

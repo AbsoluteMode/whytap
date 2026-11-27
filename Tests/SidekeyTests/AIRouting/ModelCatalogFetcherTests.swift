@@ -22,7 +22,7 @@ final class ModelCatalogFetcherTests: XCTestCase {
         let models = try await fetcher.fetch(account: .openAI, apiKey: "openai-key", server: nil)
         let text = models.filter { $0.uses?.contains(.chat) == true }
         XCTAssertEqual(text.map(\.id), ["gpt-4.1-mini", "gpt-6.1-sol", "o3"])
-        XCTAssertTrue(text.allSatisfy { $0.uses == [.chat, .chatWithTools] })
+        XCTAssertTrue(text.allSatisfy { $0.uses == [.chat] })
         // A transcription model is never a text one; this deprecated one is
         // not offered for speech either.
         // WHY: .project-docs/decisions/2026-11-22-openai-speech-provider.md
@@ -90,9 +90,8 @@ final class ModelCatalogFetcherTests: XCTestCase {
         let gemini = models[0]
         XCTAssertEqual(gemini.contextLength, 1_048_576)
         XCTAssertEqual(gemini.maxOutputTokens, 65_536)
-        XCTAssertEqual(gemini.supportsTools, true)
         XCTAssertEqual(gemini.supportsReasoning, true)
-        XCTAssertEqual(gemini.uses, [.chat, .chatWithTools])
+        XCTAssertEqual(gemini.uses, [.chat])
         XCTAssertEqual(gemini.reasoning?.mandatory, true)
         XCTAssertNotNil(gemini.expiresAt)
         let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
@@ -123,9 +122,8 @@ final class ModelCatalogFetcherTests: XCTestCase {
         XCTAssertEqual(models.map(\.id), ["claude-sonnet-5-5", "claude-haiku-5"])
         XCTAssertEqual(models.map(\.contextLength), [1_000_000, 200_000])
         XCTAssertEqual(models.map(\.maxOutputTokens), [128_000, 64_000])
-        XCTAssertEqual(models.map(\.supportsTools), [true, true])
         XCTAssertEqual(models[0].supportsReasoning, true)
-        XCTAssertTrue(models.allSatisfy { $0.uses?.contains(.chatWithTools) == true })
+        XCTAssertTrue(models.allSatisfy { $0.uses == [.chat] })
 
         let requests = StubURLProtocol.capturedRequests
         XCTAssertEqual(requests.map { $0.url?.absoluteString }, [

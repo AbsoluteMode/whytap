@@ -73,8 +73,8 @@ final class SharedModelRowsTests: XCTestCase {
                    checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults))
     }
 
-    private func llm(_ id: String, tools: Bool = true) -> CatalogModel {
-        CatalogModel(id: id, uses: tools ? [.chat, .chatWithTools] : [.chat], contextLength: 1_000_000, supportsTools: tools)
+    private func llm(_ id: String) -> CatalogModel {
+        CatalogModel(id: id, uses: [.chat], contextLength: 1_000_000)
     }
 
     private func row(_ kind: SharedModelKind, _ vm: APIAndModelsViewModel) throws -> SharedModelRow {
@@ -88,7 +88,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertEqual(Set(shared), Set(AIFeature.activeCases))
         XCTAssertEqual(shared.count, Set(shared).count)
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { [.realtime, .recorded].contains($0.mode) })
-        XCTAssertTrue(SharedModelKind.llm.features.allSatisfy { [.llm, .llmWithTools].contains($0.mode) })
+        XCTAssertTrue(SharedModelKind.llm.features.allSatisfy { $0.mode == .llm })
     }
 
     func test_empty_mac_is_set_up_with_two_picks_and_one_check() async throws {
@@ -123,9 +123,9 @@ final class SharedModelRowsTests: XCTestCase {
     }
 
     /// The Agent runs on Claude Code or Codex, so no LLM feature needs tool
-    /// use: a model without tools serves the whole LLM row.
+    /// use: any text model serves the whole LLM row with one plain check.
     func test_text_model_without_tools_serves_every_llm_feature() async throws {
-        let env = try makeEnv(snapshots: [.openRouter: fresh([llm("vendor/no-tools", tools: false)])],
+        let env = try makeEnv(snapshots: [.openRouter: fresh([llm("vendor/no-tools")])],
                               keyed: [.openRouter])
         let vm = env.makeViewModel()
         await vm.selectShared(model: "vendor/no-tools", account: .openRouter, kind: .llm, replaceCustom: false)

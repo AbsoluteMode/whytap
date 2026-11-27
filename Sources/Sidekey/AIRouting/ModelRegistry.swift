@@ -60,7 +60,7 @@ enum ModelRegistry {
         switch mode {
         case .realtime: target = openAILiveModel
         case .recorded: target = openAIRecordedModel
-        case .llm, .llmWithTools, .decision: return nil
+        case .llm, .decision: return nil
         }
         let retired = openAIRetiredSpeechModels.contains { model == $0 || model.hasPrefix($0 + "-") }
         let otherRole = mode == .realtime
@@ -183,8 +183,7 @@ extension ModelRegistry {
         RegistryModel(kind: .openAI, id: openAIRecordedModel, uses: [.asyncSTT], diarization: false),
         RegistryModel(kind: .openAI, id: OpenAIRealtimeTranslateAdapter.model, uses: [.speechTranslation], diarization: false),
         RegistryModel(kind: .openRouter, id: "google/gemini-3.8-flash", uses: [.chat], diarization: false),
-        RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat, .chatWithTools], diarization: false),
-        RegistryModel(kind: .anthropic, id: anthropicAgentModel, uses: [.chatWithTools], diarization: false),
+        RegistryModel(kind: .openRouter, id: "anthropic/claude-sonnet-5.5", uses: [.chat], diarization: false),
     ]
 
     /// Smallest context window a model needs for Meeting notes (N) and for the
@@ -274,14 +273,9 @@ extension ModelRegistry {
     }
 
     /// Bumped when an adapter changes in a way that makes an earlier "checked
-    /// when picked" result stale. Every adapter is at 1 for now.
-    /// A stored check counts only for the adapter version that made it. OpenAI
-    /// tool use is 2: its check moved to the Responses API, so a model refused
-    /// on Chat Completions (newer reasoning models) is checked again.
-    /// WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
-    static func adapterVersion(_ kind: AIProviderKind, _ use: ModelUse) -> Int {
-        kind == .openAI && use == .chatWithTools ? 2 : 1
-    }
+    /// when picked" result stale. A stored check counts only for the adapter
+    /// version that made it. Every adapter is at 1 for now.
+    static func adapterVersion(_ kind: AIProviderKind, _ use: ModelUse) -> Int { 1 }
 
     /// Why the app cannot run a model it can see in a catalog, or `nil`.
     static func knownUnsupportedReason(_ id: String, kind: AIProviderKind, use: ModelUse) -> String? {

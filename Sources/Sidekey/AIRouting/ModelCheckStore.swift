@@ -56,7 +56,10 @@ final class ModelCheckStore: ObservableObject {
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         if let data = defaults.data(forKey: Self.defaultsKey),
-           let decoded = try? JSONDecoder().decode(Persisted.self, from: data) {
+           var decoded = try? JSONDecoder().decode(Persisted.self, from: data) {
+            // Earlier builds' tool-use checks: nothing asks for them any more.
+            // WHY: .project-docs/decisions/2026-11-27-remove-tool-probe.md
+            decoded.entries.removeAll { $0.key.use == .retiredChatWithTools }
             self.state = decoded
         } else {
             self.state = Persisted()

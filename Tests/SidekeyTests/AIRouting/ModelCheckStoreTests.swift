@@ -27,7 +27,7 @@ final class ModelCheckStoreTests: XCTestCase {
         XCTAssertEqual(store.record(for: key)?.outcome, .failed(reason: "Provider refused: nope"))
 
         // The record is per account, model and use.
-        XCTAssertNil(store.record(for: ModelCheckKey(account: "openRouter", model: "vendor/model", use: .chatWithTools)))
+        XCTAssertNil(store.record(for: ModelCheckKey(account: "openRouter", model: "vendor/model", use: .decision)))
         XCTAssertNil(store.record(for: ModelCheckKey(account: "soniox", model: "vendor/model", use: .chat)))
 
         let reopened = ModelCheckStore(defaults: defaults)
@@ -87,5 +87,25 @@ final class ModelCheckStoreTests: XCTestCase {
         XCTAssertFalse(OpenRouterLLMError.unexpectedStatus(
             404, "No endpoints found matching your data policy (Free model publication)."
         ).isModelRefusal)
+    }
+
+    /// Checks an earlier build stored for the removed agent's tool use are
+    /// dropped on load; plain-text checks of the same model stay.
+    func test_tool_use_checks_from_earlier_builds_are_dropped_on_load() throws {
+        let suite = "model-checks-retired-" + UUID().uuidString
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let earlier = ModelCheckStore(defaults: defaults)
+        let tools = ModelCheckKey(account: "openAI", model: "gpt-6.2-sol", use: .retiredChatWithTools)
+        let text = ModelCheckKey(account: "openAI", model: "gpt-6.2-sol", use: .chat)
+        earlier.store(.failed(reason: "Provider refused: tools"), for: tools, adapterVersion: 2, at: date)
+        earlier.store(.passed, for: text, adapterVersion: 1, at: date)
+        let json = String(decoding: try XCTUnwrap(defaults.data(forKey: ModelCheckStore.defaultsKey)), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"chatWithTools\""), "saved with the earlier raw value")
+
+        let reopened = ModelCheckStore(defaults: defaults)
+        XCTAssertNil(reopened.record(for: tools))
+        XCTAssertEqual(reopened.record(for: text)?.outcome, .passed)
     }
 }

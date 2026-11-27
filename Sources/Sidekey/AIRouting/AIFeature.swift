@@ -6,7 +6,6 @@ enum AIFeatureMode: String, Codable, Sendable {
     case realtime
     case recorded
     case llm
-    case llmWithTools
     case decision
 
     var label: String {
@@ -14,7 +13,6 @@ enum AIFeatureMode: String, Codable, Sendable {
         case .realtime: return "real-time"
         case .recorded: return "recorded"
         case .llm: return "LLM"
-        case .llmWithTools: return "LLM with tools"
         case .decision: return "Decision"
         }
     }
@@ -83,8 +81,9 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
         switch self {
         case .dropFast, .dropSmart, .agentVoice, .voiceSearch, .subtitlesAudio, .retiredMeetingAudio: return .realtime
         case .meetings: return .recorded
-        case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation: return .llm
-        case .agent, .retiredMeetingText: return .llmWithTools
+        // The inactive Agent route is kept for history and rollback, as text.
+        case .dropSmartCleanup, .meetingNotes, .translation, .subtitlesTranslation,
+             .agent, .retiredMeetingText: return .llm
         case .dropSmartDecision: return .decision
         }
     }
@@ -148,11 +147,6 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
             case .openRouter, .openAI: return .decision
             case .soniox, .deepgram, .elevenLabs, .anthropic, .openAICompatible, .onDevice: return nil
             }
-        case .llmWithTools:
-            switch kind {
-            case .openRouter, .openAI, .anthropic: return .chatWithTools
-            case .soniox, .deepgram, .elevenLabs, .openAICompatible, .onDevice: return nil
-            }
         }
     }
 }
@@ -165,8 +159,11 @@ enum ModelUse: String, Codable, Sendable {
     case asyncSTT
     /// Text in, text out.
     case chat
-    /// Text in, text out, with tool calls (the agent).
-    case chatWithTools
+    /// Earlier builds' "text with tool calls" (the removed built-in agent).
+    /// Only read from saved catalogs and checks, never produced: loading
+    /// drops it (ModelCatalogStore, ModelCheckStore).
+    // WHY: .project-docs/decisions/2026-11-27-remove-tool-probe.md
+    case retiredChatWithTools = "chatWithTools"
     /// Typed decisions and probabilities, with no generated text.
     case decision
     /// Live speech in, its translation (and the heard original) out.

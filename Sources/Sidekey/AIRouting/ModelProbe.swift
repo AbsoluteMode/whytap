@@ -58,8 +58,10 @@ struct ModelProbe: ModelProbing {
         switch use {
         case .realtimeSTT: outcome = await probeRealtime(route)
         case .asyncSTT: outcome = await probeAsync(route)
-        case .chat: outcome = await probeChat(route, withTools: false, catalog: catalog)
-        case .chatWithTools: outcome = await probeChat(route, withTools: true, catalog: catalog)
+        case .chat: outcome = await probeChat(route, catalog: catalog)
+        case .retiredChatWithTools:
+            // The removed built-in agent's tool-use check; nothing asks for it.
+            outcome = .failed(reason: "Not a model for this feature")
         case .decision:
             outcome = .failed(reason: "Separate Decision processing is retired")
         case .speechTranslation:
@@ -180,20 +182,6 @@ struct ModelProbe: ModelProbing {
             let requireParameters: Bool
             enum CodingKeys: String, CodingKey { case requireParameters = "require_parameters" }
         }
-        struct Empty: Encodable {}
-        struct Tool: Encodable {
-            struct Function: Encodable {
-                struct Parameters: Encodable {
-                    let type: String
-                    let properties: Empty
-                }
-                let name: String
-                let description: String
-                let parameters: Parameters
-            }
-            let type: String
-            let function: Function
-        }
 
         let model: String
         let messages: [Message]
@@ -202,16 +190,15 @@ struct ModelProbe: ModelProbing {
         let stream: Bool
         let provider: Preferences?
         let reasoning: OpenRouterReasoningSetting?
-        let tools: [Tool]?
 
         enum CodingKeys: String, CodingKey {
-            case model, messages, stream, provider, reasoning, tools
+            case model, messages, stream, provider, reasoning
             case maxTokens = "max_tokens"
             case maxCompletionTokens = "max_completion_tokens"
         }
     }
 
-    private func probeChat(_ route: ResolvedRoute, withTools: Bool, catalog: CatalogModel?) async -> ProbeOutcome {
+    private func probeChat(_ route: ResolvedRoute, catalog: CatalogModel?) async -> ProbeOutcome {
         let key = route.apiKey.flatMap { $0.isEmpty ? nil : $0 }
         let url: URL
         let isOpenRouter: Bool
@@ -225,13 +212,9 @@ struct ModelProbe: ModelProbing {
             url = base
             isOpenRouter = false
         case .anthropic:
-            return await probeAnthropic(route, withTools: withTools)
+            return await probeAnthropic(route)
         case .openAI:
             guard let key else { return .inconclusive(reason: "Key problem") }
-            // A tool-use check runs on the Responses API: newer reasoning
-            // models refuse function tools on Chat Completions.
-            // WHY: .project-docs/decisions/2026-11-22-openai-agent-probe-responses.md
-            if withTools { return await probeOpenAIResponses(route, key: key) }
             url = URL(string: "https://api.openai.com/v1")!
             isOpenRouter = false
         case .soniox, .deepgram, .elevenLabs, .thisMac:
@@ -249,8 +232,7 @@ struct ModelProbe: ModelProbing {
                 maxCompletionTokens: route.account == .openAI ? 512 : nil,
                 stream: false,
                 provider: isOpenRouter ? .init(requireParameters: true) : nil,
-                reasoning: isOpenRouter ? catalog?.reasoning?.dictationSetting : nil,
-                tools: withTools ? [Self.probeTool] : nil
+                reasoning: isOpenRouter ? catalog?.reasoning?.dictationSetting : nil
             )
             var request = URLRequest(url: url.appendingPathComponent("chat").appendingPathComponent("completions"))
             request.httpMethod = "POST"
@@ -279,66 +261,6 @@ struct ModelProbe: ModelProbing {
         }
     }
 
-    private static let probeTool = ChatBody.Tool(
-        type: "function",
-        function: .init(
-            name: "whytap_probe",
-            description: "Probe tool. Do not call.",
-            parameters: .init(type: "object", properties: .init())
-        )
-    )
-
-    // MARK: - OpenAI Responses
-
-    /// An OpenAI Responses request with one function tool, nothing stored
-    /// (the shape a tool-using text feature sends). Any 2xx passes,
-    /// an `incomplete` answer cut off at `max_output_tokens` included.
-    private func probeOpenAIResponses(_ route: ResolvedRoute, key: String) async -> ProbeOutcome {
-        let body: [String: Any] = [
-            "model": route.model,
-            "input": "Reply with OK.",
-            "store": false,
-            "max_output_tokens": 512,
-            "tools": [["type": "function", "name": "whytap_probe", "description": "Probe tool. Do not call.",
-                       "parameters": ["type": "object", "properties": [String: Any]()], "strict": false]],
-        ]
-        guard let encoded = try? JSONSerialization.data(withJSONObject: body) else {
-            return .inconclusive(reason: "Could not build the request")
-        }
-        var request = URLRequest(url: URL(string: "https://api.openai.com/v1/responses")!)
-        request.httpMethod = "POST"
-        request.timeoutInterval = Self.seconds(timeout)
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
-        request.httpBody = encoded
-        let data: Data
-        let status: Int
-        do {
-            let (received, response) = try await session.data(for: request)
-            guard let http = response as? HTTPURLResponse else { return .inconclusive(reason: "No connection") }
-            data = received
-            status = http.statusCode
-        } catch {
-            return .inconclusive(reason: "No connection")
-        }
-        switch status {
-        case 200..<300:
-            guard let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                return .inconclusive(reason: "Unexpected answer")
-            }
-            if ["completed", "incomplete"].contains(object["status"] as? String ?? "") { return .passed }
-            return .failed(reason: "Provider refused: " + (Self.providerMessage(object, key: key) ?? "empty answer"))
-        case 400, 404, 422:
-            let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let message = object.flatMap { Self.providerMessage($0, key: key) } ?? "HTTP \(status)"
-            return .failed(reason: "Provider refused: " + message)
-        case 401, 402, 403:
-            return .inconclusive(reason: "Key problem")
-        default:
-            return .inconclusive(reason: "No answer from the provider")
-        }
-    }
-
     // MARK: - Anthropic
 
     private struct AnthropicBody: Encodable {
@@ -346,41 +268,24 @@ struct ModelProbe: ModelProbing {
             let role: String
             let content: String
         }
-        struct Tool: Encodable {
-            struct Schema: Encodable {
-                let type: String
-                let properties: ChatBody.Empty
-            }
-            let name: String
-            let description: String
-            let inputSchema: Schema
-            enum CodingKeys: String, CodingKey {
-                case name, description
-                case inputSchema = "input_schema"
-            }
-        }
-
         let model: String
         let maxTokens: Int
         let messages: [Message]
-        let tools: [Tool]?
 
         enum CodingKeys: String, CodingKey {
-            case model, messages, tools
+            case model, messages
             case maxTokens = "max_tokens"
         }
     }
 
-    /// Anthropic's Messages API with one fake tool and no `tool_choice`
-    /// (forced tool use is a 400 on current models). Any 2xx passes, a reply
-    /// cut off at `max_tokens` included.
-    private func probeAnthropic(_ route: ResolvedRoute, withTools: Bool) async -> ProbeOutcome {
+    /// Anthropic's Messages API. Any 2xx passes, a reply cut off at
+    /// `max_tokens` included.
+    private func probeAnthropic(_ route: ResolvedRoute) async -> ProbeOutcome {
         guard let key = route.apiKey, !key.isEmpty else { return .inconclusive(reason: "Key problem") }
         let body = AnthropicBody(
             model: route.model,
             maxTokens: 16,
-            messages: [.init(role: "user", content: "Reply with OK.")],
-            tools: withTools ? [Self.anthropicProbeTool] : nil
+            messages: [.init(role: "user", content: "Reply with OK.")]
         )
         guard let encoded = try? JSONEncoder().encode(body) else { return .inconclusive(reason: "Could not build the request") }
         var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/messages")!)
@@ -415,12 +320,6 @@ struct ModelProbe: ModelProbing {
             return .inconclusive(reason: "No answer from the provider")
         }
     }
-
-    private static let anthropicProbeTool = AnthropicBody.Tool(
-        name: "whytap_probe",
-        description: "Probe tool. Do not call.",
-        inputSchema: .init(type: "object", properties: .init())
-    )
 
     private static func interpretChat(status: Int, data: Data, key: String?) -> ProbeOutcome {
         switch status {

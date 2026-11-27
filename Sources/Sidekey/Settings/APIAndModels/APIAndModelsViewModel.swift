@@ -33,7 +33,7 @@ struct FeatureRow: Equatable, Identifiable {
         if feature == .subtitlesTranslation { return "LLM" }
         switch feature.mode {
         case .realtime, .recorded: return "Speech"
-        case .llm, .llmWithTools: return "Text"
+        case .llm: return "Text"
         case .decision: return "Decision"
         }
     }
@@ -813,9 +813,6 @@ final class APIAndModelsViewModel: ObservableObject {
                 pending.append(Check(route: target.route, use: use, features: [target.feature]))
             }
         }
-        // Tool use first: when it passes, plain text on that model needs no request.
-        pending.sort { ($0.use == .chatWithTools ? 0 : 1) < ($1.use == .chatWithTools ? 0 : 1) }
-        var passedTools: Set<String> = []
         var refused: Set<AIFeature> = []
         if !pending.isEmpty {
             sharedChecking.insert(kind)
@@ -823,14 +820,7 @@ final class APIAndModelsViewModel: ObservableObject {
             recompute()
         }
         for check in pending {
-            if check.use == .chat, passedTools.contains("\(check.route.account.storageID)|\(check.route.model)") {
-                checks.store(.passed, for: ModelCheckKey(account: check.route.account.storageID, model: check.route.model, use: .chat),
-                             adapterVersion: ModelRegistry.adapterVersion(check.route.account.kind, .chat), at: now())
-                continue
-            }
-            if await probePassed(check.route, for: check.features) {
-                if check.use == .chatWithTools { passedTools.insert("\(check.route.account.storageID)|\(check.route.model)") }
-            } else {
+            if !(await probePassed(check.route, for: check.features)) {
                 refused.formUnion(check.features)
                 let reason = check.features.first.flatMap { messages[$0] } ?? "the check failed"
                 notes.append("\(check.features.map(\.title).joined(separator: ", ")): \(reason)")

@@ -62,8 +62,8 @@ final class ModelStatusResolverTests: XCTestCase {
 
     func test_picker_keeps_provider_date_meanings_and_hides_unknown_dates() throws {
         let date = try XCTUnwrap(ISO8601DateFormatter().date(from: "2026-09-21T00:00:00Z"))
-        let dated = CatalogModel(id: "gpt-date-test", uses: [.chat, .chatWithTools], catalogDate: date)
-        let unknown = CatalogModel(id: "gpt-unknown-date", uses: [.chat, .chatWithTools])
+        let dated = CatalogModel(id: "gpt-date-test", uses: [.chat], catalogDate: date)
+        let unknown = CatalogModel(id: "gpt-unknown-date", uses: [.chat])
         let accounts: [ProviderAccount] = [.anthropic, .openAI, .openRouter]
         let env = try makeEnv(snapshots: Dictionary(uniqueKeysWithValues: accounts.map { ($0, fresh([dated, unknown])) }),
                               keyed: accounts)
@@ -240,9 +240,9 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(env.resolver.status(for: .dropFast), .ok)
     }
 
-    func test_small_context_is_not_supported_for_agent_and_notes() throws {
+    func test_small_context_is_not_supported_for_notes() throws {
         let env = try makeEnv(
-            snapshots: [.openRouter: fresh([CatalogModel(id: "x/tiny", uses: [.chat, .chatWithTools], contextLength: 8_000, supportsTools: true)])],
+            snapshots: [.openRouter: fresh([CatalogModel(id: "x/tiny", uses: [.chat], contextLength: 8_000)])],
             keyed: [.openRouter]
         )
         for feature in [AIFeature.meetingNotes] {
@@ -306,9 +306,9 @@ final class ModelStatusResolverTests: XCTestCase {
     func test_every_keyed_llm_provider_has_a_section_and_openrouter_comes_last() throws {
         let env = try makeEnv(
             snapshots: [
-                .openRouter: fresh((0..<400).map { CatalogModel(id: "vendor/model-\($0)", uses: [.chat, .chatWithTools]) }),
-                .anthropic: fresh([CatalogModel(id: "claude-sonnet-5-5", uses: [.chat, .chatWithTools])]),
-                .openAI: fresh([CatalogModel(id: "gpt-6.2-sol", uses: [.chat, .chatWithTools])]),
+                .openRouter: fresh((0..<400).map { CatalogModel(id: "vendor/model-\($0)", uses: [.chat]) }),
+                .anthropic: fresh([CatalogModel(id: "claude-sonnet-5-5", uses: [.chat])]),
+                .openAI: fresh([CatalogModel(id: "gpt-6.2-sol", uses: [.chat])]),
             ],
             keyed: [.anthropic, .openAI, .openRouter]
         )
@@ -524,13 +524,13 @@ final class ModelStatusResolverTests: XCTestCase {
         let always = OpenRouterReasoningCapabilities(mandatory: true, supportedEfforts: nil)
         let optional = OpenRouterReasoningCapabilities(mandatory: false, supportedEfforts: nil)
         return fresh([
-            CatalogModel(id: "anthropic/claude-opus-4.5", uses: [.chat, .chatWithTools], reasoning: optional,
+            CatalogModel(id: "anthropic/claude-opus-4.5", uses: [.chat], reasoning: optional,
                          catalogDate: Date(timeIntervalSince1970: 1_700_000_000), tokenPrice: price(5, 25)),
-            CatalogModel(id: "anthropic/claude-fable-5.2", uses: [.chat, .chatWithTools], reasoning: always,
+            CatalogModel(id: "anthropic/claude-fable-5.2", uses: [.chat], reasoning: always,
                          tokenPrice: price(8, 40)),
-            CatalogModel(id: "openai/gpt-5.4", uses: [.chat, .chatWithTools], reasoning: optional,
+            CatalogModel(id: "openai/gpt-5.4", uses: [.chat], reasoning: optional,
                          tokenPrice: price(2.5, 15)),
-            CatalogModel(id: "openai/gpt-5", uses: [.chat, .chatWithTools], reasoning: always,
+            CatalogModel(id: "openai/gpt-5", uses: [.chat], reasoning: always,
                          tokenPrice: price(1.25, 10)),
         ])
     }
@@ -540,14 +540,14 @@ final class ModelStatusResolverTests: XCTestCase {
     private func directCatalogs() -> [ProviderAccount: CatalogSnapshot] {
         [
             .anthropic: fresh([
-                CatalogModel(id: "claude-opus-4-5-20251101", uses: [.chat, .chatWithTools], catalogDate: anthropicReleased),
-                CatalogModel(id: "claude-fable-5-2", uses: [.chat, .chatWithTools]),
-                CatalogModel(id: "claude-unlisted-9", uses: [.chat, .chatWithTools]),
+                CatalogModel(id: "claude-opus-4-5-20251101", uses: [.chat], catalogDate: anthropicReleased),
+                CatalogModel(id: "claude-fable-5-2", uses: [.chat]),
+                CatalogModel(id: "claude-unlisted-9", uses: [.chat]),
             ]),
             .openAI: fresh([
-                CatalogModel(id: "gpt-5.4", uses: [.chat, .chatWithTools]),
-                CatalogModel(id: "gpt-5.4-2026-03-05", uses: [.chat, .chatWithTools]),
-                CatalogModel(id: "gpt-5", uses: [.chat, .chatWithTools]),
+                CatalogModel(id: "gpt-5.4", uses: [.chat]),
+                CatalogModel(id: "gpt-5.4-2026-03-05", uses: [.chat]),
+                CatalogModel(id: "gpt-5", uses: [.chat]),
             ]),
         ]
     }
@@ -627,9 +627,9 @@ final class ModelStatusResolverTests: XCTestCase {
     }
 
     func test_picker_shows_prices_only_on_openrouter_rows_without_changing_the_choice() throws {
-        let priced = CatalogModel(id: "vendor/priced", uses: [.chat, .chatWithTools], tokenPrice: price(0.3, 2.5))
-        let free = CatalogModel(id: "vendor/free", uses: [.chat, .chatWithTools], tokenPrice: price(0, 0))
-        let unknown = CatalogModel(id: "vendor/unknown", uses: [.chat, .chatWithTools])
+        let priced = CatalogModel(id: "vendor/priced", uses: [.chat], tokenPrice: price(0.3, 2.5))
+        let free = CatalogModel(id: "vendor/free", uses: [.chat], tokenPrice: price(0, 0))
+        let unknown = CatalogModel(id: "vendor/unknown", uses: [.chat])
         let accounts: [ProviderAccount] = [.openRouter, .openAI]
         let models = [priced, free, unknown]
         let env = try makeEnv(snapshots: Dictionary(uniqueKeysWithValues: accounts.map { ($0, fresh(models)) }),

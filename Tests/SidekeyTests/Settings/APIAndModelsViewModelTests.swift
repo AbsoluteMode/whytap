@@ -176,8 +176,8 @@ final class APIAndModelsViewModelTests: XCTestCase {
                 .soniox: fresh([CatalogModel(id: "stt-rt-v6", uses: [.realtimeSTT]),
                                 CatalogModel(id: "stt-rt-v7", uses: [.realtimeSTT])]),
                 .openRouter: fresh([
-                    CatalogModel(id: "a/one", uses: [.chat, .chatWithTools], contextLength: 1_000_000, supportsTools: true),
-                    CatalogModel(id: "a/two", uses: [.chat, .chatWithTools], contextLength: 1_000_000, supportsTools: true),
+                    CatalogModel(id: "a/one", uses: [.chat], contextLength: 1_000_000),
+                    CatalogModel(id: "a/two", uses: [.chat], contextLength: 1_000_000),
                 ]),
             ],
             keyed: [.soniox, .openRouter]

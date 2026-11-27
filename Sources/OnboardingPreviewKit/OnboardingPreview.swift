@@ -282,9 +282,9 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
         }
     }
 
-    private static func model(_ id: String, daysAgo: Double, uses: Set<ModelUse> = [.chat, .chatWithTools],
+    private static func model(_ id: String, daysAgo: Double, uses: Set<ModelUse> = [.chat],
                               price: (Double, Double)? = nil) -> CatalogModel {
-        var model = CatalogModel(id: id, uses: uses, contextLength: 400_000, supportsTools: !uses.isDisjoint(with: [.chatWithTools]))
+        var model = CatalogModel(id: id, uses: uses, contextLength: 400_000)
         model.catalogDate = Date().addingTimeInterval(-daysAgo * 86_400)
         model.tokenPrice = price.flatMap {
             CatalogTokenPrice(promptPerToken: Decimal($0.0) / 1_000_000, completionPerToken: Decimal($0.1) / 1_000_000)

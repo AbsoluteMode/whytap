@@ -182,11 +182,13 @@ final class ModelCatalogStore: ObservableObject {
             var snapshot = snapshot
             snapshot.models = snapshot.models.map { model in
                 var model = model
+                // Earlier builds' tool-use mark: nothing reads it any more.
+                model.uses?.remove(.retiredChatWithTools)
                 if id == ProviderAccount.openRouter.storageID,
                    model.id.hasPrefix("typesafe/jev-"), model.id != "typesafe/jev-router" {
                     model.uses = [.decision]
                 } else if id == ProviderAccount.openAI.storageID, model.id == ModelRegistry.openAIDecisionModel {
-                    model.uses = (model.uses ?? [.chat, .chatWithTools]).union([.decision])
+                    model.uses = (model.uses ?? [.chat]).union([.decision])
                 }
                 return model
             }

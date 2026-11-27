@@ -33,7 +33,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
     var contextLength: Int?
     /// OpenRouter `top_provider.max_completion_tokens`, Anthropic `max_tokens`.
     var maxOutputTokens: Int?
-    var supportsTools: Bool?
     /// `"reasoning"` is among OpenRouter's `supported_parameters`; Anthropic's
     /// `capabilities.thinking.supported`.
     var supportsReasoning: Bool?
@@ -59,7 +58,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
         aliasOf: String? = nil,
         contextLength: Int? = nil,
         maxOutputTokens: Int? = nil,
-        supportsTools: Bool? = nil,
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
         supportsLowEffort: Bool? = nil,
@@ -73,7 +71,6 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.aliasOf = aliasOf
         self.contextLength = contextLength
         self.maxOutputTokens = maxOutputTokens
-        self.supportsTools = supportsTools
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
         self.supportsLowEffort = supportsLowEffort
@@ -415,15 +412,12 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             // Routers priced at -1 are not models, except the one the app has always offered.
             if model.pricing?.prompt == -1, id != "openrouter/auto" { return nil }
             let parameters = model.supportedParameters
-            let tools = parameters?.contains("tools")
-            var uses: Set<ModelUse> = isDecision ? [.decision] : [.chat]
-            if tools == true && !isDecision { uses.insert(.chatWithTools) }
+            let uses: Set<ModelUse> = isDecision ? [.decision] : [.chat]
             return CatalogModel(
                 id: id,
                 uses: uses,
                 contextLength: model.contextLength,
                 maxOutputTokens: model.topProvider?.maxCompletionTokens,
-                supportsTools: tools,
                 supportsReasoning: parameters?.contains("reasoning"),
                 reasoning: model.reasoning,
                 expiresAt: model.expirationDate.flatMap(parseDate),
@@ -499,16 +493,15 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         }
     }
 
-    /// One page of Anthropic's models list. Every Claude model takes tools.
+    /// One page of Anthropic's models list.
     static func parseAnthropicPage(_ data: Data) throws -> (models: [CatalogModel], hasMore: Bool, lastID: String?) {
         let page = try decode(AnthropicResponse.self, from: data)
         let models = page.data.map { model in
             CatalogModel(
                 id: model.id,
-                uses: [.chat, .chatWithTools],
+                uses: [.chat],
                 contextLength: model.maxInputTokens,
                 maxOutputTokens: model.maxTokens,
-                supportsTools: true,
                 supportsReasoning: model.thinking,
                 supportsLowEffort: model.lowEffort,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
@@ -558,7 +551,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             guard base.hasPrefix("gpt-") || ["o1", "o3", "o4"].contains(where: { base == $0 || base.hasPrefix($0 + "-") }),
                   !["audio", "realtime", "transcribe", "tts", "image", "search", "codex", "deep-research", "-pro", "instruct"].contains(where: base.contains)
             else { return nil }
-            var uses: Set<ModelUse> = [.chat, .chatWithTools]
+            var uses: Set<ModelUse> = [.chat]
             if id == ModelRegistry.openAIDecisionModel { uses.insert(.decision) }
             return CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
         }.sorted { $0.id < $1.id }

@@ -61,7 +61,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         /// registry default, so the newest model the Agent can use is preselected.
         func fetch(account: ProviderAccount, apiKey: String?, server: ServerEndpoint?) async throws -> [CatalogModel] {
             func model(_ id: String, daysAgo: Double) -> CatalogModel {
-                var model = CatalogModel(id: id, uses: [.chat, .chatWithTools], contextLength: 400_000, supportsTools: true)
+                var model = CatalogModel(id: id, uses: [.chat], contextLength: 400_000)
                 model.catalogDate = Date(timeIntervalSince1970: 1_790_000_000 - daysAgo * 86_400)
                 return model
             }

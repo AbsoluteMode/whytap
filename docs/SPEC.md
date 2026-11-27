@@ -524,7 +524,7 @@ inherit no date. Unknown or invalid dates have no
 placeholder. Nonempty search orders equal-relevance matches by newest date,
 unknown dates last, preserving provider groups and stable ties. Empty search
 keeps catalog order.
-Подписей real-time, recorded и LLM with tools в списке нет. Функции: Drop Fast,
+Подписей real-time, recorded и LLM в списке нет. Функции: Drop Fast,
 Drop Smart (распознавание + очистка текста), Meetings (расшифровка + заметки),
 Agent voice (модель голоса агента; ответы агента идут через Harness), Voice search, Translation и Subtitles (в 2.2.26 — Speech + отдельная LLM;
 затем Soniox · stt-rt-v6 с ключом Soniox, без него OpenAI · gpt-realtime-translate; с 2026-11-27 строка Subtitles

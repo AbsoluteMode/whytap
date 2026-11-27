@@ -1174,15 +1174,15 @@ speech route first (Drop Smart, Meetings), and "Agent voice" for the Agent's
 speech route. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
-a feature it cannot serve (the Agent without tools, a provider without a
-recorded model, a server for the Agent) keeps its route and the row says why.
+a feature it cannot serve (a provider without a recorded model) keeps its
+route and the row says why.
 A model the feature's picker rules out is refused even where a server takes
 a typed name. Rows are planned per model (ModelStatusResolver.pickerReach),
-never from full picker lists. One probe per pick (a tools probe also passes
-plain chat). The OpenAI tools probe uses the Responses API with one function
-tool, like the Agent; reasoning models such as gpt-6.2-sol refuse function
-tools on Chat Completions (adapter version 2; WHY:
-.project-docs/decisions/2026-11-22-openai-agent-probe-responses.md). The row is read
+never from full picker lists. One plain-text probe per pick; no text feature
+needs tool use since the Agent runs on Claude Code or Codex, so catalogs no
+longer mark tool support and earlier builds' tool-use marks and checks
+(ModelUse.retiredChatWithTools) are dropped on load. WHY:
+.project-docs/decisions/2026-11-27-remove-tool-probe.md The row is read
 from the saved routes, never stored: the model more than half of the routed
 features follow, "N custom", "N not set", or "Mixed" (Advanced opens);
 re-picking asks before replacing custom models. app-control get_state has a

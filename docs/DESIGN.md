@@ -679,7 +679,7 @@ and selected model IDs, then they can open that function to change its routes.
   Why: configuration should stay compact and connected to the chosen function.
 - The summary stays visible while open. The expanded controls use Speech/Text
   labels for paired routes and Model for a single route. Transport labels such
-  as real-time, recorded and LLM with tools are removed from the main list.
+  as real-time, recorded and LLM are removed from the main list.
   Model filtering still follows the unchanged internal feature modes.
 - Selected model IDs are derived directly from the saved routes. Changing or
   removing a route updates the summary; opening/closing rows writes no route.

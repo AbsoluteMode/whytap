@@ -428,6 +428,63 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
+  Sources (iteration 1 of docs/plans/2026-11-26-assistant.md): Settings ->
+  Features -> Agent -> Sources (AgentSourcesSection, AddSourceSheet) adds MCP
+  servers imported from Claude Code, Claude Desktop, Cursor, Codex and VS Code
+  (MCPConfigImporter, MiniTOML; read only on opening the sheet, nothing written
+  back), GitHub (GitHub's remote MCP server, pasted fine-grained token or the gh
+  CLI sign-in, always X-MCP-Readonly) and Jira (uvx mcp-atlassian with
+  READ_ONLY_MODE) tiles, folders (FolderSource: bounded name/text search inside
+  the folder through one openat/O_NOFOLLOW opener, regular files only, no hidden,
+  symlinked, build or credential-like files) and custom stdio/HTTPS servers.
+  SourceCredentialPolicy is the one credential rule for import, tiles, the custom
+  form, previews and launch (problem / display over redacted): argv or address
+  credentials are refused and masked by the same word-based test, credentials
+  never go over plain http, and imports are checked against one strict entry
+  shape (keys, types, one transport, enabled) and keep their full launch
+  parameters or are listed with a reason. SourceSecretMask masks each source's
+  known values out of every server text (results, errors, exit detail, proof,
+  tool metadata) before Settings, the manifest or a model. FolderSource stores
+  the folder's real path and device/inode and reaches it and every entry through
+  O_NOFOLLOW descriptors. SourcesController keeps the manifest
+  (Application Support/whytap/assistant/sources.json, 0600, names only),
+  Keychain values (integration.<source>.<NAME>), live clients and statuses.
+  MCPClient is hand-written (initialize, paginated tools/list, tools/call, ping,
+  list_changed, cancelled; no sampling/elicitation/roots) over MCPStdioTransport
+  (MCPProcess: NotifyProcess-style group with the parent-death guard on fd 3,
+  argv without a shell, environment = allowlisted app variables + login-shell
+  PATH + the source's values, never model keys; stderr tail only for a masked
+  exit reason) or MCPHTTPTransport (Streamable HTTP, JSON or SSE, session and
+  protocol headers, same-origin redirects only, HTTPS except loopback; static
+  headers, no OAuth yet). Limits: 16 MB per message, results clipped to 24,000
+  characters, Agent calls 10 s, proof 15 s, connect 20 s HTTP / 90 s stdio, idle
+  stop 10 min, stop on sleep, at most three restarts in five minutes. Each tool
+  gets a class in app code (SourceToolClassifier: user > strictest of server
+  hints, write/delete name rule and one Agent-model suggestion for tools nothing
+  else settles; unknown tools are never Read) and a pin hash. Imported and
+  custom servers start with every tool waiting for Approve tools (no hint or
+  model suggestion approves; nothing, not even the proof, is called before);
+  GitHub, Jira and folders are trusted on connect. Approval is bound to the exact
+  list: MCPClient.listTools returns its epoch, list_changed, an ended client or
+  another HTTP session moves it, and callTool checks the SourceLease, epoch and
+  pin in the same actor step that sends. Generations and leases are replaced by
+  stop, disable, remove, new values, class changes and approvals; late answers
+  are discarded. Operation-wide deadlines (MCPDeadline) and cancellation stop
+  the actual stdin write, HTTP task or folder read. Connecting a trusted or approved source runs one harmless read call
+  as proof. The Agent gets one strict function,
+  source_call(tool, arguments), whose tool enum lists only approved Read tools
+  of enabled sources (signatures in the system prompt, 10,000 characters);
+  SourcesController.callRead rechecks class, approval and enablement at every
+  call. NativeAgentSources.installed is set by AppDelegate (nil in tests).
+  Taint: after a request receives text from a source, write_file, run_command,
+  fetch_url, Tavily and the provider's search, read_file/list_directory/
+  search_files, capture_screen, case_list_keys, show_actions and app control
+  leave the catalog and are refused for the rest of the request, and
+  source_call is narrowed to the sources already read. Source failures reach the
+  model only as fixed MCPError.agentMessage text. Both completion paths keep only
+  link cards to addresses a source returned verbatim (taintedActions), and the
+  conversation's sourceReads keep its later requests restricted. Nothing in this path
+  logs. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
   Web search (NativeAgentWebSearch) is resolved per turn: the route provider's
   server-side tool when the model has it (Anthropic web_search_20250305 with
   max_uses 2, OpenAI Responses web_search with max_tool_calls 2 and
@@ -1485,7 +1542,14 @@ it shows changes: Notify and Monitor reach it through
 FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
 Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
-(.project-docs/decisions/2026-11-25-settings-features-refresh.md). A row opens the feature's
+(.project-docs/decisions/2026-11-25-settings-features-refresh.md).
+SettingsWindowController keeps that APIAndModelsViewModel for the app's life
+but presents it only while the window is open: closed, a UserDefaults write
+(the island's Drop Mode or language controls) or a Tavily key change does not
+reread every key on the main thread mid-animation, and `show` always
+recomputes it once before the first frame (keys can change with no
+notification, e.g. a credential-only Settings Sync round)
+(.project-docs/decisions/2026-11-27-settings-models-recompute-while-hidden.md). A row opens the feature's
 own screen (SettingsWindowSelection.shownFeature) or, until it has one, its
 present place. Every feature has its own screen now. The sidebar
 (SettingsWindowTab.sidebarCases) is Features, Keys & models, Permissions,
@@ -2754,7 +2818,8 @@ Details: `docs/hotkey.md` and
    the meeting detector's Silero VAD download from Hugging Face, the On this
    Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),
-   notification sources accessed by user-configured local scripts, calendar providers
+   notification sources accessed by user-configured local scripts, MCP servers the
+   user connected as Agent sources (and what their local processes reach), calendar providers
    explicitly connected by the user (Google, Microsoft and Zoom), direct agent provider
    traffic, public OpenRouter model-author artwork (without keys or user content),
    optional Tavily search queries/usage checks and requested tool destinations, the model catalogs and free key checks of providers the user added
@@ -2772,7 +2837,10 @@ Details: `docs/hotkey.md` and
    independently saved recovery credential. `os_log` never receives
    transcripts, prompts, replies or keys (`LocalPathLoggingInvariantTests`).
    Key contents read by the hotkey tap or the Brightness keys tap are never
-   logged or persisted.
+   logged or persisted. Agent source secrets live in Keychain under
+   integration.<source>.<NAME> and reach only that server's process
+   environment or its own HTTPS headers, never argv or an address
+   (`SourceCredentialPolicy`); the sources path logs nothing.
 3. **No on-device LLM and no silent route change.** Cleanup and meeting
    processing run only on providers or endpoints the user chose; speech runs
    there or, for the microphone features, on the On this Mac model the user
@@ -2831,3 +2899,12 @@ Details: `docs/hotkey.md` and
    data goes (provider routes/endpoints, notification scripts, Monitor,
    backup destination). WHY: .project-docs/decisions/2026-10-20-whytap-links.md,
    .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
+8. **No model output executes an outward action.** Connected sources offer
+   the Agent only tools classified Read in app code (`source_call`'s enum and
+   `SourcesController.callRead`); tools that change or delete things are never
+   called by a model. An outward action will run only after a confirmation in
+   a Whytap-owned surface. Imported and custom servers are called only after
+   the user approves their tools. After a request reads source content, only
+   that source's Read tools and the answer remain; file edits and reads,
+   commands, web access, other sources and Whytap changes are refused. WHY:
+   .project-docs/decisions/2026-11-26-agent-sources.md

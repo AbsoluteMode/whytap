@@ -137,11 +137,26 @@ final class AutoPasteEngine {
         case targetNotInFront
         case clipboardChanged
     }
-    private(set) var lastPasteRefusal: PasteRefusal?
-    /// The target the last `paste` was bound to. A refused take keeps it,
-    /// so its Retry goes to the same app even if another capture (a new
-    /// History open) changed the remembered target meanwhile.
-    private(set) var lastPasteTarget: RememberedTarget?
+
+    /// The result of one `paste` operation: whether it pasted, why it was
+    /// refused (if retryable) and the target it was bound to. Callers that
+    /// keep a refused take use the outcome of their own operation
+    /// (`pasteWithOutcome`), never fields another queued take may change.
+    struct PasteOutcome: Equatable {
+        let pasted: Bool
+        let refusal: PasteRefusal?
+        /// The target this operation was bound to; a refused take keeps it,
+        /// so its Retry goes to the same app even if another capture (a new
+        /// History open) changed the remembered target meanwhile.
+        let target: RememberedTarget?
+    }
+    /// The outcome of the most recently finished `paste`, of any kind
+    /// (including a Whytap editor insert and an empty text).
+    private(set) var lastOutcome: PasteOutcome?
+    var lastPasteRefusal: PasteRefusal? { lastOutcome?.refusal }
+    var lastPasteTarget: RememberedTarget? { lastOutcome?.target }
+    /// The refusal of the operation holding the paste turn.
+    private var operationRefusal: PasteRefusal?
 
     /// When the user's clipboard comes back after a Drop paste.
     struct RestoreTiming: Equatable {
@@ -386,8 +401,17 @@ final class AutoPasteEngine {
     /// currently remembered one. Retry of a refused take uses the target
     /// that take was bound to (`lastPasteTarget`).
     func paste(_ text: String, formatting: SmartFormattingProfile = .plain, to boundTarget: RememberedTarget?) async -> Bool {
+        await pasteWithOutcome(text, formatting: formatting, to: boundTarget).pasted
+    }
+
+    /// `paste` with the full outcome of this one operation.
+    func pasteWithOutcome(
+        _ text: String,
+        formatting: SmartFormattingProfile = .plain,
+        to boundTarget: RememberedTarget?
+    ) async -> PasteOutcome {
         guard !text.isEmpty else {
-            return false
+            return finish(PasteOutcome(pasted: false, refusal: nil, target: nil))
         }
 
         // A take that began in one of Whytap's own editors goes straight
@@ -402,20 +426,35 @@ final class AutoPasteEngine {
             } else {
                 logEmit(.error, "autopaste_failed step=local_editor reason=target_gone")
             }
-            return inserted
+            return finish(PasteOutcome(pasted: inserted, refusal: nil, target: nil))
         }
-
-        lastPasteRefusal = nil
 
         // The take's target is fixed for this paste: a newer take that
         // captures another app while this one waits must not redirect it.
-        let target = boundTarget
-        lastPasteTarget = target
         let generation = flushGeneration
 
-        // One Drop paste at a time: the claim below must not be shared.
+        // One Drop paste at a time: the claim and the refusal below belong
+        // to this operation alone. Its outcome is recorded before the turn
+        // passes on, so a queued take can neither borrow nor overwrite it.
         await acquirePasteTurn()
-        defer { releasePasteTurn() }
+        operationRefusal = nil
+        let pasted = await pasteHoldingTurn(text, formatting: formatting, target: boundTarget, generation: generation)
+        let outcome = finish(PasteOutcome(pasted: pasted, refusal: pasted ? nil : operationRefusal, target: boundTarget))
+        releasePasteTurn()
+        return outcome
+    }
+
+    private func finish(_ outcome: PasteOutcome) -> PasteOutcome {
+        lastOutcome = outcome
+        return outcome
+    }
+
+    private func pasteHoldingTurn(
+        _ text: String,
+        formatting: SmartFormattingProfile,
+        target: RememberedTarget?,
+        generation: Int
+    ) async -> Bool {
         guard flushGeneration == generation else {
             logEmit(.error, "autopaste_failed step=paste reason=retired_by_flush")
             return false
@@ -493,7 +532,7 @@ final class AutoPasteEngine {
         self.claim = claim
         guard currentChangeCount() == counts.after else {
             self.claim = nil
-            lastPasteRefusal = .clipboardChanged
+            operationRefusal = .clipboardChanged
             logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_after_write")
             return false
         }
@@ -547,7 +586,7 @@ final class AutoPasteEngine {
         }
         guard clipboardIsOwned(by: claim) else {
             self.claim = nil
-            lastPasteRefusal = .clipboardChanged
+            operationRefusal = .clipboardChanged
             logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
             return false
         }
@@ -568,7 +607,7 @@ final class AutoPasteEngine {
         if let liveTarget, frontmostAtBoundary?.pid != liveTarget.pid {
             let lostInSettle = frontmostBeforeSettle?.pid == liveTarget.pid
             logEmit(.error, "autopaste_failed step=focus reason=\(lostInSettle ? "target_lost_focus" : "target_not_frontmost")")
-            lastPasteRefusal = .targetNotInFront
+            operationRefusal = .targetNotInFront
             giveBack(claim, after: "failure")
             return false
         }
@@ -615,28 +654,29 @@ final class AutoPasteEngine {
     private func postDropCmdV(recipient: RememberedTarget?, claim: ClipboardClaim) -> Bool {
         postEvent(Self.commandKeyCode, true, [])
         sleepUs(Self.keyEventGapUs)
-        // Each check can take time (the ownership check may read the
-        // pasteboard), so both are sampled twice, interleaved: a clipboard
-        // change during a foreground lookup, or a focus change during an
-        // ownership check, is seen by the next check of the other kind.
-        // The last check before V-down is the cheap change-count compare:
-        // a copy during either foreground lookup is caught right at the
-        // boundary.
+        // Fixed order: ownership (may read the pasteboard), foreground,
+        // ownership again (change count), foreground last. Every check is
+        // followed by one of the other kind except the last, which is the
+        // recipient: a wrong app receiving the dictation is the worse
+        // outcome. A clipboard change after the last change-count compare
+        // is an accepted residual window (sub-microsecond in-process; the
+        // target's own later read is outside any check anyway).
+        // WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
         let ownedFirst = self.claim === claim && clipboardIsOwned(by: claim)
         let frontFirst = frontmostAppInfo()?.pid
+        let owned = ownedFirst && self.claim === claim && currentChangeCount() == claim.ownedChangeCount
         let frontLast = frontmostAppInfo()?.pid
         let recipientReady = recipient.map { frontFirst == $0.pid && frontLast == $0.pid } ?? true
-        let owned = ownedFirst && self.claim === claim && currentChangeCount() == claim.ownedChangeCount
         guard recipientReady, owned else {
             postEvent(Self.commandKeyCode, false, [])
             if self.claim !== claim {
                 logEmit(.error, "autopaste_failed step=paste reason=clipboard_given_back")
             } else if !owned {
                 self.claim = nil
-                lastPasteRefusal = .clipboardChanged
+                operationRefusal = .clipboardChanged
                 logEmit(.error, "autopaste_failed step=pasteboard reason=replaced_before_paste")
             } else {
-                lastPasteRefusal = .targetNotInFront
+                operationRefusal = .targetNotInFront
                 logEmit(.error, "autopaste_failed step=focus reason=recipient_lost_focus")
                 giveBack(claim, after: "failure")
             }

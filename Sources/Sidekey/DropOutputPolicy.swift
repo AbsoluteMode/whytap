@@ -79,6 +79,21 @@ struct DropPasteRetry {
     /// The kept take after `engine` refused its paste in a retryable way,
     /// or nil when the last paste was not a retryable refusal (it pasted,
     /// or stopped for quit, held modifiers or a failed write).
+    static func make(
+        from outcome: AutoPasteEngine.PasteOutcome,
+        text: String,
+        rawTranscript: String,
+        formatting: SmartFormattingProfile
+    ) -> (retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal)? {
+        guard !outcome.pasted, let refusal = outcome.refusal else { return nil }
+        let retry = DropPasteRetry(
+            text: text, rawTranscript: rawTranscript, formatting: formatting, target: outcome.target
+        )
+        return (retry, refusal)
+    }
+
+    /// The same from the engine's most recently finished paste; only valid
+    /// right after the caller's own awaited paste returned.
     @MainActor
     static func make(
         after engine: AutoPasteEngine,
@@ -86,11 +101,7 @@ struct DropPasteRetry {
         rawTranscript: String,
         formatting: SmartFormattingProfile
     ) -> (retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal)? {
-        guard let refusal = engine.lastPasteRefusal else { return nil }
-        let retry = DropPasteRetry(
-            text: text, rawTranscript: rawTranscript, formatting: formatting, target: engine.lastPasteTarget
-        )
-        return (retry, refusal)
+        engine.lastOutcome.flatMap { make(from: $0, text: text, rawTranscript: rawTranscript, formatting: formatting) }
     }
 
     /// The short reason shown next to Retry.
@@ -108,4 +119,11 @@ struct DropProcessingRetry {
     let targetApp: String?
     let targetPID: pid_t?
     let mode: TranscriptionMode
+}
+
+/// Carries one take's raw-partial paste outcome from `pasteRaw` to
+/// `parkRefusedPartial` within the same delivery sink.
+@MainActor
+final class DropPasteOutcomeBox {
+    var value: AutoPasteEngine.PasteOutcome?
 }

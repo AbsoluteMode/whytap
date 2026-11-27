@@ -213,7 +213,9 @@ Voice flow (Drop / dictation):
             a remembered target (fixed when the paste starts) that loses
             focus during the 80 ms non-blocking settle stops it too, and
             ownership plus the frontmost recipient are rechecked between
-            Command-down and V-down (V is never sent otherwise). A live
+            Command-down and V-down in a fixed order, recipient last (V is
+            never sent otherwise; the remaining microsecond window is an
+            accepted residual, see the decision). A live
             target that is not in front (lost focus or refused activation)
             or a clipboard change stops the take as a retryable refusal:
             "Couldn't paste — app not in front / clipboard changed" with

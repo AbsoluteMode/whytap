@@ -2227,64 +2227,6 @@ extension AutoPasteEngineTests {
 
 
 extension AutoPasteEngineTests {
-    private func assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: Bool, terminated: Bool = false) async {
-        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
-        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
-        var board = original
-        var generation = 10
-        var commandWasPosted = false
-        var didPostV = false
-        var sendForegroundQueries = 0
-        var vDownGeneration: Int?
-        let engine = AutoPasteEngine(
-            flagsState: { [] },
-            frontmostAppInfo: {
-                if commandWasPosted && !didPostV {
-                    sendForegroundQueries += 1
-                    if sendForegroundQueries == 2 {
-                        board = external
-                        generation = 12
-                    }
-                }
-                return Self.targetA
-            },
-            activate: { _ in true }, isTerminated: { _ in terminated },
-            permissionGranted: { _ in true },
-            pasteboardWrite: { text in
-                board = PasteboardSnapshot(items: [["public.utf8-plain-text": Data(text.utf8)]])
-                generation = 11
-                return (before: 10, after: 11)
-            },
-            postEvent: { key, down, _ in
-                if key == Self.cmd && down { commandWasPosted = true }
-                if key == Self.v && down { didPostV = true; vDownGeneration = generation }
-            },
-            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
-            pasteboardSnapshot: { board },
-            pasteboardRestore: { board = $0; generation += 1 },
-            currentChangeCount: { generation }
-        )
-        if hasTarget { engine.rememberDropTarget() }
-        let result = await engine.paste("fixture")
-        await engine.waitForPendingRestore()
-        XCTAssertEqual(sendForegroundQueries, 2)
-        XCTAssertNil(vDownGeneration, "Generation 12 is the user’s new copy")
-        XCTAssertFalse(result)
-        XCTAssertFalse(didPostV, "The final foreground query must not create an unchecked clipboard window")
-        XCTAssertEqual(board, external)
-    }
-    func testBuilder706CopyAtActualLastSampleWithLiveTarget() async {
-        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: true)
-    }
-
-    func testBuilder706CopyAtActualLastSampleWithNoTarget() async {
-        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: false)
-    }
-
-    func testBuilder706CopyAtActualLastSampleWithQuitTarget() async {
-        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: true, terminated: true)
-    }
-
     func testBuilder706OpeningHistoryMustNotRedirectParkedDictation() async {
         let env = makeRestoreEnv()
         let engine = env.makeEngine()
@@ -2301,5 +2243,166 @@ extension AutoPasteEngineTests {
         await engine.waitForPendingRestore()
         XCTAssertFalse(retry)
         XCTAssertFalse(env.postedEvents.contains { $0.keyCode == Self.v && $0.down })
+    }
+}
+
+// MARK: - Build-queue review of ticket 713
+
+
+extension AutoPasteEngineTests {
+    func testBuilder713QueuedPasteCannotBorrowOrOverwriteAnotherTakesRefusal() async throws {
+        var generation = 0
+        var now: UInt64 = 0
+        var paused: CheckedContinuation<Void, Never>?
+        let engine = AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { Self.targetB },
+            activate: { _ in true }, isTerminated: { _ in false },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { text in
+                guard text != "second fixture" else { return nil }
+                generation += 1
+                return (before: generation - 1, after: generation)
+            },
+            postEvent: { _, _, _ in }, sleepUs: { now += UInt64($0) / 1_000 },
+            asyncSleepMs: { milliseconds in
+                now += milliseconds
+                if milliseconds == UInt64(AutoPasteEngine.postWriteSettleMs), paused == nil {
+                    await withCheckedContinuation { paused = $0 }
+                }
+            },
+            nowMs: { now }, logEmit: { _, _ in }, currentChangeCount: { generation }
+        )
+
+        let first = Task { @MainActor in
+            let pasted = await engine.paste("first fixture", to: Self.targetA)
+            XCTAssertFalse(pasted)
+            return DropPasteRetry.make(after: engine, text: "first fixture", rawTranscript: "first fixture", formatting: .plain)
+        }
+        while paused == nil { await Task.yield() }
+        let second = Task { @MainActor in
+            let pasted = await engine.paste("second fixture", to: Self.targetB)
+            XCTAssertFalse(pasted)
+            return DropPasteRetry.make(after: engine, text: "second fixture", rawTranscript: "second fixture", formatting: .plain)
+        }
+        for _ in 0..<20 { await Task.yield() }
+        paused?.resume()
+        let firstRefusal = await first.value
+        let secondRefusal = await second.value
+        XCTAssertEqual(firstRefusal?.refusal, .targetNotInFront)
+        XCTAssertEqual(firstRefusal?.retry.target, Self.targetA, "The pending second take must not retarget the first")
+        XCTAssertNil(secondRefusal, "The second failed write must not inherit the first refusal")
+    }
+
+    func testBuilder713ClosedLocalEditorDoesNotInheritAnEarlierClipboardRefusal() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        engine.rememberDropTarget()
+        env.frontmost = Self.targetB
+        let first = await engine.paste("old external take")
+        XCTAssertFalse(first)
+        XCTAssertEqual(engine.lastPasteRefusal, .targetNotInFront)
+
+        env.localEditorAccepts = false
+        engine.rememberDropTarget()
+        let second = await engine.paste("new local raw partial")
+        XCTAssertFalse(second)
+        XCTAssertTrue(engine.hasLocalDropTarget)
+        XCTAssertNil(DropPasteRetry.make(after: engine, text: "new local raw partial",
+                                         rawTranscript: "new local raw partial", formatting: .plain),
+                     "The local-editor failure must take the local History path without an external paste Retry")
+    }
+}
+
+extension AutoPasteEngineTests {
+    private enum RecipientMode: CaseIterable { case live, missing, quit }
+
+    /// A send-boundary fixture: global events are delivered to whatever
+    /// app is in front at V-down. `onCountAfterCommand(i)` / `onFrontAfterCommand(i)`
+    /// run on the i-th change-count / foreground query after Command-down.
+    private func runBoundary(
+        _ mode: RecipientMode,
+        onCountAfterCommand: @escaping (Int, inout AutoPasteEngine.RememberedTarget?, inout Int) -> Void = { _, _, _ in },
+        onFrontAfterCommand: @escaping (Int, inout AutoPasteEngine.RememberedTarget?, inout Int) -> Void = { _, _, _ in }
+    ) async -> (result: Bool, deliveredTo: pid_t?, order: [String]) {
+        var foreground: AutoPasteEngine.RememberedTarget? = Self.targetA
+        var clipboard = PasteboardSnapshot(items: [])
+        var generation = 10
+        var cmdDown = false
+        var counts = 0, fronts = 0
+        var order: [String] = []
+        var deliveredTo: pid_t?
+        let engine = AutoPasteEngine(
+            flagsState: { [] },
+            frontmostAppInfo: {
+                if cmdDown, deliveredTo == nil {
+                    fronts += 1; order.append("front")
+                    onFrontAfterCommand(fronts, &foreground, &generation)
+                }
+                return foreground
+            },
+            activate: { _ in true }, isTerminated: { _ in mode == .quit }, permissionGranted: { _ in true },
+            pasteboardWrite: {
+                clipboard = PasteboardSnapshot(items: [["public.utf8-plain-text": Data($0.utf8)]])
+                generation += 1
+                return (before: generation - 1, after: generation)
+            },
+            postEvent: { key, down, _ in
+                if key == Self.cmd { cmdDown = down }
+                if key == Self.v && down { deliveredTo = foreground?.pid; order.append("V") }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardSnapshot: { clipboard },
+            pasteboardRestore: { clipboard = $0; generation += 1 },
+            currentChangeCount: {
+                if cmdDown, deliveredTo == nil {
+                    counts += 1; order.append("count")
+                    onCountAfterCommand(counts, &foreground, &generation)
+                }
+                return generation
+            }
+        )
+        if mode != .missing { engine.rememberDropTarget() }
+        let result = await engine.paste("synthetic dictation")
+        engine.flushPendingRestore()
+        return (result, deliveredTo, order)
+    }
+
+    /// The fixed boundary order, which the accepted residual window is
+    /// defined against: ownership, foreground, ownership, foreground (the
+    /// recipient) last, then V-down.
+    func testSendBoundaryChecksOwnershipThenRecipientLast() async {
+        for mode in RecipientMode.allCases {
+            let run = await runBoundary(mode)
+            XCTAssertTrue(run.result, "\(mode)")
+            XCTAssertEqual(run.order, ["count", "front", "count", "front", "V"], "\(mode)")
+        }
+    }
+
+    /// Class of ticket 713 item 1: focus moves while the last ownership
+    /// sample runs. The recipient sample after it catches it in every mode.
+    func testFocusMovingDuringTheLastOwnershipSampleNeverDeliversToTheLaterApp() async {
+        for mode in RecipientMode.allCases {
+            let run = await runBoundary(mode, onCountAfterCommand: { index, foreground, _ in
+                if index == 2 { foreground = Self.targetB }
+            })
+            XCTAssertFalse(run.result, "\(mode)")
+            XCTAssertNil(run.deliveredTo, "\(mode): the later app never receives the dictation")
+        }
+    }
+
+    /// Focus moving during the first ownership check, and a copy during the
+    /// first foreground lookup, are caught by the check that follows.
+    func testChangesDuringEarlierBoundaryChecksAreCaught() async {
+        for mode in RecipientMode.allCases {
+            let focus = await runBoundary(mode, onCountAfterCommand: { index, foreground, _ in
+                if index == 1 { foreground = Self.targetB }
+            })
+            XCTAssertNil(focus.deliveredTo, "\(mode) focus")
+            let copy = await runBoundary(mode, onFrontAfterCommand: { index, _, generation in
+                if index == 1 { generation = 99 }
+            })
+            XCTAssertNil(copy.deliveredTo, "\(mode) copy")
+            XCTAssertFalse(copy.result, "\(mode) copy")
+        }
     }
 }

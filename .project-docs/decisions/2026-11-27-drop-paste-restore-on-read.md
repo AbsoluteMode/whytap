@@ -65,11 +65,16 @@ clipboard png/tiff only. The target pasted the old screenshot.
   as foreign: not restored over and not hidden from clipboard history.
 - One foreground sample after the settle decides both the focus check and
   the Cmd+V recipient. Between Command-down and V-down the ownership check
-  (which may read the pasteboard) and two foreground lookups run in that
-  order, and the last thing before V-down is a change-count compare: a copy
-  during either foreground lookup, or a focus change during the ownership
-  check, stops the paste. This holds with a live, a missing and a quit
-  target.
+  (which may read the pasteboard), a foreground lookup, a change-count
+  compare and a final foreground lookup (the recipient) run in that fixed
+  order before V-down. Each check is followed by one of the other kind
+  except the last; see "Accepted residual window".
+- The refusal and the target belong to one paste operation
+  (`AutoPasteEngine.PasteOutcome`, `pasteWithOutcome`), recorded before the
+  paste turn passes on; every exit (including a Whytap editor insert)
+  records its own outcome. Callers park a refused take from their own
+  outcome, so a queued take can neither borrow nor overwrite it, and a
+  closed Whytap editor never inherits an earlier external refusal.
 - A failed write re-checks, right before restoring, the generation that
   justified the restore (its own clear or the previous take's dictation):
   the checks themselves read the pasteboard, and anything that arrived
@@ -107,7 +112,7 @@ clipboard png/tiff only. The target pasted the old screenshot.
   (selection capture, a failed Shot text copy) puts the dictation back with
   a new change count. Drop recognises its dictation by content (transient
   marker and the same text), adopts that generation and still restores the
-  user's clipboard. Real external copies and successful Shot/History copies
+ user's clipboard. Real external copies and successful Shot/History copies
   carry no marker and are kept. `Pasteboard.snapshot` reads are Whytap's own
   and do not count as the target's read.
 - The dictation item carries `org.nspasteboard.TransientType`, so
@@ -164,7 +169,11 @@ foreground lookup (with and without a target) posts no V. After the review
 of ticket 706: a copy during only the second foreground lookup posts no V
 (live, missing and quit target); a refused Fast partial is kept for Retry
 in all three batch outcomes for both refusals, a History capture of another
-app does not redirect it, and Retry makes no provider call. On a named pasteboard: promise read counting
+app does not redirect it, and Retry makes no provider call. After the review of ticket 713: the fixed
+boundary order is pinned by a test; focus moving during the last ownership
+sample never delivers to the later app (live, missing, quit target); a
+queued take cannot borrow or overwrite another take's refusal; a closed
+Whytap editor does not inherit an earlier external refusal. On a named pasteboard: promise read counting
 and cache, `ClipboardWatcher` skipping the item unread, and an end-to-end
 run where a separate `osascript` process reads 300 ms after Cmd+V from an
 image-only pasteboard. With the timing forced back to 120 ms that process
@@ -182,6 +191,34 @@ and the image came back.
 - Pasting into the frontmost app when a live target could not be brought to
   the front (the earlier fallback): the dictation lands in an app the user
   did not target.
+
+## Accepted residual window
+
+The send-boundary race is inherent, and it is accepted rather than chased
+further (decided by the maintainer's orchestrator on 2026-11-27, after five
+review rounds). Another app can always copy, or focus can always move,
+between our last in-process check and the moment the window server routes
+the keystroke; and after V-down the target reads the pasteboard on its own
+schedule, which is the reason for this whole design. Whichever check runs
+last, a change of the other kind during it is not seen, so review fixtures
+that inject a change inside the final query contradict each other (ticket
+706 item 1 needs the clipboard compare last, ticket 713 item 1 the
+foreground lookup last).
+
+Chosen: the recipient (foreground) is sampled last, because a wrong app
+receiving the dictation is the worse outcome; a newer copy taken after the
+last compare pastes the user's own content into the intended app, which a
+copy between V-down and the target's read does anyway. In production both
+probes are in-process reads: `NSWorkspace.frontmostApplication` is a cached
+value refreshed by main-run-loop notifications, so it cannot change during
+the synchronous check sequence at all. Measured on the maintainer's Mac on
+2026-11-27 (2,000 iterations, read-only): foreground lookup p50 0.1 us,
+p99 0.1 us; `NSPasteboard.general.changeCount` p50 0.5 us, p99 0.6 us;
+creating the V-down `CGEvent` p99 0.2 us; isolated scheduler outliers up to
+1.5 ms, 0.6 ms and 30 ms (first call). The residual between the last compare
+and the posted V-down is therefore about a microsecond, bounded by a few
+milliseconds under scheduling stalls. Fixtures that inject a change inside
+the final foreground lookup are outside this guarantee.
 
 ## Limits
 

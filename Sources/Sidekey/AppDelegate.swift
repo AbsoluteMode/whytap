@@ -1375,10 +1375,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliverDropTranscript(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
-        guard !text.isEmpty else { return false }
-
-        return await autoPasteEngine.paste(text, formatting: formatting)
+    private func deliverDropTranscript(
+        _ text: String, formatting: SmartFormattingProfile = .plain
+    ) async -> AutoPasteEngine.PasteOutcome {
+        await autoPasteEngine.pasteWithOutcome(text, formatting: formatting, to: autoPasteEngine.currentTarget())
     }
 
     private func finishDropDelivery(
@@ -1389,13 +1389,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
-        let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
+        let outcome = await deliverDropTranscript(cleaned, formatting: formatting)
+        let pasted = outcome.pasted
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
             failDropTurnTelemetry(reason: "local_editor_unavailable")
-        } else if !pasted, let refused = DropPasteRetry.make(
-            after: autoPasteEngine, text: cleaned, rawTranscript: rawTranscript, formatting: formatting
+        } else if let refused = DropPasteRetry.make(
+            from: outcome, text: cleaned, rawTranscript: rawTranscript, formatting: formatting
         ) {
             // The target was not in front, or the clipboard changed under the
             // paste: nothing was pasted elsewhere. Keep the text for Retry.
@@ -3378,6 +3379,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dropDeliverySink(targetApp: String?, targetPID: pid_t?) -> DropBatchRecoverySink {
         let mode = DropTake.shared.mode
         let generation = streamingSetupGeneration
+        // The raw-partial paste's own outcome, handed to the parking hook of
+        // the same take (never an engine-wide field another paste may set).
+        let rawOutcome = DropPasteOutcomeBox()
         return DropBatchRecoverySink(
             setPhase: { [weak self] phase in
                 // The reason is applied only when the take really ends
@@ -3425,8 +3429,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // for retry) instead of silently losing the dictation. Only a
                 // SUCCESSFUL paste parks the phase at `.idle`; on failure the
                 // caller owns the phase (it flips to `.deliveryFailed`).
+                rawOutcome.value = nil
                 guard let self, generation == self.streamingSetupGeneration else { return false }
-                let pasted = await self.autoPasteEngine.paste(raw)
+                let outcome = await self.autoPasteEngine.pasteWithOutcome(
+                    raw, to: self.autoPasteEngine.currentTarget()
+                )
+                rawOutcome.value = outcome
+                let pasted = outcome.pasted
                 if pasted {
                     AppState.shared.phase = .idle
                     self.noteDeliveredDropForLanguageOffer(raw)
@@ -3438,9 +3447,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // clipboard changed): keep this text for Retry instead of
                 // re-transcribing audio or dropping it.
                 guard let self, generation == self.streamingSetupGeneration,
-                      self.autoPasteEngine.lastPasteRefusal != nil,
+                      let outcome = rawOutcome.value,
                       let refused = DropPasteRetry.make(
-                        after: self.autoPasteEngine, text: raw, rawTranscript: raw, formatting: .plain
+                        from: outcome, text: raw, rawTranscript: raw, formatting: .plain
                       ) else { return false }
                 self.dropHistoryRecorder?.record(rawTranscript: raw, formattedText: raw, targetApp: targetApp)
                 self.parkRefusedPaste(refused.retry, refusal: refused.refusal)
@@ -3579,9 +3588,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             // Bound to the refused take's own target, never to whatever was
             // captured since (a History open, for example).
-            let pasted = await self.autoPasteEngine.paste(pending.text, formatting: pending.formatting, to: pending.target)
+            let outcome = await self.autoPasteEngine.pasteWithOutcome(
+                pending.text, formatting: pending.formatting, to: pending.target
+            )
+            let pasted = outcome.pasted
             self.retryInFlight = false
-            if !pasted, let refusal = self.autoPasteEngine.lastPasteRefusal {
+            if !pasted, let refusal = outcome.refusal {
                 self.parkRefusedPaste(pending, refusal: refusal)
                 return
             }

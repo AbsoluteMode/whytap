@@ -68,7 +68,7 @@ final class InputLanguageSuggestionTests: XCTestCase {
     func test_only_takes_that_reached_the_user_are_counted() throws {
         let source = try source("Sources/Sidekey/AppDelegate.swift")
         XCTAssertTrue(source.contains("if pasted { noteDeliveredDropForLanguageOffer(rawTranscript) }"))
-        let raw = try XCTUnwrap(source.range(of: "let pasted = await self.autoPasteEngine.paste(raw)"))
+        let raw = try XCTUnwrap(source.range(of: "rawOutcome.value = outcome"))
         let tail = source[raw.upperBound...].prefix(260)
         XCTAssertTrue(tail.contains("self.noteDeliveredDropForLanguageOffer(raw)"))
         // A refused paste counts only once its Retry actually pasted.

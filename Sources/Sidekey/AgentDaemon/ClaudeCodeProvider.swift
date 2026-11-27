@@ -83,6 +83,8 @@ final class ClaudeCodeProvider: CLIProvider {
     let installURL = URL(string: "https://docs.claude.com/en/docs/claude-code/setup")!
 
     private let locate: () -> URL?
+    /// The Agent's own folder, used when a turn names none; nil fails closed.
+    private let agentWorkspace: () -> URL?
     private let runOneShot: (_ binary: URL, _ args: [String]) -> ProcessResult?
     private let runStreaming: (
         _ binary: URL,
@@ -118,9 +120,11 @@ final class ClaudeCodeProvider: CLIProvider {
     /// Guarded by `sessionQueue`, like `lastSessionID`.
     private var activeHandle: ClaudeStdinWriting?
     /// The latest turn. Only it may publish or clear `activeHandle`: a new
-    /// turn takes ownership before its child starts, so an earlier turn's
-    /// writer never stays active, even when the new child fails to start or
-    /// exits before its writer is registered. Guarded by `sessionQueue`.
+    /// turn takes ownership on entry, before the CLI lookup, the workspace or
+    /// its child, so an earlier turn's writer never stays active, even when
+    /// the new turn cannot start or its child exits before its writer is
+    /// registered. Cleared when that turn ends, so an idle provider retains
+    /// no writer. Guarded by `sessionQueue`.
     private var currentTurn: TurnHandleBox?
 
     init(
@@ -134,8 +138,10 @@ final class ClaudeCodeProvider: CLIProvider {
             _ onExit: @escaping (Int32) -> Void
         ) -> ClaudeStdinWriting = ClaudeCodeProvider.defaultRunStreaming,
         idleSoftTimeout: TimeInterval = 45,
-        idleHardTimeout: TimeInterval = 120
+        idleHardTimeout: TimeInterval = 120,
+        agentWorkspace: @escaping () -> URL? = { try? AgentDaemonWorkingDirectory.ensure() }
     ) {
+        self.agentWorkspace = agentWorkspace
         self.locate = locate
         self.runOneShot = runOneShot
         self.runStreaming = runStreaming
@@ -227,7 +233,17 @@ final class ClaudeCodeProvider: CLIProvider {
 
     func run(prompt: String, resumeSessionID: String?, options: AgentRunOptions) -> AsyncStream<AgentSSEEvent> {
         AsyncStream { continuation in
+            // This turn's own child. A cancelled turn's late result or exit
+            // must not close or clear the next turn's stdin.
+            let ownHandle = TurnHandleBox()
+            // Ownership first, before the lookup, the workspace or the child:
+            // even a turn that cannot start retires the previous writer.
+            sessionQueue.async {
+                self.currentTurn = ownHandle
+                self.activeHandle = nil
+            }
             guard let binary = locate() else {
+                releaseTurn(ownHandle)
                 continuation.yield(.error(
                     code: "not_installed",
                     message: "Claude Code is not installed",
@@ -267,7 +283,8 @@ final class ClaudeCodeProvider: CLIProvider {
 
             // Fail closed: without the Agent's own folder the CLI would run
             // (and, with actions on, write) in whatever folder Whytap has.
-            guard let workingDir = options.workingDirectory ?? (try? AgentDaemonWorkingDirectory.ensure()) else {
+            guard let workingDir = options.workingDirectory ?? agentWorkspace() else {
+                releaseTurn(ownHandle)
                 continuation.yield(.error(code: "workspace_unavailable",
                                           message: AgentHarnessMessages.workspaceUnavailable,
                                           retryable: true))
@@ -285,14 +302,6 @@ final class ClaudeCodeProvider: CLIProvider {
             // it before runStreaming would just trade this for a handle-capture
             // race, so leave the order as-is.
             var watchdog: ProcessIdleWatchdog?
-            // This turn's own child. A cancelled turn's late result or exit
-            // must not close or clear the next turn's stdin.
-            let ownHandle = TurnHandleBox()
-            // Ownership first, before anything of the child can run.
-            sessionQueue.async {
-                self.currentTurn = ownHandle
-                self.activeHandle = nil
-            }
 
             let handle = runStreaming(binary, args, workingDir, { [weak self] line in
                 watchdog?.kick()   // any stdout = alive
@@ -381,11 +390,13 @@ final class ClaudeCodeProvider: CLIProvider {
         }
     }
 
-    /// A turn ended (exit, cancel or finish): its writer stops receiving
-    /// answers, unless a newer turn already owns the provider.
+    /// A turn ended (exit, cancel, finish or a failed start): its writer
+    /// stops receiving answers and is no longer retained, unless a newer turn
+    /// already owns the provider.
     private func releaseTurn(_ turn: TurnHandleBox) {
         sessionQueue.async {
             guard self.currentTurn === turn else { return }
+            self.currentTurn = nil
             self.activeHandle = nil
         }
     }

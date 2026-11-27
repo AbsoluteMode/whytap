@@ -173,6 +173,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// leaves captured audio stranded in memory.
     private var pendingRetryPCM: Data?
     private var pendingProcessingRetry: DropProcessingRetry?
+    private var pendingPasteRetry: DropPasteRetry?
     private var pendingRetryTarget: (app: String?, pid: pid_t?)?
     /// True while a manual Retry's batch recovery is in flight. Gates
     /// `retryPendingDelivery` (via `shouldBeginRetry`) so a second press can't
@@ -614,6 +615,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        // A Drop paste may still be waiting for its target to read the
+        // dictation: give the user's clipboard back before quitting.
+        autoPasteEngine.flushPendingRestore()
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()
@@ -1371,10 +1375,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    private func deliverDropTranscript(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
-        guard !text.isEmpty else { return false }
-
-        return await autoPasteEngine.paste(text, formatting: formatting)
+    private func deliverDropTranscript(
+        _ text: String, formatting: SmartFormattingProfile = .plain
+    ) async -> AutoPasteEngine.PasteOutcome {
+        await autoPasteEngine.pasteWithOutcome(text, formatting: formatting, to: autoPasteEngine.currentTarget())
     }
 
     private func finishDropDelivery(
@@ -1385,11 +1389,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) async {
         let cleaned = text
         AppState.shared.phase = .inserting
-        let pasted = await deliverDropTranscript(cleaned, formatting: formatting)
+        let outcome = await deliverDropTranscript(cleaned, formatting: formatting)
+        let pasted = outcome.pasted
         discardPendingRetry()
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
             failDropTurnTelemetry(reason: "local_editor_unavailable")
+        } else if let refused = DropPasteRetry.make(
+            from: outcome, text: cleaned, rawTranscript: rawTranscript, formatting: formatting
+        ) {
+            // The target was not in front, or the clipboard changed under the
+            // paste: nothing was pasted elsewhere. Keep the text for Retry.
+            // WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
+            dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
+            failDropTurnTelemetry(reason: "paste_refused")
+            parkRefusedPaste(refused.retry, refusal: refused.refusal)
+            return
         } else {
             if !pasted {
                 os_log("autopaste_external_delivery_failed", log: Self.log, type: .info)
@@ -1401,6 +1416,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         try? await Task.sleep(nanoseconds: 300_000_000)
         AppState.shared.phase = .idle
+    }
+
+    private func parkRefusedPaste(_ retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal) {
+        pendingPasteRetry = retry
+        AppState.shared.dropDeliveryFailureMessage = DropPasteRetry.message(for: refusal)
+        AppState.shared.phase = .deliveryFailed
     }
 
     /// Only a take whose text reached the user counts towards the input
@@ -3360,6 +3381,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func dropDeliverySink(targetApp: String?, targetPID: pid_t?) -> DropBatchRecoverySink {
         let mode = DropTake.shared.mode
         let generation = streamingSetupGeneration
+        // The raw-partial paste's own outcome, handed to the parking hook of
+        // the same take (never an engine-wide field another paste may set).
+        let rawOutcome = DropPasteOutcomeBox()
         return DropBatchRecoverySink(
             setPhase: { [weak self] phase in
                 // The reason is applied only when the take really ends
@@ -3407,13 +3431,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // for retry) instead of silently losing the dictation. Only a
                 // SUCCESSFUL paste parks the phase at `.idle`; on failure the
                 // caller owns the phase (it flips to `.deliveryFailed`).
+                rawOutcome.value = nil
                 guard let self, generation == self.streamingSetupGeneration else { return false }
-                let pasted = await self.autoPasteEngine.paste(raw)
+                let outcome = await self.autoPasteEngine.pasteWithOutcome(
+                    raw, to: self.autoPasteEngine.currentTarget()
+                )
+                rawOutcome.value = outcome
+                let pasted = outcome.pasted
                 if pasted {
                     AppState.shared.phase = .idle
                     self.noteDeliveredDropForLanguageOffer(raw)
                 }
                 return pasted
+            },
+            parkRefusedPartial: { [weak self] raw in
+                // The raw partial's paste was refused (target not in front,
+                // clipboard changed): keep this text for Retry instead of
+                // re-transcribing audio or dropping it.
+                guard let self, generation == self.streamingSetupGeneration,
+                      let outcome = rawOutcome.value,
+                      let refused = DropPasteRetry.make(
+                        from: outcome, text: raw, rawTranscript: raw, formatting: .plain
+                      ) else { return false }
+                self.dropHistoryRecorder?.record(rawTranscript: raw, formattedText: raw, targetApp: targetApp)
+                self.parkRefusedPaste(refused.retry, refusal: refused.refusal)
+                return true
             },
             saveUndeliveredPartial: { [weak self] raw in
                 guard let self, generation == self.streamingSetupGeneration,
@@ -3526,6 +3568,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         pendingRetryPCM = nil
         pendingRetryTarget = nil
         pendingProcessingRetry = nil
+        pendingPasteRetry = nil
         AppState.shared.dropDeliveryFailureMessage = nil
     }
 
@@ -3535,6 +3578,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard AppState.shared.phase == .deliveryFailed, !retryInFlight else { return }
         discardPendingRetry()
         AppState.shared.phase = .idle
+    }
+
+    /// Retry for a refused paste (`DropPasteRetry`): pastes the kept text
+    /// again, without new processing. A new refusal parks it again.
+    private func retryRefusedPaste(_ pending: DropPasteRetry) {
+        guard !retryInFlight else { return }
+        retryInFlight = true
+        AppState.shared.phase = .inserting
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Bound to the refused take's own target, never to whatever was
+            // captured since (a History open, for example).
+            let outcome = await self.autoPasteEngine.pasteWithOutcome(
+                pending.text, formatting: pending.formatting, to: pending.target
+            )
+            let pasted = outcome.pasted
+            self.retryInFlight = false
+            if !pasted, let refusal = outcome.refusal {
+                self.parkRefusedPaste(pending, refusal: refusal)
+                return
+            }
+            self.discardPendingRetry()
+            if pasted { self.noteDeliveredDropForLanguageOffer(pending.rawTranscript) }
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            if AppState.shared.phase == .inserting { AppState.shared.phase = .idle }
+        }
     }
 
     /// Manual retry for a total-offline degraded Drop (Task 7). Re-runs
@@ -3552,6 +3621,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// in-flight phase (routed to `.noop`), never the escapable terminal: that
     /// closes the window where a stale retry could paste over a new turn.
     func retryPendingDelivery() {
+        if let pending = pendingPasteRetry { return retryRefusedPaste(pending) }
         if let pending = pendingProcessingRetry {
             guard !retryInFlight else { return }
             retryInFlight = true
@@ -3621,6 +3691,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// through to `.deliveryFailed` (retain for retry) instead of silently
         /// losing the dictation.
         var pasteRaw: (String) async -> Bool = { _ in true }
+        /// After a refused raw-partial paste (`AutoPasteEngine.PasteRefusal`):
+        /// park that text for a paste-only Retry. Returns whether it did;
+        /// the parked take owns the phase (`.deliveryFailed` with its reason).
+        var parkRefusedPartial: (String) -> Bool = { _ in false }
         /// A closed native field can park a raw partial in History without
         /// retaining audio for a retry into an editor that no longer exists.
         var saveUndeliveredPartial: (String) -> Bool = { _ in false }
@@ -3824,6 +3898,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let pasted = await sink.pasteRaw(lastPartial)          // rung 3
                 if pasted {
                     sink.failTelemetry("salvaged_partial")
+                } else if sink.parkRefusedPartial(lastPartial) {
+                    // Retry pastes the kept partial; no audio retry needed.
+                    sink.clearPendingRetry()
+                    sink.failTelemetry("salvaged_partial_paste_refused")
                 } else if sink.saveUndeliveredPartial(lastPartial) {
                     sink.clearPendingRetry()
                     sink.failTelemetry("local_editor_unavailable")

@@ -1597,9 +1597,14 @@ SettingsFeaturesView lists the catalog with each status and icon
 (AppFeature.symbol: the island tool's icon, else the one its Hotkeys row
 carries; FeatureIcon, also in each screen's header), read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
-PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
-keys from the Keychain on the main thread, so it is rebuilt only when a value
-it shows changes: Notify and Monitor reach it through
+PermissionsSettingsViewModel the older tabs show. The snapshot is built in
+SettingsFeaturesView's body, so on every redraw (also when the island switches
+Drop Mode). It asks every feature's sections once, inside one
+ProviderKeyStore.withLookupPass, which reads each key from the Keychain at
+most once per build (before: about 150 main-thread reads and a 243 ms block
+per Drop Mode switch with Features open,
+.project-docs/decisions/2026-11-28-drop-mode-switch-motion.md). Its other
+refresh triggers are kept to values it shows: Notify and Monitor reach it through
 FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
 Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs

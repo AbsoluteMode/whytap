@@ -2,7 +2,7 @@
 id: drop-mode-switch-motion-2026-11-28
 type: decision
 title: The Smart/Fast switch has its own scoped animation, and settings capture reads keys off the main thread
-summary: The Drop Mode tile symbol and the island's ON Smart/Fast status animate explicitly (symbol replace, status transition, 0.3 s smooth, none with Reduce Motion), scoped to those two views. The settings-history capture that follows every preference write reads provider keys in a detached task instead of on the main thread.
+summary: The Drop Mode tile symbol and the island's ON Smart/Fast status animate explicitly (symbol replace, status transition, 0.3 s smooth, none with Reduce Motion), scoped to those two views. The settings-history capture that follows every preference write reads provider keys in a detached task. With Settings -> Features open, each redraw (also from a Drop Mode switch) reads each provider key once per pass instead of about 150 times, which removed the owner's one-second delay.
 status: confirmed
 tags: [island, hover, drop-mode, animation, backup, keychain, performance]
 canonical_for: [drop-mode-switch-motion]
@@ -16,6 +16,15 @@ sources:
     confirmed_at: 2026-11-28
   - type: repository
     reference: Sources/Sidekey/Backup/BackupViewModel.swift
+    confirmed_at: 2026-11-28
+  - type: user-confirmed
+    reference: On 2026-11-28 the owner tested preview build 1794 with this change and reported that the mode changes about a second after the click; the orchestrator asked for the cause in the real app path.
+    confirmed_at: 2026-11-28
+  - type: repository
+    reference: Sources/Sidekey/AIRouting/ProviderKeyStore.swift
+    confirmed_at: 2026-11-28
+  - type: repository
+    reference: Sources/Sidekey/Settings/Features/FeaturesEnvironment.swift
     confirmed_at: 2026-11-28
 related: []
 ---
@@ -85,5 +94,41 @@ off the main thread rather than delayed.
   frame for no visible gain.
 - A longer capture debounce: settings history saves changes immediately.
 - Leaving the symbol to the press spring: the hotkey and some clicks cut it.
+
+## Round 3: the one-second delay was Settings -> Features
+
+In preview build 1794 the owner saw the switch "about a second after the
+click". The offscreen island did not reproduce it; the running app did, read
+only:
+
+- The unified log of the running process showed 8,942 `SecItemCopyMatching`
+  calls in 6.5 minutes, 8,682 of them on the main thread, in bursts of 250-350
+  per second lasting 2-15 s, one read every 2-3 ms, while the owner used the
+  island.
+- macOS's spin report from the owner's test (`Sidekey_2026-11-28-021708.spin`,
+  0.5 s) put the main thread in `SettingsFeaturesView.body` ->
+  `snapshot` -> `FeatureSetupSnapshot.live` -> `APIAndModelsViewModel.sections(for:)`
+  -> `ModelStatusResolver.sections` -> `KeychainStore.read` (38 of 51 samples),
+  plus `APIAndModelsViewModel.recompute` key reads.
+
+The Settings window was open on Features. That view rebuilds its snapshot in
+`body`, on `sidekeyDropModeChanged` among others, and the snapshot asked every
+feature's sections twice, each reading every provider key again. Mounted
+offscreen with six keys at a measured 1.2 ms per read, one Drop Mode switch
+cost 150 main-thread Keychain reads and a 243 ms block; the live app, with
+loaded catalogs and repeated redraws, took about a second.
+
+`ProviderKeyStore.withLookupPass` now remembers each account's answer for the
+duration of one synchronous pass (shared by the copies the view model and its
+resolver hold, forgotten on save/delete and when the pass ends). The Features
+snapshot builds each feature's sections once inside one pass, and
+`sections(for:)` and `recompute()` run in a pass. The same switch now reads 6
+keys with a 20 ms block. `SettingsFeaturesKeychainTests` keeps a budget of 20
+main-thread reads and a block under 100 ms; `ProviderKeyStoreLookupPassTests`
+covers the pass rules.
+
+Rejected: a cache of key answers that outlives one pass (a key changed by
+Settings Sync or the plugin would show stale), and moving the snapshot off the
+main thread (it reads main-actor view models).
 
 2026-11-28, PR: see fix/drop-mode-toggle-lag.

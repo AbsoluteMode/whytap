@@ -63,7 +63,8 @@ struct FeaturesFixture {
     private let catalogURL: URL
 
     init(_ state: State, dropMode: TranscriptionMode = .fast,
-         onDevice status: OnDeviceSpeechModelStatus? = nil) async throws {
+         onDevice status: OnDeviceSpeechModelStatus? = nil,
+         keys injectedKeys: ProviderKeyStore? = nil) async throws {
         suite = "Features-\(UUID().uuidString)"
         defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         catalogURL = FileManager.default.temporaryDirectory.appendingPathComponent(suite + ".json")
@@ -83,7 +84,7 @@ struct FeaturesFixture {
         let box = InMemoryTokenStore.Box()
         models = APIAndModelsViewModel(
             routing: routing,
-            keys: ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) }),
+            keys: injectedKeys ?? ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) }),
             catalogs: ModelCatalogStore(fileURL: catalogURL, fetcher: offline),
             checks: ModelCheckStore(defaults: defaults), keyStatuses: keyStatuses,
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil },

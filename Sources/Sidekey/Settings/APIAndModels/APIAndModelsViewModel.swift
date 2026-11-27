@@ -687,7 +687,13 @@ final class APIAndModelsViewModel: ObservableObject {
     // MARK: - Models
 
     func sections(for feature: AIFeature) -> [PickerSection] {
-        resolver.sections(for: feature)
+        keys.withLookupPass { resolver.sections(for: feature) }
+    }
+
+    /// One Keychain pass for several reads of this model (Settings -> Features
+    /// builds its snapshot from every feature's sections).
+    func withKeyLookupPass<T>(_ body: () throws -> T) rethrows -> T {
+        try keys.withLookupPass(body)
     }
 
     func missingProviderHint(for feature: AIFeature) -> String? {
@@ -1128,6 +1134,10 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func recompute() {
+        keys.withLookupPass { recomputeInPass() }
+    }
+
+    private func recomputeInPass() {
         let chips = keyedAccounts().map(chip(for:))
         let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)))
         if audioTranslate != slot { audioTranslate = slot }

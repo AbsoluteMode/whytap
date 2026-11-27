@@ -490,6 +490,8 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(FeatureCatalog.info(for: .agent).video, .agent)
         XCTAssertEqual(FeatureCatalog.info(for: .meetings).video, .meetings)
         XCTAssertEqual(FeatureCatalog.info(for: .googleSearch).video, .googleSearch)
+        XCTAssertEqual(FeatureCatalog.info(for: .notify).video, .notify)
+        XCTAssertEqual(FeatureCatalog.info(for: .monitor).video, .monitor)
     }
 
     func testEveryFeatureHasItsOwnScreen() {

@@ -192,7 +192,11 @@ final class PlannerExternalChangesTests: XCTestCase {
         guard let saved = protection(url) else { throw XCTSkip("This volume has no data protection classes") }
         XCTAssertEqual(saved, .completeUntilFirstUserAuthentication)
 
-        try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUnlessOpen], ofItemAtPath: url.path)
+        // Re-create the archive as the old writer did. Changing the class in place can
+        // leave the test fixture unable to change it back (EBUSY on macOS).
+        let archive = try Data(contentsOf: url)
+        try archive.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         XCTAssertEqual(protection(url), .completeUnlessOpen, "As an earlier build left it")
         try skipWhileProtectedDataIsUnavailable(url)
         let relaunched = PlannerStore(url: url)

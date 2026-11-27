@@ -341,13 +341,14 @@ final class ClaudeCodeProvider: CLIProvider {
                     handle.terminate()
                 })
             watchdog = wd
-            let exitedDuringStart = ownHandle.register(handle)
+            ownHandle.register(handle)
             wd.start()
 
-            // Both on the serial session queue, in this order: a child that
-            // already exited is registered and cleared at once.
-            sessionQueue.async { self.activeHandle = handle }
-            if exitedDuringStart { clearActiveHandle(ifItIs: handle) }
+            // Publication and the exit's clear both run on the serial session
+            // queue. The exit is recorded in the box before its clear is
+            // queued, so whichever runs first, an exited writer never stays
+            // active: publication skips it, or the later clear removes it.
+            sessionQueue.async { if !ownHandle.hasExited { self.activeHandle = handle } }
 
             // Terminate the child whenever the consumer goes away — cancelled
             // (Esc / panel dismiss / new turn / app quit -> AgentController.stop()
@@ -493,15 +494,18 @@ final class TurnHandleBox: @unchecked Sendable {
     private var exited = false
 
     /// Registers this turn's writer; applies a close requested before it.
-    /// Returns true when the child already exited.
-    func register(_ writer: ClaudeStdinWriting) -> Bool {
+    func register(_ writer: ClaudeStdinWriting) {
         lock.lock()
         handle = writer
         let close = closeRequested
-        let alreadyExited = exited
         lock.unlock()
         if close { writer.closeStdin() }
-        return alreadyExited
+    }
+
+    var hasExited: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exited
     }
 
     func closeStdin() {

@@ -4,9 +4,10 @@ import Foundation
 /// Runs a short CLI command (`auth status`, `login status`) to completion.
 /// Both pipes drain while the child runs, so a large output cannot block it.
 /// One deadline bounds the whole call: a child that has not exited by then is
-/// terminated (then killed if it ignores TERM) and the call returns nil, and a
-/// helper that inherited the pipes cannot hold the call open after the child
-/// exits either.
+/// terminated (then killed if it ignores TERM) and the call returns nil. Both
+/// pipes must reach EOF by the same deadline; a helper that inherited them
+/// cannot hold the call open, and its unfinished output is a failure (nil),
+/// never a partial answer.
 enum ProcessOneShot {
     /// How long a timed-out child gets between TERM and KILL.
     static let terminateGrace: TimeInterval = 0.2
@@ -44,9 +45,16 @@ enum ProcessOneShot {
             return nil
         }
         // The child exited; its output is complete at EOF unless a helper it
-        // started still holds the pipes. The same deadline bounds that wait.
-        _ = stdout.finished.wait(timeout: deadline)
-        _ = stderr.finished.wait(timeout: deadline)
+        // started still holds the pipes. The same deadline bounds that wait,
+        // and output without EOF by then is a failed check: a valid-looking
+        // prefix ("loggedIn":true) must never pass as a whole answer.
+        let complete = stdout.finished.wait(timeout: deadline) == .success
+            && stderr.finished.wait(timeout: deadline) == .success
+        guard complete else {
+            stdout.stop()
+            stderr.stop()
+            return nil
+        }
         return ProcessResult(stdout: String(decoding: stdout.stop(), as: UTF8.self),
                              stderr: String(decoding: stderr.stop(), as: UTF8.self),
                              exitCode: process.terminationStatus)

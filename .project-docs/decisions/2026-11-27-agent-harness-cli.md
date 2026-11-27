@@ -124,13 +124,17 @@ when the model takes it, else Low when it takes Low, else no `--effort`.
 - A cancelled Claude turn's late result or exit can no longer close or clear
   the next turn's stdin. A result or exit that arrives while the child is
   still starting is kept and applied to that turn's own writer once it is
-  registered (`TurnHandleBox`, locked).
+  registered (`TurnHandleBox`, locked). Publication of the writer and the
+  exit's clear both run on the provider's serial session queue, and the exit
+  is recorded first, so an exited writer never becomes the active one.
 - Model discovery fails closed like a turn: without the Agent's folder in
   Application Support, Claude Code is not started at all (it would load that
   folder's settings and run SessionStart hooks), and Settings says so.
 - The sign-in checks (`ProcessOneShot`) have one deadline for the whole call:
   a child that ignores TERM is killed and the check counts as failed, and a
-  helper that inherited the pipes cannot hold the call open.
+  helper that inherited the pipes cannot hold the call open. Output on either
+  pipe without EOF by the deadline also fails the check: a signed-in-looking
+  prefix is never read as a whole answer.
 - A saved Claude model missing from a loaded model list keeps its name but
   gets no `--effort`: nothing shows it accepts one.
 

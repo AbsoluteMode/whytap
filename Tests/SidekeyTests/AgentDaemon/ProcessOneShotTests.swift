@@ -42,7 +42,29 @@ final class ProcessOneShotTests: XCTestCase {
                                environment: [:], timeout: 0.10)
         }
         XCTAssertLessThan(elapsed, 0.65)
-        XCTAssertEqual(result?.exitCode, 0, "the child itself finished in time")
+        XCTAssertNil(result, "output without EOF by the deadline is not a whole answer")
+    }
+
+    /// A signed-in-looking prefix on either pipe, with the rest held open by
+    /// a helper past the deadline, must fail the check.
+    func testAValidLookingPrefixWithoutEOFFailsOnEitherPipe() {
+        for (label, status, held) in [("Claude stdout", #"{"loggedIn":true}"#, ""),
+                                       ("Codex stderr", "Logged in using ChatGPT", "1>&2")] {
+            let program = "printf '%s' \"$1\" \(held); (/bin/sleep 0.9; printf 'unfinished' \(held)) "
+                + (held.isEmpty ? "2>/dev/null" : "1>/dev/null") + " & exit 0"
+            let (result, elapsed) = timed {
+                ProcessOneShot.run(binary: sh, args: ["-c", program, "fixture", status], environment: [:], timeout: 0.15)
+            }
+            XCTAssertLessThan(elapsed, 0.65, label)
+            XCTAssertNil(result, label)
+        }
+    }
+
+    func testAHelperThatFinishesInTimeKeepsTheWholeAnswer() {
+        let result = ProcessOneShot.run(binary: sh, args: ["-c", "(/bin/sleep 0.1; printf done) & printf 'start '; wait"],
+                                        environment: [:], timeout: 5)
+        XCTAssertEqual(result?.stdout, "start done")
+        XCTAssertEqual(result?.exitCode, 0)
     }
 
     func testMissingBinaryIsNil() {

@@ -52,13 +52,15 @@ struct AppControlDropLists {
         // Check the whole batch first: one invalid term removes nothing.
         for item in items {
             guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
+            // The advertised schema limit applies to the submitted string as
+            // JSON Schema counts it: code points, before trimming. Checked
+            // for the whole batch before anything changes.
+            guard text.unicodeScalars.count <= limit else {
+                return Self.rejected(text, "is longer than \(limit) characters", change: "removed")
+            }
             let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !term.isEmpty else { return Self.rejected(term, "is empty", change: "removed") }
             guard Self.oneLine(term) else { return Self.rejected(term, "is not one line", change: "removed") }
-            // The advertised schema limit, checked before anything changes.
-            guard term.count <= limit else {
-                return Self.rejected(term, "is longer than \(limit) characters", change: "removed")
-            }
             // Both sides without surrounding spaces: a restored backup can
             // hold "  Word  ", and the editors show it as "Word".
             let same = { (other: String) in Self.key(other).caseInsensitiveCompare(term) == .orderedSame }

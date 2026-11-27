@@ -46,7 +46,10 @@ PR 525 and PR 527), so only the MCP tools are kept.
   one row. The result is confirmed against the whole saved list: exactly the
   named entries are gone and every other entry is unchanged.
 - One invalid term (not a string, empty, more than one line, longer than the
-  schema's 50 characters) removes nothing, wherever it is in the batch.
+  schema's 50 characters) removes nothing, wherever it is in the batch. The
+  limit applies to the submitted string as JSON Schema counts it: code
+  points, before trimming (50 spaces plus `x`, or 26 `e` with a combining
+  accent, is too long although it trims or renders shorter).
   No `all`, no extra arguments, no way to clear a list.
 - External harnesses only. The built-in Agent (`NativeAgentAppControl`)
   neither lists nor dispatches them (`externalOnly`), and its copies of the
@@ -72,7 +75,9 @@ with spaces, removal again after a restore), `AppControlDropListsScopeTests`
 and `AppControlDropListsRestoredTests` (from build-queue probe 722: the
 built-in Agent does not get the removal tools, an over-long term in a mixed
 batch changes neither list, restored `"  Fixture  "` is removed by
-`fixture`), `NativeAgentAppControlTests` (the built-in catalog is the MCP
+`fixture`), `DropListRemoveRawLengthTests` (from build-queue probe 724:
+padded and combining-mark terms over 50 code points in a mixed batch change
+neither list; a padded term of exactly 50 still removes), `NativeAgentAppControlTests` (the built-in catalog is the MCP
 catalog minus the two removal tools), `HarnessAccessTests` (denied and mid-request revocation
 leave the entries), `AppControlMCPServerTests` and `WhytapMCPServerTests`
 (catalog, annotations, descriptions).

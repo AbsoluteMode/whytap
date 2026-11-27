@@ -110,6 +110,8 @@ struct AgentFeatureSettings: View {
                     MacSwitch(isOn: $settings.openCodeAllowActions, label: AgentOtherSection.actionsTitle)
                 }
             }
+            AgentSourcesSection(controller: SourcesController.shared)
+                .padding(.top, 18)
         }
     }
 }

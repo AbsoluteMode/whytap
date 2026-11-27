@@ -1,0 +1,1432 @@
+import CoreGraphics
+import XCTest
+@testable import Sidekey
+
+/// An app such as Punto Switcher, bound to Right Option, swallows the press
+/// with its own event tap: Whytap names it beside the island instead of
+/// failing silently. Tap lists are fake; the probe and the clock are fakes.
+@MainActor
+final class HotkeyInterceptionTests: XCTestCase {
+    // Raw `flagsChanged` flags as macOS sends them.
+    private let rightOptionDown: UInt64 = 0x080000 | 0x40
+    private let leftOptionDown: UInt64 = 0x080000 | 0x20
+    private let rightCommandDown: UInt64 = 0x100000 | 0x10
+    private let noModifiers: UInt64 = 0x100
+
+    private let ownPID: pid_t = 100
+    private let puntoPID: pid_t = 200
+    private let siriPID: pid_t = 300
+    private let raycastPID: pid_t = 400
+    private let bttPID: pid_t = 500
+    private let frontPID: pid_t = 600
+
+    private let keysAndModifiers: UInt64 = (1 << 10) | (1 << 11) | (1 << 12)
+    private let keysOnly: UInt64 = (1 << 10) | (1 << 11)
+
+    private lazy var punto = SecureInputApp(pid: puntoPID, name: "Punto Switcher", bundleID: "ru.yandex.desktop.PuntoSwitcher")
+    private lazy var btt = SecureInputApp(pid: bttPID, name: "BetterTouchTool", bundleID: "com.hegenberg.BetterTouchTool")
+
+    private func process(_ pid: pid_t) -> InterceptorProcess? {
+        switch pid {
+        case puntoPID: return InterceptorProcess(app: punto, isSystem: false)
+        case bttPID: return InterceptorProcess(app: btt, isSystem: false)
+        case siriPID: return InterceptorProcess(app: SecureInputApp(pid: siriPID, name: "Siri", bundleID: "com.apple.Siri"), isSystem: true)
+        case raycastPID: return InterceptorProcess(app: SecureInputApp(pid: raycastPID, name: "Raycast", bundleID: "com.raycast.macos"), isSystem: false)
+        case ownPID: return InterceptorProcess(app: SecureInputApp(pid: ownPID, name: "Whytap", bundleID: "com.rootwise.sidekey"), isSystem: false)
+        default: return nil
+        }
+    }
+
+    /// A Mac as measured on 2026-11-26: Whytap's own taps, Raycast's HID
+    /// keyDown filter, Siri's modifier filters and a listen-only observer.
+    private var ordinaryTaps: [EventTapRecord] {
+        [
+            EventTapRecord(id: 1, location: .session, isActiveFilter: true, enabled: false, tappingPID: ownPID, eventsOfInterest: keysOnly),
+            EventTapRecord(id: 2, location: .hid, isActiveFilter: true, enabled: true, tappingPID: ownPID, eventsOfInterest: 1 << 12),
+            EventTapRecord(id: 3, location: .hid, isActiveFilter: true, enabled: true, tappingPID: raycastPID, eventsOfInterest: 1 << 10),
+            EventTapRecord(id: 4, location: .session, isActiveFilter: true, enabled: true, tappingPID: siriPID, eventsOfInterest: keysAndModifiers),
+            EventTapRecord(id: 5, location: .session, isActiveFilter: false, enabled: true, tappingPID: bttPID, eventsOfInterest: keysAndModifiers)
+        ]
+    }
+
+    private var puntoTap: EventTapRecord {
+        EventTapRecord(id: 9, location: .session, isActiveFilter: true, enabled: true, tappingPID: puntoPID, eventsOfInterest: keysAndModifiers)
+    }
+
+    // MARK: - Tap list classification
+
+    func testOnlyAnotherAppsEnabledModifierFilterIsACandidate() {
+        let none = HotkeyInterceptorClassifier.candidates(in: ordinaryTaps, ownPID: ownPID, frontmostPID: frontPID, process: process)
+        XCTAssertEqual(none, [], "own taps, keyDown-only filters, Apple's filters and listen-only taps are benign")
+
+        let withPunto = HotkeyInterceptorClassifier.candidates(in: ordinaryTaps + [puntoTap], ownPID: ownPID,
+                                                               frontmostPID: frontPID, process: process)
+        XCTAssertEqual(withPunto, [punto])
+    }
+
+    func testDisabledTapAndUnknownProcessAreNotCandidates() {
+        let disabled = EventTapRecord(id: 9, location: .session, isActiveFilter: true, enabled: false,
+                                      tappingPID: puntoPID, eventsOfInterest: keysAndModifiers)
+        let orphan = EventTapRecord(id: 10, location: .hid, isActiveFilter: true, enabled: true,
+                                    tappingPID: 9_999, eventsOfInterest: keysAndModifiers)
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: [disabled, orphan], ownPID: ownPID,
+                                                             frontmostPID: frontPID, process: process), [])
+    }
+
+    func testPerProcessTapCountsOnlyForTheFrontmostApp() {
+        let onOtherApp = EventTapRecord(id: 9, location: .session, isActiveFilter: true, enabled: true,
+                                        tappingPID: puntoPID, tappedPID: 777, eventsOfInterest: keysAndModifiers)
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: [onOtherApp], ownPID: ownPID, frontmostPID: frontPID,
+                                                             process: process), [])
+        let onFront = EventTapRecord(id: 9, location: .session, isActiveFilter: true, enabled: true,
+                                     tappingPID: puntoPID, tappedPID: frontPID, eventsOfInterest: keysAndModifiers)
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: [onFront], ownPID: ownPID, frontmostPID: frontPID,
+                                                             process: process), [punto])
+    }
+
+    func testHIDFiltersComeFirstAndEachAppOnce() {
+        let bttHID = EventTapRecord(id: 11, location: .hid, isActiveFilter: true, enabled: true,
+                                    tappingPID: bttPID, eventsOfInterest: 1 << 12)
+        let bttSession = EventTapRecord(id: 12, location: .session, isActiveFilter: true, enabled: true,
+                                        tappingPID: bttPID, eventsOfInterest: 1 << 12)
+        let result = HotkeyInterceptorClassifier.candidates(in: [puntoTap, bttSession, bttHID], ownPID: ownPID,
+                                                            frontmostPID: frontPID, process: process)
+        XCTAssertEqual(result, [btt, punto])
+    }
+
+    func testMessageNamesEveryOwnerAsAPossibleInterceptor() {
+        XCTAssertEqual(HotkeyInterceptorClassifier.message(for: [punto], key: .rightOption),
+                       "Punto Switcher may be intercepting Right Option")
+        XCTAssertEqual(HotkeyInterceptorClassifier.message(for: [punto, btt], key: .rightCommand),
+                       "Punto Switcher or BetterTouchTool may be intercepting Right Command")
+        let third = SecureInputApp(pid: 1, name: "Karabiner", bundleID: nil)
+        XCTAssertEqual(HotkeyInterceptorClassifier.message(for: [punto, btt, third], key: .rightOption),
+                       "Punto Switcher or another app may be intercepting Right Option")
+    }
+
+    func testVerdictCandidatesNeedTheContextThePressBeganIn() {
+        let taps = ordinaryTaps + [puntoTap]
+        let context = HotkeyPressContext(
+            frontmostPID: frontPID,
+            filterIDs: HotkeyInterceptorClassifier.filterIDs(in: taps, ownPID: ownPID, frontmostPID: frontPID))
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: context, frontmostPID: frontPID,
+                                                             ownPID: ownPID, process: process), [punto])
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: context, frontmostPID: 777,
+                                                             ownPID: ownPID, process: process), [],
+                       "another app came to front before the verdict")
+        let before = HotkeyPressContext(
+            frontmostPID: frontPID,
+            filterIDs: HotkeyInterceptorClassifier.filterIDs(in: ordinaryTaps, ownPID: ownPID, frontmostPID: frontPID))
+        XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: before, frontmostPID: frontPID,
+                                                             ownPID: ownPID, process: process), [],
+                       "a filter that appeared after the press began cannot have taken it")
+    }
+
+    func testForeignHIDFilterIDsIgnoreOwnAndSessionTaps() {
+        let puntoHID = EventTapRecord(id: 20, location: .hid, isActiveFilter: true, enabled: true,
+                                      tappingPID: puntoPID, eventsOfInterest: keysAndModifiers)
+        XCTAssertEqual(HotkeyInterceptorClassifier.foreignHIDFilterIDs(in: ordinaryTaps + [puntoTap, puntoHID], ownPID: ownPID),
+                       [20])
+    }
+
+    func testRecordParsesCoreGraphicsInformation() {
+        var info = CGEventTapInformation()
+        info.eventTapID = 42
+        info.tapPoint = .cghidEventTap
+        info.options = .defaultTap
+        info.eventsOfInterest = keysAndModifiers
+        info.tappingProcess = puntoPID
+        info.processBeingTapped = 0
+        info.enabled = true
+        let record = EventTapRecord(info)
+        XCTAssertEqual(record, EventTapRecord(id: 42, location: .hid, isActiveFilter: true, enabled: true,
+                                              tappingPID: puntoPID, eventsOfInterest: keysAndModifiers))
+        XCTAssertTrue(record?.filtersModifiers == true)
+        info.options = .listenOnly
+        XCTAssertFalse(EventTapRecord(info)?.filtersModifiers ?? true)
+    }
+
+    // MARK: - Detector
+
+    private let shift: UInt64 = 0x020000
+    private let watchedBoth: Set<HotkeyModifierKey> = [.rightOption, .rightCommand]
+
+    /// One physical change, with event time and main-thread time equal.
+    @discardableResult
+    private func phys(_ d: inout HotkeyInterceptionDetector, _ flags: UInt64, _ t: TimeInterval,
+                      watched: Set<HotkeyModifierKey>? = nil) -> [HotkeyInterceptionDetector.Change] {
+        d.physical(rawFlags: flags, eventTime: t, seenAt: t, watched: watched ?? watchedBoth)
+    }
+
+    private func firstID(_ changes: [HotkeyInterceptionDetector.Change]) -> Int? {
+        for change in changes { if case .began(let id, _) = change { return id } }
+        return nil
+    }
+
+    func testDeliveredPressIsNotBlocked() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        phys(&d, noModifiers, 10.1)
+        _ = d.delivered(rawFlags: noModifiers, eventTime: 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .delivered(.rightOption))
+        XCTAssertNil(d.decide(id, now: 10.6), "one verdict per press")
+    }
+
+    func testSwallowedPressIsBlocked() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .blocked(.rightOption))
+    }
+
+    func testRewrittenFlagsAreBlocked() {
+        // The interceptor lets the event through but clears the right-side bit.
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: leftOptionDown, eventTime: 10)
+        phys(&d, noModifiers, 10.1)
+        _ = d.delivered(rawFlags: noModifiers, eventTime: 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .blocked(.rightOption))
+    }
+
+    func testDeliveryHandledBeforeThePhysicalPressStillCounts() {
+        var d = HotkeyInterceptionDetector()
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .delivered(.rightOption))
+    }
+
+    func testReleasedPressWaitsForItsOwnReleaseGrace() {
+        // Released just before the 0.5 s hold deadline: judged only after
+        // the release grace, never by the hold callback.
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.45)
+        XCTAssertNil(d.decide(id, now: 10.5), "hold deadline of a released press")
+        XCTAssertNil(d.decide(id, now: 10.7))
+        XCTAssertEqual(d.decide(id, now: 10.75), .blocked(.rightOption))
+    }
+
+    func testDeliveryDuringTheReleaseGraceResolvesThePress() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.45)
+        XCTAssertNil(d.decide(id, now: 10.5))
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10) // a busy main thread hands it over late
+        _ = d.delivered(rawFlags: noModifiers, eventTime: 10.45)
+        XCTAssertEqual(d.decide(id, now: 10.75), .delivered(.rightOption))
+    }
+
+    func testALaterDeliveredPressNeverCoversAnEarlierLostOne() {
+        var d = HotkeyInterceptionDetector()
+        let lost = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.1)
+        let ordinary = firstID(phys(&d, rightOptionDown, 10.2))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10.2)
+        phys(&d, noModifiers, 10.3)
+        _ = d.delivered(rawFlags: noModifiers, eventTime: 10.3)
+        XCTAssertEqual(d.decide(lost, now: 10.6), .blocked(.rightOption))
+        XCTAssertEqual(d.decide(ordinary, now: 10.6), .delivered(.rightOption))
+    }
+
+    func testAReconstructedPressInsideTheSameHoldCounts() {
+        // An app that swallows the press and posts its own while the key is held.
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10.05)
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .delivered(.rightOption))
+    }
+
+    func testADeliveryAfterABlockedVerdictTakesItBack() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .blocked(.rightOption))
+        XCTAssertEqual(d.delivered(rawFlags: rightOptionDown, eventTime: 10), [id])
+    }
+
+    func testOptionWithShiftIsNotAnOptionOnlyShortcut() {
+        var d = HotkeyInterceptionDetector()
+        XCTAssertTrue(phys(&d, rightOptionDown | shift, 10).isEmpty, "down together with Shift")
+        phys(&d, rightOptionDown, 10.05) // Shift released, Right ⌥ still held: no new press
+        phys(&d, noModifiers, 10.1)
+        XCTAssertTrue(d.presses.isEmpty)
+
+        let both = firstID(phys(&d, rightOptionDown, 11))!
+        phys(&d, rightOptionDown | shift, 11.05) // Shift added during the gesture: cancelled
+        let ended = phys(&d, noModifiers, 11.1)
+        XCTAssertTrue(ended.isEmpty)
+        XCTAssertNil(d.decide(both, now: 12))
+
+        XCTAssertTrue(phys(&d, rightOptionDown | leftOptionDown, 13).isEmpty, "both Options")
+    }
+
+    func testLongHoldIsJudgedWhileHeld() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        XCTAssertNil(d.decide(id, now: 10.2), "too young")
+        XCTAssertEqual(d.decide(id, now: 10.5), .blocked(.rightOption))
+        phys(&d, noModifiers, 12)
+        XCTAssertNil(d.decide(id, now: 12.3), "already reported")
+    }
+
+    func testUnwatchedKeyIsIgnored() {
+        var d = HotkeyInterceptionDetector()
+        XCTAssertTrue(phys(&d, rightCommandDown, 10, watched: [.rightOption]).isEmpty)
+    }
+
+    func testResetRetiresReleasedPressesToo() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        phys(&d, noModifiers, 10.1)
+        d.reset()
+        XCTAssertNil(d.decide(id, now: 10.4))
+    }
+
+    // MARK: - Guard
+
+    private final class FakeProbe: HotkeyPressProbing {
+        var isRunning = false
+        var allowStart = true
+        var starts = 0
+        var deliver: (@MainActor (UInt64, TimeInterval, TimeInterval) -> Void)?
+        var onFailure: (@MainActor () -> Void)?
+
+        func start(deliver: @escaping @MainActor (UInt64, TimeInterval, TimeInterval) -> Void,
+                   onFailure: @escaping @MainActor () -> Void) -> Bool {
+            starts += 1
+            guard allowStart else { return false }
+            isRunning = true
+            self.deliver = deliver
+            self.onFailure = onFailure
+            return true
+        }
+
+        func stop() { isRunning = false }
+    }
+
+    private final class FakePresenter: SecureInputHolderPresenting {
+        var presented: [(badge: SecureInputHolderBadge, shake: Bool, persistent: Bool)] = []
+        var dismissals = 0
+        var isShowing = false
+
+        func present(_ badge: SecureInputHolderBadge, shake: Bool, persistent: Bool) {
+            presented.append((badge, shake, persistent))
+            isShowing = true
+        }
+
+        func dismiss() {
+            dismissals += 1
+            isShowing = false
+        }
+    }
+
+    private final class World {
+        var watched: Set<HotkeyModifierKey> = [.rightCommand, .rightOption]
+        var taps: [EventTapRecord] = []
+        var interactive = true
+        var front: pid_t? = 600
+        var uptime: TimeInterval = 100
+        var scheduled: [(at: TimeInterval, work: @MainActor () -> Void)] = []
+
+        /// Runs every scheduled work due by `time`, in order.
+        @MainActor func advance(to time: TimeInterval) {
+            while let next = scheduled.enumerated().filter({ $0.element.at <= time })
+                .min(by: { $0.element.at < $1.element.at }) {
+                scheduled.remove(at: next.offset)
+                uptime = max(uptime, next.element.at)
+                next.element.work()
+            }
+            uptime = time
+        }
+    }
+
+    private func makeGuard(_ world: World, probe: FakeProbe, presenter: FakePresenter) -> HotkeyInterceptionGuard {
+        let system = HotkeyInterceptionGuard.System(
+            watchedKeys: { world.watched },
+            tapList: { world.taps },
+            process: { [unowned self] pid in self.process(pid) },
+            frontmostPID: { world.front },
+            ownPID: ownPID,
+            isSessionInteractive: { world.interactive },
+            uptime: { world.uptime },
+            after: { delay, work in world.scheduled.append((world.uptime + delay, work)) }
+        )
+        return HotkeyInterceptionGuard(system: system, probe: probe, makePresenter: { presenter })
+    }
+
+    private func started(_ world: World, _ probe: FakeProbe, _ presenter: FakePresenter) -> HotkeyInterceptionGuard {
+        let guard_ = makeGuard(world, probe: probe, presenter: presenter)
+        guard_.bindingsOrSessionChanged()
+        XCTAssertTrue(probe.isRunning)
+        return guard_
+    }
+
+    /// The probe reports a change now (event time = main-thread time).
+    private func probeSees(_ probe: FakeProbe, _ world: World, _ flags: UInt64) {
+        probe.deliver?(flags, world.uptime, world.uptime)
+    }
+
+    /// A Right Option tap: the probe sees it; `delivered` says whether
+    /// Whytap's shortcut monitors do too.
+    private func tapRightOption(_ guard_: HotkeyInterceptionGuard, _ probe: FakeProbe, _ world: World,
+                                delivered: Bool) {
+        let t = world.uptime
+        probeSees(probe, world, rightOptionDown)
+        if delivered { guard_.handleDelivered(rawFlags: rightOptionDown, eventTime: t) }
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        if delivered { guard_.handleDelivered(rawFlags: noModifiers, eventTime: t + 0.1) }
+        world.advance(to: t + 1)
+    }
+
+    func testPuntoSwallowingRightOptionShakesItsLogoBriefly() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+
+        tapRightOption(guard_, probe, world, delivered: false)
+
+        XCTAssertEqual(presenter.presented.count, 1)
+        let shown = presenter.presented[0]
+        XCTAssertEqual(shown.badge.app, punto)
+        XCTAssertEqual(shown.badge.label, "Punto Switcher may be intercepting Right Option")
+        XCTAssertTrue(shown.shake)
+        XCTAssertFalse(shown.persistent, "REV 1: shown about 3 s, then hidden; never left dimmed")
+    }
+
+    func testDeliveredPressShowsNothing() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        tapRightOption(guard_, probe, world, delivered: true)
+        XCTAssertTrue(presenter.presented.isEmpty, "Punto is running but did not take this key")
+    }
+
+    func testLostPressWithOnlyBenignTapsShowsNothing() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertTrue(presenter.presented.isEmpty, "never blame Whytap, Apple or a listen-only tap")
+    }
+
+    func testShiftRightOptionNeverShakes() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} } // callbacks hold it weakly
+        let t = world.uptime
+        probeSees(probe, world, rightOptionDown | shift)
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: t + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "Whytap's monitors would not take Shift+Right Option either")
+    }
+
+    func testLockedSessionHasNoProbe() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.interactive = false
+        let guard_ = makeGuard(world, probe: probe, presenter: presenter)
+        guard_.bindingsOrSessionChanged()
+        XCTAssertFalse(probe.isRunning)
+
+        world.interactive = true
+        guard_.bindingsOrSessionChanged()
+        XCTAssertTrue(probe.isRunning)
+        world.interactive = false // locked mid-press
+        world.taps = ordinaryTaps + [puntoTap]
+        probeSees(probe, world, rightOptionDown)
+        guard_.bindingsOrSessionChanged()
+        XCTAssertFalse(probe.isRunning)
+        world.advance(to: world.uptime + 2)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testCallbackFromAStoppedProbeIsDiscarded() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        let oldDeliver = probe.deliver!
+
+        // A press released just before the probe is reinstalled.
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.taps.append(EventTapRecord(id: 40, location: .hid, isActiveFilter: true, enabled: true,
+                                         tappingPID: bttPID, eventsOfInterest: 1 << 12))
+        guard_.keepProbeAtHead()
+        XCTAssertEqual(probe.starts, 2)
+        // An event the old tap had already dispatched arrives afterwards.
+        oldDeliver(rightOptionDown, world.uptime, world.uptime)
+        oldDeliver(noModifiers, world.uptime + 0.1, world.uptime + 0.1)
+        world.advance(to: world.uptime + 2)
+
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testFirstModifierBindingInstallsTheProbeAndTheLastRemovesIt() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = []
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = makeGuard(world, probe: probe, presenter: presenter)
+        guard_.bindingsOrSessionChanged()
+        XCTAssertFalse(probe.isRunning)
+
+        world.watched = [.rightOption] // Google search switched on in Settings
+        guard_.bindingsOrSessionChanged()
+        XCTAssertTrue(probe.isRunning, "no modifier press needed first")
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the very first press is caught")
+
+        world.watched = []
+        guard_.bindingsOrSessionChanged()
+        XCTAssertFalse(probe.isRunning)
+    }
+
+    func testFrontmostChangeBeforeTheVerdictShowsNothing() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} } // callbacks hold it weakly
+        let t = world.uptime
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.front = 777
+        world.advance(to: t + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testFilterInstalledAfterThePressIsNotNamed() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} } // callbacks hold it weakly
+        let t = world.uptime
+        probeSees(probe, world, rightOptionDown)
+        world.taps.append(puntoTap)
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: t + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testLateDeliveryTakesTheBadgeBack() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        let t = world.uptime
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1)
+        guard_.handleDelivered(rawFlags: rightOptionDown, eventTime: t)
+        XCTAssertEqual(presenter.dismissals, 1)
+    }
+
+    func testEveryLostPressShowsTheLogoAgain() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        tapRightOption(guard_, probe, world, delivered: false)
+        tapRightOption(guard_, probe, world, delivered: false)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 3)
+        XCTAssertTrue(presenter.presented.allSatisfy { $0.shake && !$0.persistent })
+        XCTAssertEqual(guard_.lastBadge?.app, punto)
+    }
+
+    func testHoldIsReportedWithoutWaitingForTheRelease() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} } // callbacks hold it weakly
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + HotkeyInterceptionDetector.holdDecision + 0.01)
+        XCTAssertEqual(presenter.presented.count, 1, "a voice hold that never started")
+    }
+
+    func testBusyMainThreadDefersTheVerdict() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        let t = world.uptime
+        probeSees(probe, world, rightOptionDown)
+        world.uptime = t + 0.1
+        probeSees(probe, world, noModifiers)
+
+        // The main thread was stuck for a second: the decision runs late and
+        // the delivered events are only now handled.
+        world.uptime = t + 1.5
+        let due = world.scheduled
+        world.scheduled = []
+        for item in due { item.work() }
+        guard_.handleDelivered(rawFlags: rightOptionDown, eventTime: t)
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: t + 0.1)
+        world.advance(to: t + 3)
+
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testProbeIsRetriedLaterWithoutAccessibility() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        probe.allowStart = false
+        let guard_ = makeGuard(world, probe: probe, presenter: presenter)
+        guard_.bindingsOrSessionChanged()
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: world.uptime)
+        XCTAssertEqual(probe.starts, 1, "not on every modifier press")
+
+        probe.allowStart = true
+        world.uptime += HotkeyInterceptionGuard.probeRetryInterval
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: world.uptime)
+        XCTAssertEqual(probe.starts, 2)
+        XCTAssertTrue(probe.isRunning)
+    }
+
+    func testAccessibilityGrantRetriesAtOnce() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        probe.allowStart = false
+        let guard_ = makeGuard(world, probe: probe, presenter: presenter)
+        guard_.bindingsOrSessionChanged()
+        probe.allowStart = true
+        guard_.bindingsOrSessionChanged(retryNow: true)
+        XCTAssertTrue(probe.isRunning)
+    }
+
+    func testProbeMovesBackToTheHeadWhenANewHIDFilterAppears() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        guard_.keepProbeAtHead()
+        XCTAssertEqual(probe.starts, 1, "nothing new in front")
+
+        world.taps.append(EventTapRecord(id: 30, location: .hid, isActiveFilter: true, enabled: true,
+                                         tappingPID: puntoPID, eventsOfInterest: keysAndModifiers))
+        guard_.keepProbeAtHead()
+        XCTAssertEqual(probe.starts, 2)
+        guard_.keepProbeAtHead()
+        XCTAssertEqual(probe.starts, 2)
+    }
+
+    func testProbeHeadCheckRunsFromDeliveredChangesAtMostEveryTenSeconds() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: world.uptime)
+        world.taps.append(EventTapRecord(id: 31, location: .hid, isActiveFilter: true, enabled: true,
+                                         tappingPID: puntoPID, eventsOfInterest: keysAndModifiers))
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: world.uptime)
+        XCTAssertEqual(probe.starts, 1, "checked at the first change, before Punto's tap")
+
+        world.uptime += HotkeyInterceptionGuard.headCheckInterval
+        guard_.handleDelivered(rawFlags: noModifiers, eventTime: world.uptime)
+        XCTAssertEqual(probe.starts, 2, "moved back in front of Punto's new HID filter")
+    }
+
+    func testWatchedKeysFollowTheSwitchedOnFeatures() {
+        let defaults = HotkeyConfiguration.defaults
+        XCTAssertEqual(HotkeyInterceptionGuard.watchedKeys(in: defaults, agentEnabled: true, googleEnabled: true),
+                       [.rightCommand, .rightOption])
+        XCTAssertEqual(HotkeyInterceptionGuard.watchedKeys(in: defaults, agentEnabled: true, googleEnabled: false),
+                       [.rightCommand])
+        XCTAssertEqual(HotkeyInterceptionGuard.watchedKeys(in: defaults, agentEnabled: false, googleEnabled: false), [])
+    }
+
+    // MARK: - Hover text
+
+    func testTwoCandidateLabelWrapsInsteadOfRunningOffASmallScreen() {
+        let label = HotkeyInterceptorClassifier.message(
+            for: [SecureInputApp(pid: 1, name: "Punto Switcher", bundleID: nil),
+                  SecureInputApp(pid: 2, name: "BetterTouchTool", bundleID: nil)], key: .rightCommand)
+        let height: CGFloat = 32
+        let oneLine = SecureInputHolderMetrics.layout(label: label, height: height, maxWidth: 2_000)
+        XCTAssertNil(oneLine.wrapWidth, "one line where it fits")
+        XCTAssertEqual(oneLine.size.height, height)
+
+        let narrow: CGFloat = 260
+        let wrapped = SecureInputHolderMetrics.layout(label: label, height: height, maxWidth: narrow)
+        XCTAssertLessThanOrEqual(wrapped.size.width, narrow)
+        let wrap = try! XCTUnwrap(wrapped.wrapWidth)
+        let needed = (label as NSString).boundingRect(
+            with: CGSize(width: wrap, height: .greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: [.font: SecureInputHolderMetrics.labelFont]).height
+        XCTAssertGreaterThan(needed, SecureInputHolderMetrics.labelFont.pointSize * 1.5, "really two lines or more")
+        XCTAssertGreaterThanOrEqual(wrapped.size.height, needed + 2 * SecureInputHolderMetrics.wrappedVerticalPadding - 0.5,
+                                    "the pill is tall enough for every line")
+        XCTAssertEqual(SecureInputHolderBadge(app: nil, message: label).label, label,
+                       "the accessibility label carries the full text")
+    }
+}
+
+/// Secure Input and an interceptor share the one badge beside the island.
+@MainActor
+final class HotkeyBlockerBadgeStackTests: XCTestCase {
+    private final class FakeSurface: HotkeyBlockerBadgeSurface {
+        var onSelfDismiss: (() -> Void)?
+        var shown: SecureInputHolderBadge?
+        var log: [String] = []
+        var isShowing: Bool { shown != nil }
+
+        func present(_ badge: SecureInputHolderBadge, shake: Bool, persistent: Bool) {
+            shown = badge
+            log.append("present \(badge.app?.name ?? "-") shake=\(shake)")
+        }
+
+        func dismiss() {
+            shown = nil
+            log.append("dismiss")
+        }
+
+        func fadeByItself() {
+            shown = nil
+            onSelfDismiss?()
+        }
+    }
+
+    private let dia = SecureInputHolderBadge(app: SecureInputApp(pid: 1, name: "Dia", bundleID: nil))
+    private let punto = SecureInputHolderBadge(app: SecureInputApp(pid: 2, name: "Punto Switcher", bundleID: nil),
+                                               message: "Punto Switcher is intercepting Right Option")
+
+    func testNoWindowUntilTheFirstBadge() {
+        var made = 0
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { made += 1; return FakeSurface() })
+        _ = stack.presenter(for: .secureInput)
+        _ = stack.presenter(for: .interception)
+        XCTAssertEqual(made, 0)
+    }
+
+    func testLatestBadgeShowsAndTheOtherComesBackWhenItLeaves() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        secure.present(dia, shake: false, persistent: true)
+        interception.present(punto, shake: true, persistent: true)
+        XCTAssertEqual(surface.shown, punto)
+        XCTAssertTrue(secure.isShowing, "still Secure Input's badge, only covered")
+
+        interception.dismiss()
+        XCTAssertEqual(surface.shown, dia, "Dia's dimmed logo returns")
+        XCTAssertEqual(surface.log.last, "present Dia shake=false")
+        XCTAssertFalse(interception.isShowing)
+    }
+
+    func testOneGuardNeverDismissesTheOthersBadge() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        secure.present(dia, shake: false, persistent: true)
+        interception.present(punto, shake: true, persistent: true)
+        secure.dismiss() // secure input ended
+        XCTAssertEqual(surface.shown, punto)
+        XCTAssertTrue(interception.isShowing)
+
+        interception.dismiss()
+        XCTAssertNil(surface.shown)
+        XCTAssertNil(stack.displayed)
+    }
+
+    func testFadedShakeBringsBackThePersistentBadge() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        interception.present(punto, shake: true, persistent: true)
+        secure.present(SecureInputHolderBadge(app: nil), shake: true, persistent: false) // unknown holder
+        surface.fadeByItself()
+
+        XCTAssertEqual(surface.shown, punto)
+        XCTAssertFalse(secure.isShowing)
+        XCTAssertTrue(interception.isShowing)
+    }
+
+    func testTransientInterceptorOverSecureInputThenDimmedLogoReturns() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        secure.present(dia, shake: false, persistent: true)
+        interception.present(punto, shake: true, persistent: false)
+        XCTAssertEqual(surface.shown, punto)
+        surface.fadeByItself() // ~3 s later
+        XCTAssertEqual(surface.shown, dia, "#488's dimmed logo is unchanged")
+        XCTAssertFalse(interception.isShowing)
+    }
+
+    func testCoveredTransientBadgeNeverComesBack() {
+        let surface = FakeSurface()
+        let stack = HotkeyBlockerBadgeStack(makeSurface: { surface })
+        let secure = stack.presenter(for: .secureInput)
+        let interception = stack.presenter(for: .interception)
+
+        interception.present(punto, shake: true, persistent: false)
+        secure.present(dia, shake: true, persistent: true)
+        XCTAssertFalse(interception.isShowing)
+        secure.dismiss()
+        XCTAssertNil(surface.shown)
+    }
+
+    func testInterceptorBadgeFallsBackToAKeyboardSymbol() {
+        XCTAssertEqual(punto.fallbackSymbol, "keyboard")
+        XCTAssertEqual(dia.fallbackSymbol, "lock.fill")
+        XCTAssertEqual(punto.label, "Punto Switcher is intercepting Right Option")
+    }
+}
+
+/// Regressions from the builder's review of queue ticket 686.
+extension HotkeyInterceptionTests {
+    func testQueueReviewMatchesExactDownWhenPreviousReleaseWasNotDelivered() {
+        var detector = HotkeyInterceptionDetector()
+        let first = firstID(phys(&detector, rightOptionDown, 10))!
+        _ = detector.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        phys(&detector, noModifiers, 10.1)
+        XCTAssertEqual(detector.decide(first, now: 10.4), .delivered(.rightOption))
+
+        let second = firstID(phys(&detector, rightOptionDown, 10.6))!
+        _ = detector.delivered(rawFlags: rightOptionDown, eventTime: 10.6)
+        phys(&detector, noModifiers, 10.7)
+        _ = detector.delivered(rawFlags: noModifiers, eventTime: 10.7)
+        XCTAssertEqual(detector.decide(second, now: 11.1), .delivered(.rightOption))
+    }
+
+    func testQueueReviewDisablingOneWatchedModifierRetiresItsPendingPress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: 100.1)
+        probeSees(probe, world, noModifiers)
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: 100.2)
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: 100.5)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testQueueReviewReplacementTapDoesNotInheritPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: 100.1)
+        probeSees(probe, world, noModifiers)
+        let replacement = EventTapRecord(id: 89, location: .session, isActiveFilter: true, enabled: true,
+                                         tappingPID: puntoPID, tappedPID: frontPID, eventsOfInterest: keysAndModifiers)
+        world.taps = ordinaryTaps + [replacement]
+        world.advance(to: 100.5)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}
+
+extension HotkeyInterceptionTests {
+    func testQueueReviewLateCallbackCannotUseATapFromAfterThePress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+
+        // The HID probe observed the press at 100. The main-thread callback
+        // runs after a different app and filter have arrived.
+        world.advance(to: 100.2)
+        world.front = 777
+        world.taps.append(puntoTap)
+        probe.deliver?(rightOptionDown, 100, 100)
+        probe.deliver?(noModifiers, 100.1, 100.1)
+        world.advance(to: 100.6)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}
+
+/// The same three classes, beyond the builder's exact cases.
+extension HotkeyInterceptionTests {
+    func testNoDeliveredReleasesAtAllStillMatchesEachPressByItsOwnBoundaries() {
+        var d = HotkeyInterceptionDetector()
+        let a = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        phys(&d, noModifiers, 10.1)
+        let lost = firstID(phys(&d, rightOptionDown, 10.5))!
+        phys(&d, noModifiers, 10.6)
+        let c = firstID(phys(&d, rightOptionDown, 11))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 11)
+        phys(&d, noModifiers, 11.1)
+        XCTAssertEqual(d.decide(a, now: 12), .delivered(.rightOption))
+        XCTAssertEqual(d.decide(lost, now: 12), .blocked(.rightOption), "between two arrivals, with no releases delivered")
+        XCTAssertEqual(d.decide(c, now: 12), .delivered(.rightOption))
+    }
+
+    func testADeliveredChordWithShiftDoesNotCountAsTheShortcut() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown | shift, eventTime: 10) // rewritten on the way
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .blocked(.rightOption))
+    }
+
+    func testUnbindingWhileHeldAndRebindingBeforeReleaseJudgesNothing() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "the press began while it was a shortcut that was then removed")
+
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the next press is judged again")
+    }
+
+    func testLateCallbackOfAHoldIsNotAttributed() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let t = world.uptime
+        world.uptime = t + HotkeyInterceptionGuard.maximumContextLag + 0.05
+        probe.deliver?(rightOptionDown, t, t)
+        world.advance(to: t + 2)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testTheSameTapSurvivingTheVerdictIsNamed() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.taps = [puntoTap] + ordinaryTaps // reordered list, same tap id
+        world.advance(to: world.uptime + 1)
+        XCTAssertEqual(presenter.presented.first?.badge.app, punto)
+    }
+}
+
+/// Regressions from the builder's review of queue ticket 691.
+extension HotkeyInterceptionTests {
+    func testBuilder691LateTapListDoesNotSupplyPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        var postponeSnapshot = false
+        let system = HotkeyInterceptionGuard.System(
+            watchedKeys: { world.watched },
+            tapList: {
+                if postponeSnapshot {
+                    postponeSnapshot = false
+                    world.uptime += 0.08
+                    world.taps.append(self.puntoTap)
+                }
+                return world.taps
+            },
+            process: { self.process($0) },
+            frontmostPID: { world.front },
+            ownPID: ownPID,
+            isSessionInteractive: { true },
+            uptime: { world.uptime },
+            after: { delay, work in world.scheduled.append((world.uptime + delay, work)) }
+        )
+        let guardUnderTest = HotkeyInterceptionGuard(system: system, probe: probe, makePresenter: { presenter })
+        guardUnderTest.bindingsOrSessionChanged()
+        defer { withExtendedLifetime(guardUnderTest) {} }
+        let pressTime = world.uptime
+        postponeSnapshot = true
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "A tap first observed after the context freshness limit cannot explain the press")
+    }
+
+    func testBuilder691UnbindRetiresAnObservedPressQueuedForTheMainThread() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guardUnderTest = started(world, probe, presenter)
+        defer { withExtendedLifetime(guardUnderTest) {} }
+        let pressTime = world.uptime
+        world.advance(to: pressTime + 0.01)
+        world.watched = [.rightCommand]
+        guardUnderTest.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.02)
+        world.watched = [.rightCommand, .rightOption]
+        guardUnderTest.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.03)
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "A callback from the former binding cannot present under the new binding")
+    }
+}
+
+/// Neighbours of the ticket 691 classes.
+extension HotkeyInterceptionTests {
+    func testAnotherKeysBindingChangeDoesNotRetireAQueuedPress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let pressTime = world.uptime
+        world.advance(to: pressTime + 0.01)
+        world.watched = [.rightOption] // Agent switched off; Right Option untouched
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.02)
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertEqual(presenter.presented.count, 1)
+    }
+
+    func testAPressSeenAfterTheRebindIsJudged() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.01)
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.01)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1)
+    }
+
+    func testASlowFrontmostReadDoesNotSupplyPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        var slowFront = false
+        let system = HotkeyInterceptionGuard.System(
+            watchedKeys: { world.watched },
+            tapList: { world.taps },
+            process: { self.process($0) },
+            frontmostPID: {
+                if slowFront { slowFront = false; world.uptime += 0.08 }
+                return world.front
+            },
+            ownPID: ownPID,
+            isSessionInteractive: { true },
+            uptime: { world.uptime },
+            after: { delay, work in world.scheduled.append((world.uptime + delay, work)) }
+        )
+        let guard_ = HotkeyInterceptionGuard(system: system, probe: probe, makePresenter: { presenter })
+        defer { withExtendedLifetime(guard_) {} }
+        guard_.bindingsOrSessionChanged()
+        let pressTime = world.uptime
+        slowFront = true
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}
+
+/// Regression from the builder's review of queue ticket 699.
+
+extension HotkeyInterceptionTests {
+    func testBuilder699FirstPressAfterPreferenceWriteSurvivesDeferredSync() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guardUnderTest = started(world, probe, presenter)
+        defer { withExtendedLifetime(guardUnderTest) {} }
+
+        let priorGeneration = guardUnderTest.probeGeneration
+        let changeTime = world.uptime + 0.010
+        world.advance(to: changeTime)
+        world.watched = [.rightCommand, .rightOption] // The preference value has changed.
+        // As in the app: HotkeyPreferences' objectWillChange announces the
+        // write synchronously on the main thread; only the read is deferred.
+        // (Without any announcement the moment is unknowable, and the
+        // capability case below requires an unannounced change to be
+        // judged conservatively.)
+        guardUnderTest.bindingsWillChange(at: changeTime)
+        let observedUnderNewBinding = changeTime + 0.005 // The HID probe runs off main.
+
+        world.advance(to: changeTime + 0.012)
+        guardUnderTest.bindingsOrSessionChanged() // objectWillChange defers to main's next turn.
+        XCTAssertEqual(guardUnderTest.probeGeneration, priorGeneration)
+        probe.deliver?(rightOptionDown, observedUnderNewBinding, observedUnderNewBinding)
+
+        world.advance(to: changeTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: changeTime + 1)
+        XCTAssertEqual(presenter.presented.count, 1,
+                       "A press seen after the preference took effect belongs to the new binding, even if notification processing was later")
+    }
+}
+
+/// The ticket 699 timing class: the preference write, the probe's press and
+/// the deferred main-thread sync in every order.
+extension HotkeyInterceptionTests {
+    private func enableRightOptionWithDeferredSync(pressAt pressOffset: TimeInterval,
+                                                   callbackAfterSync: Bool) -> Int {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let writeTime = world.uptime + 0.010
+        world.advance(to: writeTime)
+        world.watched = [.rightCommand, .rightOption]
+        // The preference observer records the write as it happens; the sync
+        // that reads the new value runs on a later main-thread turn.
+        guard_.bindingsWillChange(at: writeTime)
+        let pressTime = writeTime + pressOffset
+        let syncTime = writeTime + 0.020
+        if !callbackAfterSync {
+            world.advance(to: max(pressTime, writeTime) + 0.001)
+            probe.deliver?(rightOptionDown, pressTime, pressTime)
+        }
+        world.advance(to: syncTime)
+        guard_.bindingsWillChange(at: writeTime)
+        guard_.bindingsOrSessionChanged()
+        if callbackAfterSync { probe.deliver?(rightOptionDown, pressTime, pressTime) }
+        world.advance(to: syncTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: syncTime + 1)
+        return presenter.presented.count
+    }
+
+    func testPressAfterTheWriteIsJudgedWhetherItsCallbackRunsBeforeOrAfterTheSync() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: 0.005, callbackAfterSync: true), 1)
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: 0.005, callbackAfterSync: false), 1,
+                       "the callback ran first, the key already read as watched")
+    }
+
+    func testPressBeforeTheWriteIsNeverJudgedWhenTheSyncIsDeferred() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: true), 0)
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: false), 0,
+                       "callback queued before the preference handler, run before the sync")
+    }
+
+    func testANewlyWatchedKeyWithNoRecordedWriteIsNotJudgedBeforeItsSync() {
+        // The value changed by a path that recorded no write time: the
+        // transition moment is unknown until the sync, so a press whose
+        // callback runs in between is not judged.
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        world.advance(to: world.uptime + 0.01)
+        world.watched = [.rightCommand, .rightOption]
+        let pressTime = world.uptime - 0.001 // the event precedes its callback
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: world.uptime + 0.01)
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "after the sync, presses are judged")
+    }
+
+    func testRemovalStillRetiresAPressSeenWhileItsSyncWasQueued() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let writeTime = world.uptime + 0.010
+        world.advance(to: writeTime)
+        world.watched = [.rightCommand] // Google switched off; sync still queued
+        let pressTime = writeTime + 0.005
+        world.advance(to: writeTime + 0.020)
+        guard_.bindingsWillChange(at: writeTime)
+        guard_.bindingsOrSessionChanged()
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsWillChange(at: world.uptime)
+        guard_.bindingsOrSessionChanged()
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "seen while Right Option was not a shortcut")
+    }
+}
+
+/// Regression from the builder's review of queue ticket 705.
+
+extension HotkeyInterceptionTests {
+    func testBuilder705PressBeforeWriteCannotBecomeEligibleWhenCallbackPrecedesSync() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: false), 0,
+                       "A pre-write press was queued before the preference handler; its callback running first must not classify it under the new binding")
+    }
+}
+
+/// Regressions from the builder's review of queue ticket 709.
+
+extension HotkeyInterceptionTests {
+    func testBuilder709UnrelatedWriteCannotStartRightOptionEligibility() {
+        for callbackBeforeSync in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.watched = [.rightCommand]
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            defer { withExtendedLifetime(guard_) {} }
+            let t = world.uptime
+
+            world.advance(to: t + 0.005)
+            guard_.bindingsWillChange(at: world.uptime) // Unrelated HotkeyPreferences write.
+            let preBindingPress = t + 0.010
+
+            world.advance(to: t + 0.015)
+            guard_.bindingsWillChange(at: world.uptime) // Right Option is enabled now.
+            world.watched.insert(.rightOption)
+            world.advance(to: t + 0.020)
+            if callbackBeforeSync {
+                probe.deliver?(rightOptionDown, preBindingPress, preBindingPress)
+            }
+            guard_.bindingsOrSessionChanged()
+            if !callbackBeforeSync {
+                probe.deliver?(rightOptionDown, preBindingPress, preBindingPress)
+            }
+            world.advance(to: t + 0.1)
+            probeSees(probe, world, noModifiers)
+            world.advance(to: t + 1)
+            XCTAssertTrue(presenter.presented.isEmpty,
+                          "An unrelated write must not make the intervening press eligible (callback before sync: \(callbackBeforeSync))")
+            tapRightOption(guard_, probe, world, delivered: false)
+            XCTAssertEqual(presenter.presented.count, 1, "A subsequent lost press under the real binding is reported")
+        }
+    }
+
+    func testBuilder709DisableThenEnableBeforeSyncRetiresOldAndUnboundPresses() {
+        for beforeDisable in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.watched = [.rightCommand, .rightOption]
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            defer { withExtendedLifetime(guard_) {} }
+            let t = world.uptime
+            let pressTime = t + (beforeDisable ? 0.005 : 0.015)
+
+            world.advance(to: t + 0.010)
+            guard_.bindingsWillChange(at: world.uptime)
+            world.watched.remove(.rightOption)
+            world.advance(to: t + 0.020)
+            guard_.bindingsWillChange(at: world.uptime)
+            world.watched.insert(.rightOption)
+            world.advance(to: t + 0.025)
+            guard_.bindingsOrSessionChanged()
+            probe.deliver?(rightOptionDown, pressTime, pressTime)
+            world.advance(to: t + 0.1)
+            probeSees(probe, world, noModifiers)
+            world.advance(to: t + 1)
+            XCTAssertTrue(presenter.presented.isEmpty,
+                          "A reenabled binding cannot inherit a press from before it (press before disable: \(beforeDisable))")
+        }
+    }
+
+    func testBuilder709CapabilityEnableRejectsPreEnableHardwareEventAfterSync() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let t = world.uptime
+
+        let beforeEnable = t + 0.005
+        world.advance(to: t + 0.010)
+        // The Google capability flag changed. Its notification syncs directly,
+        // without a HotkeyPreferences objectWillChange.
+        world.watched.insert(.rightOption)
+        guard_.bindingsOrSessionChanged()
+        probe.deliver?(rightOptionDown, beforeEnable, beforeEnable)
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: t + 1)
+
+        XCTAssertTrue(presenter.presented.isEmpty, "A globally observed press predating the capability was never bound")
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "The first actual press under the enabled capability is reported")
+    }
+}
+
+
+/// The binding timeline itself: every order of writes, reads and presses.
+extension HotkeyInterceptionTests {
+    func testTimelinePlacesEachTransitionAtTheWriteThatMadeIt() {
+        var timeline = HotkeyBindingTimeline()
+        timeline.snapshot([.rightCommand], at: 0, announcesWrite: false)
+        XCTAssertTrue(timeline.isEligible(.rightCommand, eventTime: -100), "bound since the first read")
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 1))
+
+        timeline.snapshot([.rightCommand], at: 1, announcesWrite: true) // unrelated write
+        timeline.snapshot([.rightCommand], at: 2, announcesWrite: true) // the write enabling Right Option
+        timeline.snapshot([.rightCommand, .rightOption], at: 3, announcesWrite: true) // another unrelated one
+        timeline.snapshot([.rightCommand, .rightOption], at: 4, announcesWrite: false) // the deferred read
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 1.5), "before the enabling write")
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 2.5), "a later unrelated write keeps it")
+        XCTAssertTrue(timeline.isEligible(.rightCommand, eventTime: -100), "untouched by every write")
+
+        timeline.snapshot([.rightCommand, .rightOption], at: 5, announcesWrite: true) // disables
+        timeline.snapshot([.rightCommand], at: 6, announcesWrite: true) // re-enables
+        timeline.snapshot([.rightCommand, .rightOption], at: 7, announcesWrite: false)
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 5.5), "pressed while unbound")
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 6))
+
+        timeline.snapshot([.rightCommand], at: 8, announcesWrite: false) // unannounced removal
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 7.5))
+        timeline.snapshot([.rightCommand, .rightOption], at: 9, announcesWrite: true, causeUnknown: true)
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 8.5), "no write explains it: placed at the read")
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 9))
+    }
+
+    func testEveryOrderOfWritesCallbacksAndReadsAgreesWithEventTime() {
+        // Right Option enabled by a write at +0.015 after an unrelated write at
+        // +0.005; a press at `offset` is judged iff it is after the enabling
+        // write, whichever runs first: the callback or the deferred read.
+        for (offset, expected) in [(0.010, 0), (0.017, 1)] {
+            for callbackFirst in [true, false] {
+                let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+                world.watched = [.rightCommand]
+                world.taps = ordinaryTaps + [puntoTap]
+                let guard_ = started(world, probe, presenter)
+                defer { withExtendedLifetime(guard_) {} }
+                let t = world.uptime
+                world.advance(to: t + 0.005)
+                guard_.bindingsWillChange(at: world.uptime)
+                world.advance(to: t + 0.015)
+                guard_.bindingsWillChange(at: world.uptime)
+                world.watched.insert(.rightOption)
+                world.advance(to: t + 0.020)
+                let press = t + offset
+                if callbackFirst { probe.deliver?(rightOptionDown, press, press) }
+                guard_.bindingsOrSessionChanged()
+                if !callbackFirst { probe.deliver?(rightOptionDown, press, press) }
+                world.advance(to: t + 0.1)
+                probeSees(probe, world, noModifiers)
+                world.advance(to: t + 1)
+                XCTAssertEqual(presenter.presented.count, expected,
+                               "press at +\(offset), callback first: \(callbackFirst)")
+            }
+        }
+    }
+
+    func testAnUnrelatedWriteDuringAHoldKeepsThePress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        guard_.bindingsWillChange(at: world.uptime) // e.g. Screenshot arrows
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertEqual(presenter.presented.count, 1, "Right Option's binding never changed")
+    }
+
+    func testARebindDuringAHoldRetiresIt() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        guard_.bindingsWillChange(at: world.uptime)
+        world.watched.remove(.rightOption)
+        guard_.bindingsWillChange(at: world.uptime + 0.001)
+        world.watched.insert(.rightOption)
+        world.advance(to: world.uptime + 0.002)
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 2)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the next press after the release is judged")
+    }
+
+}
+
+/// Regressions from the builder's review of queue ticket 715.
+
+extension HotkeyInterceptionTests {
+    func testBuilder715VerdictReadsRebindingBeforeItCanShowTheOldPress() {
+        for heldAtVerdict in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            let t = world.uptime
+            probeSees(probe, world, rightOptionDown)
+            if !heldAtVerdict {
+                world.advance(to: t + 0.05)
+                probeSees(probe, world, noModifiers)
+            }
+
+            // The verdict is queued already. The settings turn publishes both
+            // writes, but its DispatchQueue.main.async read is behind that verdict.
+            let due = t + (heldAtVerdict ? 0.5 : 0.35)
+            world.uptime = due
+            guard_.bindingsWillChange(at: due)
+            world.watched.remove(.rightOption)
+            guard_.bindingsWillChange(at: due + 0.001)
+            world.watched.insert(.rightOption)
+            world.uptime = due + 0.002
+            world.advance(to: due + 0.002)
+            guard_.bindingsOrSessionChanged()
+            if heldAtVerdict {
+                probeSees(probe, world, noModifiers)
+            }
+            world.advance(to: t + 1)
+            XCTAssertTrue(presenter.presented.isEmpty,
+                          "A queued verdict cannot report a press from the old binding (held: \(heldAtVerdict))")
+            tapRightOption(guard_, probe, world, delivered: false)
+            XCTAssertEqual(presenter.presented.last?.badge.app, punto,
+                           "A new press after the rebind remains eligible")
+        }
+    }
+
+    func testBuilder715AWriteForAnotherShortcutKeepsTheFirstValidPress() {
+        for callbackFirst in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.watched = [.rightCommand]
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            defer { withExtendedLifetime(guard_) {} }
+            let t = world.uptime
+            world.advance(to: t + 0.010)
+            guard_.bindingsWillChange(at: world.uptime) // Enable Right Option for Google.
+            world.watched.insert(.rightOption)
+            world.advance(to: t + 0.015)
+            let firstPress = world.uptime
+            if callbackFirst {
+                probeSees(probe, world, rightOptionDown)
+            }
+            world.advance(to: t + 0.020)
+            guard_.bindingsWillChange(at: world.uptime) // An unrelated binding, e.g. Screenshot arrows.
+            world.advance(to: t + 0.025)
+            guard_.bindingsOrSessionChanged()
+            if !callbackFirst {
+                probe.deliver?(rightOptionDown, firstPress, firstPress)
+            }
+            world.advance(to: t + 0.1)
+            probeSees(probe, world, noModifiers)
+            world.advance(to: t + 1)
+            XCTAssertEqual(presenter.presented.count, 1,
+                           "A write for another shortcut cannot retire a press after the actual Right Option enable (callback first: \(callbackFirst))")
+        }
+    }
+}

@@ -2876,6 +2876,15 @@ state and the frontmost app's focused-element role, never keys, and never
 works around the protection. Details: `docs/hotkey.md` (Secure Input) and
 `.project-docs/decisions/2026-11-26-secure-input-holder.md`.
 
+An app whose own event tap swallows a modifier shortcut (Punto Switcher on
+Right Option) is named the same way: `HotkeyPressProbe` (an active HID tap on
+`flagsChanged` only, passing every event) sees the physical press, and when
+the `NSEvent` monitors never see it held, `HotkeyInterceptionGuard` names the
+other app's active flagsChanged filter from `CGGetEventTapList`.
+`HotkeyBlockerBadgeStack` shares the one badge panel between both guards.
+Details: `docs/hotkey.md` and
+`.project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md`.
+
 ## Invariants
 
 1. **No Whytap-owned services.** The app never contacts a Whytap backend,

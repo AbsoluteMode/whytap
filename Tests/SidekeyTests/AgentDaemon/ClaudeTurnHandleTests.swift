@@ -19,7 +19,11 @@ final class ClaudeTurnHandleTests: XCTestCase {
             lock.lock(); _lines.append(line); lock.unlock()
             onLine?()
         }
-        func closeStdin() { lock.lock(); _closed += 1; lock.unlock() }
+        var onClose: (() -> Void)?
+        func closeStdin() {
+            lock.lock(); _closed += 1; lock.unlock()
+            onClose?()
+        }
         func terminate() {}
         var processIdentifier: Int32? { nil }
     }
@@ -46,6 +50,40 @@ final class ClaudeTurnHandleTests: XCTestCase {
         withExtendedLifetime(stream) {
             XCTAssertEqual(writer.closed, 1)
         }
+    }
+
+    /// The deferred close at registration makes the child exit before the
+    /// writer is published: that exited writer must never become active.
+    func testAnExitDuringRegistrationNeverPublishesTheExitedWriter() {
+        let writer = RecordingWriter()
+        let wrote = expectation(description: "the exited child receives nothing")
+        wrote.isInverted = true
+        let provider = ClaudeCodeProvider(locate: { URL(fileURLWithPath: "/usr/bin/false") },
+                                          runStreaming: { _, _, _, onLine, onExit in
+            writer.onClose = { onExit(0) }
+            onLine(self.result)
+            return writer
+        }, idleSoftTimeout: 10, idleHardTimeout: 20)
+        let stream = provider.run(prompt: "synthetic", resumeSessionID: nil, options: options())
+        writer.onLine = { wrote.fulfill() }   // after the prompt line run() writes itself
+        provider.respondToPermission(requestId: "late", decision: .deny(message: "no"))
+        withExtendedLifetime(stream) { wait(for: [wrote], timeout: 0.35) }
+    }
+
+    /// An exit while the child is still starting (before its writer exists).
+    func testAnExitBeforeRegistrationNeverPublishesTheWriter() {
+        let writer = RecordingWriter()
+        let wrote = expectation(description: "the exited child receives nothing")
+        wrote.isInverted = true
+        let provider = ClaudeCodeProvider(locate: { URL(fileURLWithPath: "/usr/bin/false") },
+                                          runStreaming: { _, _, _, _, onExit in
+            onExit(1)
+            return writer
+        }, idleSoftTimeout: 10, idleHardTimeout: 20)
+        let stream = provider.run(prompt: "synthetic", resumeSessionID: nil, options: options())
+        writer.onLine = { wrote.fulfill() }
+        provider.respondToPermission(requestId: "late", decision: .deny(message: "no"))
+        withExtendedLifetime(stream) { wait(for: [wrote], timeout: 0.35) }
     }
 
     func testAResultAfterStartClosesStdinOnce() {

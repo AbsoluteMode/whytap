@@ -586,7 +586,7 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   without levels or a saved model the loaded list lacks). Turns and model
   discovery run in Application Support/whytap/agent and neither starts the CLI
   if it cannot be created. Sign-in checks (ProcessOneShot) have one deadline
-  for the whole call; a timed-out check is a failure. Logs carry exit codes and byte counts only. Codex
+  for the whole call; a timed-out check or output without EOF is a failure. Logs carry exit codes and byte counts only. Codex
   item-level error events are notices; top-level error and turn.failed end the
   turn. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 

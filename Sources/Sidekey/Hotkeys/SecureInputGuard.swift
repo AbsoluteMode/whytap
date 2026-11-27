@@ -5,12 +5,20 @@ import Foundation
 import os.log
 
 /// What the indicator shows: the holder app, or nil when it is unknown.
+/// The same badge names an app that intercepts a Whytap shortcut with its
+/// own event tap; `message` then replaces the Secure Input sentence.
+// WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
 struct SecureInputHolderBadge: Equatable {
     let app: SecureInputApp?
+    var message: String? = nil
 
     var label: String {
-        "\(app?.name ?? "Another app") holds secure input — close its password field"
+        message ?? "\(app?.name ?? "Another app") holds secure input — close its password field"
     }
+
+    /// Shown when the app has no logo: a lock for Secure Input, a keyboard
+    /// for an interceptor.
+    var fallbackSymbol: String { message == nil ? "lock.fill" : "keyboard" }
 }
 
 @MainActor
@@ -54,7 +62,9 @@ final class SecureInputGuard {
         var afterArrivalWindow: (@escaping @MainActor () -> Void) -> Void
     }
 
-    static let shared = SecureInputGuard(system: .live, makePresenter: { SecureInputHolderPanel.shared })
+    static let shared = SecureInputGuard(system: .live, makePresenter: {
+        HotkeyBlockerBadgeStack.shared.presenter(for: .secureInput)
+    })
 
     nonisolated static let switchSettleDelay: TimeInterval = 0.4
     static let pollInterval: TimeInterval = 1

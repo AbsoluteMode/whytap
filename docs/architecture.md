@@ -203,9 +203,36 @@ Voice flow (Drop / dictation):
        catalog lists; any other saved name is "other" and a user's own server
        "custom". WHY:
        .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
-       -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
-            wait for modifiers released -> restore target focus -> settle ->
-            CGEvent Cmd+V (4-event sequence)
+       -> AutoPasteEngine.paste: snapshot the clipboard -> pasteboard write
+            (promised data + org.nspasteboard.TransientType marker,
+            PromisedPasteboardPayload) -> Post Event preflight -> wait for
+            modifiers released -> restore target focus -> settle ->
+            CGEvent Cmd+V (4-event sequence) -> return. Drop owns only the
+            generation its write produced (a clipboard claim): newer content
+            before Cmd+V stops the paste (false) and is never restored over;
+            a remembered target (fixed when the paste starts) that loses
+            focus during the 80 ms non-blocking settle stops it too, and
+            ownership plus the frontmost recipient are rechecked between
+            Command-down and V-down in a fixed order, recipient last (V is
+            never sent otherwise; the remaining microsecond window is an
+            accepted residual, see the decision). A live
+            target that is not in front (lost focus or refused activation)
+            or a clipboard change stops the take as a retryable refusal:
+            "Couldn't paste — app not in front / clipboard changed" with
+            Retry pasting the kept text to the take's own target
+            (DropPasteRetry, also for a refused Fast raw partial); only a missing or
+            quit target pastes where focus is. Quit stops
+            every Drop paste that began before it. The clipboard comes back
+            asynchronously 150 ms after the last read of the dictation after
+            Cmd+V, or after 2 s without one. Drop pastes run one at a time;
+            a newer take waits for the previous target's read (or its
+            fallback) and inherits the snapshot. A Whytap round trip
+            (selection capture, failed Shot text copy) that writes the
+            dictation back is recognised by content and adopted; Whytap's
+            own snapshot reads are not counted as the target's. Quitting
+            restores at once, before or after Cmd+V. A fixed 120 ms delay
+            lost the race against busy Chromium/Electron renderers. WHY:
+            .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
        A take that starts with the keyboard in one of Whytap's own native text
             editors (the floating Translate input, Settings fields) remembers
             that editor (AutoPasteEngine.rememberDropTarget, DropLocalEditor)
@@ -2857,6 +2884,15 @@ blocked chord from `flagsChanged` and shakes the holder's logo in
 state and the frontmost app's focused-element role, never keys, and never
 works around the protection. Details: `docs/hotkey.md` (Secure Input) and
 `.project-docs/decisions/2026-11-26-secure-input-holder.md`.
+
+An app whose own event tap swallows a modifier shortcut (Punto Switcher on
+Right Option) is named the same way: `HotkeyPressProbe` (an active HID tap on
+`flagsChanged` only, passing every event) sees the physical press, and when
+the `NSEvent` monitors never see it held, `HotkeyInterceptionGuard` names the
+other app's active flagsChanged filter from `CGGetEventTapList`.
+`HotkeyBlockerBadgeStack` shares the one badge panel between both guards.
+Details: `docs/hotkey.md` and
+`.project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md`.
 
 ## Invariants
 

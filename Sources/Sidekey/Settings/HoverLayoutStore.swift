@@ -79,11 +79,39 @@ final class HoverLayoutStore: ObservableObject {
     /// Saves the order on screen (after an island drag moved it unsaved).
     func saveLayout() { persist() }
 
-    func removeTool(_ tool: HoverTool) {
-        guard tool != .settings, slots.contains(tool) else { return }
+    @discardableResult
+    func removeTool(_ tool: HoverTool) -> Bool {
+        guard Self.canUnpin(tool), slots.contains(tool) else { return false }
         slots.removeAll { $0 == tool }
         persist()
+        return true
     }
+
+    // MARK: - Pin / unpin (island drawer, Settings -> Features -> Hover)
+
+    /// Settings is the way back to every other tool, so it always stays.
+    nonisolated static func canUnpin(_ tool: HoverTool) -> Bool { tool != .settings }
+
+    /// Tools the island does not show, in catalog order (Settings never).
+    nonisolated static func unpinnedTools(from slots: [HoverTool]) -> [HoverTool] {
+        HoverTool.allCases.filter { $0 != .settings && !slots.contains($0) }
+    }
+
+    var unpinnedTools: [HoverTool] { Self.unpinnedTools(from: slots) }
+
+    /// Adds a tool at the end of the island, just before Settings: the same
+    /// place the switch in Settings -> Features -> Hover puts it, so the
+    /// tools already there keep their places.
+    @discardableResult
+    func pin(_ tool: HoverTool) -> Bool {
+        guard Self.canUnpin(tool), !slots.contains(tool) else { return false }
+        return placeTool(tool, at: lockSlotIndex)
+    }
+
+    /// Takes a tool out of the island. Its own shortcut keeps working and
+    /// search still finds it; Settings cannot be removed.
+    @discardableResult
+    func unpin(_ tool: HoverTool) -> Bool { removeTool(tool) }
 
     /// Applies exactly the selected helpers, without
     /// padding with tools the user did not choose or truncating their choice.

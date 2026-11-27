@@ -613,7 +613,9 @@ feature expenses without a permanent model-level grid or scattered period contro
   moving to another row switches at once, and leaving both the open row and
   its detail closes it at once. The pointer may rest on the detail where it
   covers other rows. A click opens at once (a click on the open row closes
-  it); keyboard focus opens and Escape closes. Row positions come from SwiftUI
+  it); keyboard focus opens and owns the detail until the pointer really
+  moves; Escape closes. The detail is an application-defined NSPopover that
+  only the state closes. Row positions come from SwiftUI
   frames, never from NSViews inside the ScrollView. A period change, loading,
   empty or error state retires all detail state (2026-11-27,
   `.project-docs/decisions/2026-11-26-costs-models-popover-hover.md`).

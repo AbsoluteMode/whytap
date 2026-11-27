@@ -79,25 +79,21 @@ which the maintainer does not want.
   window is topmost under the pointer. Row hover callbacks, continuous hover
   on the table and the detail, an app-local mouse-moved monitor and an 80 ms
   poll while a detail is open or pending only trigger a new resolution.
-- A click opens its row at once; activating the open row closes it whether
-  the native popover reports its dismissal before the click, after it, or
-  never (keyboard activation), and a dismissal is consumed only once.
-  Keyboard focus opens and highlights its row even while the pointer rests
-  on another row; the next pointer move hands the detail back to the
-  pointer. Escape closes until the pointer leaves that row. No pinning
-  against hover.
-- Pointer motion is told apart from re-reading a resting pointer: the
-  controller compares screen points, so a poll or scroll keeps a detail that
-  keyboard focus opened, while any real move (even within the same row, or
-  between two points off the table) hands the detail back to the pointer.
-  Focus leaving for a non-row control gives the detail back to the row under
-  the pointer or closes it; a click on the row under the pointer belongs to
-  the pointer, Return on a focused row elsewhere to the keyboard (builder
-  findings on queue ticket 701).
-- A detail we close ourselves (click, Escape, row switch) records a stale
-  dismissal: a native dismissal arriving within 0.4 s belongs to that old
-  presentation and is consumed once, so it never closes a newer presentation
-  of the same row (ticket 701).
+- Ownership is the pointer or the keyboard (simplified on 2026-11-27 after
+  builder tickets 693, 701 and 711). Focus or keyboard activation gives the
+  detail and fill to that row; only real pointer motion, any changed screen
+  point, takes them back. The first pointer sample and re-reads of a resting
+  pointer (poll, scroll, layout) never change ownership. A click on the row
+  under the pointer belongs to the pointer; activating the open row closes
+  it; Escape closes until the pointer leaves the row.
+- The detail is one `NSPopover` with `.applicationDefined` behavior, owned
+  by `AIUsageModelsHoverController` and positioned from the open row's name
+  frame through the anchor view. AppKit never closes it, so there is no
+  native dismissal: SwiftUI's transient `.popover` delivered asynchronous
+  `false` writes with no presentation identity, which three rounds of
+  row/time tokens could not attribute correctly. The detail closes only from
+  the state (pointer, click, Escape, focus, rows, disabled) and when the app
+  resigns active.
 - A disabled Costs view (its real `isEnabled`) resolves nothing: the
   app-wide mouse monitor, hover callbacks and focus cannot open a detail.
 - Rows leaving the table retire every reference to them (`rowsChanged`), fed
@@ -138,8 +134,13 @@ after the change it passed every repeated run with six busy CPU loops).
 The builder's probes are kept as regressions: `testBuilder693…` (focus with
 a resting pointer, repeated activation, disabled table) and
 `testBuilder701…` (motion within a row and outside, focus leaving, click
-ownership, a delayed dismissal of an older presentation), with state-level
-variants beside them. The real popover window cannot be shown in
+ownership, a delayed dismissal of an older presentation) and
+`testBuilder711…` (first sample, layout under a resting pointer, half-point
+motion, closes by every route followed by reopening). Dismissal-class probes
+are adapted because the event no longer exists: they now check that nothing
+from an earlier presentation can close a later one. A hosting test shows the
+real application-defined popover beside the name, moves it to another row and
+closes it from the state. The real popover window cannot be shown in
 tests, so its frame is a stand-in rectangle. Not verified in the running app
 by this session (feature sessions do not launch the app).
 
@@ -152,6 +153,9 @@ by this session (feature sessions do not launch the app).
   detail on screen longer.
 - Click to pin against hover: the maintainer wants the detail to follow the
   pointer (2026-11-27).
+- More dismissal bookkeeping (row plus time windows, presentation tokens
+  through SwiftUI's binding): SwiftUI hands one latest binding to the native
+  popover, so a late write cannot be tied to the presentation that closed.
 - Per-row NSView probes or per-row `onHover` flags as the source of truth:
   wrong geometry inside the ScrollView and missed events across windows.
 - Moving the detail off the row: changes the look the maintainer likes.

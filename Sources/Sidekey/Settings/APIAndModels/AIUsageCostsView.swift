@@ -77,7 +77,7 @@ struct AIUsagePrice {
     }
 }
 
-struct AIUsageCostRow: Identifiable {
+struct AIUsageCostRow: Identifiable, Equatable {
     let title: String
     let events: [AIUsageEvent]
     var id: String { title }
@@ -256,10 +256,10 @@ struct AIUsageCostsView: View {
         .task { await refresh() }
         .onAppear { modelsHover.start() }
         .onChange(of: isEnabled, initial: true) { _, enabled in modelsHover.setEnabled(enabled) }
-        .onDisappear { modelsHover.retain(rows: []); modelsHover.stop() }
+        .onDisappear { modelsHover.retain(rows: [AIUsageCostRow]()); modelsHover.stop() }
         // Observed outside the conditionally shown table, so loading, empty
         // and error states retire every row's hover state too.
-        .onChange(of: visibleRowIDs, initial: true) { _, ids in modelsHover.retain(rows: ids) }
+        .onChange(of: visibleRows, initial: true) { _, rows in modelsHover.retain(rows: rows) }
         .onChange(of: model.period) { _, _ in Task { await refresh() } }
         .onChange(of: model.start) { _, _ in Task { await refresh() } }
         .onChange(of: model.end) { _, _ in Task { await refresh() } }
@@ -271,9 +271,9 @@ struct AIUsageCostsView: View {
     }
 
     /// The feature rows on screen now; empty whenever the table is not shown.
-    private var visibleRowIDs: [String] {
+    private var visibleRows: [AIUsageCostRow] {
         guard !model.failed, let interval, !model.loading, model.loadedInterval == interval else { return [] }
-        return AIUsageCostRow.grouped(model.pricedEvents).map(\.id)
+        return AIUsageCostRow.grouped(model.pricedEvents)
     }
 
     private var table: some View {
@@ -374,18 +374,11 @@ private struct AIUsageFeatureCostRow: View {
             .onChange(of: focused) { _, value in
                 hover.send(value ? .focused(row.id) : .unfocused(row.id))
             }
-            // Anchored to the name, so the detail opens beside it wherever on
-            // the row the pointer is. Its binding reads the table's one open
-            // row, so this popover only ever shows this row's models.
-            .popover(isPresented: Binding(
-                get: { hover.isPresented(row.id) },
-                set: { if !$0 { hover.send(.dismissedBySystem(row.id)) } }
-            ), arrowEdge: .trailing) {
-                AIUsageModelsPopover(row: row)
-                    .background(AIUsageHoverAnchorView { hover.registerDetail($0) })
-                    .onContinuousHover { _ in hover.checkPointer() }
-                    .onExitCommand { hover.send(.escape) }
-            }
+            // The detail opens beside the name wherever on the row the
+            // pointer is; the table's controller presents it from this frame.
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .named(AIUsageModelsHoverController.coordinateSpace))
+            } action: { hover.setNameFrame($0, for: row.id) }
             Spacer(minLength: 0)
             AIUsagePriceLabel(events: row.events)
         }

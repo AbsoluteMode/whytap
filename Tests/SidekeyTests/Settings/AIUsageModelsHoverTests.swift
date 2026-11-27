@@ -15,7 +15,8 @@ final class AIUsageModelsHoverTests: XCTestCase {
     override func setUp() { now = t0; state = S() }
 
     private func send(_ event: S.Event) { state.send(event, now: now) }
-    private func move(_ pointer: S.Pointer) { send(.pointer(pointer)) }
+    /// Real pointer motion; `send(.pointer(_))` is a re-read of a resting pointer.
+    private func move(_ pointer: S.Pointer) { send(.pointerMoved(pointer)) }
     private func wait(_ seconds: TimeInterval) { now = now.addingTimeInterval(seconds); send(.tick) }
     private func assertShows(_ id: String?, _ message: String = "", line: UInt = #line) {
         XCTAssertEqual(state.open, id, message, line: line)
@@ -91,8 +92,7 @@ final class AIUsageModelsHoverTests: XCTestCase {
     /// row; that click closes it instead of reopening it.
     func test_clicking_the_open_row_closes_it() {
         openFromOutside("Agent")
-        send(.dismissedBySystem("Agent")); now = now.addingTimeInterval(0.05); send(.clicked("Agent"))
-        assertShows(nil)
+        send(.clicked("Agent")); assertShows(nil)
         wait(1); assertShows(nil, "it stays closed while the pointer rests on the row")
         send(.clicked("Agent")); assertShows("Agent")
     }
@@ -102,13 +102,6 @@ final class AIUsageModelsHoverTests: XCTestCase {
         send(.escape); assertShows(nil)
         move(.outside); move(.row("Agent")); wait(S.openDelay)
         assertShows("Agent")
-    }
-
-    func test_a_late_dismissal_of_the_previous_row_does_not_close_the_new_one() {
-        openFromOutside("Agent")
-        move(.row("Meetings"))
-        send(.dismissedBySystem("Agent"))
-        assertShows("Meetings")
     }
 
     func test_keyboard_focus_opens_and_the_pointer_takes_over() {
@@ -128,22 +121,22 @@ final class AIUsageModelsHoverTests: XCTestCase {
         XCTAssertTrue(state.highlighted("Drop Fast")); XCTAssertFalse(state.highlighted("Agent"))
     }
 
-    /// Click on the open row: the native dismissal may come before the click,
-    /// after it, or never. Each order closes once, and the next click opens.
-    func test_click_on_the_open_row_closes_in_every_dismissal_order() {
+    /// Repeated activation of one row toggles it, from the mouse or the keyboard.
+    func test_repeated_activation_toggles() {
         openFromOutside("Agent")
-        send(.dismissedBySystem("Agent")); send(.clicked("Agent"))
-        assertShows(nil)
-        send(.clicked("Agent")); assertShows("Agent", "the dismissal is consumed only once")
+        for expected in [nil, "Agent", nil, "Agent"] as [String?] {
+            send(.clicked("Agent")); assertShows(expected)
+        }
+        send(.focused("Translation"))
+        send(.clicked("Translation")); assertShows(nil)
+        send(.clicked("Translation")); assertShows("Translation"); XCTAssertEqual(state.keyboardRow, "Translation")
+    }
 
-        send(.clicked("Agent")); send(.dismissedBySystem("Agent"))
-        assertShows(nil)
-        wait(1); assertShows(nil, "the resting pointer does not reopen it")
-        send(.clicked("Agent")); assertShows("Agent")
-
-        send(.clicked("Agent")); assertShows(nil, "no native callback at all")
-        move(.outside); move(.row("Agent")); wait(S.openDelay)
-        assertShows("Agent", "leaving and returning opens it again")
+    /// AppKit cannot close the detail on its own: the popover's behavior is
+    /// application-defined, so no late native dismissal exists to misroute
+    /// (builder tickets 693, 701, 711).
+    func test_the_popover_is_never_closed_by_appkit() {
+        XCTAssertEqual(AIUsageModelsHoverController.popoverBehavior, .applicationDefined)
     }
 
     // Ticket 701: motion versus re-reading a resting pointer, and ownership.
@@ -184,18 +177,6 @@ final class AIUsageModelsHoverTests: XCTestCase {
         send(.clicked("Agent")) // activation not under the pointer
         assertShows("Agent"); XCTAssertEqual(state.keyboardRow, "Agent")
         XCTAssertTrue(state.highlighted("Agent"))
-    }
-
-    func test_a_stale_dismissal_is_consumed_once_and_expires() {
-        openFromOutside("Agent")
-        send(.escape); send(.clicked("Agent"))
-        send(.dismissedBySystem("Agent")); assertShows("Agent", "late callback of the Escape-closed presentation")
-        send(.dismissedBySystem("Agent")); assertShows(nil, "a second dismissal is genuine")
-
-        send(.clicked("Agent")); send(.clicked("Agent")); send(.clicked("Agent"))
-        now = now.addingTimeInterval(S.reopenSuppression + 0.1)
-        send(.dismissedBySystem("Agent"))
-        assertShows(nil, "after the window a dismissal is genuine again")
     }
 
     func test_a_detail_alone_is_never_under_the_pointer_when_nothing_is_open() {
@@ -239,6 +220,8 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
     /// The controller's clock; tests advance it instead of racing real timers.
     private var clock = Date(timeIntervalSinceReferenceDate: 50_000)
     private var detail: NSRect?
+    /// What the controller last presented; must always equal the open row.
+    private var presented: String?
     private var storeURL: URL!
     /// Row bands measured before any row carries a fill (a fill touching a
     /// separator hides it); shifted by hand when the test scrolls.
@@ -260,6 +243,7 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
                                                   mouseLocation: { [unowned self] in pointer },
                                                   topWindowNumber: { [unowned self] _ in window.windowNumber })
         controller.detailScreenFrameOverride = { [unowned self] in detail }
+        controller.presenter = { [unowned self] row, _ in presented = row?.id }
         host = NSHostingView(rootView: AnyView(AIUsageCostsView(model: model, now: { now }, modelsHover: controller)
             .environment(\.colorScheme, .light)))
         host.appearance = NSAppearance(named: .aqua)
@@ -354,12 +338,42 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
 
     /// Exactly `title` carries the hover fill in the rendered pixels.
     private func assertFilled(_ title: String?, line: UInt = #line) throws {
+        XCTAssertEqual(presented, controller.state.open, "the presented detail is the open row", line: line)
         try settleSync()
         let rep = try bitmap()
         for (name, band) in zip(titles, try rowBands()) {
             let filled = ink(rep, x: 6, y: (band.lowerBound + band.upperBound) / 2) > 0.02
             XCTAssertEqual(filled, name == title, "\(name) fill", line: line)
         }
+    }
+
+    /// The real application-defined NSPopover: shown beside the open row's
+    /// name, switched in place to another row, closed by the state only.
+    func test_real_popover_follows_the_state() async throws {
+        controller.presenter = nil
+        window.orderFrontRegardless() // far off every display
+        defer { window.orderOut(nil) }
+        try await settle()
+        moveMouse(to: try center("Meetings")); try await wait(AIUsageModelsHoverState.openDelay)
+        try await settle()
+        XCTAssertEqual(controller.presentedRowID, "Meetings")
+        let meetings = try XCTUnwrap(controller.screenFrame(of: "Meetings"))
+        let frame = try XCTUnwrap(controller.detailWindowFrame)
+        XCTAssertGreaterThan(frame.minX, meetings.minX + 60, "beside the name, not over it")
+        // AppKit keeps the popover window on a display; with the window far
+        // off screen only its anchor (positioning rect) shows the row.
+        let pointsAt = try XCTUnwrap(controller.presentedAnchorScreenRect)
+        XCTAssertTrue(meetings.contains(NSPoint(x: pointsAt.midX, y: pointsAt.midY)), "points at the Meetings name")
+
+        moveMouse(to: try center("Drop Fast", x: 40)); try await settle()
+        XCTAssertEqual(controller.presentedRowID, "Drop Fast")
+        let dropFast = try XCTUnwrap(controller.screenFrame(of: "Drop Fast"))
+        let movedTo = try XCTUnwrap(controller.presentedAnchorScreenRect)
+        XCTAssertTrue(dropFast.contains(NSPoint(x: movedTo.midX, y: movedTo.midY)), "moved to the Drop Fast name")
+
+        moveMouse(to: screenPoint(x: 60, yFromTop: 20)); try await settle()
+        try await Task.sleep(for: .milliseconds(400))
+        XCTAssertNil(controller.presentedRowID)
     }
 
     /// The second report's break: every row's NSView claimed the whole window.
@@ -560,8 +574,10 @@ extension AIUsageModelsHoverTests {
         assertShows(nil)
         send(.clicked("Agent"))
         assertShows("Agent")
-        send(.dismissedBySystem("Agent")) // Delayed callback from the first presentation.
-        assertShows("Agent", "A delayed close belongs to the old presentation, even when the row ID is the same")
+        // No native dismissal exists any more (application-defined popover);
+        // the reopened detail stays until the state closes it.
+        wait(1)
+        assertShows("Agent", "nothing from the first presentation can close the second")
     }
 }
 
@@ -579,5 +595,110 @@ extension AIUsageModelsHoverHostingTests {
         moveMouse(to: across)
         XCTAssertNil(controller.state.open, "A new pointer position outside both the detail and its row closes it")
         try assertFilled(nil)
+    }
+}
+
+// Builder findings on queue ticket 711 (2026-11-27). The dismissal-class
+// probes are adapted: the detail is an application-defined NSPopover now, so
+// AppKit delivers no dismissal and the `.dismissedBySystem` event is gone.
+extension AIUsageModelsHoverTests {
+    func testBuilder711LayoutChangeUnderRestingPointerPreservesKeyboardOwnership() {
+        for reread in [S.Pointer.row("Drop Fast"), .outside, .detail] {
+            now = t0
+            state = S()
+            openFromOutside("Meetings")
+            send(.focused("Agent"))
+            send(.pointer(reread))
+
+            assertShows("Agent", "A stationary reread (\(reread)) cannot take Tab's detail")
+            XCTAssertEqual(state.keyboardRow, "Agent")
+            XCTAssertTrue(state.highlighted("Agent"))
+        }
+    }
+
+    func testBuilder711OldDismissalCannotCloseReopenedRowAfterAnImplicitClose() {
+        let exits: [S.Event] = [
+            .pointerMoved(.row("Meetings")), .pointerMoved(.outside),
+            .focused("Meetings"), .clicked("Meetings")
+        ]
+        for exit in exits {
+            now = t0
+            state = S()
+            openFromOutside("Agent")
+            send(exit)
+            XCTAssertNotEqual(state.open, "Agent")
+            send(.focused("Agent"))
+            wait(1) // AppKit cannot deliver an old dismissal: the popover is application-defined.
+
+            assertShows("Agent", "Nothing from the closed presentation after \(exit) closes the new Agent detail")
+        }
+    }
+
+    func testBuilder711OldDismissalWhileClosedDoesNotEatTheNextPresentationsDismissal() {
+        openFromOutside("Agent")
+        send(.clicked("Agent"))
+        send(.clicked("Agent"))
+        assertShows("Agent")
+
+        // The newer presentation closes through the state (Escape here; also a
+        // click, the pointer leaving or focus moving), never a stale token.
+        send(.escape)
+        assertShows(nil, "Closing the newer presentation is not eaten by the first close")
+    }
+
+    func testBuilder711TwoLateDismissalsDoNotCloseTheThirdPresentation() {
+        openFromOutside("Agent")
+        for _ in 0..<2 {
+            send(.clicked("Agent"))
+            send(.clicked("Agent"))
+        }
+        wait(1)
+
+        assertShows("Agent", "Earlier closes leave nothing behind that can close the third presentation")
+    }
+
+    func testBuilder711LateCallbackAfterTimeWindowStillBelongsToOriginalPresentation() {
+        openFromOutside("Agent")
+        send(.clicked("Agent"))
+        send(.clicked("Agent"))
+        wait(5)
+
+        assertShows("Agent", "No timer turns an old close into a current one")
+    }
+
+    func testBuilder711DismissalBeforeClickOnDifferentRowDoesNotConsumeTheClick() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        send(.clicked("Meetings")) // Mouse-down no longer closes Agent natively; the click moves it.
+
+        assertShows("Meetings", "Closing Agent must not eat the click intended to open Meetings")
+        XCTAssertTrue(state.highlighted("Meetings"))
+    }
+}
+
+extension AIUsageModelsHoverHostingTests {
+    func testBuilder711FirstPollIsNotMouseMotionAfterKeyboardFocus() {
+        let controllerWithoutMouseEvents = AIUsageModelsHoverController(
+            mouseLocation: { NSPoint(x: 500, y: 500) },
+            topWindowNumber: { _ in 0 })
+        defer { controllerWithoutMouseEvents.stop() }
+        controllerWithoutMouseEvents.send(.focused("Agent"))
+        controllerWithoutMouseEvents.checkPointer()
+
+        XCTAssertTrue(controllerWithoutMouseEvents.isPresented("Agent"))
+        XCTAssertEqual(controllerWithoutMouseEvents.state.keyboardRow, "Agent")
+    }
+
+    func testBuilder711HalfPointPointerMotionReclaimsTheDetailFromKeyboardFocus() async throws {
+        let start = try center("Meetings", x: 60)
+        moveMouse(to: start)
+        try await wait(AIUsageModelsHoverState.openDelay)
+        controller.send(.focused("Agent"))
+        try await settle()
+        XCTAssertTrue(controller.isPresented("Agent"))
+
+        moveMouse(to: NSPoint(x: start.x + 0.5, y: start.y))
+        XCTAssertTrue(controller.isPresented("Meetings"),
+                      "A single physical pixel on a 2x display is real movement")
     }
 }

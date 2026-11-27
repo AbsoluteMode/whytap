@@ -320,7 +320,8 @@ final class IslandHoverHitBridge: ObservableObject {
     /// ask the island to close the drawer through its explicit dismissal,
     /// even with the pointer still over the pill or the drawer.
     func dismissAfterEdit() {
-        guard !showsToolMenu, editHold.holdsDrawer else { return }
+        // Escape during a drag only cancels that drag (`escapeBelongsToDrag`).
+        guard !showsToolMenu, !isReordering, editHold.holdsDrawer else { return }
         editHold.release()
         dismissals.send()
     }
@@ -485,8 +486,7 @@ final class IslandHoverHitBridge: ObservableObject {
     private func startEscapeWatch() {
         stopEscapeWatch()
         let handler: (NSEvent) -> Void = { [weak self] event in
-            guard event.keyCode == 53 else { return }
-            MainActor.assumeIsolated { self?.cancelReorder() }
+            MainActor.assumeIsolated { self?.handleDragKey(event) }
         }
         if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { handler($0); return $0 }) {
             escapeMonitors.append(local)
@@ -494,6 +494,25 @@ final class IslandHoverHitBridge: ObservableObject {
         if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: handler) {
             escapeMonitors.append(global)
         }
+    }
+
+    /// The Escape that cancelled the last drag. The edit-dismiss observer can
+    /// see the same key before or after the drag's monitor does.
+    private var lastDragEscape: TimeInterval?
+
+    /// Escape while a tool is lifted belongs to the drag alone: it puts the
+    /// tools back and never also closes a drawer held by an earlier edit.
+    func handleDragKey(_ event: NSEvent) {
+        guard event.type == .keyDown, event.keyCode == 53, isReordering else { return }
+        lastDragEscape = event.timestamp
+        cancelReorder()
+    }
+
+    /// True for an Escape the drag owns, whether the drag's monitor has
+    /// already handled it or not; other observers must leave it alone.
+    func escapeBelongsToDrag(_ event: NSEvent) -> Bool {
+        guard event.type == .keyDown, event.keyCode == 53 else { return false }
+        return isReordering || event.timestamp == lastDragEscape
     }
 
     private func stopEscapeWatch() {

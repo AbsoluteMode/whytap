@@ -1267,6 +1267,7 @@ struct IslandView: View {
                         .background(IslandHoverMenuDismissObserver(
                             enabled: hoverHitBridge.editHold.holdsDrawer && !hoverHitBridge.showsToolMenu,
                             consumesEscapeElsewhere: false,
+                            ignores: { hoverHitBridge.escapeBelongsToDrag($0) },
                             onDismiss: { hoverHitBridge.dismissAfterEdit() }
                         ))
                         .onReceive(hoverHitBridge.dismissals) { dismissHoverMenu() }

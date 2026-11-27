@@ -41,7 +41,11 @@ of the hover, and that More should be the whole bottom strip.
   (`NSAnimationEffect.poof`, not under Reduce Motion), fades the picture in
   place and gives a haptic. Back inside before letting go keeps the tool;
   Escape (local and global key monitors, only while a tile is lifted, never
-  consumed) restores the order before the lift. Settings and Soon tools do
+  consumed) restores the order before the lift. That Escape has one owner:
+  the edit-dismiss observer ignores it (`escapeBelongsToDrag`, also for the
+  same key after the drag's monitor handled it) and `dismissAfterEdit` does
+  nothing while a tile is lifted, so cancelling a later drag never closes a
+  drawer held by an earlier edit (builder ticket 695). Settings and Soon tools do
   not lift; the context menu stays for them, for VoiceOver users and as a
   secondary path.
 - **Edit hold.** `IslandHoverEditHold` has four phases: `held` (edited with the

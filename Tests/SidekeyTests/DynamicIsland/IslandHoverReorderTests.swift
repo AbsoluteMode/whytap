@@ -242,6 +242,81 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertFalse(bridge.motion.outside)
     }
 
+    // Builder ticket 695: Escape during a second drag cancels only that
+    // drag; the drawer held by the earlier edit stays open.
+    func testBuilder695EscapeCancelsADragWithoutDismissingTheEarlierEditHold() {
+        bridge.notePointer(inside: true)
+        XCTAssertTrue(bridge.unpin(.monitor))
+        let before = store.slots
+        var dismissals = 0
+        let subscribed = bridge.dismissals.sink { dismissals += 1 }
+        defer { subscribed.cancel() }
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        XCTAssertTrue(bridge.isReordering)
+        XCTAssertNotEqual(store.slots, before)
+        // The earlier edit observer and the drag observer both see this Escape.
+        bridge.dismissAfterEdit()
+        bridge.cancelReorder()
+        XCTAssertEqual(store.slots, before)
+        XCTAssertEqual(dismissals, 0, "Escape cancels the current drag; it must not also close the edited drawer")
+        XCTAssertTrue(bridge.editHold.holdsDrawer)
+    }
+
+    private func escapeKey(at timestamp: TimeInterval) throws -> NSEvent {
+        try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: timestamp,
+                                       windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
+                                       charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+    }
+
+    /// The real wiring: the edit-dismiss observer and the drag's Escape
+    /// monitor see the same key in either order. The drag owns it both ways;
+    /// a later Escape with no drag still closes the edited drawer.
+    func testADragsEscapeHasOneOwnerWhicheverMonitorSeesItFirst() throws {
+        bridge.notePointer(inside: true)
+        XCTAssertTrue(bridge.unpin(.monitor))
+        let before = store.slots
+        var dismissals = 0
+        let subscribed = bridge.dismissals.sink { dismissals += 1 }
+        defer { subscribed.cancel() }
+        let observer = IslandHoverMenuDismissObserver.Coordinator()
+        observer.view = window.contentView
+        observer.consumesEscapeElsewhere = false
+        observer.ignores = { [bridge] in bridge!.escapeBelongsToDrag($0) }
+        let deliver: (NSEvent) -> Void = { event in
+            if observer.shouldDismiss(event) { self.bridge.dismissAfterEdit() }
+        }
+
+        // The observer first, then the drag's monitor.
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        XCTAssertTrue(bridge.isReordering)
+        let first = try escapeKey(at: 10)
+        deliver(first)
+        bridge.handleDragKey(first)
+        XCTAssertFalse(bridge.isReordering)
+        XCTAssertEqual(store.slots, before)
+
+        // The drag's monitor first, then the observer.
+        bridge.mouseUp(at: point(1), in: window, allowed: true)
+        XCTAssertTrue(down(0))
+        drag(to: point(1))
+        XCTAssertTrue(bridge.isReordering)
+        let second = try escapeKey(at: 20)
+        bridge.handleDragKey(second)
+        deliver(second)
+        XCTAssertFalse(bridge.isReordering)
+        XCTAssertEqual(store.slots, before)
+        XCTAssertEqual(dismissals, 0, "Neither order closes the drawer the earlier edit holds")
+        XCTAssertTrue(bridge.editHold.holdsDrawer)
+
+        // With no drag, Escape is the edit hold's again.
+        bridge.mouseUp(at: point(1), in: window, allowed: true)
+        deliver(try escapeKey(at: 30))
+        XCTAssertEqual(dismissals, 1)
+        XCTAssertFalse(bridge.editHold.holdsDrawer)
+    }
+
     /// Escape reaches the island only when it already has keyboard focus
     /// (IslandPanel.sendEvent); the cancel it calls restores the order.
     func testCancelPutsEveryToolBack() {

@@ -614,6 +614,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         isTerminating = true
+        // A Drop paste may still be waiting for its target to read the
+        // dictation: give the user's clipboard back before quitting.
+        autoPasteEngine.flushPendingRestore()
         screenshotCoordinator?.cancel(restoreFocus: false)
         translationWindowController?.cancel()
         BackupViewModel.shared.stop()

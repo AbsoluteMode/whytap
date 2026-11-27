@@ -103,6 +103,7 @@ final class DropLocalEditorTests: XCTestCase {
 
         engine.rememberDropTarget()
         let delivered = await engine.paste("dictated text")
+        await engine.waitForPendingRestore()
 
         XCTAssertTrue(delivered)
         XCTAssertEqual(engine.currentDropTarget().pid, 4242)

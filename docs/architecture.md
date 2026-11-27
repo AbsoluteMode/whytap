@@ -203,9 +203,18 @@ Voice flow (Drop / dictation):
        catalog lists; any other saved name is "other" and a user's own server
        "custom". WHY:
        .project-docs/decisions/2026-11-24-smart-minimal-reasoning.md
-       -> AutoPasteEngine.paste: pasteboard write -> Post Event preflight ->
-            wait for modifiers released -> restore target focus -> settle ->
-            CGEvent Cmd+V (4-event sequence)
+       -> AutoPasteEngine.paste: snapshot the clipboard -> pasteboard write
+            (promised data + org.nspasteboard.TransientType marker,
+            PromisedPasteboardPayload) -> Post Event preflight -> wait for
+            modifiers released -> restore target focus -> settle ->
+            CGEvent Cmd+V (4-event sequence) -> return. The clipboard comes
+            back asynchronously 150 ms after the last read of the dictation
+            after Cmd+V, or after 2 s without one; a user copy in between
+            (changeCount moved) cancels the restore, and a take that starts
+            before it inherits the pending snapshot. Quitting restores at
+            once. A fixed 120 ms delay lost the race against busy Chromium/
+            Electron renderers. WHY:
+            .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
        A take that starts with the keyboard in one of Whytap's own native text
             editors (the floating Translate input, Settings fields) remembers
             that editor (AutoPasteEngine.rememberDropTarget, DropLocalEditor)

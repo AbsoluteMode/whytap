@@ -67,12 +67,20 @@ final class HotkeyInterceptionGuard {
     /// earlier probe is discarded.
     private(set) var probeGeneration = 0
     private var contexts: [Int: HotkeyPressContext] = [:]
-    /// The keys watched at the last sync, and when each key's binding last
-    /// changed (main-thread uptime). A press the probe saw before its key's
-    /// binding changed belongs to the former binding and is never judged,
-    /// even if its callback reaches the main thread afterwards.
+    /// The keys watched at the last sync, and per key the boundary before
+    /// which a press the probe saw is never judged (main-thread uptime),
+    /// even if its callback reaches the main thread afterwards:
+    /// - a key that stops being a shortcut: the sync that sees it go, so
+    ///   every press of the former binding, and any seen while the removal
+    ///   was still queued, is retired;
+    /// - a key that becomes a shortcut: the moment the preference was
+    ///   written (`bindingsWillChange`), never the later sync, so the first
+    ///   press after the write is judged however late the sync runs. With
+    ///   no recorded write, an addition sets no boundary.
     private var lastWatched: Set<HotkeyModifierKey> = []
     private var bindingChangedAt: [HotkeyModifierKey: TimeInterval] = [:]
+    /// When a preference write that the next sync will read happened.
+    private var pendingWriteAt: TimeInterval?
     /// Other processes' HID modifier filters when the probe was installed.
     private var probeBaseline: Set<UInt32> = []
     private var probeRetryAt: TimeInterval?
@@ -124,9 +132,16 @@ final class HotkeyInterceptionGuard {
             }
         }
         observe(NotificationCenter.default, .sidekeyCapabilityFlagsChanged) { $0.bindingsOrSessionChanged() }
-        // Published before the value changes: read it on the next turn.
+        // Published as the value is written: note the write now, read the
+        // new value on the next turn.
         preferencesObservation = HotkeyPreferences.shared.objectWillChange.sink { [weak self] _ in
-            DispatchQueue.main.async { MainActor.assumeIsolated { self?.bindingsOrSessionChanged() } }
+            let writtenAt = ProcessInfo.processInfo.systemUptime
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self?.bindingsWillChange(at: writtenAt)
+                    self?.bindingsOrSessionChanged()
+                }
+            }
         }
         syncProbe()
     }
@@ -193,6 +208,12 @@ final class HotkeyInterceptionGuard {
         if contexts.count > 64 {
             contexts = contexts.filter { detector.presses[$0.key] != nil }
         }
+    }
+
+    /// A shortcut preference was written at `time` (uptime); the sync that
+    /// reads it may run later.
+    func bindingsWillChange(at time: TimeInterval) {
+        pendingWriteAt = min(pendingWriteAt ?? time, time)
     }
 
     /// Shortcuts, capabilities, Accessibility or the session changed.
@@ -268,7 +289,13 @@ final class HotkeyInterceptionGuard {
     private func syncProbe() {
         let watched = system.watchedKeys()
         let now = system.uptime()
-        for key in watched.symmetricDifference(lastWatched) { bindingChangedAt[key] = now }
+        for key in lastWatched.subtracting(watched) { bindingChangedAt[key] = now }
+        if let writtenAt = pendingWriteAt {
+            for key in watched.subtracting(lastWatched) {
+                bindingChangedAt[key] = max(bindingChangedAt[key] ?? writtenAt, writtenAt)
+            }
+        }
+        pendingWriteAt = nil
         lastWatched = watched
         // A key that stopped being a shortcut keeps no pending press, even
         // while another watched key keeps the tap installed.

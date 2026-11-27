@@ -124,7 +124,14 @@ catch it: secure input was off, and the key never reached Whytap at all.
    last changed is kept, so a press the probe saw before that moment, whose
    callback only reaches the main thread afterwards, belongs to the former
    binding and is never judged; another key's binding change does not touch
-   it.
+   it. The shortcut preferences are read on the main thread's next turn
+   after a write, while the probe runs on its own thread, so for a key that
+   becomes a shortcut the boundary is not the sync's time but the moment
+   the preference was written (`bindingsWillChange`): the first press after
+   enabling Right Option is judged whether its callback runs before or after
+   that deferred sync, and a press before the write is not. A key that
+   stops being a shortcut keeps the sync's time, so a press seen while the
+   removal was still queued is retired.
 4. **Name possible interceptors only on that signal, in the press's own
    context.** When a press begins, the frontmost app and the exact filters
    (tap ids) that could act on it are recorded. Both are read when the
@@ -188,7 +195,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (54) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (58) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -237,7 +244,13 @@ the frontmost and tap-list reads, so a slow read could supply a filter
 installed after the press. Its two regressions (`testBuilder691...`) are in
 the suite, with neighbours: another key's binding change keeps the press, a
 press after the rebind is judged, a slow frontmost read supplies no
-context. Removing the eligibility or frontmost-context checks fails
+context. Its fourth review (ticket 699) found that boundary too strict in
+the other direction: with Right Command keeping the probe alive, enabling
+Right Option and pressing it before the deferred sync ran retired a valid
+first press. Its regression (`testBuilder699...`) is in the suite, with the
+timing class: a press after the write with its callback before or after the
+sync is judged, a press before the write is not, and a removal still
+retires a press seen while its sync was queued. Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

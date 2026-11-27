@@ -1038,3 +1038,94 @@ extension HotkeyInterceptionTests {
         XCTAssertTrue(presenter.presented.isEmpty)
     }
 }
+
+/// Regression from the builder's review of queue ticket 699.
+
+extension HotkeyInterceptionTests {
+    func testBuilder699FirstPressAfterPreferenceWriteSurvivesDeferredSync() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guardUnderTest = started(world, probe, presenter)
+        defer { withExtendedLifetime(guardUnderTest) {} }
+
+        let priorGeneration = guardUnderTest.probeGeneration
+        let changeTime = world.uptime + 0.010
+        world.advance(to: changeTime)
+        world.watched = [.rightCommand, .rightOption] // The preference value has changed.
+        let observedUnderNewBinding = changeTime + 0.005 // The HID probe runs off main.
+
+        world.advance(to: changeTime + 0.012)
+        guardUnderTest.bindingsOrSessionChanged() // objectWillChange defers to main's next turn.
+        XCTAssertEqual(guardUnderTest.probeGeneration, priorGeneration)
+        probe.deliver?(rightOptionDown, observedUnderNewBinding, observedUnderNewBinding)
+
+        world.advance(to: changeTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: changeTime + 1)
+        XCTAssertEqual(presenter.presented.count, 1,
+                       "A press seen after the preference took effect belongs to the new binding, even if notification processing was later")
+    }
+}
+
+/// The ticket 699 timing class: the preference write, the probe's press and
+/// the deferred main-thread sync in every order.
+extension HotkeyInterceptionTests {
+    private func enableRightOptionWithDeferredSync(pressAt pressOffset: TimeInterval,
+                                                   callbackAfterSync: Bool) -> Int {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let writeTime = world.uptime + 0.010
+        world.advance(to: writeTime)
+        world.watched = [.rightCommand, .rightOption]
+        let pressTime = writeTime + pressOffset
+        let syncTime = writeTime + 0.020
+        if !callbackAfterSync {
+            world.advance(to: max(pressTime, writeTime) + 0.001)
+            probe.deliver?(rightOptionDown, pressTime, pressTime)
+        }
+        world.advance(to: syncTime)
+        guard_.bindingsWillChange(at: writeTime)
+        guard_.bindingsOrSessionChanged()
+        if callbackAfterSync { probe.deliver?(rightOptionDown, pressTime, pressTime) }
+        world.advance(to: syncTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: syncTime + 1)
+        return presenter.presented.count
+    }
+
+    func testPressAfterTheWriteIsJudgedWhetherItsCallbackRunsBeforeOrAfterTheSync() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: 0.005, callbackAfterSync: true), 1)
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: 0.005, callbackAfterSync: false), 1,
+                       "the callback ran first, the key already read as watched")
+    }
+
+    func testPressBeforeTheWriteIsNeverJudgedWhenTheSyncIsDeferred() {
+        XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: true), 0)
+    }
+
+    func testRemovalStillRetiresAPressSeenWhileItsSyncWasQueued() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let writeTime = world.uptime + 0.010
+        world.advance(to: writeTime)
+        world.watched = [.rightCommand] // Google switched off; sync still queued
+        let pressTime = writeTime + 0.005
+        world.advance(to: writeTime + 0.020)
+        guard_.bindingsWillChange(at: writeTime)
+        guard_.bindingsOrSessionChanged()
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsWillChange(at: world.uptime)
+        guard_.bindingsOrSessionChanged()
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "seen while Right Option was not a shortcut")
+    }
+}

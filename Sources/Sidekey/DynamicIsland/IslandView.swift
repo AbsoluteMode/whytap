@@ -1273,7 +1273,10 @@ struct IslandView: View {
                         .onReceive(hoverHitBridge.dismissals) { dismissHoverMenu() }
                         // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
                         // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
-                        .islandHoverGlassSurface()
+                        // The glass backdrop also reports its frame: a dragged tile that
+                        // has left it entirely is removed.
+                        // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+                        .islandHoverGlassSurface(reportingDrawerTo: hoverHitBridge)
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.
@@ -2944,7 +2947,16 @@ struct IslandDropModeHoverPanel: View {
     // MARK: - Tool grid
     // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
 
-    static let tileTransition = AnyTransition.scale(scale: 0.6).combined(with: .opacity)
+    /// An added tile is there at once: it fades in within 0.12 s (also a
+    /// dissolve under Reduce Motion) while it grows from 0.85 with the
+    /// edit's spring. A spring-driven fade from 0.6 left it at about a
+    /// quarter of its opacity 50 ms after the click. A removed tile shrinks
+    /// and fades with the spring.
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    static let tileTransition = AnyTransition.asymmetric(
+        insertion: .scale(scale: 0.85).combined(with: .opacity.animation(.easeOut(duration: 0.12))),
+        removal: .scale(scale: 0.6).combined(with: .opacity)
+    )
 
     private var tiles: some View {
         IslandHoverTileGridLayout {

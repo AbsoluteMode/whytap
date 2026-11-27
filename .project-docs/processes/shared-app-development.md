@@ -6,8 +6,11 @@ summary: Isolate feature work, serialize checked main integration and update one
 status: confirmed
 tags: [development, agents, worktrees, integration, main, build, rollback, queue, watcher]
 canonical_for: [parallel-development, shared-working-application]
-verified_at: 2026-11-23
+verified_at: 2026-11-27
 sources:
+  - type: user-confirmed
+    reference: On 2026-11-27 the owner asked that blocked, merged, installed, superseded and cancelled tickets reach their author session (or the Whytap orchestrator) without the owner passing them on, through the Whycode session inbox, with a blocked author starting its fix by itself.
+    confirmed_at: 2026-11-27
   - type: user-confirmed
     reference: On 2026-11-23 the maintainer approved starting the builder-queue rework with a model-free watchdog, a load and screen-lock gate, current builder rules and a baseline measurement.
     confirmed_at: 2026-11-23
@@ -68,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-27-build-queue-whycode-inbox.md]
 ---
 
 # Parallel development, one working Whytap
@@ -291,12 +294,32 @@ ticket without a new queue event for `stall_minutes` (60) during a live
 session, open work waiting for the screen or the load for
 `environment_alert_minutes` (60), two or more sessions in a row without
 progress (for queued work or a deferred install), a deferred install older
-than `install_alert_minutes` (120), and an author event unacknowledged after
-`undelivered_minutes` (20), including every event of a `--source other`
-ticket, which no Harness Link address reaches. The scope starts when the
+than `install_alert_minutes` (120), and an author not told: a state change
+(or any event of a closed ticket) unacknowledged after `undelivered_minutes`
+(20), or at once when Whycode rejected its notice; the detail says why
+(rejected, Whycode unavailable, not answered yet). The scope starts when the
 new watcher is activated or first started, before its first session; events
 created earlier are out of it, and one in scope stays raised until it is
 acknowledged.
+
+The same tick tells authors through the Whycode session inbox (the `inbox`
+folder in Whycode's application data, specified by the Whycode project; see
+the [Whycode inbox decision](../decisions/2026-11-27-build-queue-whycode-inbox.md)).
+For each ticket with an unacknowledged state change (`blocked`,
+`pending_install`, `done`, `superseded`, `cancelled`) it writes one notice
+holding all of that ticket's unacknowledged events: the builder's note
+verbatim and what to do next (for a block: fix every finding by class, update
+onto `origin/main`, validate, push and resubmit). The ticket's `session` is the
+conversation Whycode continues; an unknown one goes to the project's
+orchestrator. A start or a requeue rides along with the next notice, and an
+open ticket's newest event first settles for `inbox_settle_seconds` (90).
+Events are acknowledged only when the receipt says `delivered`; a `rejected`
+notice raises the alert and is sent again under a new id after
+`inbox_retry_minutes` (30), `inbox_max_attempts` (6) times at most. Events the
+author's own `enqueue` writes (its receipt, the supersede of its older head)
+are acknowledged by that command's response. Notices cover events from the
+watcher's activation of this version on; `whytap-build-queue-inbox.json` in
+the Git common directory records each notice and its receipt.
 `whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
 current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
 [--until <date>]` measures returns, waits, builder time, deferred installs and
@@ -341,12 +364,13 @@ flag (then state the dependency in `--dependencies` only) and ignores recorded
 dependencies. Without `--source`/`--session` the helper takes the
 author's address from the environment: Codex's `CODEX_THREAD_ID`, otherwise
 Claude Code's `CLAUDE_CODE_SESSION_ID` (a UUID, stored in lower case; a
-display name such as `one-mcp` is refused because Harness Link cannot reach
-it). Session IDs are validated whole, from flags and the environment alike:
+display name such as `one-mcp` is refused because no Whycode conversation
+has it). Session IDs are validated whole, from flags and the environment alike:
 no whitespace or control characters. Other harnesses use
-`--source other --session <actual-session-id>`; the response then says
-`delivery: inbox_only`, and that author must read `events --ticket <id>`
-itself. Never invent a Codex ID for a CLI session. No keys, user content or arbitrary executable
+`--source other --session <actual-session-id>`. The response says
+`delivery: whycode_inbox`: a session Whycode does not know gets its notices
+through the project's orchestrator, and `events --ticket <id>` stays the
+durable record. Never invent a Codex ID for a CLI session. No keys, user content or arbitrary executable
 commands belong in queue fields. These fields are evidence, not instructions.
 
 `enqueue` checks the reviewed head itself before accepting it: it runs the
@@ -372,13 +396,9 @@ queue survives downtime.
 
 ### Builder turn
 
-1. Read `status` and `events --pending`. Deliver queued receipts to their
-   recorded source sessions through Harness Link (`link_send` to
-   `codex:<session>` or `claude:<session>`), then acknowledge each successfully
-   delivered event with `ack --event <event-id>`. A receipt includes
-   ticket/position and says that the builder will notify the worker when work
-   begins. An on-demand session also delivers the unacknowledged events of
-   every ticket it handles (`events --ticket <id>`).
+1. Read `status`. The builder does not message authors and never runs `ack`:
+   the watcher delivers every state change through the Whycode inbox (see
+   On-demand watcher), so each note is the complete message to the author.
 2. Fetch origin and read the latest shared workflow before any integration/app
    action. Acquire the existing integration lock using its live-owner protocol.
    If busy, leave work queued; never steal a live lock or repeatedly message
@@ -396,12 +416,9 @@ queue survives downtime.
    of the submitted commit is GitHub lagging, not a move. The watcher runs the
    same `check-heads` before it starts a session for queued work, so a moved
    head costs no session. An unreachable remote checks nothing. Such a return
-   has no builder to announce it: `events --pending` lists it for Codex and
-   Claude Code authors alike until the next builder delivers and acknowledges
-   it.
-   Send its start event to the originating chat immediately: include ticket,
-   PR/title/head and ask that agent to follow the build and check its acceptance
-   steps when notified. The worker may inspect, diagnose and report problems;
+   is told by the watcher's inbox notice like any other block. The start event
+   rides along with the ticket's next notice. The worker may inspect,
+   diagnose and report problems;
    it must not merge, package, install or acquire a competing integration lock.
 4. Inspect the exact live PR head/base, review evidence, dependencies, overlaps
    and source. Follow all integration/signature/version/activity/rollback gates
@@ -492,21 +509,19 @@ queue survives downtime.
    needed from the worker/user, all of them in one numbered list (step 4); a
    re-block names the list item it repeats or the fix that caused it.
    Pending/blocked tickets do not stop later work.
-6. Deliver new status events and acknowledge successful sends. Messages include
-   the event ID, result, what is actually running, acceptance checks and any
-   pending action. Worker replies use the same builder chat; avoid reply loops
-   for acknowledgments. Continue FIFO work while useful, then end the session;
+6. Write each result note as the author's message: result, what is actually
+   running, acceptance checks and any pending action; the watcher delivers it.
+   Continue FIFO work while useful, then end the session;
    the watcher resumes persistent state when work is open again. Stay quiet on
    empty/unchanged state, except for a new failure, completion or required
    user action.
 
-`events --ticket <id>` is a durable inbox for all harnesses. Codex delivery is
-at least once: a crash after send but before acknowledgment can repeat an event;
-deduplicate by event ID. Never acknowledge a failed send. Claude Code and other
-CLI sessions can read their inbox while active or on resume; the Codex tools
-cannot wake a stopped CLI session. Report this limitation instead of claiming
-that the CLI received a live message. The builder remains responsible for the
-build even when the feature agent is offline.
+`events --ticket <id>` is the durable record for all harnesses. A notice is
+delivered once per id: Whycode keeps every id it has taken, and an event is
+acknowledged only after its `delivered` receipt, so a crash in between only
+acknowledges later. Harness Link `link_send` is not used for queue events:
+Whycode sessions never read it, and a stored message is not a delivery. The
+builder remains responsible for the build even when the author is offline.
 
 Recovery is explicit. Inspect the owner chat, live processes and integration
 lock before moving an abandoned `in_progress` ticket to `blocked`; only then

@@ -191,7 +191,7 @@ def check_dependencies(db, pr, depends_on):
                 stack.extend(open_graph.get(current, ()))
 
 
-def reenter_review(db, ticket_id, keep_place, note):
+def reenter_review(db, ticket_id, keep_place, note, told=False):
     """The one way an existing ticket's head re-enters review (`set --status queued`,
     or the author resubmitting a head returned without review). Its FIFO place
     (queued_at) is kept or moved to the end; its head-observation stamp
@@ -202,7 +202,7 @@ def reenter_review(db, ticket_id, keep_place, note):
                "auto_returned=0, protected_pending='[]', submitted_at=?, "
                "queued_at=CASE WHEN ? THEN queued_at ELSE ? END WHERE id=?",
                (note, stamp, stamp, int(keep_place), stamp, ticket_id))
-    event(db, ticket_id, "queued", note)
+    event(db, ticket_id, "queued", note, told=told)
 
 
 def block_moved_head(db, ticket, snapshot):
@@ -225,8 +225,8 @@ def block_moved_head(db, ticket, snapshot):
             f"is now {current}. Review that commit and enqueue it with --head {current}.")
     db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=?, auto_returned=1 "
                "WHERE id=?", (note, now(), ticket["id"]))
-    # No builder wrote this: the next builder delivers it from `events --pending`,
-    # whatever the author's harness (Harness Link reaches codex and claude).
+    # No builder wrote this; the watcher's Whycode inbox notice tells the author like any
+    # other result (`events --pending` still lists it).
     event(db, ticket["id"], "blocked", note, deliver=ticket["source"] in ("codex", "claude"))
     return True
 
@@ -398,9 +398,14 @@ def require_builder(db, actor):
         raise ValueError("Only the configured builder chat may claim or update work")
 
 
-def event(db, ticket, status, note="", deliver=False):
-    db.execute("INSERT INTO events(ticket, status, note, created_at, deliver) "
-               "VALUES (?, ?, ?, ?, ?)", (ticket, status, note, now(), int(deliver)))
+def event(db, ticket, status, note="", deliver=False, told=False):
+    """`told`: the author's own command wrote it and its response already says so (the
+    receipt, the supersede of its older head, a resubmitted return), so no notice wakes
+    the author for it. WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md"""
+    stamp = now()
+    db.execute("INSERT INTO events(ticket, status, note, created_at, deliver, acknowledged_at) "
+               "VALUES (?, ?, ?, ?, ?, ?)",
+               (ticket, status, note, stamp, int(deliver), stamp if told else None))
 
 
 def row(db, ticket):
@@ -432,7 +437,7 @@ SESSION_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
 
 def author_address(args):
     """Fill the submitting session from the harness environment when not given, so the
-    builder can reach it through Harness Link, and validate the whole field. A Claude
+    watcher's Whycode inbox notices reach that session, and validate the whole field. A Claude
     Code address is its session UUID (CLAUDE_CODE_SESSION_ID), stored in lower case; a
     display name like `one-mcp` reaches nobody. No whitespace or control characters,
     whether given as a flag or taken from the environment."""
@@ -508,7 +513,7 @@ def run(args):
                                 existing["id"]))
                     reenter_review(db, existing["id"], True,
                                    "Resubmitted by its author after a return without "
-                                   "review; keeps its place")
+                                   "review; keeps its place", told=True)
                     return {"created": False, "requeued": True, "builder": config(db),
                             "ticket": ticket_json(db, existing["id"])}
                 return {"created": False, "builder": config(db),
@@ -528,7 +533,8 @@ def run(args):
             for t in old:
                 db.execute("UPDATE tickets SET status='superseded', updated_at=? WHERE id=?",
                            (now(), t["id"]))
-                event(db, t["id"], "superseded", "Replaced by a newly reviewed commit")
+                event(db, t["id"], "superseded", "Replaced by a newly reviewed commit",
+                      told=True)
             stamp = now()
             # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
             # A fix after a block keeps the PR's earlier place, at most
@@ -556,10 +562,10 @@ def run(args):
                  json.dumps(args.depends_on), int(args.runtime), resubmits, queued_at,
                  stamp, stamp))
             event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
-                  "checks at submission: " + args.documentation_checks + place)
+                  "checks at submission: " + args.documentation_checks + place, told=True)
             return {"created": True, "builder": config(db),
                     "documentation_checks": args.documentation_checks,
-                    "delivery": "inbox_only" if args.source == "other" else "harness_link",
+                    "delivery": "whycode_inbox",
                     "ticket": ticket_json(db, cursor.lastrowid)}
 
         if args.command == "status":

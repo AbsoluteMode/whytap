@@ -180,10 +180,13 @@ class QueueTests(unittest.TestCase):
         self.enqueue()
         self.call("claim")
         pending = self.call("events", "--pending")
-        self.assertEqual([e["status"] for e in pending], ["queued", "in_progress"])
+        # The receipt was told by the enqueue response itself; only the builder's start waits.
+        self.assertEqual([e["status"] for e in pending], ["in_progress"])
         self.call("ack", "--event", str(pending[0]["id"]))
-        self.assertEqual(len(self.call("events", "--pending")), 1)
-        self.assertEqual(len(self.call("events", "--ticket", "1")), 2)
+        self.assertEqual(self.call("events", "--pending"), [])
+        history = self.call("events", "--ticket", "1")
+        self.assertEqual([e["status"] for e in history], ["queued", "in_progress"])
+        self.assertTrue(all(e["acknowledged_at"] for e in history))
 
     def test_terminal_ticket_cannot_be_requeued(self):
         self.enqueue()
@@ -290,7 +293,7 @@ class QueueTests(unittest.TestCase):
         result = self.submit(env={"CLAUDE_CODE_SESSION_ID": session})
         self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
                          ("claude", session))
-        self.assertEqual(result["delivery"], "harness_link")
+        self.assertEqual(result["delivery"], "whycode_inbox")
 
     def test_codex_thread_wins_over_a_claude_session_in_the_environment(self):
         result = self.submit(env={"CODEX_THREAD_ID": "thread-1",
@@ -298,11 +301,11 @@ class QueueTests(unittest.TestCase):
         self.assertEqual((result["ticket"]["source"], result["ticket"]["session"]),
                          ("codex", "thread-1"))
 
-    def test_claude_display_name_is_refused_and_other_is_inbox_only(self):
+    def test_claude_display_name_is_refused_and_other_authors_use_the_inbox_too(self):
         error = self.submit("--source", "claude", "--session", "one-mcp", ok=False)["error"]
         self.assertIn("UUID", error)
         result = self.submit("--source", "other", "--session", "one-mcp")
-        self.assertEqual(result["delivery"], "inbox_only")
+        self.assertEqual(result["delivery"], "whycode_inbox")
 
     def test_metrics_count_returns_and_waits_without_writing(self):
         first = self.enqueue()["ticket"]["id"]

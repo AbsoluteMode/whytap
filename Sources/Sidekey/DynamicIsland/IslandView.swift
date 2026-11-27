@@ -2944,7 +2944,16 @@ struct IslandDropModeHoverPanel: View {
     // MARK: - Tool grid
     // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
 
-    static let tileTransition = AnyTransition.scale(scale: 0.6).combined(with: .opacity)
+    /// An added tile is there at once: it fades in within 0.12 s (also a
+    /// dissolve under Reduce Motion) while it grows from 0.85 with the
+    /// edit's spring. A spring-driven fade from 0.6 left it at about a
+    /// quarter of its opacity 50 ms after the click. A removed tile shrinks
+    /// and fades with the spring.
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    static let tileTransition = AnyTransition.asymmetric(
+        insertion: .scale(scale: 0.85).combined(with: .opacity.animation(.easeOut(duration: 0.12))),
+        removal: .scale(scale: 0.6).combined(with: .opacity)
+    )
 
     private var tiles: some View {
         IslandHoverTileGridLayout {

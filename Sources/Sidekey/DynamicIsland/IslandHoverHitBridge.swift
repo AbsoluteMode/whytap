@@ -93,12 +93,17 @@ struct IslandHoverReorder: Equatable {
     let original: [HoverTool]
     /// Cell frames in window coordinates by slot index, measured at the lift.
     let cells: [Int: CGRect]
-    /// The drawer's frame in window coordinates at the lift. Letting go
-    /// outside it takes the tool out of the island.
+    /// The drawer's frame in window coordinates at the lift (search band,
+    /// grid, footer and More). A tile whose picture has left it entirely is
+    /// taken out of the island on release.
     var panel: CGRect? = nil
+    /// The lifted tile's frame at the lift and the point it was pressed at,
+    /// both in window coordinates: the picture follows the pointer from there.
+    var tile: CGRect? = nil
+    var lift: CGPoint? = nil
 
-    /// How far past the grid a release still counts as "in the grid" when
-    /// the drawer's frame is unknown.
+    /// The area a tile must leave when the drawer's frame is unknown: the
+    /// grid and this much around it.
     static let releaseMargin: CGFloat = 24
 
     /// The slot under the pointer, or nil outside the grid (the tool stays).
@@ -106,15 +111,33 @@ struct IslandHoverReorder: Equatable {
         cells.filter { $0.value.contains(point) }.keys.min()
     }
 
-    /// The pointer is outside the hover: letting go here throws the tool
-    /// out of the island. Inside the drawer (search, footer, More) a release
-    /// keeps it, so dropping back inside is the pointer's way to cancel.
-    // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
+    /// The lifted tile's picture with the pointer at `point`, as drawn while
+    /// lifted (`liftedScale`, around its centre).
+    func tileFrame(at point: CGPoint) -> CGRect? {
+        guard let tile, let lift, !tile.isNull, !tile.isEmpty else { return nil }
+        let grow = IslandHoverReorderMotionCurve.liftedScale - 1
+        return tile.insetBy(dx: -tile.width * grow / 2, dy: -tile.height * grow / 2)
+            .offsetBy(dx: point.x - lift.x, dy: point.y - lift.y)
+    }
+
+    /// The tile's picture is entirely outside the hover: letting go here
+    /// throws the tool out of the island. Any part of it still over the
+    /// drawer (search, grid, footer, More) keeps it, so a release there is a
+    /// reorder or, outside the grid, a cancel. Touching the edge is outside.
+    /// Every side counts: below, beside, and above toward the notch.
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
     func removesRelease(at point: CGPoint) -> Bool {
-        if let panel, !panel.isNull, !panel.isEmpty { return !panel.contains(point) }
-        let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
-        guard !grid.isNull else { return false }
-        return !grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin).contains(point)
+        let area: CGRect
+        if let panel, !panel.isNull, !panel.isEmpty {
+            area = panel
+        } else {
+            let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
+            guard !grid.isNull else { return false }
+            area = grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin)
+        }
+        guard let picture = tileFrame(at: point) else { return !area.contains(point) }
+        let overlap = area.intersection(picture)
+        return overlap.isNull || overlap.width <= 0 || overlap.height <= 0
     }
 
     /// The order to put back on cancel, or nil when the layout changed from
@@ -145,7 +168,7 @@ final class IslandHoverReorderMotion: ObservableObject {
         if next != translation { translation = next }
     }
 
-    /// The pointer is outside the hover: letting go removes the tool.
+    /// The tile is entirely outside the hover: letting go removes the tool.
     @Published private(set) var outside = false
 
     func setOutside(_ value: Bool) {
@@ -268,19 +291,33 @@ final class IslandHoverHitBridge: ObservableObject {
     @discardableResult
     func unpin(_ tool: HoverTool) -> Bool {
         guard reorder == nil, let store = layoutStore else { return false }
-        var changed = false
-        withAnimation(Self.reorderAnimation) { changed = store.unpin(tool) }
-        if changed { editHold.edited(pointerInside: pointerInside) }
-        return changed
+        return editLayout { store.unpin(tool) }
     }
 
     /// Adds a tool from More at the end of the island, before Settings.
     @discardableResult
     func pin(_ tool: HoverTool) -> Bool {
         guard reorder == nil, let store = layoutStore else { return false }
+        return editLayout { store.pin(tool) }
+    }
+
+    /// One transaction for everything an add or remove changes: the layout,
+    /// the edit hold and the released press. A second change in another
+    /// transaction right after the animated one makes SwiftUI flush the
+    /// first synchronously, inside the click, before the tile can move
+    /// (6-13 ms measured per click; 0.2 ms in one transaction).
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    private func editLayout(_ change: () -> Bool) -> Bool {
         var changed = false
-        withAnimation(Self.reorderAnimation) { changed = store.pin(tool) }
-        if changed { editHold.edited(pointerInside: pointerInside) }
+        withAnimation(Self.reorderAnimation) {
+            changed = change()
+            if changed {
+                var next = editHold
+                next.edited(pointerInside: pointerInside)
+                if next != editHold { editHold = next }
+                if pressedID != nil { pressedID = nil }
+            }
+        }
         return changed
     }
 
@@ -356,7 +393,8 @@ final class IslandHoverHitBridge: ObservableObject {
         for tile in live where tile.id.surface == .tile && tile.context == candidate.context {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
-        reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells, panel: drawerFrame(in: window))
+        reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells, panel: drawerFrame(in: window),
+                                     tile: candidate.frame, lift: pressPoint)
         liftPoint = pressPoint
         motion.reset()
         startEscapeWatch()
@@ -389,7 +427,8 @@ final class IslandHoverHitBridge: ObservableObject {
     }
 
     /// The lifted tool takes the place of the cell under the pointer at once.
-    /// Outside the hover the tile shows that letting go removes it.
+    /// Once the tile's picture is entirely outside the hover it shows that
+    /// letting go removes it; any part back over the drawer clears that.
     func moveLiftedTool(to point: CGPoint) {
         guard let reorder else { return }
         if let liftPoint { motion.follow(from: liftPoint, to: point) }
@@ -704,8 +743,10 @@ final class IslandHoverHitBridge: ObservableObject {
         let liveTargets = snapshots(in: window, allowsHover: allowed, allowsAnswer: allowsAnswer)
         let owner = tracking.end(at: point, targets: liveTargets, enabled: allowed || allowsAnswer)
         let action = owner.flatMap { targets[$0]?.view?.activate }
-        pressedID = nil
+        // After the action, and only if it did not already: an add or remove
+        // releases the press inside its own transaction (`editLayout`).
         action?()
+        if pressedID != nil { pressedID = nil }
     }
 }
 

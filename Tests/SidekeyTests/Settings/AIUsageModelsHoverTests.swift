@@ -120,6 +120,32 @@ final class AIUsageModelsHoverTests: XCTestCase {
         send(.focused("Agent")); send(.escape); assertShows(nil)
     }
 
+    func test_focus_owns_the_fill_while_the_pointer_rests_elsewhere() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        XCTAssertTrue(state.highlighted("Agent")); XCTAssertFalse(state.highlighted("Meetings"))
+        move(.row("Drop Fast"))
+        XCTAssertTrue(state.highlighted("Drop Fast")); XCTAssertFalse(state.highlighted("Agent"))
+    }
+
+    /// Click on the open row: the native dismissal may come before the click,
+    /// after it, or never. Each order closes once, and the next click opens.
+    func test_click_on_the_open_row_closes_in_every_dismissal_order() {
+        openFromOutside("Agent")
+        send(.dismissedBySystem("Agent")); send(.clicked("Agent"))
+        assertShows(nil)
+        send(.clicked("Agent")); assertShows("Agent", "the dismissal is consumed only once")
+
+        send(.clicked("Agent")); send(.dismissedBySystem("Agent"))
+        assertShows(nil)
+        wait(1); assertShows(nil, "the resting pointer does not reopen it")
+        send(.clicked("Agent")); assertShows("Agent")
+
+        send(.clicked("Agent")); assertShows(nil, "no native callback at all")
+        move(.outside); move(.row("Agent")); wait(S.openDelay)
+        assertShows("Agent", "leaving and returning opens it again")
+    }
+
     func test_a_detail_alone_is_never_under_the_pointer_when_nothing_is_open() {
         move(.detail)
         XCTAssertEqual(state.pointer, .outside)
@@ -158,6 +184,8 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
     private var host: NSHostingView<AnyView>!
     private var controller: AIUsageModelsHoverController!
     private var pointer = NSPoint.zero
+    /// The controller's clock; tests advance it instead of racing real timers.
+    private var clock = Date(timeIntervalSinceReferenceDate: 50_000)
     private var detail: NSRect?
     private var storeURL: URL!
     /// Row bands measured before any row carries a fill (a fill touching a
@@ -176,7 +204,8 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
         }
         let model = AIUsageCostsViewModel(store: store, loadPrices: { .init(events: $0) })
         await model.load(AIUsagePeriod.month.interval(now: now, start: now, end: now)!)
-        controller = AIUsageModelsHoverController(mouseLocation: { [unowned self] in pointer },
+        controller = AIUsageModelsHoverController(now: { [unowned self] in clock },
+                                                  mouseLocation: { [unowned self] in pointer },
                                                   topWindowNumber: { [unowned self] _ in window.windowNumber })
         controller.detailScreenFrameOverride = { [unowned self] in detail }
         host = NSHostingView(rootView: AnyView(AIUsageCostsView(model: model, now: { now }, modelsHover: controller)
@@ -262,8 +291,13 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
         controller.checkPointer() // the poll's backstop, run now for determinism
     }
 
+    /// Advances the controller's clock and applies due timers at once, so a
+    /// loaded machine cannot reorder them against the test (builder, ticket 693).
     private func wait(_ seconds: TimeInterval) async throws {
-        try await Task.sleep(for: .milliseconds(Int(seconds * 1000) + 60))
+        clock = clock.addingTimeInterval(seconds + 0.001)
+        controller.checkPointer()
+        controller.send(.tick)
+        try await settle()
     }
 
     /// Exactly `title` carries the hover fill in the rendered pixels.
@@ -371,5 +405,57 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
         if let scroll = view as? NSScrollView { return scroll }
         for sub in view.subviews { if let found = findScrollView(sub) { return found } }
         return nil
+    }
+}
+
+// Builder findings on queue ticket 693 (2026-11-27), kept under the names the
+// builder used for its probes.
+extension AIUsageModelsHoverTests {
+    func testBuilder693TabOpensFocusedRowWithPointerRestingOnAnotherRow() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        XCTAssertEqual(state.open, "Agent", "Tab gives the focused row its detail even with the pointer resting on another row")
+        move(.row("Drop Fast"))
+        assertShows("Drop Fast")
+    }
+
+    func testBuilder693SecondClickClosesBeforeTheNativePopoverReportsDismissal() {
+        move(.row("Agent"))
+        send(.clicked("Agent"))
+        assertShows("Agent")
+        send(.clicked("Agent"))
+        XCTAssertNil(state.open, "A second click during presentation closes without needing a native callback")
+        wait(1)
+        XCTAssertNil(state.open)
+    }
+}
+
+extension AIUsageModelsHoverHostingTests {
+    func testBuilder693DisabledTableDoesNotOpenDetailsOnPointerMovement() async throws {
+        let now = Date()
+        let store = AIUsageStore(url: storeURL)
+        let model = AIUsageCostsViewModel(store: store, loadPrices: { .init(events: $0) })
+        await model.load(AIUsagePeriod.month.interval(now: now, start: now, end: now)!)
+        host.rootView = AnyView(AIUsageCostsView(model: model, now: { now }, modelsHover: controller)
+            .disabled(true).environment(\.colorScheme, .light))
+        try await settle()
+        bands = try measureRowBands()
+        moveMouse(to: try center("Meetings", x: 500))
+        try await wait(AIUsageModelsHoverState.openDelay)
+        XCTAssertNil(controller.state.open, "The app-wide pointer observer must honor the disabled table")
+        try assertFilled(nil)
+    }
+
+    func testBuilder693RenderNormalAndHoveredCosts() async throws {
+        guard let path = ProcessInfo.processInfo.environment["WHYTAP_COSTS_QUEUE_RENDER_DIR"] else { throw XCTSkip("No render directory") }
+        let dir = URL(fileURLWithPath: path)
+        for (state, target) in [("normal", nil), ("hover", "Drop Fast")] as [(String, String?)] {
+            if let target { moveMouse(to: try center(target, x: 400)) }
+            try await settle()
+            try assertFilled(target)
+            let rep = try bitmap()
+            let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+            try png.write(to: dir.appendingPathComponent("Costs-700-\(state).png"))
+        }
     }
 }

@@ -79,10 +79,15 @@ which the maintainer does not want.
   window is topmost under the pointer. Row hover callbacks, continuous hover
   on the table and the detail, an app-local mouse-moved monitor and an 80 ms
   poll while a detail is open or pending only trigger a new resolution.
-- A click opens its row at once; a click on the open row (the transient
-  popover closes on that mouse-down) closes it. Keyboard focus opens a row
-  while the pointer is off the table; Escape closes until the pointer leaves
-  that row. No pinning against hover.
+- A click opens its row at once; activating the open row closes it whether
+  the native popover reports its dismissal before the click, after it, or
+  never (keyboard activation), and a dismissal is consumed only once.
+  Keyboard focus opens and highlights its row even while the pointer rests
+  on another row; the next pointer move hands the detail back to the
+  pointer. Escape closes until the pointer leaves that row. No pinning
+  against hover.
+- A disabled Costs view (its real `isEnabled`) resolves nothing: the
+  app-wide mouse monitor, hover callbacks and focus cannot open a detail.
 - Rows leaving the table retire every reference to them (`rowsChanged`), fed
   from the rows actually on screen outside the conditionally shown table, so
   loading, empty and error states pass an empty set (builder finding on queue

@@ -64,8 +64,10 @@ struct AIUsageModelsHoverState: Equatable {
 
     var pointerRow: String? { if case .row(let id) = pointer { return id } else { return nil } }
 
-    /// The row painted with the hover fill.
+    /// The row painted with the hover fill: the keyboard's row while focus
+    /// owns the detail, otherwise the row under the pointer.
     func highlighted(_ id: String) -> Bool {
+        if let row = keyboardRow { return open == row && row == id }
         switch pointer {
         case .row(let row): return row == id
         case .detail: return open == id
@@ -102,8 +104,10 @@ struct AIUsageModelsHoverState: Equatable {
                 dismissed = nil; pending = nil; keyboardRow = nil; open = nil
             }
         case .focused(let id):
-            guard pointer == .outside else { return }
-            keyboardRow = id; open = id; pending = nil
+            // Focus shows its row's detail even while the pointer rests on
+            // another row; the next pointer move hands it back to the pointer.
+            keyboardRow = id; open = id; pending = nil; dismissed = nil
+            if pointer == .detail { pointer = .outside }
         case .unfocused(let id):
             if keyboardRow == id {
                 keyboardRow = nil
@@ -112,7 +116,17 @@ struct AIUsageModelsHoverState: Equatable {
         case .clicked(let id):
             pending = nil
             if let gone = dismissed, gone.row == id, now.timeIntervalSince(gone.at) < Self.reopenSuppression {
-                dismissed = nil
+                // The native popover already closed on this click's mouse-down;
+                // consume that dismissal once and stay closed.
+                dismissed = Dismissal(row: id, at: .distantPast)
+                return
+            }
+            if open == id {
+                // Activating the open row closes it, whether or not the host
+                // reports a dismissal (keyboard activation, repeated click).
+                // A dismissal that arrives afterwards is ignored: open is nil.
+                close()
+                dismissed = Dismissal(row: pointerRow ?? id, at: .distantPast)
                 return
             }
             dismissed = nil
@@ -174,6 +188,9 @@ final class AIUsageModelsHoverController: ObservableObject {
     private var timer: Task<Void, Never>?
     private var poll: Task<Void, Never>?
     private var monitor: Any?
+    /// The Costs view's actual enabled state. A disabled table resolves
+    /// nothing, so no event source can open a detail behind it.
+    private(set) var isEnabled = true
 
     init(now: @escaping () -> Date = Date.init,
          mouseLocation: @escaping () -> NSPoint = { NSEvent.mouseLocation },
@@ -183,7 +200,20 @@ final class AIUsageModelsHoverController: ObservableObject {
 
     func isPresented(_ id: String) -> Bool { state.open == id }
 
+    func setEnabled(_ enabled: Bool) {
+        guard enabled != isEnabled else { return }
+        isEnabled = enabled
+        if !enabled { send(.disabled) }
+    }
+
     func send(_ event: AIUsageModelsHoverState.Event) {
+        if !isEnabled {
+            // Only retiring state passes while the table is disabled.
+            switch event {
+            case .disabled, .rowsChanged: break
+            default: return
+            }
+        }
         var next = state
         next.send(event, now: now())
         if next != state { state = next }

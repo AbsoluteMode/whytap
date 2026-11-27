@@ -169,6 +169,7 @@ struct AIUsageCostsView: View {
     @FocusState private var periodFocused: Bool
     /// One open "Models used" detail for the whole table.
     @StateObject private var modelsHover: AIUsageModelsHoverController
+    @Environment(\.isEnabled) private var isEnabled
     let now: () -> Date
     init(model: AIUsageCostsViewModel, now: @escaping () -> Date = Date.init,
          modelsHover: AIUsageModelsHoverController? = nil) {
@@ -254,6 +255,7 @@ struct AIUsageCostsView: View {
         .foregroundStyle(MacSettingsTheme.text)
         .task { await refresh() }
         .onAppear { modelsHover.start() }
+        .onChange(of: isEnabled, initial: true) { _, enabled in modelsHover.setEnabled(enabled) }
         .onDisappear { modelsHover.retain(rows: []); modelsHover.stop() }
         // Observed outside the conditionally shown table, so loading, empty
         // and error states retire every row's hover state too.

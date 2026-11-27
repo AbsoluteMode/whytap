@@ -69,17 +69,31 @@ final class AIRoutingStoreTests: XCTestCase {
     func test_setting_a_route_replaces_the_previous_one_and_nil_unsets_it() {
         let defaults = makeDefaults()
         let store = AIRoutingStore(defaults: defaults)
-        store.setRoute(FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash"), for: .agent)
+        store.setRoute(FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash"), for: .translation)
         let replacement = FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
-        store.setRoute(replacement, for: .agent)
+        store.setRoute(replacement, for: .translation)
 
-        XCTAssertEqual(store.route(for: .agent), replacement)
-        XCTAssertEqual(AIRoutingStore(defaults: defaults).route(for: .agent), replacement)
+        XCTAssertEqual(store.route(for: .translation), replacement)
+        XCTAssertEqual(AIRoutingStore(defaults: defaults).route(for: .translation), replacement)
 
-        store.setRoute(nil, for: .agent)
+        store.setRoute(nil, for: .translation)
 
+        XCTAssertNil(store.route(for: .translation))
+        XCTAssertNil(AIRoutingStore(defaults: defaults).route(for: .translation))
+    }
+
+    /// The Agent runs on Claude Code or Codex: its old text route stays in
+    /// the stored state for a rollback build, but is neither read nor written.
+    func test_the_inactive_agent_route_is_kept_but_never_read_or_written() throws {
+        let defaults = makeDefaults()
+        let old = FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
+        let state = AIRoutingState(routes: [AIFeature.agent.rawValue: old], migratedRoutes: [:], servers: [], migrationVersion: 4)
+        defaults.set(try JSONEncoder().encode(state), forKey: AIRoutingStore.defaultsKey)
+        let store = AIRoutingStore(defaults: defaults)
         XCTAssertNil(store.route(for: .agent))
-        XCTAssertNil(AIRoutingStore(defaults: defaults).route(for: .agent))
+        store.setRoute(FeatureRoute(account: .openRouter, model: "other"), for: .agent)
+        store.setRoute(FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash"), for: .translation)
+        XCTAssertEqual(AIRoutingStore(defaults: defaults).state.routes[AIFeature.agent.rawValue], old)
     }
 
     /// A stored state this build cannot read at all is never "not migrated":

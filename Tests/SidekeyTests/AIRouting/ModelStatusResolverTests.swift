@@ -240,27 +240,12 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(env.resolver.status(for: .dropFast), .ok)
     }
 
-    func test_agent_picker_marks_models_without_tools() throws {
-        let env = try makeEnv(
-            snapshots: [.openRouter: fresh([
-                CatalogModel(id: "x/with-tools", uses: [.chat, .chatWithTools], contextLength: 128_000, supportsTools: true),
-                CatalogModel(id: "x/no-tools", uses: [.chat], contextLength: 128_000, supportsTools: false),
-            ])],
-            keyed: [.openRouter]
-        )
-        let section = try XCTUnwrap(env.resolver.sections(for: .agent).first)
-
-        XCTAssertEqual(section.options.map(\.model), ["anthropic/claude-sonnet-5.5", "x/with-tools"],
-                       "a model without tools is left out of the agent picker")
-        XCTAssertEqual(section.options.map(\.state), [.verified, .new])
-    }
-
     func test_small_context_is_not_supported_for_agent_and_notes() throws {
         let env = try makeEnv(
             snapshots: [.openRouter: fresh([CatalogModel(id: "x/tiny", uses: [.chat, .chatWithTools], contextLength: 8_000, supportsTools: true)])],
             keyed: [.openRouter]
         )
-        for feature in [AIFeature.agent, .meetingNotes] {
+        for feature in [AIFeature.meetingNotes] {
             XCTAssertEqual(
                 env.resolver.verdict(model: "x/tiny", account: .openRouter, for: feature),
                 .notSupported(reason: "context under 64K tokens")
@@ -313,7 +298,7 @@ final class ModelStatusResolverTests: XCTestCase {
             env.resolver.sections(for: .dropSmartCleanup).map(\.account),
             [.server(a.id), .server(b.id), .openRouter]
         )
-        XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.openRouter])
+        XCTAssertTrue(env.resolver.sections(for: .agent).isEmpty, "the Agent route is no longer offered")
         XCTAssertEqual(env.resolver.sections(for: .dropFast).first?.title, "Soniox")
         XCTAssertEqual(env.resolver.sections(for: .dropFast).dropFirst().first?.title, "a:8000")
     }
@@ -337,7 +322,7 @@ final class ModelStatusResolverTests: XCTestCase {
             XCTAssertEqual(env.resolver.sections(for: feature).map(\.account),
                            [.anthropic, .openAI, .server(server.id), .openRouter], "\(feature)")
         }
-        XCTAssertEqual(env.resolver.sections(for: .agent).map(\.account), [.anthropic, .openAI, .openRouter])
+        XCTAssertTrue(env.resolver.sections(for: .agent).isEmpty, "the Agent route is no longer offered")
         let sections = env.resolver.sections(for: .dropSmartCleanup)
         XCTAssertEqual(sections.map(\.title), ["Anthropic", "OpenAI", "Ollama · localhost:11434", "OpenRouter"])
         XCTAssertTrue(sections.allSatisfy { $0.keyProblem == nil })
@@ -424,7 +409,7 @@ final class ModelStatusResolverTests: XCTestCase {
 
     func test_missing_provider_hint_lists_providers_for_the_feature() throws {
         let env = try makeEnv()
-        XCTAssertEqual(env.resolver.missingProviderHint(for: .agent), "Add a key for OpenRouter, OpenAI or Anthropic")
+        XCTAssertNil(env.resolver.missingProviderHint(for: .agent), "the Agent runs on Claude Code or Codex")
         XCTAssertEqual(
             env.resolver.missingProviderHint(for: .dropFast),
             "Add a key for Soniox, Deepgram, ElevenLabs, OpenAI or an OpenAI-compatible server"
@@ -605,9 +590,9 @@ final class ModelStatusResolverTests: XCTestCase {
         XCTAssertEqual(try option("openai/gpt-5", openRouter).priceLabel, "$1.25 in / $10 out per 1M tokens")
 
         // Other features keep their own hints: no reasoning note outside Smart cleanup.
-        let agent = env.resolver.sections(for: .agent).first { $0.account == .anthropic }?.options ?? []
-        XCTAssertNil(agent.first { $0.model == "claude-fable-5-2" }?.hint)
-        XCTAssertEqual(agent.first { $0.model == "claude-fable-5-2" }?.priceLabel, "$8 in / $40 out per 1M tokens")
+        let translation = env.resolver.sections(for: .translation).first { $0.account == .anthropic }?.options ?? []
+        XCTAssertNil(translation.first { $0.model == "claude-fable-5-2" }?.hint)
+        XCTAssertEqual(translation.first { $0.model == "claude-fable-5-2" }?.priceLabel, "$8 in / $40 out per 1M tokens")
 
         // Display only: the extra lines change neither states nor search.
         let plain = try makeEnv(snapshots: directCatalogs(), keyed: [.anthropic, .openAI])

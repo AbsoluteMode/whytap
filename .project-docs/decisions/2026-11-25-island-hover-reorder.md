@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHoverReorderTests.swift
     confirmed_at: 2026-11-25
-related: []
+related: [2026-11-26-hover-unpin-and-more-tools.md]
 ---
 
 ## Context

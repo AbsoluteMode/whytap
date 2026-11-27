@@ -67,6 +67,12 @@ final class HotkeyInterceptionGuard {
     /// earlier probe is discarded.
     private(set) var probeGeneration = 0
     private var contexts: [Int: HotkeyPressContext] = [:]
+    /// The keys watched at the last sync, and when each key's binding last
+    /// changed (main-thread uptime). A press the probe saw before its key's
+    /// binding changed belongs to the former binding and is never judged,
+    /// even if its callback reaches the main thread afterwards.
+    private var lastWatched: Set<HotkeyModifierKey> = []
+    private var bindingChangedAt: [HotkeyModifierKey: TimeInterval] = [:]
     /// Other processes' HID modifier filters when the probe was installed.
     private var probeBaseline: Set<UInt32> = []
     private var probeRetryAt: TimeInterval?
@@ -164,17 +170,21 @@ final class HotkeyInterceptionGuard {
         for change in changes {
             switch change {
             case .began(let id, let at):
-                guard system.uptime() - seenAt <= Self.maximumContextLag else {
-                    // The main thread was late: what is in front now, and
-                    // which taps exist now, may not be what the press met.
-                    detector.retire(id)
+                if let key = detector.presses[id]?.key, let changed = bindingChangedAt[key], seenAt < changed {
+                    detector.retire(id) // seen under the former binding
                     continue
                 }
                 let front = system.frontmostPID()
-                contexts[id] = HotkeyPressContext(
-                    frontmostPID: front,
-                    filterIDs: HotkeyInterceptorClassifier.filterIDs(in: system.tapList(), ownPID: system.ownPID,
-                                                                    frontmostPID: front))
+                let filterIDs = HotkeyInterceptorClassifier.filterIDs(in: system.tapList(), ownPID: system.ownPID,
+                                                                      frontmostPID: front)
+                // Fresh only if both reads finished promptly after the probe
+                // saw the event; otherwise what is in front, and which taps
+                // exist, may describe a later moment than the press.
+                guard system.uptime() - seenAt <= Self.maximumContextLag else {
+                    detector.retire(id)
+                    continue
+                }
+                contexts[id] = HotkeyPressContext(frontmostPID: front, filterIDs: filterIDs)
                 schedule(id, due: at + HotkeyInterceptionDetector.holdDecision)
             case .ended(let id, let at):
                 schedule(id, due: at + HotkeyInterceptionDetector.decisionDelay)
@@ -257,6 +267,9 @@ final class HotkeyInterceptionGuard {
     /// session is interactive.
     private func syncProbe() {
         let watched = system.watchedKeys()
+        let now = system.uptime()
+        for key in watched.symmetricDifference(lastWatched) { bindingChangedAt[key] = now }
+        lastWatched = watched
         // A key that stopped being a shortcut keeps no pending press, even
         // while another watched key keeps the tap installed.
         detector.retire(keysOutside: watched)

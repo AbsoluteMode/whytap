@@ -120,13 +120,18 @@ catch it: secure input was off, and the key never reached Whytap at all.
    while held is retired unjudged, as the gesture monitors cancel it. A key
    that stops being a shortcut retires its held and pending presses at once,
    even while another watched key keeps the tap installed; a press still held
-   then starts nothing new until it is released.
+   then starts nothing new until it is released. The time each key's binding
+   last changed is kept, so a press the probe saw before that moment, whose
+   callback only reaches the main thread afterwards, belongs to the former
+   binding and is never judged; another key's binding change does not touch
+   it.
 4. **Name possible interceptors only on that signal, in the press's own
    context.** When a press begins, the frontmost app and the exact filters
    (tap ids) that could act on it are recorded. Both are read when the
-   probe's callback reaches the main thread; if that is more than 50 ms
-   after the probe saw the event, they may describe a later moment, so the
-   press is not attributed at all. A tap that replaces another one of the
+   probe's callback reaches the main thread; if both reads have not
+   finished within 50 ms after the probe saw the event, they may describe a
+   later moment, so the press is not attributed at all (the limit is checked
+   after the reads, not before). A tap that replaces another one of the
    same app gets a new id and inherits nothing. On a lost press the
    tap list is read again: candidates are enabled active filters with
    flagsChanged in their mask, owned by another process, global or filtering
@@ -183,7 +188,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (49) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (54) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -224,7 +229,15 @@ one's context) and read the context on a late callback. Its four
 regressions (`testQueueReview...`) are in the suite, with neighbours of
 each class: no delivered releases at all around a lost press, a delivered
 chord with Shift, unbinding and rebinding while held, a late callback of a
-hold, the same tap id surviving the verdict. Removing the eligibility or frontmost-context checks fails
+hold, the same tap id surviving the verdict. Its third review (ticket 691)
+found the same two classes once more: a press observed before its key was
+unbound and rebound, whose callback was still queued for the main thread,
+presented under the new binding; and the 50 ms freshness check ran before
+the frontmost and tap-list reads, so a slow read could supply a filter
+installed after the press. Its two regressions (`testBuilder691...`) are in
+the suite, with neighbours: another key's binding change keeps the press, a
+press after the rebind is judged, a slow frontmost read supplies no
+context. Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

@@ -918,3 +918,123 @@ extension HotkeyInterceptionTests {
         XCTAssertEqual(presenter.presented.first?.badge.app, punto)
     }
 }
+
+/// Regressions from the builder's review of queue ticket 691.
+extension HotkeyInterceptionTests {
+    func testBuilder691LateTapListDoesNotSupplyPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        var postponeSnapshot = false
+        let system = HotkeyInterceptionGuard.System(
+            watchedKeys: { world.watched },
+            tapList: {
+                if postponeSnapshot {
+                    postponeSnapshot = false
+                    world.uptime += 0.08
+                    world.taps.append(self.puntoTap)
+                }
+                return world.taps
+            },
+            process: { self.process($0) },
+            frontmostPID: { world.front },
+            ownPID: ownPID,
+            isSessionInteractive: { true },
+            uptime: { world.uptime },
+            after: { delay, work in world.scheduled.append((world.uptime + delay, work)) }
+        )
+        let guardUnderTest = HotkeyInterceptionGuard(system: system, probe: probe, makePresenter: { presenter })
+        guardUnderTest.bindingsOrSessionChanged()
+        defer { withExtendedLifetime(guardUnderTest) {} }
+        let pressTime = world.uptime
+        postponeSnapshot = true
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "A tap first observed after the context freshness limit cannot explain the press")
+    }
+
+    func testBuilder691UnbindRetiresAnObservedPressQueuedForTheMainThread() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guardUnderTest = started(world, probe, presenter)
+        defer { withExtendedLifetime(guardUnderTest) {} }
+        let pressTime = world.uptime
+        world.advance(to: pressTime + 0.01)
+        world.watched = [.rightCommand]
+        guardUnderTest.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.02)
+        world.watched = [.rightCommand, .rightOption]
+        guardUnderTest.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.03)
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "A callback from the former binding cannot present under the new binding")
+    }
+}
+
+/// Neighbours of the ticket 691 classes.
+extension HotkeyInterceptionTests {
+    func testAnotherKeysBindingChangeDoesNotRetireAQueuedPress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let pressTime = world.uptime
+        world.advance(to: pressTime + 0.01)
+        world.watched = [.rightOption] // Agent switched off; Right Option untouched
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: pressTime + 0.02)
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertEqual(presenter.presented.count, 1)
+    }
+
+    func testAPressSeenAfterTheRebindIsJudged() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.01)
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.01)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1)
+    }
+
+    func testASlowFrontmostReadDoesNotSupplyPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        var slowFront = false
+        let system = HotkeyInterceptionGuard.System(
+            watchedKeys: { world.watched },
+            tapList: { world.taps },
+            process: { self.process($0) },
+            frontmostPID: {
+                if slowFront { slowFront = false; world.uptime += 0.08 }
+                return world.front
+            },
+            ownPID: ownPID,
+            isSessionInteractive: { true },
+            uptime: { world.uptime },
+            after: { delay, work in world.scheduled.append((world.uptime + delay, work)) }
+        )
+        let guard_ = HotkeyInterceptionGuard(system: system, probe: probe, makePresenter: { presenter })
+        defer { withExtendedLifetime(guard_) {} }
+        guard_.bindingsOrSessionChanged()
+        let pressTime = world.uptime
+        slowFront = true
+        probe.deliver?(rightOptionDown, pressTime, pressTime)
+        world.advance(to: pressTime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: pressTime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}

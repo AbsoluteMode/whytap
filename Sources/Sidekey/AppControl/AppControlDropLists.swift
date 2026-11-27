@@ -1,20 +1,23 @@
 import Foundation
 import WhytapCaseKit
 
-/// Adds entries to Drop's hand-filled lists for the application controls,
-/// each through the store and checks the app itself uses:
-/// - Vocab (`vocab_add`): `VocabularyCache.add`, the island editor's rules;
-///   words dictation should spell right.
-/// - Filler (`filler_add`): `FillerTermsStore.add`, the Filler editor's rules;
-///   words Drop removes from a take.
+/// Adds entries to and removes them from Drop's hand-filled lists for the
+/// application controls, each through the store and checks the app itself
+/// uses:
+/// - Vocab (`vocab_add`, `vocab_remove`): `VocabularyCache.add` / `remove`,
+///   the island editor's rules; words dictation should spell right.
+/// - Filler (`filler_add`, `filler_remove`): `FillerTermsStore.add` /
+///   `remove`, the Filler editor's rules; words Drop removes from a take.
 /// The editors reload from the stores' change notifications and every take
-/// reads the lists again. Additive and retry-safe: an entry already there is
-/// reported with its saved form, never rewritten. No read, no removal.
+/// reads the lists again. Retry-safe: an entry already there is reported
+/// with its saved form, never rewritten, and an entry that is not there is
+/// reported as missing. No read.
 /// External harnesses reach these only through `HarnessAccessGate`.
 // WHY: .project-docs/decisions/2026-11-23-agent-drop-lists.md
+// WHY: .project-docs/decisions/2026-11-27-drop-list-removal-mcp.md
 @MainActor
 struct AppControlDropLists {
-    static let operations: Set<String> = ["vocab_add", "filler_add"]
+    static let operations: Set<String> = ["vocab_add", "filler_add", "vocab_remove", "filler_remove"]
     static let maxBatch = 20
 
     let vocabulary: () -> VocabularyCache
@@ -33,7 +36,60 @@ struct AppControlDropLists {
         guard Set(args.keys) == ["terms"], let items = args["terms"]?.array, (1...Self.maxBatch).contains(items.count) else {
             return .failure("invalid_arguments", "Pass terms: 1–\(Self.maxBatch) entries.")
         }
-        return addTerms(items, list: operation == "vocab_add" ? "Vocab" : "Filler")
+        let list = operation.hasPrefix("vocab") ? "Vocab" : "Filler"
+        return operation.hasSuffix("_remove") ? removeTerms(items, list: list) : addTerms(items, list: list)
+    }
+
+    /// Removes the named entries, matched as the editors match them: without
+    /// surrounding spaces and in any letter case. An entry that is not in
+    /// the list is `missing`; it changes nothing and is not an error.
+    private func removeTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
+        let vocab = list == "Vocab"
+        var remaining = vocab ? vocabulary().terms : fillers().terms()
+        let limit = vocab ? VocabularyCache.maxTermLength : FillerTermsStore.maxTermLength
+        var toRemove: [String] = []
+        var rows: [Row] = []
+        // Check the whole batch first: one invalid term removes nothing.
+        for item in items {
+            guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
+            // The advertised schema limit applies to the submitted string as
+            // JSON Schema counts it: code points, before trimming. Checked
+            // for the whole batch before anything changes.
+            guard text.unicodeScalars.count <= limit else {
+                return Self.rejected(text, "is longer than \(limit) characters", change: "removed")
+            }
+            let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !term.isEmpty else { return Self.rejected(term, "is empty", change: "removed") }
+            guard Self.oneLine(term) else { return Self.rejected(term, "is not one line", change: "removed") }
+            // Both sides without surrounding spaces: a restored backup can
+            // hold "  Word  ", and the editors show it as "Word".
+            let same = { (other: String) in Self.key(other).caseInsensitiveCompare(term) == .orderedSame }
+            // Named twice in one request: one row.
+            guard !rows.contains(where: { same($0.term) }) else { continue }
+            let matches = remaining.filter(same)
+            if let first = matches.first {
+                remaining.removeAll(where: same)
+                toRemove += matches
+                rows.append(Row(term: term, result: "removed", saved: Self.key(first)))
+            } else {
+                rows.append(Row(term: term, result: "missing", saved: term))
+            }
+        }
+        if !toRemove.isEmpty, let stillAllowed = HarnessConsent.stillAllowed, !stillAllowed() {
+            return .failure("access_denied", "The user has turned this tool's access to Whytap off. Do not retry.")
+        }
+        for entry in toRemove {
+            if vocab { vocabulary().remove(entry) } else { fillers().remove(entry) }
+        }
+        // Confirm from the saved list, not from the request: exactly the
+        // named entries are gone and every other entry is still there.
+        let saved = vocab ? vocabulary().terms : fillers().terms()
+        guard saved == remaining else {
+            return .failure("unconfirmed", "The saved \(list) does not match the change; nothing is confirmed. Retry.")
+        }
+        return .success(.object([
+            "terms": .array(rows.map { .object(["term": .string($0.saved), "result": .string($0.result)]) })
+        ]))
     }
 
     private func addTerms(_ items: [AppControlValue], list: String) -> AppControlResponse {
@@ -94,6 +150,11 @@ struct AppControlDropLists {
         ]))
     }
 
+    /// An entry as the editors show and match it.
+    private static func key(_ entry: String) -> String {
+        entry.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     /// One line: no line breaks or control characters. Format characters such
     /// as the zero-width non-joiner (U+200C) that Persian and other scripts
     /// need stay, as the stores and editors accept them.
@@ -103,8 +164,8 @@ struct AppControlDropLists {
         }
     }
 
-    private static func rejected(_ entry: String, _ reason: String) -> AppControlResponse {
+    private static func rejected(_ entry: String, _ reason: String, change: String = "added") -> AppControlResponse {
         let shown = entry.count > 60 ? String(entry.prefix(60)) + "…" : entry
-        return .failure("invalid_term", "\"\(shown)\" \(reason). Nothing was added.")
+        return .failure("invalid_term", "\"\(shown)\" \(reason). Nothing was \(change).")
     }
 }

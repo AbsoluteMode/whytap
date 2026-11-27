@@ -43,13 +43,16 @@ final class ClaudeProbeTests: XCTestCase {
         XCTAssertFalse(captured.contains("-p"))
     }
 
-    /// Unparseable output falls back to the process exit code.
-    func testFallsBackToExitCodeOnUnparseableOutput() async {
-        let ok = await provider(ProcessResult(stdout: "not json", stderr: "", exitCode: 0)).probe()
-        XCTAssertEqual(ok, .connected(sessionID: nil))
-
-        let bad = await provider(ProcessResult(stdout: "", stderr: "boom", exitCode: 7)).probe()
-        guard case .failed = bad else { return XCTFail("expected .failed, got \(bad)") }
+    /// Unparseable output is not a sign-in: an exit code alone never connects,
+    /// and stderr (paths, account details) never reaches the message.
+    func testUnparseableOutputFailsWithoutEchoingStderr() async {
+        for result in [ProcessResult(stdout: "not json", stderr: "", exitCode: 0),
+                       ProcessResult(stdout: "", stderr: "/Users/someone/secret boom", exitCode: 7)] {
+            let outcome = await provider(result).probe()
+            guard case .failed(_, let message) = outcome else { return XCTFail("expected .failed, got \(outcome)") }
+            XCTAssertFalse(message.contains("boom"))
+            XCTAssertFalse(message.contains("/Users/"))
+        }
     }
 }
 

@@ -1,50 +1,95 @@
 import XCTest
 @testable import Sidekey
 
+/// Claude Code's model list comes from its own `initialize` answer.
+/// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 final class ClaudeModelCatalogReaderTests: XCTestCase {
-    func testHighestVersionPerFamilyAsAliases() {
-        let tokens = [
-            "claude-opus-4-5", "claude-opus-4-8", "claude-opus-4-6",
-            "claude-sonnet-4-5", "claude-sonnet-4-6",
-            "claude-haiku-4-5",
-        ]
-        let cat = ClaudeModelCatalogReader.build(tokens: tokens, current: "claude-opus-4-7")
-        // Values are ALIASES (always-latest pointers), labels carry the resolved version.
-        XCTAssertEqual(cat.options.map { $0.token }, ["opus", "sonnet", "haiku"])
-        XCTAssertEqual(cat.options.map { $0.label }, ["Opus 4.8", "Sonnet 4.6", "Haiku 4.5"])
-        XCTAssertEqual(cat.defaultAlias, "opus")
+    /// Claude Code 2.1.325's real answer, models and version unchanged; the
+    /// account object is replaced with placeholders.
+    static let fixture = #"{"type":"control_response","response":{"subtype":"success","request_id":"whytap-models","response":{"models":[{"value":"default","displayName":"Default (recommended)","description":"Fable 5.2","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"opus","displayName":"Opus 5.5","description":"For complex work and everyday tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"fable","displayName":"Fable 5.2","description":"For your toughest challenges","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"sonnet","displayName":"Sonnet 5.5","description":"Most efficient for simpler tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"haiku","displayName":"Haiku 5.5","description":"Fastest for quick answers","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-fable-5-1","displayName":"Fable 5.1","description":"Most capable for your hardest and longest-running tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-haiku-4-5-20251001","displayName":"Haiku 4.5","description":"Fastest for quick answers"},{"value":"claude-sonnet-5","displayName":"Sonnet 5","description":"Efficient for routine tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-opus-5","displayName":"Opus 5","description":"Best for everyday, complex tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-fable-5","displayName":"Fable 5","description":"Most capable for your hardest and longest-running tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-opus-4-8","displayName":"Opus 4.8","description":"Best for everyday, complex tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-opus-4-7","displayName":"Opus 4.7","description":"Best for everyday, complex tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","xhigh","max"]},{"value":"claude-opus-4-6","displayName":"Opus 4.6","description":"Best for everyday, complex tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","max"]},{"value":"claude-sonnet-4-6","displayName":"Sonnet 4.6","description":"Efficient for routine tasks","supportsEffort":true,"supportedEffortLevels":["low","medium","high","max"]}],"claude_code_version":"2.1.325","account":{"email":"person@example.com","organization":"Example","subscriptionType":"max"}}}}"#
+
+    func testParsesEveryModelWithItsOwnReasoningLevels() throws {
+        let catalog = try XCTUnwrap(ClaudeModelCatalogReader.parse(controlResponse: Self.fixture))
+        XCTAssertEqual(catalog.cliVersion, "2.1.325")
+        XCTAssertEqual(catalog.models.count, 14)
+        XCTAssertEqual(catalog.models.first?.value, "default")
+        XCTAssertTrue(catalog.models.contains { $0.value == "fable" && $0.displayName == "Fable 5.2" })
+        let haiku45 = try XCTUnwrap(catalog.models.first { $0.value == "claude-haiku-4-5-20251001" })
+        XCTAssertEqual(haiku45.efforts, [], "a model without reasoning levels")
+        let opus46 = try XCTUnwrap(catalog.models.first { $0.value == "claude-opus-4-6" })
+        XCTAssertEqual(opus46.efforts, ["low", "medium", "high", "max"])
     }
 
-    /// A date-form token (claude-opus-4-20250514) must NOT outrank 4-8.
-    func testIgnoresDateFormTokens() {
-        let cat = ClaudeModelCatalogReader.build(
-            tokens: ["claude-opus-4-8", "claude-opus-4-20250514"], current: nil)
-        XCTAssertEqual(cat.options.first?.label, "Opus 4.8")
+    func testRejectsOtherLinesAndAnswersWithoutModels() {
+        for line in ["", "not json",
+                     #"{"type":"system","subtype":"hook_started"}"#,
+                     #"{"type":"control_response","response":{"subtype":"success","request_id":"other","response":{"models":[{"value":"x","displayName":"X"}]}}}"#,
+                     #"{"type":"control_response","response":{"subtype":"error","request_id":"whytap-models","error":"no"}}"#,
+                     #"{"type":"control_response","response":{"subtype":"success","request_id":"whytap-models","response":{"models":[]}}}"#,
+                     #"{"type":"control_response","response":{"subtype":"success","request_id":"whytap-models","response":{"models":[{"value":"two words"}]}}}"#] {
+            XCTAssertNil(ClaudeModelCatalogReader.parse(controlResponse: line), line)
+        }
     }
 
-    func testDefaultAliasFallsBackToFirstOptionWhenNoCurrent() {
-        let cat = ClaudeModelCatalogReader.build(tokens: ["claude-sonnet-4-6"], current: nil)
-        XCTAssertEqual(cat.defaultAlias, "sonnet")
+    func testDuplicateValuesKeepTheFirst() throws {
+        let line = #"{"type":"control_response","response":{"subtype":"success","request_id":"whytap-models","response":{"models":[{"value":"a","displayName":"A1"},{"value":"a","displayName":"A2"}]}}}"#
+        XCTAssertEqual(try XCTUnwrap(ClaudeModelCatalogReader.parse(controlResponse: line)).models.map(\.displayName), ["A1"])
     }
 
-    func testEmptyWhenNoTokens() {
-        let cat = ClaudeModelCatalogReader.build(tokens: [], current: nil)
-        XCTAssertTrue(cat.options.isEmpty)
-        XCTAssertNil(cat.defaultAlias)
+    // MARK: - The real handshake against a fake `claude`
+
+    private func fakeClaude(_ body: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("fake-claude-\(UUID().uuidString).sh")
+        try ("#!/bin/sh\n" + body).write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
     }
 
-    func testReadNilBinaryYieldsEmpty() {
-        let cat = ClaudeModelCatalogReader(scanTokens: { _ in ["claude-opus-4-8"] },
-                                           currentModel: { nil }).read(binary: nil)
-        XCTAssertTrue(cat.options.isEmpty)
+    func testHandshakeSkipsHookOutputAndNeverSendsAUserMessage() async throws {
+        let log = FileManager.default.temporaryDirectory.appendingPathComponent("stdin-\(UUID().uuidString)")
+        addTeardownBlock { try? FileManager.default.removeItem(at: log) }
+        let answer = Self.fixture.replacingOccurrences(of: "'", with: "")
+        let script = try fakeClaude("""
+        read -r request
+        printf '%s\\n' "$request" > '\(log.path)'
+        printf '{"type":"system","subtype":"hook_started"}\\n'
+        printf '%s\\n' '\(answer)'
+        cat >> '\(log.path)'
+        """)
+        let catalog = try await ClaudeModelCatalogReader(locate: { script }).read()
+        XCTAssertEqual(catalog.models.count, 14)
+        let written = try String(contentsOf: log, encoding: .utf8)
+        XCTAssertTrue(written.contains(#""subtype":"initialize""#))
+        XCTAssertFalse(written.contains(#""type":"user""#), "no prompt, no model request")
     }
 
-    func testReadScansProvidedBinary() {
-        let reader = ClaudeModelCatalogReader(
-            scanTokens: { _ in ["claude-opus-4-8", "claude-haiku-4-5"] },
-            currentModel: { "claude-haiku-4-5" })
-        let cat = reader.read(binary: URL(fileURLWithPath: "/x/claude"))
-        XCTAssertEqual(cat.options.map { $0.token }, ["opus", "haiku"])
-        XCTAssertEqual(cat.defaultAlias, "haiku")
+    func testHandshakeFailsWhenTheCLIExitsWithoutAnAnswer() async throws {
+        let script = try fakeClaude("echo 'Error: not supported'; exit 1\n")
+        do {
+            _ = try await ClaudeModelCatalogReader(locate: { script }).read()
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? ClaudeModelCatalogError, .unreadable)
+        }
+    }
+
+    func testHandshakeTimesOutOnASilentCLI() async throws {
+        let script = try fakeClaude("sleep 30\n")
+        do {
+            _ = try await ClaudeModelCatalogReader(locate: { script }, timeout: 0.5).read()
+            XCTFail("expected a timeout")
+        } catch {
+            XCTAssertEqual(error as? ClaudeModelCatalogError, .timedOut)
+        }
+    }
+
+    func testMissingClaudeCodeIsNotInstalled() async {
+        do {
+            _ = try await ClaudeModelCatalogReader(locate: { nil }).read()
+            XCTFail("expected an error")
+        } catch {
+            XCTAssertEqual(error as? ClaudeModelCatalogError, .notInstalled)
+        }
     }
 }

@@ -87,12 +87,70 @@ final class AgentSettingsStoreTests: XCTestCase {
     func testClaudeSettingsRemainIndependent() {
         let d = freshDefaults(#function)
         d.set("opus", forKey: "agent.claude.model")
-        let s = AgentSettingsStore(defaults: d, codexConfig: .init())
-        XCTAssertEqual(s.options(for: .claude), AgentRunOptions(model: "sonnet", effort: "low"))
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        XCTAssertEqual(s.options(for: .claude), AgentRunOptions(model: "opus", effort: "low"))
+        XCTAssertEqual(d.string(forKey: "agent.claude.model"), "opus", "loading never rewrites the pick")
         s.claudeEffort = "MAX"
         XCTAssertEqual(s.options(for: .claude).effort, "max")
         s.claudeEffort = "bogus"
         XCTAssertEqual(s.options(for: .claude).effort, "low")
+    }
+
+    // MARK: - Claude Code model catalog
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+
+    private static let claudeCatalog = ClaudeModelCatalog(models: [
+        ClaudeModelOption(value: "default", displayName: "Default (recommended)", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"]),
+        ClaudeModelOption(value: "sonnet", displayName: "Sonnet 5.5", supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"]),
+        ClaudeModelOption(value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5"),
+        ClaudeModelOption(value: "claude-opus-4-6", displayName: "Opus 4.6", supportedEffortLevels: ["low", "medium", "high", "max"]),
+    ], cliVersion: "2.1.325")
+
+    func testNoClaudePickSendsNoModelSoClaudeCodeUsesItsOwnDefault() {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        XCTAssertNil(s.options(for: .claude).model, "no hard-coded model")
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        XCTAssertEqual(s.selectedClaudeOption?.value, "default")
+        XCTAssertNil(s.options(for: .claude).model)
+        XCTAssertEqual(s.options(for: .claude).effort, "low")
+        s.claudeModel = "default"
+        XCTAssertNil(s.options(for: .claude).model, "picking Claude Code's default sends no --model")
+    }
+
+    func testClaudePickIsSentVerbatimAndEffortFollowsTheModel() {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        s.claudeEffort = "xhigh"
+        s.claudeModel = "sonnet"
+        XCTAssertEqual(s.options(for: .claude).model, "sonnet")
+        XCTAssertEqual(s.options(for: .claude).effort, "xhigh")
+        s.claudeModel = "claude-opus-4-6"
+        XCTAssertEqual(s.options(for: .claude).effort, "low", "a level the model lacks falls back to Low")
+        XCTAssertEqual(s.claudeEffort, "xhigh", "the pick is kept for a model that takes it")
+        s.claudeModel = "claude-haiku-4-5-20251001"
+        XCTAssertNil(s.options(for: .claude).effort, "no --effort for a model without reasoning levels")
+    }
+
+    func testSavedClaudeModelMissingFromCatalogIsKept() {
+        let d = freshDefaults(#function)
+        d.set("claude-retired-1", forKey: "agent.claude.model")
+        let s = AgentSettingsStore(defaults: d, codexConfig: .init(), whytapMCPCommand: { nil })
+        s.updateClaudeCatalog(Self.claudeCatalog)
+        XCTAssertNil(s.selectedClaudeOption)
+        XCTAssertEqual(s.options(for: .claude).model, "claude-retired-1")
+        XCTAssertEqual(s.options(for: .claude).effort, "low")
+    }
+
+    func testClaudeCatalogFailureKeepsTheLastGoodListAndSaysWhy() async {
+        let s = AgentSettingsStore(defaults: freshDefaults(#function), codexConfig: .init(), whytapMCPCommand: { nil })
+        await s.refreshClaudeCatalog(force: true, load: { Self.claudeCatalog })
+        XCTAssertEqual(s.claudeCatalog.count, 4)
+        XCTAssertEqual(s.claudeVersion, "2.1.325")
+        await s.refreshClaudeCatalog(force: true, load: { throw ClaudeModelCatalogError.timedOut })
+        XCTAssertEqual(s.claudeCatalog.count, 4)
+        XCTAssertNotNil(s.claudeCatalogError)
+        await s.refreshClaudeCatalog(force: true, load: { throw ClaudeModelCatalogError.notInstalled })
+        XCTAssertEqual(s.claudeCatalogError, "Claude Code isn’t installed on this Mac.")
     }
 
     // MARK: - OpenCode model from the agent route

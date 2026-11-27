@@ -107,7 +107,7 @@ struct AgentFeatureSettings: View {
             MacGroupTitle(title: "Settings")
             MacCard {
                 MacRow(title: AgentOtherSection.actionsTitle, subtitle: AgentOtherSection.actionsSubtitle) {
-                    MacSwitch(isOn: $settings.openCodeAllowActions, label: AgentOtherSection.actionsTitle)
+                    MacSwitch(isOn: $settings.allowActions, label: AgentOtherSection.actionsTitle)
                 }
             }
             AgentSourcesSection(controller: SourcesController.shared)

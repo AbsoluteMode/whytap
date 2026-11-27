@@ -148,7 +148,7 @@ the window finishes it. It does not come back after updates.
 
 The next version (after 2.2.26) redesigns this window into five pages with
 Back on every page after the first: the
-speech page also lists language-model and Tavily keys with each provider's
+speech page also lists language-model keys with each provider's
 free offer and a searchable "I speak" language, Screen Recording (for Shot)
 becomes an optional row on the permissions page, a page introduces tool
 shortcuts and hover tools, and the last page can connect Claude Code and Codex.
@@ -159,10 +159,10 @@ without a model opens Keys & models on its row when you use it; Whytap never
 picks another provider for you. If you used **Local** before October 2026,
 choose a speech model again: the old local models were removed.
 
-For the optional Agent, add an OpenRouter, OpenAI or Anthropic key, choose the
-Agent model in **Keys & models**, then turn on **Agent** in **Settings → Features → Agent**.
-Read [Whytap Agent](agent.md) first: once on, it can edit files and run
-commands. Meeting recording also asks for **System Audio Recording**.
+For the optional Agent, install and sign in to Claude Code or Codex, choose it
+under **Harness** in **Keys & models → Models**, then turn on **Agent** in
+**Settings → Features → Agent**. Read [Whytap Agent](agent.md) first: once on,
+it can edit files and run commands under your tool's own permissions. Meeting recording also asks for **System Audio Recording**.
 
 ## What it costs
 
@@ -171,10 +171,8 @@ built for people and teams who already have one of these:
 
 - **Provider keys**, billed by the provider per use: Soniox, Deepgram or
   ElevenLabs for speech; OpenRouter, OpenAI or Anthropic for language models.
-  They also run the Agent's web search: about $10 per 1,000 searches plus
-  result tokens on Anthropic and OpenAI, Exa at about $7 per 1,000 through
-  OpenRouter (Claude models there use Anthropic's search). Tavily is for an
-  Agent model without search, or when chosen in Models → Search.
+- **A Claude Code or Codex sign-in** for the Agent: it runs on your own
+  subscription or API account through that tool, not on Whytap's keys.
 - **A ChatGPT or Claude plan with monthly API credits.** OpenAI gives ChatGPT
   Pro ($100, $200 or $500 a month, by tier) and Business seats API credit;
   Anthropic gives Claude Max ($100), Ultra ($200) and Team seats. Both must be
@@ -192,7 +190,7 @@ built for people and teams who already have one of these:
 | --- | --- | --- |
 | Drop Fast | On this Mac | a speech provider or server on Intel |
 | Drop Smart | speech only | a language model for the cleanup |
-| Agent (text) | no | a language model (OpenRouter, OpenAI or Anthropic), which also searches the web; Tavily for search with a model that cannot |
+| Agent (text) | no | Claude Code or Codex, signed in |
 | Agent voice, Voice search | On this Mac | a speech provider or server on Intel |
 | Meeting Notes | no: a meeting waits until both rows are set | a language model for the notes, plus speech (On this Mac gives no speaker labels; Soniox, Deepgram or ElevenLabs label speakers) |
 | Translate | no | a language model |

@@ -479,7 +479,7 @@ final class SubtitleOverlayMoveResizeScrollTests: XCTestCase {
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         addTeardownBlock { defaults.removePersistentDomain(forName: suite) }
         let model = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
-                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
+                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey(nil) })
         var opened: [AIFeature] = []
         let controller = TranslationWindowController(
             textModel: TextTranslationModel(makeService: { FixtureTranslator() }), subtitleModel: model,

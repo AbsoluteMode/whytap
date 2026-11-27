@@ -27,8 +27,8 @@ struct FeaturesEnvironment {
     var autoStop: DropAutoStopPreferences
     /// Shows an island panel (the Vocab and Filler editors live there).
     var openHoverPanel: (HoverInlinePanel) -> Void
-    /// The switches of the features that have one. The Agent's connects the
-    /// native Agent and returns why it did not turn on.
+    /// The switches of the features that have one. The Agent's turns the
+    /// chosen harness on and returns why it did not turn on.
     var setAgent: @MainActor (Bool) async -> String?
     var setMeetings: (Bool) -> Void
     var setGoogle: (Bool) -> Void
@@ -170,6 +170,7 @@ extension FeatureSetupSnapshot {
             selectableModels: selectable,
             modelAlternatives: alternatives,
             subtitlesKeyPresent: models.audioTranslate.isActive,
+            subtitlesEngineChoice: models.audioTranslate.choice,
             onDevice: environment.supportsOnDevice ? .available(environment.onDevice.status) : .unsupported,
             keyboardReady: permissions.keyboardReady,
             keyboardNeedsRestart: permissions.keyboardNeedsRestart,
@@ -180,6 +181,7 @@ extension FeatureSetupSnapshot {
             systemAudioHeard: SystemAudioAccess.heard(),
             dropShortcut: permissions.dropHotkeyStatus,
             agentOn: environment.agentOn(),
+            harnessReady: AgentProviderStore.shared.activeProvider != nil,
             meetingsOn: environment.meetingsOn(),
             googleOn: environment.googleOn(),
             notifySources: environment.notifySupervisor.sources.count,

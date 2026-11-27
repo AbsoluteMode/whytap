@@ -46,8 +46,7 @@ credentials or the user's transcripts. Missing prerequisites cause a nonzero exi
 | Custom monitoring | [Dashboard contract](dashboards.md) | passive JSON snapshot plus a separate collector |
 | Settings page | `Settings/SettingsWindowTab.swift` | `Settings/SettingsWindowView.swift` detail switch |
 | Persistence, keys or migrations | [Local data](local-data.md) | use existing stores rather than new raw file writes |
-| Agent execution | `AgentDaemon/NativeAgentProvider.swift`, `AgentDaemon/NativeAgentModel.swift`, `AgentDaemon/NativeAgentTools.swift`, `Agent/AgentController.swift` | Direct selected model, local tools, web search (`AgentDaemon/NativeAgentWebSearch.swift`: provider's own or Tavily), bounded context and action policy |
-| Agent sources (MCP), gated off by `AgentSourcesGate` | `Assistant/Connections/AgentSourcesGate.swift`, `Assistant/Connections/SourcesController.swift`, `Assistant/Connections/MCPClient.swift`, `AgentDaemon/NativeAgentSources.swift`, `Settings/Features/AgentSourcesSettings.swift` | Keychain-only secrets, Read-only tools for the Agent, taint rule, import from other apps |
+| Agent execution | `AgentDaemon/ClaudeCodeProvider.swift`, `AgentDaemon/CodexProvider.swift`, `AgentDaemon/AgentHarnessFlags.swift`, `Agent/AgentController.swift` | The user's own Claude Code or Codex per turn, permission flags for "Allow file edits and commands", Whytap's per-turn MCP server, scoped resume |
 | Dictation | `Streaming/`, `PostProcessor.swift` | preserve graceful finish, retained audio and delivery recovery |
 | Meeting notes | `Meetings/MeetingsCoordinator.swift` | capture, staged audio, processing checkpoints and notes |
 
@@ -112,7 +111,7 @@ does not currently download source, rewrite itself, or install a third-party
 harness. Its runtime agent and its source customization workflow are separate
 entry points, both controlled by the user.
 
-For monitoring requests, the built-in agent also receives
+For monitoring requests, the Agent (Claude Code or Codex) also receives
 `WhytapCustomizationContext.promptInstructions`: resolved user-local directories,
 the passive JSON schema, collector boundaries and source-kit navigation. It can
 create a custom dashboard directly from that contract without locating a source

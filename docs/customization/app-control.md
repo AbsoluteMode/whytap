@@ -16,7 +16,7 @@ that the installed application or a host's plugin connection has been updated.
 | Claude Code | yes | yes | after a one-time Yes in Whytap | after **Case → Connect → Claude Code** |
 | Codex | yes | yes | after a one-time Yes in Whytap | no: Case → Connect does not offer Codex, so Case refuses it (access denied) |
 | Cursor | yes | yes | no (`unsupported_client`): only Claude Code and Codex are recognized | after **Case → Connect → Cursor** |
-| Whytap Agent (built in) | through its own `whytap` tool (next version after 2.2.26) | same | same, without the question (you are at the Mac) | after **Case → Connect → Whytap Agent** |
+| Whytap Agent (Right Command) | yes: each turn of your Claude Code or Codex gets the `whytap` server | yes | as that tool: after its one-time Yes in Whytap | as that tool (Claude Code after **Case → Connect → Claude Code**) |
 | Whycode (Developer ID build) | yes | yes | no (`unsupported_client`); after a one-time Yes only the live Drop take, see [Live dictation](#live-dictation-in-an-apps-own-field) | no |
 | A script, terminal or other program | yes, through the CLI or MCP | yes | no (`unsupported_client`) | no |
 
@@ -35,8 +35,9 @@ that the installed application or a host's plugin connection has been updated.
   meetings) and `whytap case mcp` (Case) as two servers; `whytap mcp` arrives
   with the next version.
 
-The built-in Whytap Agent is a different mechanism with its own tools,
-including file edits and commands: see [Whytap Agent](../agent.md).
+The Whytap Agent (Right Command) runs your own Claude Code or Codex and adds
+this server to each of its turns; its file edits and commands are that tool's
+own: see [Whytap Agent](../agent.md).
 
 ## Commands
 
@@ -91,19 +92,18 @@ invalid entry (empty, too long, a line break or control character) adds
 nothing (`invalid_term`); joiners such as the Persian zero-width non-joiner
 stay part of a word. A full list answers `list_full`. A coding tool needs
 the user's one-time Yes for these, as for meetings (they change the user's
-speech profile); the built-in Agent adds what your request names.
+speech profile).
 
 `whytap_vocab_add` takes `terms`: 1–20 words or short phrases, at most 50
 characters each; Vocab holds 1,000. A term already there in any letter case
 is `existing` with its saved spelling. Each speech route sends the part of
 Vocab its model supports, so a saved term is not a promise that a given
-model uses it (On this Mac dictation uses no Vocab). The built-in Agent
-shows `Vocab + whytap` above its answer, with the spelling exactly as saved.
+model uses it (On this Mac dictation uses no Vocab).
 
 `whytap_filler_add` takes `terms` (1–20, at most 50 characters; the list
 holds 100): words Drop removes from dictation, Fast and Smart (`um`, `ну`).
 When removing them would leave a Fast take empty, Drop pastes the take
-unfiltered. The Agent shows `Filler + ну`.
+unfiltered.
 
 There is no Replace list: it came with Drop learning, which was shelved on
 2026-11-23.
@@ -377,24 +377,14 @@ not a sandbox for an already authorized agent. A website's `whytap://` link
 cannot invoke or receive these commands. Case requests keep their existing
 authorization and the app-control namespace never returns secret values.
 
-## The built-in Whytap Agent
+## The Whytap Agent
 
-The Agent in the island (Right Command) has the same `whytap_*` operations:
-the same names, descriptions and argument schemas, taken from the plugin's own
-catalog and run inside the app by the same controller, without the helper or
-an MCP server. The model sees them as one `whytap` tool (operation plus a JSON
-arguments string), which keeps every provider's strict tool limits. Ask it, for example, "switch Drop Smart cleanup to
-anthropic/claude-sonnet-5.5", "add a task: send the report" or "where did we
-discuss the budget?". Every change still needs the exact current value, and
-each confirmed change appears as one line above the answer, such as
-`Drop Smart cleanup → anthropic/claude-sonnet-5.5`, `Toolbox + Shot` or
-`Hotkey: Shot — ⌥S`. "Add Shot to my quick actions (hover) and give it option
-f" pins the tool and assigns the keys in one line,
-`Toolbox + Shot · ⌥F (no longer types “ƒ” in text fields)`; a hotkey the rules
-refuse or another action uses is reported with the nearest free keys, not
-moved. For a task a Whytap tool does ("take a screenshot") the Agent reads the
-tools and suggests one with its hotkey, "Press ⌥S — that's Shot", instead of
-macOS shortcuts; without a hotkey it points to the hover or its search and
-offers to set one. It only suggests: no operation opens or starts a tool. Meetings need no harness
-prompt there: the request comes from you at this Mac. The Agent still cannot
-read key values, the clipboard or run commands through these tools.
+The Agent in the island (Right Command) is your own Claude Code or Codex.
+Each turn gets this server under the name `whytap` (replacing a registered
+entry of the same name for that turn), so it has the same `whytap_*`
+operations as in your own sessions, with the same one-time Yes. Ask it, for
+example, "switch Drop Smart cleanup to anthropic/claude-sonnet-5.5", "add a
+task: send the report" or "where did we discuss the budget?". Every change
+still needs the exact current value. It can read the island's tools and
+their hotkeys (`whytap_toolbox_get`) to point you to one; no operation opens
+or starts a tool.

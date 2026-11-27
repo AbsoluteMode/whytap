@@ -129,8 +129,6 @@ final class APIHintsRenderTests: XCTestCase {
             let name = try XCTUnwrap(hint.assetName, hint.provider)
             XCTAssertNotNil(ProviderBrandIconAsset.image(named: name, pointSize: 17), hint.provider)
         }
-        // The API keys tile draws the same Tavily mark.
-        XCTAssertNotNil(ProviderBrandIconAsset.image(named: "tavily", pointSize: 28))
     }
 
     private static func scrollViews(in view: NSView) -> [NSScrollView] {

@@ -31,7 +31,7 @@ final class CodingToolsEntryTests: XCTestCase {
 
     private func setup(_ client: CaseKnownClient, _ connector: CaseClientConnector) -> CaseClientSetup {
         CaseClientSetup(helperURL: helper, binDir: root.appendingPathComponent("bin"), flavorName: "dev",
-                        connectors: [client: connector], builtInAgentAvailable: { false })
+                        connectors: [client: connector])
     }
 
     private func writeClaude(_ entry: String?) throws -> Data {

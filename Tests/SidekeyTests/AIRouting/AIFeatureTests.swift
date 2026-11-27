@@ -12,12 +12,16 @@ final class AIFeatureTests: XCTestCase {
     // MARK: - Registry
 
     func test_features_follow_the_spec_table() {
-        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agent, .agentVoice, .voiceSearch, .translation])
-        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent", "Agent voice", "Voice search", "Translation"])
-        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "LLM with tools", "real-time", "real-time", "LLM"])
+        XCTAssertEqual(AIFeature.activeCases, [.dropFast, .dropSmart, .dropSmartCleanup, .meetings, .meetingNotes, .agentVoice, .voiceSearch, .translation])
+        XCTAssertEqual(AIFeature.activeCases.map(\.title), ["Drop Fast", "Drop Smart", "Drop Smart cleanup", "Meetings", "Meeting notes", "Agent voice", "Voice search", "Translation"])
+        XCTAssertEqual(AIFeature.activeCases.map(\.mode.label), ["real-time", "real-time", "LLM", "recorded", "LLM", "real-time", "real-time", "LLM"])
         // Subtitles run only on Audio translate: no route of their own.
         XCTAssertFalse(AIFeature.subtitlesAudio.isActive)
         XCTAssertFalse(AIFeature.subtitlesTranslation.isActive)
+        // The Agent answers through the user's Claude Code or Codex: its text
+        // route is kept for a rollback build but no longer used or offered.
+        XCTAssertFalse(AIFeature.agent.isActive)
+        XCTAssertNil(AIFeature.agent.modelUse(on: .openRouter))
         XCTAssertEqual(AIFeature.drop(.fast), .dropFast)
         XCTAssertEqual(AIFeature.drop(.smart), .dropSmart)
     }
@@ -84,14 +88,9 @@ final class AIFeatureTests: XCTestCase {
                 soniox: nil, deepgram: nil, elevenLabs: nil,
                 openRouter: .chat, anthropic: .chat, openAICompatible: .chat
             ),
-            TableRow(
-                features: [.agent],
-                soniox: nil, deepgram: nil, elevenLabs: nil,
-                openRouter: .chatWithTools, anthropic: .chatWithTools, openAICompatible: nil
-            ),
         ]
         // Every feature sits in exactly one row, so the loop below visits all
-        // 9 active features x 8 providers = 72 cells.
+        // 8 active features x 8 providers = 64 cells.
         XCTAssertEqual(
             rows.flatMap(\.features).map(\.rawValue).sorted(),
             AIFeature.activeCases.map(\.rawValue).sorted()
@@ -109,16 +108,15 @@ final class AIFeatureTests: XCTestCase {
                 }
             }
         }
-        XCTAssertEqual(visited, 72)
+        XCTAssertEqual(visited, 64)
     }
 
     func test_direct_llm_providers_serve_text_modes_and_openai_also_live_speech() {
         for kind in [AIProviderKind.openAI, .anthropic] {
             for feature in AIFeature.activeCases {
                 let expected: ModelUse? = feature.mode == .llm ? .chat
-                    : (feature.mode == .llmWithTools ? .chatWithTools
-                       : (kind == .openAI && feature.mode == .decision ? .decision
-                          : (kind == .openAI && feature.mode == .realtime ? .realtimeSTT : nil)))
+                    : (kind == .openAI && feature.mode == .decision ? .decision
+                       : (kind == .openAI && feature.mode == .realtime ? .realtimeSTT : nil))
                 XCTAssertEqual(feature.modelUse(on: kind), expected, feature.rawValue)
             }
         }

@@ -219,28 +219,14 @@ final class ModelProbeTests: XCTestCase {
         XCTAssertEqual(body["max_tokens"] as? Int, 16)
     }
 
-    func test_agent_probe_offers_one_fake_tool() async throws {
-        let probe = httpProbe { _ in (200, [:], Self.okBody) }
-        let outcome = await probe.probe(route(.openRouter, feature: .agent), use: .chatWithTools, catalog: nil)
-        XCTAssertEqual(outcome, .passed)
-        let body = try jsonBody(at: 0)
-        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.count, 1)
-        XCTAssertEqual(tools[0]["type"] as? String, "function")
-        let function = try XCTUnwrap(tools[0]["function"] as? [String: Any])
-        XCTAssertEqual(function["name"] as? String, "whytap_probe")
-        XCTAssertEqual(function["description"] as? String, "Probe tool. Do not call.")
-    }
-
-    /// Anthropic's own Messages API: one fake tool, no `tool_choice` (forced
-    /// tool use is a 400 on current models), and a 200 cut off at `max_tokens`
-    /// still passes.
-    func test_anthropic_agent_probe_offers_one_fake_tool_without_tool_choice() async throws {
+    /// Anthropic's own Messages API: a one-word prompt without tools, and a
+    /// 200 cut off at `max_tokens` still passes.
+    func test_anthropic_text_probe_sends_no_tool() async throws {
         let cutOff = Data(#"{"type":"message","content":[],"stop_reason":"max_tokens"}"#.utf8)
         let probe = httpProbe { _ in (200, [:], cutOff) }
         let outcome = await probe.probe(
-            route(.anthropic, model: "claude-sonnet-5-5", key: "sk-ant", feature: .agent),
-            use: .chatWithTools, catalog: nil)
+            route(.anthropic, model: "claude-sonnet-5-5", key: "sk-ant", feature: .dropSmartCleanup),
+            use: .chat, catalog: nil)
         XCTAssertEqual(outcome, .passed)
 
         XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
@@ -258,13 +244,7 @@ final class ModelProbeTests: XCTestCase {
         XCTAssertNil(body["tool_choice"])
         XCTAssertNil(body["stream"])
         XCTAssertEqual(body["messages"] as? [[String: String]], [["role": "user", "content": "Reply with OK."]])
-        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.count, 1)
-        XCTAssertEqual(tools[0]["name"] as? String, "whytap_probe")
-        XCTAssertEqual(tools[0]["description"] as? String, "Probe tool. Do not call.")
-        let schema = try XCTUnwrap(tools[0]["input_schema"] as? [String: Any])
-        XCTAssertEqual(schema["type"] as? String, "object")
-        XCTAssertEqual((schema["properties"] as? [String: Any])?.isEmpty, true)
+        XCTAssertNil(body["tools"])
 
         let refusal = Data(#"{"type":"error","error":{"type":"invalid_request_error","message":"model: claude-nope not found"}}"#.utf8)
         let table: [(Int, Data, ProbeOutcome)] = [
@@ -278,65 +258,9 @@ final class ModelProbeTests: XCTestCase {
         ]
         for (status, data, expected) in table {
             let probe = httpProbe { _ in (status, [:], data) }
-            let result = await probe.probe(route(.anthropic, key: "sk-ant", feature: .agent), use: .chatWithTools, catalog: nil)
+            let result = await probe.probe(route(.anthropic, key: "sk-ant", feature: .dropSmartCleanup), use: .chat, catalog: nil)
             XCTAssertEqual(result, expected, "anthropic \(status)")
         }
-    }
-
-    /// OpenAI tool use is checked the way the Agent runs it: the Responses API
-    /// with one function tool. Newer reasoning models (gpt-6.2-sol) refuse
-    /// function tools on Chat Completions, which the Agent never uses.
-    func test_openai_agent_probe_uses_the_responses_api() async throws {
-        let refusalOnChat = Data(#"{"error":{"message":"Function tools with reasoning_effort are not supported for gpt-6.2-sol in /v1/chat/completions. To use function tools, use /v1/responses.","type":"invalid_request_error"}}"#.utf8)
-        let probe = httpProbe { request in
-            if request.url?.path == "/v1/chat/completions" { return (400, [:], refusalOnChat) }
-            return (200, [:], Data(#"{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"OK"}]}]}"#.utf8))
-        }
-        let outcome = await probe.probe(route(.openAI, model: "gpt-6.2-sol", key: "sk-openai", feature: .agent),
-                                        use: .chatWithTools, catalog: nil)
-        XCTAssertEqual(outcome, .passed)
-        XCTAssertEqual(StubURLProtocol.capturedRequests.count, 1)
-        let request = try XCTUnwrap(StubURLProtocol.capturedRequests.first)
-        XCTAssertEqual(request.url?.absoluteString, "https://api.openai.com/v1/responses")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer sk-openai")
-        let body = try jsonBody(at: 0)
-        XCTAssertEqual(body["model"] as? String, "gpt-6.2-sol")
-        XCTAssertEqual(body["store"] as? Bool, false)
-        XCTAssertEqual(body["max_output_tokens"] as? Int, 512)
-        XCTAssertNil(body["reasoning"], "No reasoning_effort: the Agent sends none either")
-        XCTAssertNil(body["messages"])
-        let tools = try XCTUnwrap(body["tools"] as? [[String: Any]])
-        XCTAssertEqual(tools.count, 1)
-        XCTAssertEqual(tools[0]["type"] as? String, "function")
-        XCTAssertEqual(tools[0]["name"] as? String, "whytap_probe")
-
-        let refusal = Data(#"{"error":{"message":"The model `gpt-nope` does not exist.","type":"invalid_request_error"}}"#.utf8)
-        let table: [(Int, Data, ProbeOutcome)] = [
-            (200, Data(#"{"status":"incomplete","incomplete_details":{"reason":"max_output_tokens"}}"#.utf8), .passed),
-            (200, Data(#"{"status":"failed","error":{"message":"server error"}}"#.utf8), .failed(reason: "Provider refused: server error")),
-            (200, Data("not json".utf8), .inconclusive(reason: "Unexpected answer")),
-            (400, refusal, .failed(reason: "Provider refused: The model `gpt-nope` does not exist.")),
-            (404, refusal, .failed(reason: "Provider refused: The model `gpt-nope` does not exist.")),
-            (401, Data(), .inconclusive(reason: "Key problem")),
-            (429, Data(), .inconclusive(reason: "No answer from the provider")),
-        ]
-        for (status, data, expected) in table {
-            let probe = httpProbe { _ in (status, [:], data) }
-            let result = await probe.probe(route(.openAI, key: "sk-openai", feature: .agent), use: .chatWithTools, catalog: nil)
-            XCTAssertEqual(result, expected, "openai responses \(status)")
-        }
-        // The whole Sol family: the check never touches Chat Completions.
-        for model in ["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol"] {
-            let probe = httpProbe { request in
-                request.url?.path == "/v1/chat/completions" ? (400, [:], refusalOnChat) : (200, [:], Data(#"{"status":"completed"}"#.utf8))
-            }
-            let result = await probe.probe(route(.openAI, model: model, key: "sk-openai", feature: .agent), use: .chatWithTools, catalog: nil)
-            XCTAssertEqual(result, .passed, model)
-            XCTAssertEqual(StubURLProtocol.capturedRequests.map { $0.url?.path }, ["/v1/responses"], model)
-        }
-        let noKey = await httpProbe { _ in (200, [:], Data()) }
-            .probe(route(.openAI, key: nil, feature: .agent), use: .chatWithTools, catalog: nil)
-        XCTAssertEqual(noKey, .inconclusive(reason: "Key problem"))
     }
 
     /// Plain text on OpenAI stays on Chat Completions, as the text features call it.
@@ -348,12 +272,18 @@ final class ModelProbeTests: XCTestCase {
         XCTAssertNil(try jsonBody(at: 0)["tools"])
     }
 
-    /// A failure stored by the old Chat Completions check is not shown again.
-    func test_openai_tool_use_checks_have_a_new_adapter_version() {
-        XCTAssertEqual(ModelRegistry.adapterVersion(.openAI, .chatWithTools), 2)
-        XCTAssertEqual(ModelRegistry.adapterVersion(.openAI, .chat), 1)
-        XCTAssertEqual(ModelRegistry.adapterVersion(.anthropic, .chatWithTools), 1)
-        XCTAssertEqual(ModelRegistry.adapterVersion(.openRouter, .chatWithTools), 1)
+    /// The removed agent's tool-use check: nothing asks for it, and a stray
+    /// request for it sends nothing.
+    func test_the_retired_tool_use_check_sends_no_request() async {
+        let probe = httpProbe { _ in (200, [:], Self.okBody) }
+        let outcome = await probe.probe(route(.openAI, key: "sk-openai", feature: .agent), use: .retiredChatWithTools, catalog: nil)
+        XCTAssertEqual(outcome, .failed(reason: "Not a model for this feature"))
+        XCTAssertTrue(StubURLProtocol.capturedRequests.isEmpty)
+        for feature in AIFeature.allCases {
+            for kind in AIProviderKind.allCases {
+                XCTAssertNotEqual(feature.modelUse(on: kind), .retiredChatWithTools, "\(feature) on \(kind)")
+            }
+        }
     }
 
     func test_max_tokens_rejection_retries_once_with_512() async throws {

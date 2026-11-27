@@ -557,9 +557,8 @@ struct ModelStatusResolver {
             if let uses = entry.uses, !uses.contains(.decision) { return "not a decision model" }
         case .chat:
             if let uses = entry.uses, !uses.contains(.chat) { return "not a text model" }
-        case .chatWithTools:
-            if entry.supportsTools == false { return "no tool support" }
-            if let uses = entry.uses, !uses.contains(.chatWithTools) { return "no tool support" }
+        case .retiredChatWithTools:
+            return "no longer used"
         case .speechTranslation:
             if entry.uses?.contains(.speechTranslation) != true { return "not a speech translation model" }
         }

@@ -13,8 +13,8 @@ import Foundation
 ///
 /// Isolated from the app: its settings live in their own defaults suite,
 /// emptied at every start and quit (never `com.rootwise.sidekey`); keys stay
-/// in memory (no Keychain); key checks, catalogs, model probes and the Tavily
-/// check are answered here without a network request; a word in the key
+/// in memory (no Keychain); key checks, catalogs and model probes
+/// are answered here without a network request; a word in the key
 /// picks the answer ("bad": refused, "credit": out of credit, "noaccess": no
 /// speech access, "offline": no answer; shorter than 16 characters fails the
 /// shape check before any request); the first Allow on an access step comes
@@ -135,8 +135,7 @@ final class OnboardingPreviewSession {
     }
 
     /// `pace` multiplies every delay the preview's fakes add so a person can
-    /// watch the states (key checks, System Settings, the model download,
-    /// Tavily's answer). Tests pass a small value; the order of events stays.
+    /// watch the states (key checks, System Settings, the model download). Tests pass a small value; the order of events stays.
     init(suiteName: String = OnboardingPreviewSession.suiteName,
          dwellWait: ((TimeInterval) async -> Void)? = nil,
          pace: Double = 1) {
@@ -168,7 +167,6 @@ final class OnboardingPreviewSession {
 
         let system = System()
         system.pace = pace
-        OnboardingPreviewURLProtocol.pace = pace
         simulated = system
         let permissions = PermissionsSettingsViewModel(
             onComplete: {}, autoComplete: false,
@@ -180,9 +178,6 @@ final class OnboardingPreviewSession {
         system.permissions = permissions
         let screenRecording = ScreenRecordingAccess(isGranted: { system.screen },
                                                     request: { await MainActor.run { system.ask("screen") { $0.screen = true } } })
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [OnboardingPreviewURLProtocol.self]
-        let tavily = TavilySettings(keys: keys, search: TavilySearch(http: NativeAgentHTTP(session: URLSession(configuration: configuration))))
 
         model = OnboardingJourneyModel(
             models: models, permissions: permissions,
@@ -194,7 +189,6 @@ final class OnboardingPreviewSession {
             openScreenRecordingSettings: { system.grant { $0.screen = true } },
             defaultsChanges: NotificationCenter(),
             dwellWait: dwellWait,
-            tavily: tavily,
             hotkeys: HotkeyPreferences(defaults: defaults),
             toolbox: HoverLayoutStore(defaults: defaults),
             agentEnabled: { UserPreferencesCache(defaults: defaults).currentAgentEnabled },
@@ -288,9 +282,9 @@ struct OnboardingPreviewProviders: ModelCatalogFetching, ProviderKeyChecking, Mo
         }
     }
 
-    private static func model(_ id: String, daysAgo: Double, uses: Set<ModelUse> = [.chat, .chatWithTools],
+    private static func model(_ id: String, daysAgo: Double, uses: Set<ModelUse> = [.chat],
                               price: (Double, Double)? = nil) -> CatalogModel {
-        var model = CatalogModel(id: id, uses: uses, contextLength: 400_000, supportsTools: !uses.isDisjoint(with: [.chatWithTools]))
+        var model = CatalogModel(id: id, uses: uses, contextLength: 400_000)
         model.catalogDate = Date().addingTimeInterval(-daysAgo * 86_400)
         model.tokenPrice = price.flatMap {
             CatalogTokenPrice(promptPerToken: Decimal($0.0) / 1_000_000, completionPerToken: Decimal($0.1) / 1_000_000)
@@ -359,46 +353,4 @@ final class OnboardingPreviewSpeechModel: OnDeviceSpeechModelManaging, @unchecke
     func delete() async throws { lock.withLock { present = false } }
     func acquire() async throws -> AsrManager { throw OnDeviceSpeechError.modelNotDownloaded }
     func release() async {}
-}
-
-/// Answers every request of the preview's own URLSession locally, like
-/// Tavily's usage check: a key containing "bad" is refused (401), "credit"
-/// is over its plan (432), "busy" is rate limited (429), "offline" gets no
-/// answer; any other key passes.
-final class OnboardingPreviewURLProtocol: URLProtocol {
-    /// Multiplies the simulated answer delay; set by the newest session
-    /// (tests pass less than 1). Sessions in one process run one at a time.
-    nonisolated(unsafe) static var pace: Double = 1
-
-    override class func canInit(with request: URLRequest) -> Bool { true }
-    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
-
-    static func status(_ authorization: String?) -> Int? {
-        let key = authorization?.lowercased() ?? ""
-        if key.contains("offline") { return nil }
-        if key.contains("bad") { return 401 }
-        if key.contains("credit") { return 432 }
-        if key.contains("busy") { return 429 }
-        return 200
-    }
-
-    override func startLoading() {
-        let status = Self.status(request.value(forHTTPHeaderField: "Authorization"))
-        let body = Data((status == 200 ? "{}" : #"{"detail":{"error":"preview"}}"#).utf8)
-        let response = HTTPURLResponse(url: request.url ?? URL(string: "https://preview.invalid")!,
-                                       statusCode: status ?? 200, httpVersion: "HTTP/1.1",
-                                       headerFields: ["Content-Type": "application/json"])!
-        DispatchQueue.global().asyncAfter(deadline: .now() + 0.6 * Self.pace) { [weak self] in
-            guard let self else { return }
-            guard status != nil else {
-                self.client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
-                return
-            }
-            self.client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-            self.client?.urlProtocol(self, didLoad: body)
-            self.client?.urlProtocolDidFinishLoading(self)
-        }
-    }
-
-    override func stopLoading() {}
 }

@@ -73,8 +73,8 @@ final class SharedModelRowsTests: XCTestCase {
                    checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults))
     }
 
-    private func llm(_ id: String, tools: Bool = true) -> CatalogModel {
-        CatalogModel(id: id, uses: tools ? [.chat, .chatWithTools] : [.chat], contextLength: 1_000_000, supportsTools: tools)
+    private func llm(_ id: String) -> CatalogModel {
+        CatalogModel(id: id, uses: [.chat], contextLength: 1_000_000)
     }
 
     private func row(_ kind: SharedModelKind, _ vm: APIAndModelsViewModel) throws -> SharedModelRow {
@@ -88,7 +88,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertEqual(Set(shared), Set(AIFeature.activeCases))
         XCTAssertEqual(shared.count, Set(shared).count)
         XCTAssertTrue(SharedModelKind.speech.features.allSatisfy { [.realtime, .recorded].contains($0.mode) })
-        XCTAssertTrue(SharedModelKind.llm.features.allSatisfy { [.llm, .llmWithTools].contains($0.mode) })
+        XCTAssertTrue(SharedModelKind.llm.features.allSatisfy { $0.mode == .llm })
     }
 
     func test_empty_mac_is_set_up_with_two_picks_and_one_check() async throws {
@@ -112,7 +112,7 @@ final class SharedModelRowsTests: XCTestCase {
         let text = await vm.selectShared(model: "claude-opus-5", account: .anthropic, kind: .llm, replaceCustom: false)
         XCTAssertTrue(text)
         XCTAssertEqual(env.probe.calls.map(\.model), ["claude-opus-5"], "one check for the whole pick")
-        XCTAssertEqual(env.probe.calls.map(\.use), [.chatWithTools], "tool use covers plain text")
+        XCTAssertEqual(env.probe.calls.map(\.use), [.chat], "the LLM features need plain text, no tool use")
         for feature in SharedModelKind.llm.features {
             XCTAssertEqual(env.routing.route(for: feature), FeatureRoute(account: .anthropic, model: "claude-opus-5"))
         }
@@ -122,23 +122,20 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertTrue(vm.rows.allSatisfy { $0.status == .ok }, "\(vm.rows.map { ($0.feature, $0.status) })")
     }
 
-    func test_text_model_without_tools_leaves_the_agent_alone() async throws {
-        let env = try makeEnv(snapshots: [.openRouter: fresh([llm("vendor/no-tools", tools: false),
-                                                              llm("anthropic/claude-sonnet-5.5")])],
+    /// The Agent runs on Claude Code or Codex, so no LLM feature needs tool
+    /// use: any text model serves the whole LLM row with one plain check.
+    func test_text_model_without_tools_serves_every_llm_feature() async throws {
+        let env = try makeEnv(snapshots: [.openRouter: fresh([llm("vendor/no-tools")])],
                               keyed: [.openRouter])
-        env.routing.setRoute(FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"), for: .agent)
         let vm = env.makeViewModel()
-        XCTAssertEqual(try row(.llm, vm).label, "OpenRouter · anthropic/claude-sonnet-5.5 · 3 not set")
-
         await vm.selectShared(model: "vendor/no-tools", account: .openRouter, kind: .llm, replaceCustom: false)
-        XCTAssertEqual(env.routing.route(for: .agent), FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"))
-        for feature in [AIFeature.dropSmartCleanup, .meetingNotes, .translation] {
-            XCTAssertEqual(env.routing.route(for: feature)?.model, "vendor/no-tools")
+        for feature in SharedModelKind.llm.features {
+            XCTAssertEqual(env.routing.route(for: feature)?.model, "vendor/no-tools", "\(feature)")
         }
         let shared = try row(.llm, vm)
-        XCTAssertEqual(shared.label, "OpenRouter · vendor/no-tools · 1 custom")
-        XCTAssertEqual(shared.custom, [.agent])
-        XCTAssertEqual(shared.notes, ["Agent: no tool support · kept anthropic/claude-sonnet-5.5"])
+        XCTAssertEqual(shared.label, "OpenRouter · vendor/no-tools")
+        XCTAssertEqual(shared.custom, [])
+        XCTAssertEqual(shared.notes, [])
         XCTAssertEqual(env.probe.calls.map(\.use), [.chat])
     }
 
@@ -154,7 +151,7 @@ final class SharedModelRowsTests: XCTestCase {
 
         await vm.selectShared(model: "claude-sonnet-5", account: .anthropic, kind: .llm, replaceCustom: false)
         XCTAssertEqual(env.routing.route(for: .translation)?.model, "claude-haiku-5-5", "custom kept")
-        XCTAssertEqual(env.routing.route(for: .agent)?.model, "claude-sonnet-5")
+        XCTAssertEqual(env.routing.route(for: .meetingNotes)?.model, "claude-sonnet-5")
         XCTAssertEqual(try row(.llm, vm).label, "Anthropic · claude-sonnet-5 · 1 custom")
 
         await vm.selectShared(model: "claude-sonnet-5", account: .anthropic, kind: .llm, replaceCustom: true)
@@ -170,8 +167,7 @@ final class SharedModelRowsTests: XCTestCase {
         let routes: [AIFeature: FeatureRoute] = [
             .dropSmartCleanup: FeatureRoute(account: .openRouter, model: "a/one"),
             .meetingNotes: FeatureRoute(account: .openRouter, model: "b/two"),
-            .translation: FeatureRoute(account: .openRouter, model: "b/two"),
-            .agent: FeatureRoute(account: .anthropic, model: "claude-opus-5"),
+            .translation: FeatureRoute(account: .anthropic, model: "claude-opus-5"),
             .dropFast: FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"),
             .dropSmart: FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"),
             .agentVoice: FeatureRoute(account: .elevenLabs, model: "scribe_v3_live"),
@@ -184,7 +180,7 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertEqual(env.routing.state, before, "reading the shared rows changes no route")
         let text = try row(.llm, vm)
         XCTAssertTrue(text.isMixed)
-        XCTAssertEqual(text.label, "Mixed · 4 custom")
+        XCTAssertEqual(text.label, "Mixed · 3 custom")
         XCTAssertNil(text.choice)
         XCTAssertEqual(try row(.speech, vm).label, "ElevenLabs · scribe_v3_live", "Scribe v3 on Meetings follows v3 Live")
         XCTAssertFalse(try row(.speech, vm).isMixed)
@@ -264,14 +260,13 @@ final class SharedModelRowsTests: XCTestCase {
         XCTAssertEqual(env2.probe.calls.map(\.use), [.realtimeSTT], "Meetings on a server use the same live check")
 
         await vm.selectShared(model: "qwen3:8b", account: account, kind: .llm, replaceCustom: false)
-        XCTAssertNil(env.routing.route(for: .agent), "a server can't serve the Agent")
         for feature in [AIFeature.dropSmartCleanup, .meetingNotes, .translation] {
             XCTAssertEqual(env.routing.route(for: feature)?.model, "qwen3:8b")
         }
         XCTAssertEqual(env2.probe.calls.map(\.use), [.realtimeSTT, .chat])
         let text = try row(.llm, vm)
-        XCTAssertEqual(text.label, "localhost:8000 · qwen3:8b · 1 not set", "a server is named by its address")
-        XCTAssertEqual(text.uncovered.map(\.feature), [.agent])
+        XCTAssertEqual(text.label, "localhost:8000 · qwen3:8b", "a server is named by its address")
+        XCTAssertTrue(text.uncovered.isEmpty)
     }
 
     func test_a_failed_check_changes_nothing_and_says_why() async throws {
@@ -337,7 +332,7 @@ final class SharedModelRowsTests: XCTestCase {
         let start = Date()
         let vm = env.makeViewModel()
         let elapsed = Date().timeIntervalSince(start)
-        XCTAssertEqual(try row(.llm, vm).label, "OpenRouter · vendor/model-1200 · 3 not set")
+        XCTAssertEqual(try row(.llm, vm).label, "OpenRouter · vendor/model-1200 · 2 not set")
         XCTAssertLessThan(elapsed, 1.0, "view model init took \(elapsed) s")
     }
 
@@ -389,45 +384,4 @@ final class SharedModelRowsTests: XCTestCase {
 
     // MARK: - OpenAI Sol and the Agent check (orchestrator task 78, REV 2)
 
-    /// Build 1720/1721 state: gpt-6.2-sol and gpt-6.1-sol were refused for the
-    /// Agent by the old Chat Completions tool check (adapter 1), plain text
-    /// passed, the Agent kept Anthropic. With the Responses check (adapter 2)
-    /// both Sol models are offered again for every LLM feature, the Agent
-    /// included, and picking one re-checks it and moves the Agent.
-    func test_sol_refused_by_the_old_tool_check_is_offered_again_and_moves_the_agent() async throws {
-        let sols = ["gpt-6.2-sol", "gpt-6.1-sol", "gpt-6-sol"]
-        let env = try makeEnv(snapshots: [.openAI: fresh(sols.map { llm($0) }), .anthropic: fresh([llm("claude-opus-5")])],
-                              keyed: [.openAI, .anthropic])
-        for feature in SharedModelKind.llm.features where feature != .agent {
-            env.routing.setRoute(FeatureRoute(account: .openAI, model: "gpt-6.1-sol"), for: feature)
-        }
-        env.routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-opus-5"), for: .agent)
-        let refusal = "Provider refused: Function tools with reasoning_effort are not supported for gpt-6.2-sol in /v1/chat/completions."
-        for model in ["gpt-6.2-sol", "gpt-6.1-sol"] {
-            env.checks.store(.failed(reason: refusal), for: ModelCheckKey(account: "openAI", model: model, use: .chatWithTools),
-                             adapterVersion: 1, at: Date())
-            env.checks.store(.passed, for: ModelCheckKey(account: "openAI", model: model, use: .chat), adapterVersion: 1, at: Date())
-        }
-        let vm = env.makeViewModel()
-
-        for feature in [SharedModelKind.llm.pickerFeature, .agent] {
-            let openAI = try XCTUnwrap(vm.sections(for: feature).first { $0.account == .openAI })
-            for model in sols {
-                let option = try XCTUnwrap(openAI.options.first { $0.model == model }, "\(model) listed for \(feature)")
-                if case .notSupported = option.state { XCTFail("\(model) is not ruled out for \(feature)") }
-            }
-        }
-        let shared = try XCTUnwrap(vm.sharedSections(.llm).first { $0.account == .openAI })
-        XCTAssertTrue(shared.options.contains { $0.model == "gpt-6.2-sol" }, "6.2-sol is back in the LLM picker")
-
-        // The Agent kept Anthropic after the refusal, so it counts as custom:
-        // the row asks first (as for any custom model); answering yes:
-        XCTAssertEqual(try row(.llm, vm).label, "OpenAI · gpt-6.1-sol · 1 custom")
-        let picked = await vm.selectShared(model: "gpt-6.2-sol", account: .openAI, kind: .llm, replaceCustom: true)
-        XCTAssertTrue(picked)
-        XCTAssertEqual(env.probe.calls.map(\.use), [.chatWithTools], "the stored failure is from the old check: checked again")
-        XCTAssertEqual(env.routing.route(for: .agent), FeatureRoute(account: .openAI, model: "gpt-6.2-sol"))
-        XCTAssertEqual(try row(.llm, vm).label, "OpenAI · gpt-6.2-sol")
-        XCTAssertEqual(try row(.llm, vm).notes, [])
-    }
 }

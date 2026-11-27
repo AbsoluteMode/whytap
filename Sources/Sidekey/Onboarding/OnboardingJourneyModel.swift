@@ -49,24 +49,6 @@ enum OnboardingKeyProblem: Equatable {
     /// No answer: the same key can simply be tried again.
     var offersRetry: Bool { self == .unreachable || self == .busy }
 
-    /// A failed Tavily check, by its HTTP status: 401 and 403 refuse the key,
-    /// 432 and 433 are Tavily's plan and pay-as-you-go limits (no credit),
-    /// 429 is too many requests, and no HTTP answer is unreachable.
-    // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-    init(tavily error: Error) {
-        if case .service(_, let status, _)? = error as? NativeAgentError {
-            switch status {
-            case 401, 403: self = .refused
-            case 402, 432, 433: self = .noCredit
-            case 429: self = .busy
-            default: self = .other("Tavily answered with an error (\(status)). Try again later.")
-            }
-        } else if error is URLError {
-            self = .unreachable
-        } else {
-            self = .other("Couldn't check the Tavily key. Try again.")
-        }
-    }
 }
 
 /// Stand-ins for the system permission requests (the standalone preview).
@@ -168,14 +150,13 @@ enum OnboardingStepOutcome: Equatable {
     var isDone: Bool { if case .done = self { return true } else { return false } }
 }
 
-/// Whose answer a key step's state is: a provider's key, the person's own
-/// server or Tavily. An accepted key belongs to its provider; another mark
+/// Whose answer a key step's state is: a provider's key or the person's own
+/// server. An accepted key belongs to its provider; another mark
 /// shows its own state and never borrows that answer.
 // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
 enum OnboardingRoute: Hashable {
     case provider(AIProviderKind)
     case server
-    case tavily
 
     var provider: AIProviderKind? { if case .provider(let kind) = self { return kind } else { return nil } }
 }
@@ -272,8 +253,6 @@ final class OnboardingJourneyModel: ObservableObject {
     static let sourceBeat: TimeInterval = 0.34
     private let pause: (TimeInterval) async -> Void
     private var sourceMove: Task<Void, Never>?
-    /// The Tavily search key, saved the way Settings -> API keys saves it.
-    let tavily: TavilySettings
     /// The person's shortcuts, Toolbox and Agent switch for the tour steps.
     let hotkeys: HotkeyPreferences
     let toolbox: HoverLayoutStore
@@ -325,7 +304,6 @@ final class OnboardingJourneyModel: ObservableObject {
         openScreenRecordingSettings: @escaping () -> Void = PermissionsHelper.openScreenRecordingSettings,
         defaultsChanges: NotificationCenter = .default,
         dwellWait: ((TimeInterval) async -> Void)? = nil,
-        tavily: TavilySettings? = nil,
         hotkeys: HotkeyPreferences? = nil,
         toolbox: HoverLayoutStore? = nil,
         agentEnabled: (() -> Bool)? = nil,
@@ -362,8 +340,6 @@ final class OnboardingJourneyModel: ObservableObject {
         pause = dwellWait ?? { seconds in try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000)) }
         language = preferences.selectedLanguage
         languageVariant = preferences.selectedLanguageVariant
-        let tavily = tavily ?? models.makeTavilySettings()
-        self.tavily = tavily
         self.hotkeys = hotkeys ?? .shared
         self.toolbox = toolbox ?? .shared
         self.agentEnabled = agentEnabled ?? { UserPreferencesCache.shared.currentAgentEnabled }
@@ -377,7 +353,6 @@ final class OnboardingJourneyModel: ObservableObject {
         var start = OnboardingStart()
         start.speechReady = dropSpeech.isReady
         start.llmReady = llm.map { $0.choice != nil || $0.isMixed } ?? false
-        start.searchReady = tavily.configured
         start.languageChosen = preferences.selectedLanguage != nil
         start.keyboardGranted = PermissionsHelper.keyboardReady(snapshot, settingsOnly: permissions.settingsOnly)
         start.microphoneGranted = snapshot.microphoneGranted
@@ -386,7 +361,6 @@ final class OnboardingJourneyModel: ObservableObject {
         start.onDeviceSupported = supportsOnDevice
         self.start = start
         var progress = OnboardingProgress()
-        if case .server? = llm?.choice?.account { progress.languageModelSelfHosted = true }
         progress.needsInputMonitoring = permissions.dropHotkeyStatus == .inputMonitoringRequired
         progress.speechExpected = start.speechReady
         self.progress = progress
@@ -435,7 +409,7 @@ final class OnboardingJourneyModel: ObservableObject {
         switch step {
         case .speechKey: return serverForms.contains(.speech) ? .server : .provider(speechProvider)
         case .llmKey: return serverForms.contains(.languageModel) ? .server : .provider(llmProvider)
-        default: return .tavily
+        default: return .provider(llmProvider)
         }
     }
 
@@ -712,15 +686,16 @@ final class OnboardingJourneyModel: ObservableObject {
 
     // MARK: - 3. Language model key
 
-    /// The model the LLM step preselects for `provider`: the Agent's
-    /// recommended one when the registry has it (so the pick also serves the
-    /// Agent's tools), otherwise the newest catalog model the Agent can use.
-    /// OpenAI has no registry default: its live catalog is the source.
+    /// The model the LLM step preselects for `provider`: the recommended one
+    /// for the shared LLM row's features when the registry has it, otherwise
+    /// the newest catalog model they can use. OpenAI has no registry default:
+    /// its live catalog is the source. The Agent runs on the user's Claude Code
+    /// or Codex and takes no model from here.
     func preselectedModel(_ provider: AIProviderKind) -> String? {
         // The provider's current catalog decides (its recommended family's
         // newest model); the registry only before the catalog is there.
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-        recommendedModel(.llmKey, provider: provider) ?? ModelRegistry.recommended(for: .agent, kind: provider)
+        recommendedModel(.llmKey, provider: provider) ?? ModelRegistry.recommended(for: SharedModelKind.llm.pickerFeature, kind: provider)
     }
 
     /// The model a key step marks "Recommended": the language model step's
@@ -776,7 +751,7 @@ final class OnboardingJourneyModel: ObservableObject {
     private func allChoices(for provider: AIProviderKind, speech: Bool) -> [OnboardingModelChoice] {
         _ = revision
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return [] }
-        let options = models.sections(for: speech ? .dropFast : .agent).filter { $0.account == account }.flatMap(\.options)
+        let options = models.sections(for: speech ? .dropFast : SharedModelKind.llm.pickerFeature).filter { $0.account == account }.flatMap(\.options)
         let usable = options.filter { if case .notSupported = $0.state { return false } else { return true } }
         let all = usable.map { option -> OnboardingModelChoice in
             let perMinute = provider == .openAI ? ModelRegistry.openAISpeechUSDPerMinute(option.model) : nil
@@ -882,12 +857,10 @@ final class OnboardingJourneyModel: ObservableObject {
     /// was picked: a format problem, never a guess.
     // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
     func rejectUnrecognizedKey(on step: OnboardingStep) {
-        // The search step has one provider: a key without its format is a
-        // format problem, not "which provider is it".
-        let problem: OnboardingKeyProblem = step == .search ? .format : .unrecognized
+        let problem = OnboardingKeyProblem.unrecognized
         keyProblems[step] = problem
         attempts[step] = shownRoute(step)
-        outcomes[step] = .failed(problem.message(provider: step == .search ? "Tavily" : ""))
+        outcomes[step] = .failed(problem.message(provider: ""))
     }
 
     /// The key steps showing their own-server fields in place of the key
@@ -904,7 +877,7 @@ final class OnboardingJourneyModel: ObservableObject {
     /// so the person names only this step's model.
     func serverPrefill(for kind: OnboardingKeyStageKind) -> OnboardingServerDraft? {
         let other: OnboardingKeyStageKind = kind == .speech ? .languageModel : .speech
-        guard kind != .search, let added = addedServers[other] else { return nil }
+        guard let added = addedServers[other] else { return nil }
         return OnboardingServerDraft(address: added.address, key: added.key)
     }
 
@@ -987,9 +960,7 @@ final class OnboardingJourneyModel: ObservableObject {
         guard applied || models.sharedRow(shared)?.choice != nil else {
             outcomes[step] = .failed(notes.first ?? "\(server.name) · \(name) could not be used"); return
         }
-        if shared == .llm {
-            progress.languageModelSelfHosted = true
-        } else {
+        if shared == .speech {
             progress.speechExpected = true
         }
         pickedModels.remove(step)
@@ -1014,7 +985,7 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         // Saving the key loaded its catalog, so a catalog-only provider has a model now.
         guard let model = llmModel ?? preselectedModel(provider) else {
-            outcomes[.llmKey] = .failed("\(provider.displayName) lists no model the Agent can use")
+            outcomes[.llmKey] = .failed("\(provider.displayName) lists no model Whytap can use")
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .llm, replaceCustom: false,
@@ -1025,8 +996,6 @@ final class OnboardingJourneyModel: ObservableObject {
             outcomes[.llmKey] = .failed(notes.first ?? "\(provider.displayName) · \(model) could not be used")
             return
         }
-        // A provider's key: its own web search, no Tavily step.
-        progress.languageModelSelfHosted = false
         // With a choice of models the step waits for a pick or Next, which
         // keeps the recommended model already set.
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
@@ -1071,7 +1040,6 @@ final class OnboardingJourneyModel: ObservableObject {
         switch kind {
         case .speech: return speechProviders.filter(keySaved)
         case .languageModel: return Self.llmProviders.filter(keySaved)
-        case .search: return []
         }
     }
 
@@ -1081,7 +1049,6 @@ final class OnboardingJourneyModel: ObservableObject {
         switch kind {
         case .speech: speechProvider = provider
         case .languageModel: llmProvider = provider
-        case .search: break
         }
     }
 
@@ -1095,26 +1062,6 @@ final class OnboardingJourneyModel: ObservableObject {
         case .languageModel:
             guard keySaved(llmProvider) else { return }
             await useLLMKey("", provider: llmProvider)
-        case .search:
-            guard tavily.configured else { return }
-            await useSearchKey("")
-        }
-    }
-
-    // MARK: - 4. Search
-
-    func useSearchKey(_ key: String) async {
-        attempts[.search] = .tavily
-        outcomes[.search] = .working("Checking the Tavily key…")
-        keyProblems[.search] = nil
-        tavily.draftKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
-        await tavily.save()
-        if tavily.messageIsError || !tavily.configured {
-            let problem = tavily.lastFailure.map(OnboardingKeyProblem.init(tavily:)) ?? .other(tavily.message ?? "Key not accepted")
-            keyProblems[.search] = problem
-            outcomes[.search] = .failed(problem.message(provider: "Tavily"))
-        } else {
-            succeed(.search, "Tavily", route: .tavily)
         }
     }
 

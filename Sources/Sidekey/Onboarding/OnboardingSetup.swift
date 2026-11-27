@@ -110,8 +110,10 @@ enum OnboardingFeatureAction: Equatable {
         return .toggle
     }
 
-    /// The Agent switch connects the native Agent, which needs its model.
-    static func agent(selectedModel: String?) -> OnboardingFeatureAction {
-        selectedModel == nil ? .addModel(.agent) : .toggle
+    /// The Agent runs on a harness (Claude Code or Codex): without one, the
+    /// step opens Keys & models on Harness (`.agent` focuses that row).
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+    static func agent(harness: CLIProviderID?) -> OnboardingFeatureAction {
+        harness == nil ? .addModel(.agent) : .toggle
     }
 }

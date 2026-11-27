@@ -298,7 +298,7 @@ struct OnboardingSpeechPage: View {
                     }
                     .padding(.top, 12)
                 }
-                OnboardingKeyCard(model: model, models: model.models, tavily: model.tavily)
+                OnboardingKeyCard(model: model, models: model.models)
                     .padding(.top, 10)
             }
         } footer: {
@@ -475,15 +475,13 @@ struct OnboardingLanguageList: View {
     }
 }
 
-/// A key the onboarding can save: a model provider's or Tavily's.
+/// A key the onboarding can save: a model provider's.
 enum OnboardingKeyTarget: Hashable {
     case provider(AIProviderKind)
-    case tavily
 
     var name: String {
         switch self {
         case .provider(let kind): return kind.displayName
-        case .tavily: return "Tavily"
         }
     }
 
@@ -498,7 +496,7 @@ enum OnboardingKeyTarget: Hashable {
 /// offer from Settings -> Keys & models -> API hints (the one source for
 /// offers; a provider without one gets none).
 struct OnboardingKeyOffer: Equatable {
-    enum Category: String { case speech = "SPEECH", ai = "AI", search = "SEARCH" }
+    enum Category: String { case speech = "SPEECH", ai = "AI" }
 
     let target: OnboardingKeyTarget
     let category: Category
@@ -508,11 +506,10 @@ struct OnboardingKeyOffer: Equatable {
     let url: URL?
     let detail: String?
 
-    /// Speech first (Drop needs one), then language models, then search.
+    /// Speech first (Drop needs one), then language models.
     static let targets: [(OnboardingKeyTarget, Category)] =
         OnboardingDropSpeech.keyProviders.map { (.provider($0), .speech) }
-        + [(.provider(.openRouter), .ai), (.provider(.openAI), .ai), (.provider(.anthropic), .ai),
-           (.tavily, .search)]
+        + [(.provider(.openRouter), .ai), (.provider(.openAI), .ai), (.provider(.anthropic), .ai)]
 
     /// Which provider's key an API hints offer is spent with.
     static func target(of hint: APIHintsView.Hint) -> OnboardingKeyTarget? {
@@ -558,7 +555,6 @@ struct OnboardingKeyOffer: Equatable {
 struct OnboardingKeyCard: View {
     @ObservedObject var model: OnboardingModel
     @ObservedObject var models: APIAndModelsViewModel
-    @ObservedObject var tavily: TavilySettings
     @State private var key = ""
     @State private var saving = false
     @State private var failure: String?
@@ -611,7 +607,6 @@ struct OnboardingKeyCard: View {
     private func isSaved(_ target: OnboardingKeyTarget) -> Bool {
         if saved.contains(target) { return true }
         switch target {
-        case .tavily: return tavily.configured
         case .provider(let kind):
             return APIAndModelsViewModel.builtInAccount(for: kind).map(models.accountIsAvailableForSelection) ?? false
         }
@@ -635,7 +630,6 @@ struct OnboardingKeyCard: View {
                 Group {
                     switch offer.target {
                     case .provider(let kind): ProviderKindIcon(kind: kind, size: 17)
-                    case .tavily: ProviderKindIcon(assetName: "tavily", size: 17)
                     }
                 }
                 .foregroundColor(OnboardingTheme.ink)
@@ -723,7 +717,7 @@ struct OnboardingKeyCard: View {
     }
 
     /// The same checks and Keychain saves as Settings -> API keys
-    /// (`ProviderKeyForm.save` with the provider's account, `TavilySettings.save`).
+    /// (`ProviderKeyForm.save` with the provider's account).
     private func save() {
         let candidate = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !candidate.isEmpty, !saving, let target = model.keyTarget else { return }
@@ -734,10 +728,6 @@ struct OnboardingKeyCard: View {
         Task {
             let problem: String?
             switch target {
-            case .tavily:
-                tavily.draftKey = candidate
-                await tavily.save()
-                problem = tavily.messageIsError ? (tavily.message ?? "Key not accepted") : nil
             case .provider(let kind):
                 if let account = APIAndModelsViewModel.builtInAccount(for: kind) {
                     problem = await models.replaceKey(candidate, for: account)

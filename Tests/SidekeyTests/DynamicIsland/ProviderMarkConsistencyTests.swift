@@ -4,8 +4,8 @@ import XCTest
 @testable import Sidekey
 
 /// A route on Anthropic's own API shows the bundled Anthropic mark everywhere
-/// (island ticker, Keys & models), the same asset the Agent uses for Anthropic
-/// models, never a generic SF Symbol.
+/// (island ticker, Keys & models), the same bundled asset as the Anthropic
+/// key, never a generic SF Symbol.
 @MainActor
 final class ProviderMarkConsistencyTests: XCTestCase {
     override func setUp() async throws {
@@ -30,27 +30,21 @@ final class ProviderMarkConsistencyTests: XCTestCase {
     func testAnthropicRoutesShowTheAgentsBundledMarkNotASystemSymbol() throws {
         let routing = routing()
         let route = FeatureRoute(account: .anthropic, model: "claude-sonnet-5-5")
-        routing.setRoute(route, for: .agent)
         routing.setRoute(route, for: .dropSmartCleanup)
-
-        // The Agent on an Anthropic route: the reference mark.
-        let agent = TranscriptionProviderBrand.agent(.native, route: routing.route(for: .agent))
-        XCTAssertEqual(agent.assetName, "model-anthropic")
-        XCTAssertNil(agent.systemName)
 
         // Drop Smart cleanup ("thinking…" in the island) on the same account.
         let cleanup = try XCTUnwrap(TranscriptionProviderBrand.currentDropCleanup(routing: routing))
-        XCTAssertEqual(cleanup.assetName, agent.assetName)
+        XCTAssertEqual(cleanup.assetName, "model-anthropic")
         XCTAssertNil(cleanup.systemName)
         XCTAssertEqual(cleanup.label, "Anthropic")
 
         // Any other surface that asks for the account's brand.
         let account = TranscriptionProviderBrand.brand(for: .anthropic, in: routing)
-        XCTAssertEqual(account.assetName, agent.assetName)
+        XCTAssertEqual(account.assetName, "model-anthropic")
         XCTAssertNil(account.systemName)
 
         // Settings → Keys & models tiles, chips and model rows.
-        XCTAssertEqual(ProviderKindIcon.assetName(for: .anthropic), agent.assetName)
+        XCTAssertEqual(ProviderKindIcon.assetName(for: .anthropic), "model-anthropic")
 
         // An unset feature still shows nothing rather than a guessed mark.
         routing.setRoute(nil, for: .dropSmartCleanup)
@@ -65,8 +59,6 @@ final class ProviderMarkConsistencyTests: XCTestCase {
             (.openAI, .openAI, "model-openai"), (.anthropic, .anthropic, "model-anthropic"),
         ]
         for (account, kind, asset) in cases {
-            let agent = TranscriptionProviderBrand.agent(.native, route: .init(account: account, model: "exact-user-model"))
-            XCTAssertEqual(agent.assetName, asset)
             XCTAssertEqual(TranscriptionProviderBrand.brand(for: account, in: routing).assetName, asset)
             XCTAssertEqual(ProviderKindIcon.assetName(for: kind), asset)
             XCTAssertEqual(OnboardingKeyProvider.of(kind)?.assetName, asset)
@@ -74,9 +66,6 @@ final class ProviderMarkConsistencyTests: XCTestCase {
         }
         // Drop dictation on an OpenAI key and the plan hint use it too.
         XCTAssertEqual(TranscriptionProviderBrand.byok(.openAI).assetName, "model-openai")
-        // An OpenRouter route to the same authors keeps the same marks.
-        let routed = TranscriptionProviderBrand.agent(.native, route: .init(account: .openRouter, model: "openai/gpt-exact"))
-        XCTAssertEqual(routed.assetName, "model-openai")
     }
 
     func testAnthropicMarkIsBundledAndReadsOnTheBlackIslandAtTickerSize() throws {

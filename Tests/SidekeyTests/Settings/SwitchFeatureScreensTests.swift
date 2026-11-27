@@ -48,12 +48,12 @@ final class SwitchFeatureScreensTests: XCTestCase {
     func testAgentSwitchStaysOffAndSaysWhyWhenItCannotConnect() async throws {
         let fixture = try await fixture(.freshInstall)
         var environment = fixture.environment
-        environment.setAgent = { _ in AgentOtherSection.Problem.noModel.message }
+        environment.setAgent = { _ in AgentOtherSection.Problem.noHarness.message }
         let agent = FeatureSwitchModel(feature: .agent, isOn: false, environment: environment)
         await agent.turn(true)?.value
         XCTAssertFalse(agent.isOn)
         XCTAssertFalse(agent.busy)
-        XCTAssertEqual(agent.problem, "Choose an Agent model in Keys & models.")
+        XCTAssertEqual(agent.problem, "Choose Claude Code or Codex under Harness in Keys & models → Models.")
 
         environment.setAgent = { _ in nil }
         let connected = FeatureSwitchModel(feature: .agent, isOn: false, environment: environment)
@@ -72,7 +72,7 @@ final class SwitchFeatureScreensTests: XCTestCase {
     func testAnAgentTurnedOnElsewhereDropsTheOldReason() async throws {
         let fixture = try await fixture(.freshInstall)
         var environment = fixture.environment
-        environment.setAgent = { _ in AgentOtherSection.Problem.noModel.message }
+        environment.setAgent = { _ in AgentOtherSection.Problem.noHarness.message }
         let agent = FeatureSwitchModel(feature: .agent, isOn: false, environment: environment)
         await agent.turn(true)?.value
         XCTAssertNotNil(agent.problem)
@@ -224,5 +224,25 @@ final class SwitchFeatureScreensTests: XCTestCase {
                 }
             }
         }
+    }
+
+    // MARK: - The switch and the harness
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+
+    func testAgentSwitchNeedsAHarnessAndOffKeepsIt() {
+        let suite = "harness-switch-\(UUID())"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = AgentProviderStore(defaults: defaults)
+        var toggled: [Bool] = []
+        XCTAssertEqual(AgentOtherSection.turn(true, store: store) { toggled.append($0) }, .noHarness)
+        XCTAssertEqual(toggled, [], "never turns on without a harness")
+        store.markConnected(.codex)
+        XCTAssertNil(AgentOtherSection.turn(true, store: store) { toggled.append($0) })
+        XCTAssertNil(AgentOtherSection.turn(false, store: store) { toggled.append($0) })
+        XCTAssertEqual(toggled, [true, false])
+        XCTAssertEqual(store.activeProvider, .codex, "turning the Agent off keeps the harness")
+        XCTAssertTrue(AgentOtherSection.isOn(enabled: true, activeProvider: .claude))
+        XCTAssertFalse(AgentOtherSection.isOn(enabled: false, activeProvider: .codex))
     }
 }

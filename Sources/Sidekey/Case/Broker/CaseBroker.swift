@@ -56,17 +56,13 @@ extension CaseCallerResolving {
 /// immediately.
 struct CaseSystemCallerResolver: CaseCallerResolving {
     let inspector: CaseProcessInspecting
-    var builtInOpenCodePIDs: () -> Set<pid_t> = { [] }
 
     func resolve(peerPID: pid_t, registrations: [CaseAppRegistration]) -> CaseCaller {
-        CaseCallerResolver(
-            inspector: inspector, registrations: registrations,
-            builtInOpenCodePIDs: builtInOpenCodePIDs()
-        ).resolve(peerPID: peerPID)
+        CaseCallerResolver(inspector: inspector, registrations: registrations).resolve(peerPID: peerPID)
     }
 
     func terminalAppName(peerPID: pid_t) -> String? {
-        CaseCallerResolver(inspector: inspector, registrations: [], builtInOpenCodePIDs: [])
+        CaseCallerResolver(inspector: inspector, registrations: [])
             .terminalAppName(peerPID: peerPID)
     }
 }

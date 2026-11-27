@@ -7,11 +7,9 @@ struct ProviderKeyTiles: View {
     enum Target: Hashable {
         case provider(AIProviderKind)
         case server(ProviderAccount)
-        case tavily
     }
 
     @ObservedObject var viewModel: APIAndModelsViewModel
-    @StateObject private var tavily: TavilySettings
     let onRemoveFailure: () -> Void
     let onSaveResult: (Bool) -> Void
     /// Why a key was not saved, after `onSaveResult(false)`.
@@ -24,14 +22,13 @@ struct ProviderKeyTiles: View {
     @FocusState private var focused: Target?
 
     init(viewModel: APIAndModelsViewModel, initiallyExpanded: Target? = nil,
-         tavily: TavilySettings? = nil, onRemoveFailure: @escaping () -> Void = {},
+         onRemoveFailure: @escaping () -> Void = {},
          onSaveResult: @escaping (Bool) -> Void = { _ in },
          onSaveFailure: @escaping (String) -> Void = { _ in }) {
         self.viewModel = viewModel
         self.onSaveResult = onSaveResult
         self.onSaveFailure = onSaveFailure
         self.onRemoveFailure = onRemoveFailure
-        _tavily = StateObject(wrappedValue: tavily ?? viewModel.makeTavilySettings())
         _expanded = State(initialValue: initiallyExpanded)
     }
 
@@ -39,7 +36,7 @@ struct ProviderKeyTiles: View {
         // On this Mac is not a key: it has its own card above the tiles.
         AIProviderKind.allCases
             .filter { $0 != .onDevice }
-            .map(Target.provider) + [.tavily]
+            .map(Target.provider)
             + viewModel.chips.compactMap { chip in
                 if case .server = chip.account { return .server(chip.account) }
                 return nil
@@ -51,9 +48,7 @@ struct ProviderKeyTiles: View {
         ProviderGrid(tileCount: items.count, expandedIndex: expanded.flatMap { items.firstIndex(of: $0) }) {
             ForEach(items, id: \.self) { target in tile(target) }
             if let expanded {
-                if expanded == .tavily {
-                    TavilyKeyForm(settings: tavily, onSaveResult: onSaveResult, onRemoveFailure: onRemoveFailure, onClose: close)
-                } else if let kind = kind(expanded) {
+                if let kind = kind(expanded) {
                     ProviderKeyForm(viewModel: viewModel, kind: kind, account: account(expanded),
                                 onBusyChanged: { busy = $0 }, onSaveResult: onSaveResult,
                                 onSaveFailure: onSaveFailure, onClose: close)
@@ -62,7 +57,7 @@ struct ProviderKeyTiles: View {
             }
         }
         .onKeyPress(.escape) {
-            guard expanded != nil, !busy, !tavily.saving else { return .ignored }
+            guard expanded != nil, !busy else { return .ignored }
             close()
             return .handled
         }
@@ -74,10 +69,9 @@ struct ProviderKeyTiles: View {
     private func tile(_ target: Target) -> some View {
         let provider = kind(target)
         let chip = account(target).flatMap { account in viewModel.chips.first { $0.account == account } }
-        let title = target == .tavily ? "Tavily" : chip?.title ?? (provider == .openAICompatible ? "Custom server" : provider?.displayName ?? "")
-        let status = target == .tavily ? (tavily.configured ? "Key saved" : "Add API key")
-            : chip?.statusText ?? (provider == .openAICompatible ? "Add server" : "Add API key")
-        let hasKey = target == .tavily ? tavily.configured : chip != nil
+        let title = chip?.title ?? (provider == .openAICompatible ? "Custom server" : provider?.displayName ?? "")
+        let status = chip?.statusText ?? (provider == .openAICompatible ? "Add server" : "Add API key")
+        let hasKey = chip != nil
         // Only a verified key turns green; limited, rejected or unchecked keys keep the secondary colour.
         let keyWorks = chip?.keyWorks == true
         let selected = expanded == target
@@ -93,7 +87,6 @@ struct ProviderKeyTiles: View {
             HStack(alignment: .top, spacing: 10) {
                 Group {
                     if let provider { ProviderKindIcon(kind: provider, size: 22) }
-                    else if target == .tavily { ProviderKindIcon(assetName: "tavily", size: 22) }
                     else { Image(systemName: "globe").font(.system(size: 20)).accessibilityHidden(true) }
                 }
                 .frame(width: 22, height: 22)
@@ -101,7 +94,7 @@ struct ProviderKeyTiles: View {
                     Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .lineLimit(1)
-                    Text(provider?.keyTileDetail ?? "Web search")
+                    Text(provider?.keyTileDetail ?? "")
                         .font(.system(size: 11.5))
                         .foregroundStyle(MacSettingsTheme.text2)
                         .lineLimit(1)
@@ -128,7 +121,7 @@ struct ProviderKeyTiles: View {
         }
         .help("\(title): \(status)")
         .buttonStyle(APIModelFeedbackStyle(cornerRadius: 10))
-        .disabled(busy || tavily.saving)
+        .disabled(busy)
         .focused($focused, equals: target)
         .accessibilityLabel(title)
         .accessibilityValue("\(status), \(selected ? "Expanded" : "Collapsed")")
@@ -140,7 +133,6 @@ struct ProviderKeyTiles: View {
         switch target {
         case .provider(let kind): return kind == .openAICompatible
         case .server: return true
-        case .tavily: return false
         }
     }
 
@@ -148,7 +140,6 @@ struct ProviderKeyTiles: View {
         switch target {
         case .provider(let kind): return kind
         case .server(let account): return account.kind
-        case .tavily: return nil
         }
     }
 
@@ -156,7 +147,6 @@ struct ProviderKeyTiles: View {
         switch target {
         case .provider(let kind): return viewModel.account(for: kind)
         case .server(let account): return account
-        case .tavily: return nil
         }
     }
 

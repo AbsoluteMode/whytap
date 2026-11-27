@@ -157,61 +157,6 @@ final class AIUsageTests: XCTestCase {
         XCTAssertNil(AIUsageAudio.wavSeconds(wav.prefix(44)))
     }
 
-    func test_agent_deduplicates_step_parts_and_preserves_each_paid_step() {
-        var recorded: [AIUsageEvent] = []
-        let meter = AIUsageAgentMeter(account: .anthropic, model: "claude-test", record: { recorded.append($0) })
-        let first = #"{"type":"step_finish","sessionID":"session-test","part":{"id":"a","cost":0.02}}"#
-        meter.consume(first); meter.consume(first)
-        meter.consume(#"{"type":"step_finish","sessionID":"session-test","part":{"id":"b","cost":0.03}}"#)
-        meter.finish(); meter.finish()
-        XCTAssertEqual(recorded.count, 2)
-        XCTAssertEqual(recorded.compactMap(\.amount).reduce(0, +), 0.05, accuracy: 0.000001)
-        XCTAssertTrue(recorded.allSatisfy { $0.context.account == .anthropic })
-        XCTAssertTrue(recorded.allSatisfy { $0.basis == .estimated })
-    }
-
-    func test_openai_agent_expenses_keep_the_direct_provider_identity() {
-        var events: [AIUsageEvent] = []
-        let meter = AIUsageAgentMeter(account: OpenCodeModelProvider.openAI.account, model: "selected-openai-model",
-                                      record: { events.append($0) })
-        meter.consume(#"{"type":"step_finish","sessionID":"fixture","part":{"id":"one","cost":0.01}}"#)
-        meter.finish()
-        XCTAssertEqual(events.count, 1)
-        XCTAssertEqual(events.first?.context.account, .openAI)
-        XCTAssertEqual(events.first?.context.model, "selected-openai-model")
-    }
-
-    func test_agent_interrupted_later_step_and_child_task_preserve_incomplete_total() {
-        for tail in [#"{"type":"step_start"}"#, #"{"type":"tool_use","part":{"tool":"task"}}"#] {
-            var events: [AIUsageEvent] = []
-            let meter = AIUsageAgentMeter(account: .openRouter, model: "paid-model", record: { events.append($0) })
-            meter.consume(#"{"type":"step_finish","part":{"id":"one","cost":0.02}}"#)
-            meter.consume(tail); meter.finish(); meter.finish()
-            XCTAssertEqual(events.count, 2)
-            XCTAssertEqual(AIUsagePrice(events: events).text, "$0.02. Estimated · 1 unpriced call")
-        }
-    }
-
-    func test_agent_cancel_during_child_work_without_tool_event_remains_incomplete() {
-        var events: [AIUsageEvent] = []
-        let meter = AIUsageAgentMeter(account: .openRouter, model: "paid-model", record: { events.append($0) })
-        meter.consume(#"{"type":"step_finish","part":{"id":"parent","cost":0.02}}"#)
-        meter.finish(interrupted: true); meter.finish(interrupted: true)
-        XCTAssertEqual(events.count, 2)
-        XCTAssertEqual(AIUsagePrice(events: events).text, "$0.02. Estimated · 1 unpriced call")
-    }
-
-    func test_agent_missing_pricing_and_early_exit_remain_unknown() {
-        var events: [AIUsageEvent] = []
-        let meter = AIUsageAgentMeter(account: .openRouter, model: "not-free", record: { events.append($0) })
-        meter.consume(#"{"type":"step_finish","part":{"id":"step","cost":0}}"#)
-        meter.finish()
-        XCTAssertEqual(events.count, 1); XCTAssertNil(events[0].amount)
-        let second = AIUsageAgentMeter(account: .openRouter, model: "other", record: { events.append($0) })
-        second.finish(); second.finish()
-        XCTAssertEqual(events.count, 2); XCTAssertNil(events[1].amount)
-    }
-
     func test_metered_audio_preserves_final_join_and_records_close_once() async {
         let upstream = Upstream()
         var events: [AIUsageEvent] = []

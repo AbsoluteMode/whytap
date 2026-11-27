@@ -15,13 +15,16 @@ final class CodexRunStreamingTests: XCTestCase {
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, args, _, onLine, onExit in
+            runStreaming: { _, args, _, stdin, onLine, onExit in
                 XCTAssertTrue(args.contains("exec"))
                 XCTAssertTrue(args.contains("--json"))
-                XCTAssertTrue(args.contains("--dangerously-bypass-approvals-and-sandbox"),
-                              "skip-permission mode: no approvals + no sandbox, accepted on exec AND resume; got: \(args)")
-                XCTAssertFalse(args.contains("sandbox_mode=workspace-write"),
-                               "sandbox is dropped in skip-permission mode; got: \(args)")
+                XCTAssertFalse(args.contains("--dangerously-bypass-approvals-and-sandbox"),
+                               "never a blanket bypass; got: \(args)")
+                XCTAssertTrue(args.contains(#"sandbox_mode="workspace-write""#), "actions on by default; got: \(args)")
+                XCTAssertTrue(args.contains(#"approvals_reviewer="auto_review""#), "got: \(args)")
+                XCTAssertEqual(args.last, "-", "the prompt is read from stdin")
+                XCTAssertFalse(args.contains("hi"), "the prompt never appears in argv")
+                XCTAssertEqual(String(decoding: stdin, as: UTF8.self), "hi")
                 XCTAssertFalse(args.contains("-s"),
                                "must NOT pass -s/--sandbox — `codex exec resume` rejects it (exit 2)")
                 onLine(#"{"type":"thread.started","thread_id":"t-1"}"#)
@@ -45,7 +48,7 @@ final class CodexRunStreamingTests: XCTestCase {
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/Applications/Codex.app/Contents/Resources/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, _, _, onLine, onExit in
+            runStreaming: { _, _, _, _, onLine, onExit in
                 onLine(#"{"type":"thread.started","thread_id":"t-1"}"#)
                 onLine(#"{"type":"item.completed","item":{"id":"i1","type":"agent_message","text":"Open this.\n\n```json\n{\"kind\":\"useful.links\",\"schemaVersion\":1,\"links\":[{\"url\":\"https://linear.app/example/issue/EX-209\",\"description\":\"Security audit\",\"provider\":\"linear\"}]}\n```"}}"#)
                 onLine(#"{"type":"turn.completed","usage":{}}"#)
@@ -74,14 +77,14 @@ final class CodexRunStreamingTests: XCTestCase {
         XCTAssertTrue(events.contains(.done(sources: [])), "events: \(events)")
     }
 
-    // MARK: - Test 2: resume — thread_id + prompt are trailing positionals
+    // MARK: - Test 2: resume — thread_id + `-` (stdin prompt) are trailing positionals
 
     func testResumeForwardsThreadID() async {
         var captured: [String] = []
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/x/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, args, _, _, onExit in captured = args; onExit(0); return CodexProcessHandle.noop })
+            runStreaming: { _, args, _, _, _, onExit in captured = args; onExit(0); return CodexProcessHandle.noop })
 
         var it = provider.run(prompt: "follow", resumeSessionID: "t-9").makeAsyncIterator()
         while await it.next() != nil {}
@@ -93,8 +96,9 @@ final class CodexRunStreamingTests: XCTestCase {
         // SESSION_ID then PROMPT are the trailing positionals.
         XCTAssertEqual(captured.suffix(2).first, "t-9",
                        "Penultimate arg must be thread_id 't-9', got: \(captured)")
-        XCTAssertEqual(captured.last, "follow",
-                       "Last arg must be the prompt, got: \(captured)")
+        XCTAssertEqual(captured.last, "-",
+                       "Last arg must be `-` (prompt on stdin), got: \(captured)")
+        XCTAssertFalse(captured.contains("follow"), "the prompt never appears in argv")
     }
 
     // MARK: - Test 3: non-zero exit without turn.completed -> synthetic error
@@ -103,7 +107,7 @@ final class CodexRunStreamingTests: XCTestCase {
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/x/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, _, _, _, onExit in
+            runStreaming: { _, _, _, _, _, onExit in
                 // No lines at all — process just dies with code 1.
                 onExit(1)
                 return CodexProcessHandle.noop
@@ -129,7 +133,7 @@ final class CodexRunStreamingTests: XCTestCase {
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/x/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, _, _, onLine, onExit in
+            runStreaming: { _, _, _, _, onLine, onExit in
                 onLine(#"{"type":"turn.completed","usage":{}}"#)
                 onExit(1)  // non-zero, but turn.completed already seen
                 return CodexProcessHandle.noop
@@ -166,7 +170,7 @@ final class CodexRunStreamingTests: XCTestCase {
             locate: { URL(fileURLWithPath: "/x/codex") },
             runOneShot: { _, _ in nil },
             // Never call onExit -> stream stays open until the consumer cancels.
-            runStreaming: { _, _, _, _, _ in fake })
+            runStreaming: { _, _, _, _, _, _ in fake })
 
         let stream = provider.run(prompt: "long", resumeSessionID: nil)
         let started = expectation(description: "consumer began iterating")
@@ -206,7 +210,7 @@ final class CodexRunStreamingTests: XCTestCase {
         let provider = CodexProvider(
             locate: { URL(fileURLWithPath: "/x/codex") },
             runOneShot: { _, _ in nil },
-            runStreaming: { _, _, _, _, _ in fake },
+            runStreaming: { _, _, _, _, _, _ in fake },
             idleSoftTimeout: 0.05,
             idleHardTimeout: 0.1)
 
@@ -223,9 +227,9 @@ final class CodexRunStreamingTests: XCTestCase {
 
     // MARK: - Test 7: real-Process termination via tail -f /dev/null
     //
-    // Codex's defaultRunStreaming uses stdin=nullDevice, so `cat` would EOF and
-    // exit immediately. Use `tail -f /dev/null` instead — a cheap, always-present
-    // blocker that never exits on its own. terminate() (SIGTERM) must kill it and
+    // Codex's defaultRunStreaming writes the prompt and closes stdin, so `cat`
+    // would EOF and exit immediately. Use `tail -f /dev/null` instead — a cheap,
+    // always-present blocker that never exits on its own. terminate() (SIGTERM) must kill it and
     // the terminationHandler must fire onExit (pipe teardown).
 
     func testRealBlockingProcessIsTerminatedAndFiresExit() async throws {
@@ -237,10 +241,36 @@ final class CodexRunStreamingTests: XCTestCase {
             binary: URL(fileURLWithPath: path),
             args: ["-f", "/dev/null"],
             workingDir: nil,
+            stdin: Data("prompt".utf8),
             onLine: { _ in },
             onExit: { _ in exited.fulfill() }
         )
         handle.terminate()
         await fulfillment(of: [exited], timeout: 5)
+    }
+
+    // MARK: - Real process: the prompt arrives on stdin, multi-line, and the
+    // last JSON lines written in one chunk at exit are each parsed.
+
+    func testRealProcessReadsPromptFromStdinAndParsesFinalLines() async throws {
+        let script = FileManager.default.temporaryDirectory
+            .appendingPathComponent("fake-codex-\(UUID().uuidString).sh")
+        // Echo stdin back inside an agent_message, then emit every final event
+        // in one printf so they reach the reader as a single chunk at exit.
+        try """
+        #!/bin/sh
+        input=$(cat | tr '\\n' '|')
+        printf '{"type":"thread.started","thread_id":"t-9"}\\n{"type":"item.completed","item":{"id":"i","type":"agent_message","text":"%s"}}\\n{"type":"turn.completed","usage":{}}' "$input"
+        """.write(to: script, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+        defer { try? FileManager.default.removeItem(at: script) }
+
+        let provider = CodexProvider(locate: { script }, runOneShot: { _, _ in nil })
+        var events: [AgentSSEEvent] = []
+        for await event in provider.run(prompt: "line one\n-- line two", resumeSessionID: nil) { events.append(event) }
+
+        XCTAssertTrue(events.contains(.finalAnswer(text: "line one|-- line two")), "events: \(events)")
+        XCTAssertTrue(events.contains(.done(sources: [])), "events: \(events)")
+        XCTAssertEqual(provider.lastSessionID, "t-9")
     }
 }

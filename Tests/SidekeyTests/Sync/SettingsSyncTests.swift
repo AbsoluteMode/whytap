@@ -829,14 +829,14 @@ final class SettingsSyncLiveReloadTests: XCTestCase {
 
     func testRoutingStoreReadsAnotherMacsRoutes() throws {
         let store = AIRoutingStore(defaults: defaults)
-        XCTAssertNil(store.route(for: .agent))
+        XCTAssertNil(store.route(for: .translation))
         let route = FeatureRoute(account: .anthropic, model: "claude-opus-5-5")
-        let state = AIRoutingState(routes: [AIFeature.agent.rawValue: route], migratedRoutes: [:], servers: [], migrationVersion: 4)
+        let state = AIRoutingState(routes: [AIFeature.translation.rawValue: route], migratedRoutes: [:], servers: [], migrationVersion: 4)
         defaults.set(try JSONEncoder().encode(state), forKey: AIRoutingStore.defaultsKey)
 
         store.reloadFromDefaults()
 
-        XCTAssertEqual(store.route(for: .agent), route)
+        XCTAssertEqual(store.route(for: .translation), route)
     }
 
     func testHotkeysPublishOnlyWhatChanged() {

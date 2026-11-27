@@ -3,7 +3,7 @@ id: openai-agent-probe-responses-2026-11-22
 type: decision
 title: The OpenAI Agent model check uses the Responses API, like the Agent
 summary: Picking an OpenAI model for the Agent (directly or through the shared LLM row) checks it with one function tool on /v1/responses, the endpoint the Agent runs on, instead of /v1/chat/completions, which newer reasoning models such as gpt-6.2-sol refuse with function tools; OpenAI's internal citation marks are removed from Agent answers, and the Search row names the Agent model it follows.
-status: confirmed
+status: stale
 tags: [agent, native-agent, openai, model-probe, api-and-models, web-search]
 canonical_for: [openai-agent-model-check]
 verified_at: 2026-11-22
@@ -17,13 +17,15 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AIRouting/ModelProbe.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentOpenAITests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentOpenAITests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-22-agent-provider-web-search.md, 2026-11-22-shared-model-rows.md, 2026-10-19-api-and-models.md, 2026-11-23-agent-low-effort.md]
+related: [2026-11-22-agent-provider-web-search.md, 2026-11-22-shared-model-rows.md, 2026-10-19-api-and-models.md, 2026-11-23-agent-low-effort.md, 2026-11-27-remove-tool-probe.md]
 ---
 
 # The OpenAI Agent model check uses the Responses API
+
+Historical decision: superseded on 2026-11-27 by [removing the tool-use check](2026-11-27-remove-tool-probe.md): no text feature needs tool use since the Agent runs on Claude Code or Codex.
 
 ## Context
 

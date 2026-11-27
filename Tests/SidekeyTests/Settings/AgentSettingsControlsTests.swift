@@ -14,31 +14,22 @@ final class AgentSettingsControlsTests: XCTestCase {
         XCTAssertEqual(AgentControlsCodex.modelOptions(catalog: [], selected: nil).map { $0.value }, [""])
     }
 
-    func testClaudeModelOptionsAreHardcodedToSonnet() {
-        // Hardcoded single pinned model, independent of the scanned catalog.
-        let opts = AgentControlsClaude.modelOptions(ClaudeModelCatalog())
-        XCTAssertEqual(opts.map { $0.value }, ["sonnet"])
-        XCTAssertEqual(opts.first?.label, "Sonnet")
+    func testClaudeModelOptionsComeFromClaudeCodeAndKeepASavedModel() {
+        let catalog = [ClaudeModelOption(value: "default", displayName: "Default (recommended)"),
+                       ClaudeModelOption(value: "fable", displayName: "Fable 5.2")]
+        let opts = AgentControlsClaude.modelOptions(catalog: catalog, selected: "claude-old-1")
+        XCTAssertEqual(opts.map(\.value), ["claude-old-1", "default", "fable"])
+        XCTAssertEqual(opts.first?.label, "claude-old-1 (saved)")
+        XCTAssertEqual(opts.last?.label, "Fable 5.2")
     }
 
-    // MARK: - Reasoning picker (no "—" inherit option, list starts at Low)
-
-    func testClaudeEffortOptionsStartAtLowWithNoInheritDash() {
-        let opts = AgentControlsClaude.effortOptions
-        XCTAssertEqual(opts.map { $0.value }, ["low", "medium", "high", "xhigh", "max"])
-        XCTAssertEqual(opts.first?.label, "Low")
+    func testClaudeWithoutCatalogOffersOnlyItsOwnDefault() {
+        XCTAssertEqual(AgentControlsClaude.modelOptions(catalog: [], selected: nil).map(\.value), ["default"])
     }
 
-    func testClaudeDisplayedEffortShowsStoredOrLow() {
-        // No stored override -> the picker shows Low (what will actually be sent).
-        XCTAssertEqual(AgentControlsClaude.displayedEffort(stored: nil), "low")
-        // Explicit user override is shown as-is.
-        XCTAssertEqual(AgentControlsClaude.displayedEffort(stored: "medium"), "medium")
-        XCTAssertEqual(AgentControlsClaude.displayedEffort(stored: "max"), "max")
-        // Case-insensitive stored value.
-        XCTAssertEqual(AgentControlsClaude.displayedEffort(stored: "XHIGH"), "xhigh")
-        // A stored value outside the option set falls back to Low.
-        XCTAssertEqual(AgentControlsClaude.displayedEffort(stored: "turbo"), "low")
+    func testClaudeEffortLabels() {
+        XCTAssertEqual(AgentControlsClaude.effortLabel("low"), "Low")
+        XCTAssertEqual(AgentControlsClaude.effortLabel("xhigh"), "Very high")
     }
 
     /// The "—" (inherit) entry is gone from the Reasoning pickers: the option

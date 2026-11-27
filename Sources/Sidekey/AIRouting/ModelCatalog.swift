@@ -33,14 +33,10 @@ struct CatalogModel: Codable, Equatable, Sendable {
     var contextLength: Int?
     /// OpenRouter `top_provider.max_completion_tokens`, Anthropic `max_tokens`.
     var maxOutputTokens: Int?
-    var supportsTools: Bool?
     /// `"reasoning"` is among OpenRouter's `supported_parameters`; Anthropic's
     /// `capabilities.thinking.supported`.
     var supportsReasoning: Bool?
     var reasoning: OpenRouterReasoningCapabilities?
-    /// Anthropic's `capabilities.server_tools.web_search.supported`; `nil`
-    /// when the catalog does not say. Decides the Agent's built-in search.
-    var supportsWebSearch: Bool?
     /// Anthropic's `capabilities.effort.low.supported` (`false` when
     /// `effort.supported` is false); `nil` when the catalog does not say.
     /// Decides whether the Agent sends `effort: low`.
@@ -62,10 +58,8 @@ struct CatalogModel: Codable, Equatable, Sendable {
         aliasOf: String? = nil,
         contextLength: Int? = nil,
         maxOutputTokens: Int? = nil,
-        supportsTools: Bool? = nil,
         supportsReasoning: Bool? = nil,
         reasoning: OpenRouterReasoningCapabilities? = nil,
-        supportsWebSearch: Bool? = nil,
         supportsLowEffort: Bool? = nil,
         expiresAt: Date? = nil,
         updatedAt: Date? = nil,
@@ -77,10 +71,8 @@ struct CatalogModel: Codable, Equatable, Sendable {
         self.aliasOf = aliasOf
         self.contextLength = contextLength
         self.maxOutputTokens = maxOutputTokens
-        self.supportsTools = supportsTools
         self.supportsReasoning = supportsReasoning
         self.reasoning = reasoning
-        self.supportsWebSearch = supportsWebSearch
         self.supportsLowEffort = supportsLowEffort
         self.expiresAt = expiresAt
         self.updatedAt = updatedAt
@@ -420,15 +412,12 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             // Routers priced at -1 are not models, except the one the app has always offered.
             if model.pricing?.prompt == -1, id != "openrouter/auto" { return nil }
             let parameters = model.supportedParameters
-            let tools = parameters?.contains("tools")
-            var uses: Set<ModelUse> = isDecision ? [.decision] : [.chat]
-            if tools == true && !isDecision { uses.insert(.chatWithTools) }
+            let uses: Set<ModelUse> = isDecision ? [.decision] : [.chat]
             return CatalogModel(
                 id: id,
                 uses: uses,
                 contextLength: model.contextLength,
                 maxOutputTokens: model.topProvider?.maxCompletionTokens,
-                supportsTools: tools,
                 supportsReasoning: parameters?.contains("reasoning"),
                 reasoning: model.reasoning,
                 expiresAt: model.expirationDate.flatMap(parseDate),
@@ -445,7 +434,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             let maxInputTokens: Int?
             let maxTokens: Int?
             let thinking: Bool?
-            let webSearch: Bool?
             let lowEffort: Bool?
             let createdAt: String?
 
@@ -459,13 +447,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
 
             private struct Capabilities: Decodable {
                 struct Support: Decodable { let supported: Bool? }
-                struct ServerTools: Decodable {
-                    let webSearch: Support?
-                    enum CodingKeys: String, CodingKey { case webSearch = "web_search" }
-                    init(from decoder: Decoder) throws {
-                        webSearch = try? decoder.container(keyedBy: CodingKeys.self).decodeIfPresent(Support.self, forKey: .webSearch)
-                    }
-                }
                 struct Effort: Decodable {
                     let supported: Bool?
                     let low: Support?
@@ -477,18 +458,13 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                     enum CodingKeys: String, CodingKey { case supported, low }
                 }
                 let thinking: Support?
-                let serverTools: ServerTools?
                 let effort: Effort?
-                enum CodingKeys: String, CodingKey {
-                    case thinking, effort
-                    case serverTools = "server_tools"
-                }
+                enum CodingKeys: String, CodingKey { case thinking, effort }
                 // Each capability decodes on its own: an odd value in one
-                // (say web_search.supported) never costs another (thinking).
+                // (say effort.low) never costs another (thinking).
                 init(from decoder: Decoder) throws {
                     let container = try decoder.container(keyedBy: CodingKeys.self)
                     thinking = try? container.decodeIfPresent(Support.self, forKey: .thinking)
-                    serverTools = try? container.decodeIfPresent(ServerTools.self, forKey: .serverTools)
                     effort = try? container.decodeIfPresent(Effort.self, forKey: .effort)
                 }
             }
@@ -502,7 +478,6 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
                 // A capabilities object of another shape costs only the flag.
                 let capabilities = try? container.decodeIfPresent(Capabilities.self, forKey: .capabilities)
                 thinking = capabilities?.thinking?.supported
-                webSearch = capabilities?.serverTools?.webSearch?.supported
                 let effort = capabilities?.effort
                 lowEffort = effort?.supported == false ? false : effort?.low?.supported
             }
@@ -518,18 +493,16 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
         }
     }
 
-    /// One page of Anthropic's models list. Every Claude model takes tools.
+    /// One page of Anthropic's models list.
     static func parseAnthropicPage(_ data: Data) throws -> (models: [CatalogModel], hasMore: Bool, lastID: String?) {
         let page = try decode(AnthropicResponse.self, from: data)
         let models = page.data.map { model in
             CatalogModel(
                 id: model.id,
-                uses: [.chat, .chatWithTools],
+                uses: [.chat],
                 contextLength: model.maxInputTokens,
                 maxOutputTokens: model.maxTokens,
-                supportsTools: true,
                 supportsReasoning: model.thinking,
-                supportsWebSearch: model.webSearch,
                 supportsLowEffort: model.lowEffort,
                 catalogDate: knownModelDate(model.createdAt.flatMap(parseDate))
             )
@@ -578,7 +551,7 @@ struct ModelCatalogFetcher: ModelCatalogFetching {
             guard base.hasPrefix("gpt-") || ["o1", "o3", "o4"].contains(where: { base == $0 || base.hasPrefix($0 + "-") }),
                   !["audio", "realtime", "transcribe", "tts", "image", "search", "codex", "deep-research", "-pro", "instruct"].contains(where: base.contains)
             else { return nil }
-            var uses: Set<ModelUse> = [.chat, .chatWithTools]
+            var uses: Set<ModelUse> = [.chat]
             if id == ModelRegistry.openAIDecisionModel { uses.insert(.decision) }
             return CatalogModel(id: id, uses: uses, catalogDate: model.created?.date)
         }.sorted { $0.id < $1.id }

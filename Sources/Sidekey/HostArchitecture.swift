@@ -2,8 +2,7 @@ import Foundation
 
 /// Runtime Apple Silicon probe. Formerly `LocalModelSupport`, named after the
 /// on-device model stack it gated until that stack was removed; it picks the
-/// OpenCode release asset and the default for a processing route the user
-/// never chose (`SelfKeyPreferences`).
+/// default for a processing route the user never chose (`SelfKeyPreferences`).
 ///
 /// The app ships a UNIVERSAL binary, so a compile-time `#if arch(arm64)` is
 /// wrong: an Intel slice (or an arm64 build running under Rosetta translation)

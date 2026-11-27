@@ -36,7 +36,7 @@ final class SettingsFeaturesTests: XCTestCase {
         let snapshot = try await fixture(.usual).snapshot
         XCTAssertEqual(FeatureCatalog.status(for: .drop, snapshot: snapshot), .ready(note: nil))
         XCTAssertEqual(FeatureCatalog.status(for: .agent, snapshot: snapshot).word, "Needs setup")
-        XCTAssertEqual(FeatureCatalog.status(for: .agent, snapshot: snapshot).reason, "No text model")
+        XCTAssertEqual(FeatureCatalog.status(for: .agent, snapshot: snapshot).reason, "No harness chosen")
         XCTAssertEqual(FeatureCatalog.status(for: .meetings, snapshot: snapshot), .off)
         XCTAssertEqual(FeatureCatalog.status(for: .googleSearch, snapshot: snapshot), .ready(note: nil))
         XCTAssertEqual(FeatureCatalog.status(for: .screenshots, snapshot: snapshot).word, "Not set up")

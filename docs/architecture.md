@@ -915,10 +915,9 @@ Monitor inside hover:
   Hover launch and the legacy openMonitor callback both request inline .monitor
   with programmatic expansion; neither opens a window. The legacy window class
   is retained for compatibility only. Every picker row, Server status included,
-  has an ×
-  (no context menu: the island has no right-click actions; rows have no chevron
-  and the scroller sits in the right margin beside the cards; row and × show
-  hover/press/focus only while enabled). The × asks first
+  has an ×. The picker rows have no context menu or chevron. The scroller sits
+  in the right margin beside the cards. The row and × show hover, press and focus
+  only while enabled. The × asks first
   inside the panel (a card with only the question, Cancel first, red Delete;
   a system alert opened under the island and could not be clicked). The card
   registers its buttons as IslandHoverHitBridge .modal targets and, while
@@ -2240,10 +2239,9 @@ Clipboard history retains the newest 50 local entries across launch, quit and
 sleep/wake. Do not reintroduce automatic lifecycle wipes. New copies evict only
 the oldest excess rows and their image sidecars; the current History feed shows
 20 clipboard entries in a scrollable five-row viewport (Agent/Drop keep 10),
-without deleting other retained rows. Clipboard rows have no Delete and no
-context menu (the island has no right-click actions; the user removed the
-per-entry Delete on 2026-11-21); only the 50-entry cap removes them. History
-key monitors ignore keys while a modal alert is open. WHY:
+without deleting other retained rows. Clipboard rows have no context menu.
+The user removed per-entry Delete on 2026-11-21, so only the 50-entry cap
+removes rows. History key monitors ignore keys while a modal alert is open. WHY:
 .project-docs/decisions/2026-11-21-clipboard-no-entry-delete.md
 Island History pastes several rows in one opening: with a paste target,
 ⌘-click marks rows in click order (a blue numbered badge; ⌘-click again

@@ -106,6 +106,14 @@ enum IslandDropModeControl {
     /// Minimum: edgeInset(5) + chipH(20) + startY(48) + 3*minimumStride(72) = 145.
     static let hoverPanelHeight: CGFloat = 145
 
+    /// Band for the input/output language pickers: the gap plus the drawer
+    /// their unfiltered four-row grid needs (`hoverPanelHeight` minus the gap
+    /// left the fourth row 3pt outside the drawer). Longer results scroll.
+    // WHY: .project-docs/decisions/2026-11-28-language-picker-scrolls-inside-panel.md
+    static var languagePickerHoverPanelHeight: CGFloat {
+        detachedPanelGap + IslandLanguagePickerLayout.drawerHeight
+    }
+
     /// Derive the host hit band from the same row geometry used by the view.
     /// `moreTools`: the number of tools in the expanded More section, or nil
     /// while it is collapsed; the band grows with the section so its rows
@@ -776,6 +784,96 @@ enum IslandLanguagePickerLayout {
     private static let inputToFlagGap: CGFloat = 6
     private static let flagRowCount = 4
     private static let rowVerticalSpacing: CGFloat = 4
+    /// Space between the search field and the clipped flag area. Smaller than
+    /// `inputToFlagGap`, so a hover-scaled first-row flag is not cut off.
+    private static let viewportTopGap: CGFloat = 2
+
+    /// Drawer height the unfiltered grid needs: the search row, four flag rows
+    /// at the minimum stride and the bottom inset (24+18+6+3*24+20+5 = 145).
+    /// Results that need more rows scroll inside the drawer instead of
+    /// drawing below it.
+    // WHY: .project-docs/decisions/2026-11-28-language-picker-scrolls-inside-panel.md
+    static var drawerHeight: CGFloat {
+        inputTopInset + inputSize.height + inputToFlagGap
+            + CGFloat(flagRowCount - 1) * (flagChipSize.height + rowVerticalSpacing)
+            + flagChipSize.height + edgeInset
+    }
+
+    enum Content: Equatable {
+        /// Curated grid: the leading Auto/Off chip sits beside the search field.
+        case fullGrid
+        /// Search results with larger targets.
+        case filtered
+        /// Labelled variants of one country flag.
+        case variants
+    }
+
+    /// Everything the view draws, in panel coordinates. `flagFrames` can
+    /// extend below the panel; the view shows them only through `viewport`
+    /// and scrolls when `requiresScrolling`.
+    struct Grid: Equatable {
+        let input: CGRect
+        /// Chips beside the search field, outside the scrolling area.
+        let pinnedFrames: [CGRect]
+        /// Chips inside the scrolling area.
+        let flagFrames: [CGRect]
+        /// The clipped part of the panel that shows `flagFrames`.
+        let viewport: CGRect
+        /// Height of the scrolling content measured from `viewport.minY`.
+        let contentHeight: CGFloat
+
+        var requiresScrolling: Bool { contentHeight > viewport.height + 0.5 }
+        var allFrames: [CGRect] { pinnedFrames + flagFrames }
+        var rowCount: Int { Set(flagFrames.map { Int(round($0.minY)) }).count }
+
+        /// `frame` in the scrolling content's coordinate space.
+        func contentFrame(_ frame: CGRect) -> CGRect {
+            frame.offsetBy(dx: -viewport.minX, dy: -viewport.minY)
+        }
+    }
+
+    static func grid(panelSize: CGSize, count: Int, content: Content) -> Grid {
+        let resolvedCount = max(0, count)
+        let rows: Rows
+        let pinnedCount: Int
+        switch content {
+        case .fullGrid:
+            rows = self.rows(panelSize: panelSize, count: resolvedCount)
+            pinnedCount = resolvedCount > 0 ? 1 : 0
+        case .filtered:
+            rows = filteredRows(panelSize: panelSize, count: resolvedCount)
+            pinnedCount = 0
+        case .variants:
+            rows = choiceRows(
+                panelSize: panelSize,
+                count: resolvedCount,
+                chipSize: variantChipSize(panelSize: panelSize, count: resolvedCount),
+                spacing: variantChipSpacing,
+                centersRows: true
+            )
+            pinnedCount = 0
+        }
+
+        let frames = rows.flagFrames
+        let pinned = Array(frames.prefix(pinnedCount))
+        let scrolling = Array(frames.dropFirst(pinnedCount))
+        let viewportTop = min(max(0, panelSize.height), rows.input.maxY + viewportTopGap)
+        let viewport = CGRect(
+            x: 0,
+            y: viewportTop,
+            width: max(0, panelSize.width),
+            height: max(0, panelSize.height - viewportTop)
+        )
+        let contentBottom = scrolling.map(\.maxY).max().map { $0 + edgeInset } ?? viewportTop
+
+        return Grid(
+            input: rows.input,
+            pinnedFrames: pinned,
+            flagFrames: scrolling,
+            viewport: viewport,
+            contentHeight: max(viewport.height, contentBottom - viewportTop)
+        )
+    }
 
     static func inputFrame(
         panelSize: CGSize,
@@ -786,33 +884,28 @@ enum IslandLanguagePickerLayout {
             return centeredInputFrame(panelSize: panelSize, width: inputSize.width)
         }
 
-        guard anchorsToFullGrid else {
-            return filteredRows(panelSize: panelSize, count: optionCount).input
-        }
-
-        return rows(panelSize: panelSize, count: optionCount).input
+        return grid(
+            panelSize: panelSize,
+            count: optionCount,
+            content: anchorsToFullGrid ? .fullGrid : .filtered
+        ).input
     }
 
+    /// All chip frames in panel coordinates (pinned first), as `grid` lays them out.
     static func flagFrames(
         panelSize: CGSize,
         count: Int,
         anchorsToFullGrid: Bool = true
     ) -> [CGRect] {
-        guard anchorsToFullGrid else {
-            return filteredRows(panelSize: panelSize, count: count).flagFrames
-        }
-
-        return rows(panelSize: panelSize, count: count).flagFrames
+        grid(
+            panelSize: panelSize,
+            count: count,
+            content: anchorsToFullGrid ? .fullGrid : .filtered
+        ).allFrames
     }
 
     static func variantFrames(panelSize: CGSize, count: Int) -> [CGRect] {
-        choiceRows(
-            panelSize: panelSize,
-            count: count,
-            chipSize: variantChipSize(panelSize: panelSize, count: count),
-            spacing: variantChipSpacing,
-            centersRows: true
-        ).flagFrames
+        grid(panelSize: panelSize, count: count, content: .variants).allFrames
     }
 
     private struct Rows {

@@ -9,6 +9,8 @@ session is needed, keeps it single, logs it and cleans up its own lease.
 It also waits while the screen is locked or the Mac is overloaded, and a
 model-free watchdog records stalls and waits in an alerts file for the
 maintainer's orchestrator (WHY: .project-docs/decisions/2026-11-23-builder-queue-watchdog.md).
+It also tells each ticket's author what became of it through the Whycode inbox
+(WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md).
 Only Python's standard library is required.
 """
 
@@ -17,6 +19,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -43,6 +46,21 @@ LOGS = "whytap-build-queue-logs"
 INTEGRATION_LOCK = "exodia-integration.lock"
 ALERTS = "whytap-build-queue-alerts.jsonl"
 WATCHDOG = "whytap-build-queue-watchdog.json"
+INBOX_STATE = "whytap-build-queue-inbox.json"
+# Append-only: each notice id, written before its file. Whycode can take a file into its
+# ledger and lose the receipt; this keeps that batch held under its own id.
+INBOX_PUBLISHED = "whytap-build-queue-inbox-published.log"
+INBOX_RESEND_SECONDS = 600     # a published id with neither file nor receipt goes again
+INBOX_PUBLISHED_MAX_BYTES = 65536  # then only ids with unacknowledged events are kept
+INBOX_SOURCE = "whytap-build-queue"
+# A notice of its own for these; queued/in_progress events ride along with the next one.
+NOTICE_STATUSES = ("blocked", "pending_install", "done", "superseded", "cancelled")
+FINAL_STATUSES = ("blocked", "done", "superseded", "cancelled")
+INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`, in UTF-16 units
+INBOX_FILE_LIMIT = 128 * 1024  # Whycode's limit for the whole file, in bytes
+RECEIPT_STATUSES = ("queued", "delivered", "rejected")
+ON_ITS_WAY = ("sent", "queued", "invalid", "lost", "acknowledging")  # hold their range
+ID_PATTERN = re.compile(r"(\d{1,12})-(\d{1,12})(?:\.r(\d{1,3}))?")  # first-last[.rN]
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
 ACTIVATED_SOURCES = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
@@ -69,6 +87,12 @@ DEFAULTS = {
                                     # protected-data tests, packaging and installs wait
     "stale_dependency_minutes": 120,  # return a ticket whose dependency stays blocked
     "notes_max_bytes": 32768,      # builder notes above this keep only their tail
+    # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
+    "whycode_inbox": "~/Library/Application Support/Whycode/inbox",  # "" turns notices off
+    "whycode_project": "",         # empty: the main checkout beside the Git common directory
+    "inbox_settle_seconds": 90,    # an open ticket's newest event waits this long for more
+    "inbox_retry_minutes": 30,     # a rejected notice is sent again under a new id after this
+    "inbox_max_attempts": 6,       # then only the undelivered alert remains
 }
 NOTES = "whytap-builder-notes"
 NOTES_KEPT_LINES = 120
@@ -544,7 +568,9 @@ def ticket_rows(root, undelivered_since):
             "(SELECT MAX(created_at) FROM events e WHERE e.ticket = t.id) AS last_event "
             "FROM tickets t WHERE t.status IN ('queued', 'in_progress', 'pending_install')")]
         undelivered = [dict(r) for r in db.execute(
-            "SELECT e.id, e.ticket, e.created_at, t.pr, t.source FROM events e "
+            "SELECT e.id, e.ticket, e.status, e.created_at, t.pr, t.source, "
+            "t.status AS ticket_status, (SELECT MAX(id) FROM events x WHERE x.ticket = e.ticket) "
+            "AS newest_id FROM events e "
             "JOIN tickets t ON t.id = e.ticket WHERE e.acknowledged_at IS NULL "
             "AND e.created_at >= ? ORDER BY e.id", (undelivered_since,))]
     finally:
@@ -561,9 +587,10 @@ def age_minutes(stamp, now):
         return 0
 
 
-def findings(root, config, context, previous, now):
+def findings(root, config, context, previous, now, inbox=None):
     """Conditions worth a person's attention, keyed so one episode raises once and
     clears only when its condition is resolved."""
+    inbox = inbox if isinstance(inbox, dict) else {}
     tickets, undelivered = ticket_rows(root, previous["undelivered_since"])
     found = {}
     open_work = any(t["status"] in ("queued", "in_progress") or t["retry"] == "meeting"
@@ -595,18 +622,528 @@ def findings(root, config, context, previous, now):
         found["no_progress"] = {"sessions": context["no_progress"],
                                 "detail": f"{context['no_progress']} builder sessions in a row "
                                           "ended without changing the queue"}
+    # The backstop of the Whycode inbox notices: an author still not told. Only the
+    # ticket's newest event as a state change (or anything of a closed ticket) counts:
+    # a receipt, start or requeue of an open ticket, and anything a newer event replaced,
+    # rides along with its next notice. A rejected notice counts at once.
+    # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
+    rejected = inbox.get("rejected") or {}
+    in_flight = inbox.get("in_flight") or {}
+    if inbox.get("invalid"):
+        found["inbox_invalid"] = {
+            "notices": inbox["invalid"][:20],
+            "detail": f"{len(inbox['invalid'])} Whycode inbox file(s) or receipt(s) of this "
+                      "queue do not match it; they hold their range until a person looks"}
     for e in undelivered:
         late = age_minutes(e["created_at"], now)
-        if late > config["undelivered_minutes"]:
-            key = f"undelivered:{e['ticket']}"
-            entry = found.setdefault(key, {
-                "ticket": e["ticket"], "pr": e["pr"], "events": [],
-                "detail": f"#{e['ticket']} ({e['source']}) author not told: "
-                          + ("no Harness Link address, inbox only" if e["source"] == "other"
-                             else "event not acknowledged")})
-            entry["events"].append(e["id"])
-            entry["minutes"] = max(entry.get("minutes", 0), round(late))
+        rides_along = e["ticket_status"] not in FINAL_STATUSES and (
+            e["status"] not in NOTICE_STATUSES or e["id"] != e["newest_id"])
+        if e["id"] not in rejected and (rides_along or late <= config["undelivered_minutes"]):
+            continue
+        if e["id"] in rejected:
+            why = rejected[e["id"]]
+        elif inbox.get("unavailable"):
+            why = "Whycode inbox unavailable: " + inbox["unavailable"]
+        elif e["id"] in in_flight:
+            why = ("Whycode has not answered the notice yet (Whycode closed?)"
+                   if in_flight[e["id"]] == "sent" else "Whycode holds the notice: "
+                   + in_flight[e["id"]])
+        else:
+            why = "no notice sent (before the inbox scope, or not settled)"
+        key = f"undelivered:{e['ticket']}"
+        entry = found.setdefault(key, {
+            "ticket": e["ticket"], "pr": e["pr"], "events": [],
+            "detail": f"#{e['ticket']} ({e['source']}) author not told: {why}"})
+        entry["events"].append(e["id"])
+        entry["minutes"] = max(entry.get("minutes", 0), round(late))
     return found
+
+# --- Whycode inbox: tell each ticket's author what became of it ---------------------
+# WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
+# Harness Link `link_send` only stored messages no Whycode session ever read, and the
+# builder acknowledged them anyway. The watcher now writes one file per ticket batch into
+# Whycode's inbox (spec: whycode docs/session-inbox.md); Whycode continues the author's
+# session or hands the notice to the project's orchestrator and answers with a receipt.
+# An event is acknowledged only when its receipt says `delivered`. The sender keeps no
+# state it trusts: each pass derives everything from the queue and Whycode's folder, and
+# a notice id names its exact event range, so sending again is idempotent.
+
+
+def inbox_sender(root):
+    """Ids are unique per queue: another clone's queue numbers its events from 1 too."""
+    return INBOX_SOURCE + ":" + hashlib.sha256(str(root).encode()).hexdigest()[:8]
+
+
+def inbox_project(root, config):
+    if config.get("whycode_project"):
+        return str(Path(config["whycode_project"]).expanduser())
+    return str(root.parent if root.name == ".git" else root)
+
+
+def inbox_folder(config):
+    """The inbox folder, or (None, why not). Whycode makes it; a sender may make it 0700
+    once Whycode's own folder exists. A symlinked folder is never used."""
+    if not config.get("whycode_inbox"):
+        return None, "notices are turned off (whycode_inbox is empty)"
+    inbox = Path(config["whycode_inbox"]).expanduser()
+    if inbox.is_symlink() or (inbox / "receipts").is_symlink():
+        return None, f"{inbox} is a symlink"
+    if not inbox.is_dir():
+        if not inbox.parent.is_dir():
+            return None, f"Whycode is not installed here ({inbox.parent} is missing)"
+        inbox.mkdir(mode=0o700, exist_ok=True)
+    return inbox, ""
+
+
+def ensure_inbox_scope(root, now=None):
+    """Events from the first run of this version on are delivered; older ones stay with
+    the undelivered alert (sending days-old results would wake sessions for stale news).
+    This start is the only thing read back from the file; an unreadable one starts anew."""
+    path = root / INBOX_STATE
+    state = read_json(path, {})
+    since = state.get("since") if isinstance(state, dict) else None
+    try:
+        datetime.fromisoformat(since)
+        return since
+    except (TypeError, ValueError):
+        since = datetime.fromtimestamp(
+            now or time.time(), timezone.utc).isoformat(timespec="microseconds")
+        write_json(path, {"since": since, "messages": {}})
+        return since
+
+
+def inbox_events(root, since):
+    """Unacknowledged events in scope, each with its ticket and the ticket's newest event
+    (acknowledged or not): the newest one is the ticket's actual state."""
+    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    db.row_factory = sqlite3.Row
+    try:
+        columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+        returned = "t.auto_returned" if "auto_returned" in columns else "0"
+        depends = "t.depends_on" if "depends_on" in columns else "'[]'"
+        return [dict(r) for r in db.execute(
+            "SELECT e.id, e.ticket, e.status, e.note, e.created_at, t.pr, t.head, t.title, "
+            "t.source, t.session, t.acceptance, t.status AS ticket_status, "
+            + returned + " AS auto_returned, " + depends + " AS depends_on, "
+            "n.id AS newest_id, n.acknowledged_at AS newest_acknowledged FROM events e "
+            "JOIN tickets t ON t.id = e.ticket "
+            "JOIN events n ON n.id = (SELECT MAX(id) FROM events x WHERE x.ticket = e.ticket) "
+            "WHERE e.acknowledged_at IS NULL AND e.created_at >= ? ORDER BY e.id", (since,))]
+    finally:
+        db.close()
+
+
+def utf16_units(text):
+    """Whycode checks lengths in JavaScript, which counts UTF-16 code units."""
+    return len(str(text).encode("utf-16-le")) // 2
+
+
+def clip(text, limit, tail=" [...]"):
+    """At most `limit` UTF-16 units, never splitting a character."""
+    text = str(text or "")
+    if utf16_units(text) <= limit:
+        return text
+    budget, used, kept = max(limit - utf16_units(tail), 0), 0, []
+    for character in text:
+        size = 2 if ord(character) > 0xFFFF else 1
+        if used + size > budget:
+            break
+        kept.append(character)
+        used += size
+    return "".join(kept).rstrip() + tail
+
+
+def pr_label(pr):
+    return "PR #" + str(pr).rstrip("/").rsplit("/", 1)[-1]
+
+
+def return_kind(ticket, status):
+    """`finding`, or the structured kind of a return made without review."""
+    if status != "blocked" or not ticket.get("auto_returned"):
+        return "finding"
+    try:
+        dependencies = json.loads(ticket.get("depends_on") or "[]")
+    except ValueError:
+        dependencies = []
+    return "dependency" if dependencies and "dependency" in (ticket.get("note") or "") \
+        else "moved_head"
+
+
+def notice_guidance(status, kind, helper_path, pr):
+    enqueue = (f'python3 "{helper_path}" enqueue --pr {pr} --head <new reviewed head> '
+               "--title ... --checks ... --dependencies ... --acceptance ...")
+    if kind == "dependency":
+        return ("Returned without review: nothing in your change was judged, so do not change "
+                "code for it. Wait until the dependency named in the note is merged through "
+                "the queue, then resubmit the same head (`enqueue` with the same --head keeps "
+                "the place), or drop --depends-on if it is no longer needed.")
+    if kind == "moved_head":
+        return ("Returned without review: the PR head moved after you submitted it, and "
+                "nothing in your change was judged. Review the newer commit named in the note "
+                "and enqueue that head; no other change is asked for.")
+    if status == "blocked":
+        return (
+            "Your PR went back to you. Start on it now; the owner does not need to forward "
+            "this.\n"
+            "1. Fix every finding by class: find and fix the same kind of defect across the "
+            "whole change, not only the cited line, and add a check that would have caught it.\n"
+            "2. Update the branch onto current origin/main (fetch first) and resolve conflicts.\n"
+            "3. Validate as the runbook requires: the relevant build, tests and other "
+            "non-launching checks. Never launch or install the app.\n"
+            "4. Push, then resubmit the new reviewed head of the same PR:\n   " + enqueue + "\n"
+            "   A resubmission keeps the PR's place twice at most.\n"
+            "If a finding needs a product decision by the owner, or you disagree with it, do "
+            "not guess: report it to your orchestrator with the evidence.")
+    if status == "pending_install":
+        return ("Merged into main; the installation into the working app is still pending "
+                "(see the note). Nothing to do unless the note asks you; another notice "
+                "follows when it is running. A merge alone does not update the running app.")
+    if status == "done":
+        return ("Done: merged, and installed when it changes the app (the note says what "
+                "actually runs). Now follow the runbook's Feature session steps 7-8: check "
+                "that the remote feature branch was deleted and remove your worktree's build "
+                "output. Then report to your orchestrator what runs and the acceptance steps "
+                "below.")
+    if status == "superseded":
+        return ("Superseded: this ticket will not be built (see the note). If a newer "
+                "ticket of yours replaces it, nothing to do; otherwise tell your orchestrator.")
+    return ("Cancelled: this ticket will not be built (see the note). Stop work on it; if it "
+            "should go on, ask your orchestrator.")
+
+
+def notice_payload(root, config, message_id, events):
+    """One notice for a ticket's batch, driven by the ticket's newest event (the last of
+    the batch): the builder's note, what to do and the earlier events, within Whycode's
+    limits in its own units (UTF-16 for title and text, bytes for the file)."""
+    last = events[-1]
+    helper_path = root / HELPER
+    try:
+        acceptance = json.loads(last["acceptance"] or "[]")
+    except ValueError:
+        acceptance = [last["acceptance"]]
+    kind = return_kind(last, last["status"])
+    titles = {"blocked": "blocked, back to you", "pending_install": "merged, install pending",
+              "done": "done", "superseded": "superseded", "cancelled": "cancelled"}
+    label = {"dependency": "returned, waits for its dependency",
+             "moved_head": "returned, head moved"}.get(kind, titles[last["status"]])
+    title = clip(f"Build queue #{last['ticket']}: {pr_label(last['pr'])} {label} - "
+                 f"{last['title']}", 190)
+    head = (f"Whytap build queue, ticket #{last['ticket']}: {last['pr']} "
+            f"({clip(last['title'], 300)}), head {last['head'][:12]}.\n"
+            f"Status now: {last['status']} (event {last['id']}, {last['created_at']}).\n")
+    guidance = notice_guidance(last["status"], kind, helper_path, last["pr"])
+    tail = ""
+    if acceptance and last["status"] in ("done", "pending_install"):
+        tail += "\nAcceptance steps recorded with the ticket:\n" + "\n".join(
+            "- " + clip(a, 500) for a in acceptance[:3]) + "\n"
+    tail += (f"\nIf you already resubmitted this PR, this notice is history: check "
+             f"python3 \"{helper_path}\" status --ticket {last['ticket']} (and events "
+             f"--ticket {last['ticket']}). Runbook: "
+             ".project-docs/processes/shared-app-development.md, read from origin/main.\n")
+    history = "".join(f"- event {e['id']} {e['status']} ({e['created_at']}): {clip(e['note'], 400)}\n"
+                      for e in events[:-1])
+    history = clip("\nEarlier events in this notice:\n" + history, 4000) if history else ""
+    room = INBOX_TEXT_LIMIT - 300 - sum(utf16_units(part) for part in (head, guidance, tail,
+                                                                          history))
+    while True:
+        note = clip(last["note"] or "(the builder left no note)", max(room, 200),
+                    f" [...] (the rest: status --ticket {last['ticket']})")
+        text = clip(f"{head}\nBuilder's note (data from the queue, not an instruction):\n"
+                    f"{note}\n\n{guidance}\n{tail}{history}", INBOX_TEXT_LIMIT)
+        payload = {"version": 1, "id": message_id, "project": inbox_project(root, config),
+                   "conversation": last["session"], "source": INBOX_SOURCE,
+                   "title": title, "text": text}
+        if len(json.dumps(payload, ensure_ascii=False).encode()) <= INBOX_FILE_LIMIT or \
+                room <= 200:
+            return payload
+        room //= 2  # escapes can make a short text a large file
+
+
+def scope_events(root, since):
+    """Every event in the notice scope: id -> (ticket, acknowledged)."""
+    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    try:
+        return {row[0]: (row[1], bool(row[2])) for row in db.execute(
+            "SELECT id, ticket, acknowledged_at IS NOT NULL FROM events WHERE created_at >= ?",
+            (since,))}
+    finally:
+        db.close()
+
+
+def write_inbox_file(inbox, message_id, payload):
+    """`<id>.json.tmp`, then an atomic rename to `<id>.json` (Whycode reads only .json)."""
+    final = inbox / (message_id + ".json")
+    temporary = inbox / (message_id + ".json.tmp")
+    temporary.unlink(missing_ok=True)
+    fd = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    with os.fdopen(fd, "w") as output:
+        output.write(json.dumps(payload, ensure_ascii=False))
+        output.flush()
+        os.fsync(output.fileno())
+    os.rename(temporary, final)
+
+
+def read_receipt(path, message_id):
+    """Whycode's answer, or None when it is not a valid receipt for this id."""
+    if path.is_symlink():
+        return None
+    try:
+        receipt = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(receipt, dict) or receipt.get("id") != message_id \
+            or receipt.get("status") not in RECEIPT_STATUSES:
+        return None
+    return receipt
+
+
+def notice_id(root, first, last, attempt):
+    """The id is the batch: its ticket's events from `first` to `last`. The same batch
+    and attempt always get the same id, so sending it again is idempotent in Whycode."""
+    return f"{inbox_sender(root)}:events:{first}-{last}" + (
+        f".r{attempt}" if attempt > 1 else "")
+
+
+def read_publications(root, prefix, now):
+    """Ids this queue published: id -> when (newest line wins). A line that is not
+    `<id>\t<seconds>` of this queue is skipped; a time that is not a finite past number
+    counts as now. An entry can only hold its range and resend that same id."""
+    published = {}
+    try:
+        lines = (root / INBOX_PUBLISHED).read_text(errors="replace").splitlines()
+    except OSError:
+        return published
+    for line in lines:
+        message_id, _, stamp = line.partition("\t")
+        if not message_id.startswith(prefix) or \
+                not ID_PATTERN.fullmatch(message_id[len(prefix):]):
+            continue
+        try:
+            at = float(stamp)
+        except ValueError:
+            at = now
+        at = at if math.isfinite(at) and 0 <= at <= now else now
+        published[message_id] = max(published.get(message_id, 0), at)
+    return published
+
+
+def record_publication(root, message_id, now):
+    """Durable before the file exists: a failure here means nothing is published."""
+    fd = os.open(root / INBOX_PUBLISHED, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, f"{message_id}\t{int(now)}\n".encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def compact_publications(root, published, keep):
+    path = root / INBOX_PUBLISHED
+    try:
+        if path.stat().st_size <= INBOX_PUBLISHED_MAX_BYTES:
+            return
+        replace_bytes(path, "".join(f"{m}\t{int(published[m])}\n" for m in sorted(keep)
+                                    if m in published).encode())
+    except OSError as error:
+        log(f"inbox: publication log not compacted: {error}")
+
+
+def inbox_evidence(root, inbox, scope, now, config, published=None):
+    """What Whycode holds or answered for this queue, read only from its folder and
+    checked against the queue: the notice id names the ticket's event range, the queue
+    says which events those are. A name or receipt that does not check out is listed as
+    invalid and holds its range without acknowledging anything."""
+    prefix = inbox_sender(root) + ":events:"
+    paths = {}
+    for folder, kind in ((inbox, "file"), (inbox / "receipts", "receipt")):
+        for path in folder.glob(prefix + "*.json"):
+            paths.setdefault(path.name[:-len(".json")], {})[kind] = path
+    for message_id, at in (published or {}).items():
+        paths.setdefault(message_id, {})["log"] = at
+    by_ticket = {}
+    for event_id, (ticket, _acknowledged) in scope.items():
+        by_ticket.setdefault(ticket, []).append(event_id)
+    notices, invalid = {}, []
+    for message_id, found in sorted(paths.items()):
+        try:
+            match = ID_PATTERN.fullmatch(message_id[len(prefix):])
+            first, last = (int(match.group(1)), int(match.group(2))) if match else (0, -1)
+            if first > last or first not in scope or last not in scope \
+                    or scope[first][0] != scope[last][0]:
+                if set(found) != {"log"}:  # an old or stray log line is no alert
+                    invalid.append(message_id)
+                continue
+            ticket = scope[last][0]
+            events = [e for e in by_ticket[ticket] if first <= e <= last]
+            pending = [e for e in events if not scope[e][1]]
+            notice = {"ticket": ticket, "first": first, "last": last, "events": events,
+                      "pending": pending, "attempt": int(match.group(3) or 1)}
+            notices[message_id] = notice
+            if not pending:
+                notice["state"] = "settled"  # nothing left to tell; the receipt is not read
+                continue
+            if "receipt" not in found:
+                if "file" in found:
+                    notice["state"] = "sent"  # Whycode has not taken it yet
+                else:
+                    # Published (the log says so) but neither file nor receipt: Whycode
+                    # took it and lost the receipt, or the file never landed. The range
+                    # stays held and goes again under this same id, never another.
+                    notice["state"] = "lost"
+                    notice["resend_due"] = now - found["log"] >= INBOX_RESEND_SECONDS
+                continue
+            receipt = read_receipt(found["receipt"], message_id)
+            if receipt is None:
+                invalid.append(message_id)
+                notice["state"] = "invalid"  # holds its range for a person to look at
+                continue
+            notice["state"] = receipt["status"]
+            notice["waiting"] = clip(receipt.get("waiting") or "", 200)
+            notice["reason"] = clip(receipt.get("reason") or "", 300)
+            target = receipt.get("target")
+            notice["target"] = target.get("kind") if isinstance(target, dict) else None
+            if notice["state"] == "rejected":
+                # The receipt file's own time: no number from the file is trusted.
+                rejected_at = found["receipt"].stat().st_mtime
+                notice["retry_due"] = notice["attempt"] < config["inbox_max_attempts"] and \
+                    now - rejected_at >= config["inbox_retry_minutes"] * 60
+        except Exception as error:  # this notice only
+            invalid.append(message_id)
+            log(f"inbox: {message_id} unreadable: {type(error).__name__}: {error}")
+    return notices, invalid
+
+
+def acknowledge(root, event_id, why):
+    try:
+        helper(root, ACTOR, "ack", "--event", str(event_id))
+        return True
+    except (OSError, ValueError) as error:
+        log(f"inbox: event {event_id} ({why}) not acknowledged: {error}")
+        return False
+
+
+def deliver_notices(root, config, now=None):
+    """Model-free, one pass, without sender state: the queue and Whycode's inbox folder
+    are the only truth, so no lost or damaged record can make a notice go twice under
+    another id or acknowledge the wrong events. A delivered receipt acknowledges its
+    range; a new notice goes for each ticket whose newest event is an unacknowledged
+    state change. Returns a summary for the watchdog; never raises into the caller, and
+    one notice's or ticket's failure never stops another's."""
+    now = now or time.time()
+    path = root / INBOX_STATE
+    summary = {"unavailable": "", "rejected": {}, "in_flight": {}, "invalid": []}
+    try:
+        since = ensure_inbox_scope(root, now)
+        inbox, summary["unavailable"] = inbox_folder(config)
+        if inbox is None:
+            return summary
+        scope = scope_events(root, since)
+        published = read_publications(root, inbox_sender(root) + ":events:", now)
+        notices, summary["invalid"] = inbox_evidence(root, inbox, scope, now, config,
+                                                     published)
+        for message_id, notice in notices.items():
+            if notice.get("state") == "delivered":
+                told = notice["pending"]
+                notice["pending"] = [e for e in told
+                                     if not acknowledge(root, e, "delivered")]
+                if notice["pending"]:
+                    # Still covered by its receipt: the next pass acknowledges again,
+                    # nothing is published for these events meanwhile.
+                    notice["state"] = "acknowledging"
+                log(f"inbox: #{notice['ticket']} delivered to {notice.get('target') or '?'} "
+                    f"(events {', '.join(map(str, told))})")
+        unacknowledged = inbox_events(root, since)  # after the acknowledgements
+        # A notice holds its range while Whycode has it (or its receipt is invalid), and
+        # while a rejected one waits for its retry or was rejected for the last time.
+        held, flight = {}, set()
+        for notice in notices.values():
+            state = notice.get("state")
+            if state in ON_ITS_WAY:
+                flight.update(notice["pending"])
+                for event_id in notice["pending"]:
+                    summary["in_flight"][event_id] = notice.get("waiting") or state
+            if state in ON_ITS_WAY or (
+                    state == "rejected" and not notice.get("retry_due")):
+                held[notice["ticket"]] = max(held.get(notice["ticket"], 0), notice["last"])
+        for message_id, notice in notices.items():
+            if notice.get("state") == "rejected":
+                for event_id in notice["pending"]:
+                    if event_id not in flight:  # a later attempt on its way supersedes it
+                        summary["rejected"][event_id] = \
+                            f"Whycode inbox rejected {message_id}: {notice.get('reason', '')}"
+        tickets = {}
+        for event in unacknowledged:
+            tickets.setdefault(event["ticket"], []).append(event)
+        # A lost notice Whycode may well have delivered: once its ticket's newest event
+        # was told, it is history like any older event, never sent again.
+        lost = {e for n in notices.values() if n.get("state") == "lost" for e in n["pending"]}
+        for message_id, notice in notices.items():
+            told = tickets.get(notice["ticket"], [{}])[-1].get("newest_acknowledged")
+            if notice.get("state") == "lost" and notice.get("resend_due") and not told:
+                try:
+                    events = [e for e in tickets.get(notice["ticket"], [])
+                              if notice["first"] <= e["id"] <= notice["last"]]
+                    if events:
+                        record_publication(root, message_id, now)
+                        write_inbox_file(inbox, message_id,
+                                         notice_payload(root, config, message_id, events))
+                        log(f"inbox: #{notice['ticket']} notice {message_id} sent again "
+                            "(no file and no receipt)")
+                except Exception as error:  # this notice only
+                    log(f"inbox: {message_id} not sent again: {type(error).__name__}: {error}")
+        for ticket_id, pending in tickets.items():
+            try:
+                if pending[-1]["newest_acknowledged"]:
+                    # The ticket's latest state already reached the author: a delivered
+                    # notice, or the author's own command (a resubmission, a new head)
+                    # whose response said so. Older events not on their way are history.
+                    for event in pending:
+                        if event["id"] not in flight or event["id"] in lost:
+                            acknowledge(root, event["id"], "history: a newer state was told")
+                    continue
+                # Every unacknowledged event above all held ranges: a contiguous range of
+                # the ticket's events, which the id names exactly.
+                events = [e for e in pending if e["id"] > held.get(ticket_id, 0)]
+                if not events:
+                    continue  # the newest is on its way; older ones wait for it
+                newest = events[-1]
+                if newest["status"] not in NOTICE_STATUSES:
+                    continue  # a receipt, start or requeue rides along with the next result
+                youngest = min(age_minutes(e["created_at"], now) for e in events)
+                if newest["ticket_status"] not in FINAL_STATUSES and \
+                        youngest * 60 < config["inbox_settle_seconds"]:
+                    continue
+                batch = {e["id"] for e in events}
+                attempt = max([n["attempt"] for n in notices.values()
+                               if n.get("state") == "rejected" and batch & set(n["events"])],
+                              default=0) + 1
+                message_id = notice_id(root, events[0]["id"], newest["id"], attempt)
+                record_publication(root, message_id, now)  # before the file, or nothing
+                published[message_id] = now
+                write_inbox_file(inbox, message_id,
+                                 notice_payload(root, config, message_id, events))
+                log(f"inbox: #{ticket_id} notice {message_id} written "
+                    f"(events {', '.join(str(e['id']) for e in events)})")
+                notices[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
+                                       "pending": [e["id"] for e in events], "state": "sent",
+                                       "attempt": attempt}
+                for event in events:  # on its way now: an earlier rejection no longer counts
+                    summary["rejected"].pop(event["id"], None)
+                    summary["in_flight"][event["id"]] = "sent"
+            except Exception as error:  # this ticket only
+                log(f"inbox: no notice for #{ticket_id}: {type(error).__name__}: {error}")
+        compact_publications(root, published, {m for m, n in notices.items()
+                                                if n.get("state") != "settled"})
+        # A journal for people (`status`); nothing ever reads it back to decide.
+        write_json(path, {"since": since, "invalid": summary["invalid"], "messages": {
+            message_id: {"ticket": n["ticket"], "events": n["events"], "attempt": n["attempt"],
+                         "status": n.get("state"), **{k: n[k] for k in ("waiting", "reason",
+                                                                        "target") if n.get(k)}}
+            for message_id, n in notices.items() if n.get("state") != "settled"}})
+        return summary
+    except Exception as error:  # delivery must never stop a build or the watchdog
+        log(f"inbox delivery failed: {type(error).__name__}: {error}")
+        return summary
 
 
 def alert_targets(root, config):
@@ -645,8 +1182,9 @@ def watchdog(root, config, context):
         stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
         previous.setdefault("undelivered_since", datetime.fromtimestamp(
             now, timezone.utc).isoformat(timespec="microseconds"))
-        found = findings(root, config, context, previous, now) if (root / QUEUE).is_file() \
-            else {}
+        inbox = deliver_notices(root, config, now) if (root / QUEUE).is_file() else {}
+        found = findings(root, config, context, previous, now, inbox) \
+            if (root / QUEUE).is_file() else {}
         active = previous.get("active", {})
         outbox = previous.get("outbox", {})
         targets = alert_targets(root, config)
@@ -699,6 +1237,9 @@ def run_session(root, config, reason, work):
         "queue_helper": str(root / HELPER), "worktree": str(worktree),
         "open_tickets": {k: work[k] for k in ("queued", "in_progress", "retry_install")},
         "session_log": str(session_log),
+        # The builder prompt keys on this: this watcher tells authors itself.
+        # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
+        "author_notices": "whycode_inbox",
     }
     rules, rules_source = builder_prompt(root, config)
     context["builder_prompt"] = rules_source
@@ -1078,6 +1619,7 @@ def activate(root, arguments):
     template = (SOURCES / "build-queue-watcher.plist.template").read_text()
     helper(root, "", "install")
     ensure_watchdog_scope(root)
+    ensure_inbox_scope(root)
     shutil.copyfile(Path(__file__).resolve(), root / INSTALLED_WATCHER)
     shutil.copyfile(SOURCES / "build-queue-builder-prompt.md", root / INSTALLED_PROMPT)
     write_json(root / CONFIG, config)

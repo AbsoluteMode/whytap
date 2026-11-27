@@ -1658,9 +1658,16 @@ held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
 so the island and Settings -> Features -> Hover change at once and a tile
 sliding under the pointer cannot send the tool back. A lifted tool is drawn
 larger with a shadow, holds the drawer open (IslandView interactionHeld and
-isHoverExpanded), and its release never activates it. A release more than
-24 pt outside the tools restores the order before the lift (Escape only when
-the island already has keyboard focus); a layout change the drag did not
+isHoverExpanded), and its release never activates it. Since 2026-11-27 a
+release outside the drawer's frame (IslandHoverReorder.panel, measured at the
+lift from the .navigation region; 24 pt around the tools when unknown)
+removes the tool (removeLiftedTool -> HoverLayoutStore.unpin): outside, the
+floating tile shrinks, dims and shows a red minus and the cursor becomes the
+system disappearing-item cursor; the release plays the system poof
+(NSAnimationEffect, skipped under Reduce Motion) and the picture fades in
+place (ReorderPhase .removed). Releasing back inside keeps the tool; Escape,
+watched by key monitors only for the drag, restores the order before the lift.
+A layout change the drag did not
 write (Settings Sync) ends it without undoing that change; hide, drawer close
 or the next press end the drag with the order reached. A shorter press stays
 an ordinary click. Motion: the lifted tool is drawn by IslandHoverFloatingTile
@@ -1677,13 +1684,16 @@ until release (saveLayout); a cancel restores the screen only; any Settings
 Sync reload (externalReloads) ends the drag. WHY:
 .project-docs/decisions/2026-11-25-island-hover-reorder.md
 
-Island pin/unpin and More tools: a right-click or Control-click on a tile is
+Island pin/unpin and More tools: throwing a tile out of the drawer (above)
+is the primary way to remove it; a right-click or Control-click on a tile is
 found geometrically in IslandPanel.sendEvent (IslandHoverHitBridge
 .contextMenuTarget) and pops a native NSMenu (IslandHoverToolMenu): Remove from
 Hover, or a disabled "Settings always stays in Hover"; VoiceOver has the same
-action on the tile. The footer keeps the description on the left and
-IslandHoverMoreToolsToggle on the right ("More tools" with nothing hovered).
-It opens IslandHoverMoreToolsSection below the footer: HoverLayoutStore
+action on the tile. With tools to add, the whole footer strip is one button
+(IslandHoverMoreToolsStrip): the hovered tool's description or "More tools"
+on the left, the chevron on the right. It opens IslandHoverMoreToolsSection
+below the strip, mounted 0.45 s after the drawer appears and opened by height
+and opacity in the same transaction as the drawer's height: HoverLayoutStore
 .unpinnedTools in catalog order, three per row, three visible rows then
 scrolling; a click or "Add to Hover" calls HoverLayoutStore.pin (end of the
 island, before Settings) and the grid scrolls to it. Its rows and chevron are
@@ -1691,11 +1701,16 @@ hit surfaces .moreTools/.moreToggle, accepted together with .tile; the band
 grows with the section (controlsHoverPanelHeight moreTools). The chevron is
 hidden when every tool is in the island; search and drawer close collapse the
 section. After a removal, an addition and while the menu is open the drawer is
-held (IslandHoverEditHold in IslandHoverHitBridge.holdsDrawer) until a click
-outside or Escape (IslandHoverMenuDismissObserver -> dismissAfterEdit ->
+held (IslandHoverEditHold in IslandHoverHitBridge.holdsDrawer: held with the
+pointer inside, away, reentered, free) until a click outside or Escape (IslandHoverMenuDismissObserver -> dismissAfterEdit ->
 dismissals -> dismissHoverMenu, which closes it even with the pointer over it;
-Escape in another Whytap window passes on), or until the pointer is seen over
-the island or the drawer's final frame and then leaves. Disabled hit targets
+Escape in another Whytap window passes on), or until the pointer has left,
+come back and left again; a hover edge the edit itself causes never counts as
+the return. Grid motion: IslandHoverTileGridLayout (a plain Layout, scrolling
+only past four rows) places the tiles; added and removed tiles scale and fade
+(tileTransition) while the others slide; tile frames for the floating layer
+live in IslandHoverTileFrameBox, outside SwiftUI state. WHY:
+.project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md, Disabled hit targets
 (a Soon tool) still register as inactive: clicks skip them, the context menu
 finds them, so such a tool can be removed but not opened. WHY:
 .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md

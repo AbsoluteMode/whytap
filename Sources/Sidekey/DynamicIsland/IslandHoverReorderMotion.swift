@@ -14,6 +14,12 @@ enum IslandHoverReorderMotionCurve {
     static let land = Animation.spring(response: 0.34, dampingFraction: 0.9)
     /// How much larger a lifted tile is drawn.
     static let liftedScale: CGFloat = 1.1
+    /// The tile turning into "will be removed" outside the hover, and back.
+    static let removeHint = Animation.spring(response: 0.2, dampingFraction: 0.9)
+    /// The tile vanishing where it was thrown out.
+    static let vanish = Animation.easeOut(duration: 0.22)
+    /// Outside the hover the tile shrinks a little and dims.
+    static let outsideScale: CGFloat = 0.9
 }
 
 /// Every tile's frame in the grid's coordinate space, so the floating tile
@@ -23,6 +29,11 @@ struct IslandHoverTileFramesKey: PreferenceKey {
     static func reduce(value: inout [HoverTool: CGRect], nextValue: () -> [HoverTool: CGRect]) {
         value.merge(nextValue()) { _, new in new }
     }
+}
+
+/// The latest tile frames, kept outside SwiftUI's dependency graph.
+final class IslandHoverTileFrameBox {
+    var frames: [HoverTool: CGRect] = [:]
 }
 
 struct IslandHoverTileFrameReporter: View {
@@ -48,6 +59,8 @@ final class IslandHoverReorderStage: ObservableObject {
     @Published private(set) var origin: CGPoint = .zero
     @Published var settle: CGPoint?
     @Published var lifted = false
+    /// Thrown out of the hover: the picture puffs away where it is.
+    @Published var vanished = false
     /// The lift this picture belongs to (`IslandHoverHitBridge.reorderGeneration`).
     private(set) var generation = 0
 
@@ -58,6 +71,7 @@ final class IslandHoverReorderStage: ObservableObject {
         self.generation = generation
         settle = nil
         lifted = false
+        vanished = false
     }
 
     func clear(generation: Int) {
@@ -66,6 +80,7 @@ final class IslandHoverReorderStage: ObservableObject {
         content = nil
         settle = nil
         lifted = false
+        vanished = false
     }
 }
 
@@ -79,7 +94,8 @@ struct IslandHoverFloatingLayer: View {
         ZStack(alignment: .topLeading) {
             if let content = stage.content {
                 IslandHoverFloatingTile(motion: motion, origin: stage.origin,
-                                        settle: stage.settle, lifted: stage.lifted) { content }
+                                        settle: stage.settle, lifted: stage.lifted,
+                                        vanished: stage.vanished) { content }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -97,15 +113,34 @@ struct IslandHoverFloatingTile<Content: View>: View {
     /// Where it lands, once let go; nil while it follows the pointer.
     let settle: CGPoint?
     let lifted: Bool
+    var vanished = false
     @ViewBuilder let content: () -> Content
 
     static func position(origin: CGPoint, translation: CGSize, settle: CGPoint?) -> CGPoint {
         settle ?? CGPoint(x: origin.x + translation.width, y: origin.y + translation.height)
     }
 
+    private var scale: CGFloat {
+        if vanished { return 1.35 }
+        if motion.outside { return IslandHoverReorderMotionCurve.outsideScale }
+        return lifted ? IslandHoverReorderMotionCurve.liftedScale : 1
+    }
+
     var body: some View {
         content()
-            .scaleEffect(lifted ? IslandHoverReorderMotionCurve.liftedScale : 1)
+            // Outside the hover: a red minus says letting go removes it.
+            .overlay(alignment: .topLeading) {
+                Image(systemName: "minus.circle.fill")
+                    .font(.system(size: 16, weight: .semibold))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, .red)
+                    .offset(x: -4, y: -4)
+                    .scaleEffect(motion.outside && !vanished ? 1 : 0.2)
+                    .opacity(motion.outside && !vanished ? 1 : 0)
+            }
+            .opacity(vanished ? 0 : (motion.outside ? 0.72 : 1))
+            .blur(radius: vanished ? 6 : 0)
+            .scaleEffect(scale)
             .shadow(color: .black.opacity(lifted ? 0.35 : 0), radius: lifted ? 10 : 0, y: lifted ? 5 : 0)
             .fixedSize()
             .position(Self.position(origin: origin, translation: motion.translation, settle: settle))

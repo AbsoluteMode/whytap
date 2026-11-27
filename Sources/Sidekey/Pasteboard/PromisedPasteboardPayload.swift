@@ -19,6 +19,28 @@ final class PasteboardReadMonitor {
     }
 }
 
+/// Attributable evidence of a failed Drop write: the change count the
+/// writer's own `clearContents()` produced before `writeObjects` failed.
+/// Without it a changed count after a failed write is ambiguous (another app
+/// may have copied meanwhile) and the engine must treat it as foreign.
+// WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
+@MainActor
+final class PasteboardWriteLedger {
+    private var failedWriteChangeCount: Int?
+
+    nonisolated init() {}
+
+    func recordFailedWrite(ownedChangeCount: Int) {
+        failedWriteChangeCount = ownedChangeCount
+    }
+
+    /// Returns and forgets the evidence of the last failed write.
+    func takeFailedWrite() -> Int? {
+        defer { failedWriteChangeCount = nil }
+        return failedWriteChangeCount
+    }
+}
+
 /// Publishes a Drop paste payload as promised pasteboard data. The data is
 /// handed over only when a reader asks for it, which is the moment the
 /// engine needs: Chromium/Electron read the pasteboard only when the page
@@ -71,13 +93,17 @@ final class PromisedPasteboardPayload: NSObject, NSPasteboardItemDataProvider {
     }
 
     /// Clears `pasteboard` and writes one item that promises every payload
-    /// type and carries the transient marker. Returns the change counts
-    /// around the write, or nil when the pasteboard refused it.
+    /// type and carries the transient marker. Returns the change count
+    /// before and the generation this write owns (the one its own
+    /// `clearContents()` produced; `writeObjects` does not change it), or
+    /// nil when the pasteboard refused the write. A refusal after the clear
+    /// is recorded in `ledger`.
     @MainActor
     static func write(
         _ payload: [NSPasteboard.PasteboardType: Data],
         to pasteboard: NSPasteboard,
-        reads: PasteboardReadMonitor
+        reads: PasteboardReadMonitor,
+        ledger: PasteboardWriteLedger? = nil
     ) -> (before: Int, after: Int)? {
         guard !payload.isEmpty else { return nil }
         let provider = PromisedPasteboardPayload(payload: payload) { [weak reads] in
@@ -94,8 +120,11 @@ final class PromisedPasteboardPayload: NSObject, NSPasteboardItemDataProvider {
               item.setDataProvider(provider, forTypes: Array(payload.keys))
         else { return nil }
         let before = pasteboard.changeCount
-        pasteboard.clearContents()
-        guard pasteboard.writeObjects([item]) else { return nil }
-        return (before, pasteboard.changeCount)
+        let owned = pasteboard.clearContents()
+        guard pasteboard.writeObjects([item]) else {
+            ledger?.recordFailedWrite(ownedChangeCount: owned)
+            return nil
+        }
+        return (before, owned)
     }
 }

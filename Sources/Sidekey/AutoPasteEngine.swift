@@ -169,6 +169,7 @@ final class AutoPasteEngine {
     private let localEditor: LocalEditorFn
     private let readMonitor: PasteboardReadMonitor
     private let restoreTiming: RestoreTiming
+    private let writeLedger: PasteboardWriteLedger
 
     // MARK: - State
 
@@ -220,14 +221,15 @@ final class AutoPasteEngine {
     convenience init(suppression: ClipboardSuppression = .shared) {
         let log = OSLog(subsystem: "com.rootwise.sidekey", category: "pipeline")
         let reads = PasteboardReadMonitor()
+        let ledger = PasteboardWriteLedger()
         self.init(
             flagsState: { CGEventSource.flagsState(.hidSystemState) },
             frontmostAppInfo: AutoPasteEngine.defaultFrontmostAppInfo,
             activate: AutoPasteEngine.defaultActivate,
             isTerminated: AutoPasteEngine.defaultIsTerminated,
             permissionGranted: PermissionsHelper.postEventAccessGranted,
-            pasteboardWrite: { AutoPasteEngine.writePromisedText($0, to: .general, reads: reads) },
-            richPasteboardWrite: { AutoPasteEngine.writeRichContent($0, to: .general, reads: reads) },
+            pasteboardWrite: { AutoPasteEngine.writePromisedText($0, to: .general, reads: reads, ledger: ledger) },
+            richPasteboardWrite: { AutoPasteEngine.writeRichContent($0, to: .general, reads: reads, ledger: ledger) },
             postEvent: AutoPasteEngine.defaultPostEvent,
             postEventToPid: AutoPasteEngine.defaultPostEventToPid,
             sleepUs: { usleep($0) },
@@ -247,7 +249,8 @@ final class AutoPasteEngine {
                 let name = NSRunningApplication.current.localizedName ?? "Whytap"
                 return LocalEditorTarget(name: name, insert: { editor.insert($0) })
             },
-            readMonitor: reads
+            readMonitor: reads,
+            writeLedger: ledger
         )
     }
 
@@ -272,7 +275,8 @@ final class AutoPasteEngine {
         currentChangeCount: @escaping CurrentChangeCountFn = { 0 },
         localEditor: @escaping LocalEditorFn = { nil },
         readMonitor: PasteboardReadMonitor = PasteboardReadMonitor(),
-        restoreTiming: RestoreTiming = .standard
+        restoreTiming: RestoreTiming = .standard,
+        writeLedger: PasteboardWriteLedger = PasteboardWriteLedger()
     ) {
         self.flagsState = flagsState
         self.frontmostAppInfo = frontmostAppInfo
@@ -295,6 +299,7 @@ final class AutoPasteEngine {
         self.localEditor = localEditor
         self.readMonitor = readMonitor
         self.restoreTiming = restoreTiming
+        self.writeLedger = writeLedger
     }
 
     // MARK: - Public API
@@ -412,12 +417,12 @@ final class AutoPasteEngine {
         setClipboardSuppression(true)
 
         // Step 3: pasteboard write. If this fails the rest of the
-        // pipeline is moot. A writer may have cleared the clipboard before
-        // reporting failure, so restore if the write itself moved the
-        // change count (or the pasteboard still holds an earlier take's
-        // dictation) — and only while nothing newer arrived since.
+        // pipeline is moot. Restore only on attributable evidence: the
+        // writer's own clear is still the current generation (it may have
+        // cleared before failing), or the earlier take's dictation is still
+        // there. A count that merely moved may be another app's copy.
         // Suppression must still be cleared on the failure path.
-        let beforeWriteCount = currentChangeCount()
+        _ = writeLedger.takeFailedWrite()
         let written: (before: Int, after: Int)?
         let plainText: String
         if formatting.usesRichPaste, let richPasteboardWrite, let rich = SmartRichTextPaste.make(text) {
@@ -427,16 +432,16 @@ final class AutoPasteEngine {
             plainText = text
             written = pasteboardWrite(text)
         }
-        let afterWriteCount = currentChangeCount()
         guard let counts = written else {
+            let ownClear = writeLedger.takeFailedWrite()
             logEmit(.error, "autopaste_failed step=pasteboard reason=write_returned_nil")
-            let writerMutated = afterWriteCount != beforeWriteCount
+            let ownClearStands = ownClear.map { $0 == currentChangeCount() } ?? false
             let previousTakeHolds = inherited && claim.map(clipboardIsOwned(by:)) == true
             if claim != nil { claim = nil }
-            if (writerMutated || previousTakeHolds), currentChangeCount() == afterWriteCount {
+            if ownClearStands || previousTakeHolds {
                 pasteboardRestore(snapshot)
                 suppressClipboardThrough(currentChangeCount())
-            } else if writerMutated || inherited {
+            } else if ownClear != nil || inherited {
                 logEmit(.info, "autopaste_pasteboard_restore_skipped reason=replaced after=failure")
             }
             setClipboardSuppression(false)
@@ -515,19 +520,26 @@ final class AutoPasteEngine {
             giveBack(claim, after: "flush")
             return false
         }
-        if let target, !isTerminated(target.pid),
-           frontmostBeforeSettle?.pid == target.pid, frontmostAppInfo()?.pid != target.pid {
+        // One foreground sample decides both the focus check and the
+        // recipient: a live target that holds focus is the recipient for
+        // the whole sequence; without a live target, or when focus could
+        // not be restored to it, the paste goes where focus is (fallback).
+        let frontmostAtBoundary = frontmostAppInfo()
+        let liveTarget = target.flatMap { isTerminated($0.pid) ? nil : $0 }
+        if let liveTarget, frontmostBeforeSettle?.pid == liveTarget.pid,
+           frontmostAtBoundary?.pid != liveTarget.pid {
             logEmit(.error, "autopaste_failed step=focus reason=target_lost_focus")
             giveBack(claim, after: "failure")
             return false
         }
+        let recipient = frontmostAtBoundary
 
         // Step 10: post Cmd+V. Explicit Command-down → V-down → V-up →
         // Command-up sequence with usleep gaps — `CGEvent.flags = .maskCommand`
         // alone is not enough on every app (friend's empirical note). The
         // app frontmost now receives it; ownership and that recipient are
         // checked again right before V-down.
-        guard postDropCmdV(recipient: frontmostAppInfo(), claim: claim) else {
+        guard postDropCmdV(recipient: recipient, claim: claim) else {
             return false
         }
         let readsAtPaste = readMonitor.readCount
@@ -563,8 +575,10 @@ final class AutoPasteEngine {
     private func postDropCmdV(recipient: RememberedTarget?, claim: ClipboardClaim) -> Bool {
         postEvent(Self.commandKeyCode, true, [])
         sleepUs(Self.keyEventGapUs)
-        let recipientReady = recipient.map { frontmostAppInfo()?.pid == $0.pid } ?? true
+        // The ownership check can read the pasteboard; the foreground is
+        // sampled after it, as the last thing before V-down.
         let owned = self.claim === claim && clipboardIsOwned(by: claim)
+        let recipientReady = recipient.map { frontmostAppInfo()?.pid == $0.pid } ?? true
         guard recipientReady, owned else {
             postEvent(Self.commandKeyCode, false, [])
             if self.claim !== claim {
@@ -978,9 +992,10 @@ final class AutoPasteEngine {
     static func writePromisedText(
         _ text: String,
         to pasteboard: NSPasteboard,
-        reads: PasteboardReadMonitor
+        reads: PasteboardReadMonitor,
+        ledger: PasteboardWriteLedger? = nil
     ) -> (before: Int, after: Int)? {
-        PromisedPasteboardPayload.write([.string: Data(text.utf8)], to: pasteboard, reads: reads)
+        PromisedPasteboardPayload.write([.string: Data(text.utf8)], to: pasteboard, reads: reads, ledger: ledger)
     }
 
     /// A named pasteboard is injectable for validation without touching the
@@ -988,14 +1003,15 @@ final class AutoPasteEngine {
     static func writeRichContent(
         _ content: SmartRichTextPaste,
         to pasteboard: NSPasteboard,
-        reads: PasteboardReadMonitor = PasteboardReadMonitor()
+        reads: PasteboardReadMonitor = PasteboardReadMonitor(),
+        ledger: PasteboardWriteLedger? = nil
     ) -> (before: Int, after: Int)? {
         var payload: [NSPasteboard.PasteboardType: Data] = [
             .string: Data(content.plainText.utf8),
             .rtf: content.rtf,
         ]
         if let html = content.html { payload[.html] = html }
-        return PromisedPasteboardPayload.write(payload, to: pasteboard, reads: reads)
+        return PromisedPasteboardPayload.write(payload, to: pasteboard, reads: reads, ledger: ledger)
     }
 
     private static func defaultPostEventToPid(_ keyCode: CGKeyCode, _ down: Bool, _ flags: CGEventFlags, _ pid: pid_t) {

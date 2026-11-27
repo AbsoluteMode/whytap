@@ -1784,3 +1784,232 @@ extension AutoPasteEngineTests {
         XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("newer clipboard fixture".utf8)]])
     }
 }
+
+// MARK: - Build-queue review of ticket 697
+
+
+extension AutoPasteEngineTests {
+    func testBuilder697FailedDropWriteDoesNotClaimExternalGenerationInsideWriter() async {
+        for dropClearedFirst in [false, true] {
+            let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+            let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+            var board = original
+            var generation = 10
+            var restored = false
+            var posts = 0
+            var skipThrough: [Int] = []
+            let engine = AutoPasteEngine(
+                flagsState: { [] }, frontmostAppInfo: { Self.targetA },
+                activate: { _ in true }, isTerminated: { _ in false },
+                permissionGranted: { _ in true },
+                pasteboardWrite: { _ in
+                    if dropClearedFirst {
+                        board = PasteboardSnapshot(items: [])
+                        generation += 1
+                    }
+                    board = external
+                    generation += 1
+                    return nil
+                },
+                postEvent: { _, _, _ in posts += 1 }, sleepUs: { _ in },
+                nowMs: { 0 }, logEmit: { _, _ in },
+                pasteboardSnapshot: { board },
+                pasteboardRestore: {
+                    restored = true
+                    board = $0
+                    generation += 1
+                },
+                suppressClipboardThrough: { skipThrough.append($0) },
+                currentChangeCount: { generation }
+            )
+            let result = await engine.paste("fixture")
+            XCTAssertFalse(result)
+            XCTAssertEqual(posts, 0)
+            XCTAssertEqual(board, external, "A failed write cannot adopt another app's copy")
+            XCTAssertFalse(restored, "Don't restore over the external generation")
+            XCTAssertTrue(skipThrough.isEmpty, "Don't suppress the external copy in History")
+        }
+    }
+
+    func testBuilder697DoesNotRebindStillLivingTargetWhenFocusMovesAtRecipientCapture() async {
+        var focusReads = 0
+        var generation = 1
+        var postedV = false
+        var restored = false
+        let engine = AutoPasteEngine(
+            flagsState: { [] },
+            frontmostAppInfo: {
+                focusReads += 1
+                return focusReads < 5 ? Self.targetA : Self.targetB
+            },
+            activate: { _ in true }, isTerminated: { _ in false },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { _ in generation = 2; return (before: 1, after: 2) },
+            postEvent: { code, down, _ in
+                if code == Self.v && down { postedV = true }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardRestore: { _ in generation += 1; restored = true },
+            currentChangeCount: { generation }
+        )
+        engine.rememberTargetBeforeRecording()
+
+        let result = await engine.paste("fixture")
+        XCTAssertFalse(result, "The originally remembered target is alive but lost focus")
+        XCTAssertFalse(postedV, "Do not redirect V-down to the new foreground app")
+        XCTAssertTrue(restored, "Return the previous clipboard when the paste is stopped")
+        await engine.waitForPendingRestore()
+    }
+
+    func testBuilder697DoesNotPostVWhenFocusMovesDuringFinalClipboardOwnershipCheck() async {
+        var frontmost = Self.targetA
+        var generation = 1
+        var commandWasPosted = false
+        var postedV = false
+        var restored = false
+        let engine = AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { frontmost },
+            activate: { _ in true }, isTerminated: { _ in false },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { _ in generation = 2; return (before: 1, after: 2) },
+            postEvent: { code, down, _ in
+                if code == Self.cmd && down { commandWasPosted = true }
+                if code == Self.v && down { postedV = true }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardRestore: { _ in generation += 1; restored = true },
+            currentChangeCount: {
+                if commandWasPosted { frontmost = Self.targetB }
+                return generation
+            }
+        )
+        engine.rememberTargetBeforeRecording()
+
+        let result = await engine.paste("fixture")
+        XCTAssertFalse(result)
+        XCTAssertFalse(postedV, "The ownership check can run after the last focus sample")
+        XCTAssertTrue(restored)
+        await engine.waitForPendingRestore()
+    }
+}
+
+extension AutoPasteEngineTests {
+    /// Another app copies inside Drop's writer, at either observation
+    /// boundary (the write reports success with its own generation, or it
+    /// fails), with or without Drop's own clear first, for plain and rich
+    /// paste, with and without a previous take whose claim this one took
+    /// over. Drop never pastes, restores over or hides that copy.
+    func testExternalCopyInsideTheWriterIsNeverClaimedRestoredOverOrHidden() async {
+        for rich in [false, true] {
+            for predecessor in [false, true] {
+                for clearedFirst in [false, true] {
+                    for reportsSuccess in [false, true] where clearedFirst || !reportsSuccess {
+                        let label = "rich=\(rich) predecessor=\(predecessor) cleared=\(clearedFirst) success=\(reportsSuccess)"
+                        let marker = PromisedPasteboardPayload.transientMarker.rawValue
+                        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+                        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+                        var board = original
+                        var generation = 10
+                        var faulty = !predecessor
+                        var restores = 0
+                        var vDowns = 0
+                        var skipThrough: [Int] = []
+                        let ledger = PasteboardWriteLedger()
+                        let write: () -> (before: Int, after: Int)? = {
+                            let before = generation
+                            guard faulty else {
+                                generation += 1
+                                board = PasteboardSnapshot(items: [["public.utf8-plain-text": Data("take one".utf8), marker: Data()]])
+                                return (before, generation)
+                            }
+                            var own: Int?
+                            if clearedFirst {
+                                generation += 1
+                                own = generation
+                                board = PasteboardSnapshot(items: [])
+                            }
+                            generation += 1
+                            board = external
+                            if reportsSuccess, let own { return (before, own) }
+                            if let own { ledger.recordFailedWrite(ownedChangeCount: own) }
+                            return nil
+                        }
+                        let engine = AutoPasteEngine(
+                            flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true },
+                            isTerminated: { _ in false }, permissionGranted: { _ in true },
+                            pasteboardWrite: { _ in write() }, richPasteboardWrite: { _ in write() },
+                            postEvent: { code, down, _ in if code == Self.v && down { vDowns += 1 } },
+                            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+                            pasteboardSnapshot: { board },
+                            pasteboardRestore: { restores += 1; board = $0; generation += 1 },
+                            suppressClipboardThrough: { skipThrough.append($0) },
+                            currentChangeCount: { generation }, writeLedger: ledger
+                        )
+                        if predecessor {
+                            let first = await engine.paste("take one")
+                            XCTAssertTrue(first, label)
+                            faulty = true
+                        }
+                        let skipsBefore = skipThrough.count
+                        let result = await engine.paste(rich ? "**Важно**" : "take two", formatting: rich ? .slack : .plain)
+                        await engine.waitForPendingRestore()
+
+                        XCTAssertFalse(result, label)
+                        XCTAssertEqual(vDowns, predecessor ? 1 : 0, label)
+                        XCTAssertEqual(restores, 0, label)
+                        XCTAssertEqual(board, external, label)
+                        XCTAssertFalse(skipThrough.dropFirst(skipsBefore).contains { $0 >= generation }, "\(label): \(skipThrough)")
+                        XCTAssertFalse(engine.hasPendingRestore, label)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The positive side: Drop's own clear is still the current generation
+    /// after its write failed, so the user's clipboard comes back.
+    func testFailedWriteWithItsOwnClearStandingRestoresTheClipboard() async {
+        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+        var board = original
+        var generation = 10
+        var vDowns = 0
+        let ledger = PasteboardWriteLedger()
+        let engine = AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true },
+            isTerminated: { _ in false }, permissionGranted: { _ in true },
+            pasteboardWrite: { _ in
+                generation += 1
+                board = PasteboardSnapshot(items: [])
+                ledger.recordFailedWrite(ownedChangeCount: generation)
+                return nil
+            },
+            postEvent: { code, down, _ in if code == Self.v && down { vDowns += 1 } },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardSnapshot: { board },
+            pasteboardRestore: { board = $0; generation += 1 },
+            currentChangeCount: { generation }, writeLedger: ledger
+        )
+
+        let result = await engine.paste("dictated")
+
+        XCTAssertFalse(result)
+        XCTAssertEqual(vDowns, 0)
+        XCTAssertEqual(board, original)
+    }
+
+    /// Fallback kept from before: a live target that could not be brought
+    /// to the front (activation refused) does not stop the paste; it goes
+    /// to the app that has focus, as long as that app keeps it until V-down.
+    func testLiveTargetThatCannotTakeFocusKeepsTheFrontmostFallback() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()          // target A
+        env.frontmost = Self.targetB                     // focus moved before the paste; A refuses activation
+
+        let result = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertTrue(result)
+        XCTAssertEqual(env.postedEvents.filter { $0.keyCode == Self.v && $0.down }.count, 1)
+    }
+}

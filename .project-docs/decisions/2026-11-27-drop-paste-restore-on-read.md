@@ -57,9 +57,18 @@ clipboard png/tiff only. The target pasted the old screenshot.
   frontmost. Otherwise Command is released, V is never sent, and the
   clipboard comes back only if it is still Drop's. Without a remembered
   target only ownership decides (the documented fallback).
-- A failed write restores only when the write itself moved the change
-  count (or the previous take's dictation is still there) and nothing newer
-  arrived after it.
+- The writer reports the generation its own `clearContents()` produced
+  (`writeObjects` does not change it). A failed write restores only on
+  attributable evidence: that own clear, recorded in `PasteboardWriteLedger`,
+  is still the current generation, or the previous take's dictation is still
+  there. A count that merely moved may be another app's copy and is treated
+  as foreign: not restored over and not hidden from clipboard history.
+- One foreground sample after the settle decides both the focus check and
+  the Cmd+V recipient. Between Command-down and V-down the ownership check
+  (which may read the pasteboard) runs first and the foreground is sampled
+  last. A live target that could not be brought to the front at all keeps
+  the earlier fallback: the paste goes to the app with focus, if it keeps
+  focus until V-down.
 - Drop pastes run one at a time. A take that starts while the previous one
   waits for its read waits too (up to the 2 s fallback), so the previous
   target reads its own dictation, then inherits the snapshot; if its write
@@ -116,7 +125,12 @@ between Command-down and V-down (with and without a target) is not pasted
 and not overwritten; a failed write does not restore over a later copy; quit
 while a second take waits for the first read, or while two later takes
 wait, stops them; a newer take capturing another app during the settle, and
-a focus change between Command-down and V-down, post no V. On a named pasteboard: promise read counting
+a focus change between Command-down and V-down, post no V. After the
+review of ticket 697: an external copy inside the writer (both observation
+boundaries, with and without Drop's own clear, plain and rich, with and
+without a previous take) is never claimed, restored over or hidden; a focus
+change between the boundary check and the recipient capture, or during the
+final ownership check, posts no V. On a named pasteboard: promise read counting
 and cache, `ClipboardWatcher` skipping the item unread, and an end-to-end
 run where a separate `osascript` process reads 300 ms after Cmd+V from an
 image-only pasteboard. With the timing forced back to 120 ms that process

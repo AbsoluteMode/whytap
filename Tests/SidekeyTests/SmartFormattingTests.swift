@@ -202,7 +202,8 @@ final class SmartRichTextPasteTests: XCTestCase {
         let original = Pasteboard.snapshot(of: pb)
         var events = 0
         var suppression: [Bool] = []
-        let engine = AutoPasteEngine(flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true }, pasteboardWrite: { _ in nil }, richPasteboardWrite: { _ in pb.clearContents(); pb.setString("partial", forType: .string); return nil }, postEvent: { _,_,_ in events += 1 }, sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _,_ in }, pasteboardSnapshot: { Pasteboard.snapshot(of: pb) }, pasteboardRestore: { Pasteboard.restore($0, into: pb) }, setClipboardSuppression: { suppression.append($0) }, currentChangeCount: { pb.changeCount })
+        let ledger = PasteboardWriteLedger()
+        let engine = AutoPasteEngine(flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true }, pasteboardWrite: { _ in nil }, richPasteboardWrite: { _ in let own = pb.clearContents(); pb.setString("partial", forType: .string); ledger.recordFailedWrite(ownedChangeCount: own); return nil }, postEvent: { _,_,_ in events += 1 }, sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _,_ in }, pasteboardSnapshot: { Pasteboard.snapshot(of: pb) }, pasteboardRestore: { Pasteboard.restore($0, into: pb) }, setClipboardSuppression: { suppression.append($0) }, currentChangeCount: { pb.changeCount }, writeLedger: ledger)
         let success = await engine.paste("**Важно**", formatting: .slack)
         XCTAssertFalse(success)
         XCTAssertEqual(Pasteboard.snapshot(of: pb), original)

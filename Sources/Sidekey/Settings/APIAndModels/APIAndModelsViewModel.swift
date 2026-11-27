@@ -9,6 +9,8 @@ struct KeyChip: Equatable, Identifiable {
     let checkedAt: Date?
     /// A server's added models, in the order added; `nil` for other accounts.
     var serverModels: [ServerModel]? = nil
+    /// The last check said the key works: its tile shows the status in green.
+    var keyWorks = false
     var id: String { account.storageID }
 }
 
@@ -198,6 +200,12 @@ final class APIAndModelsViewModel: ObservableObject {
     private var sharedChecking: Set<SharedModelKind> = []
     private var sharedNotes: [SharedModelKind: [String]] = [:]
     private var observers: Set<AnyCancellable> = []
+    /// Whether a window shows this model. Other owners (onboarding, the app
+    /// control plugin) keep the default and recompute on every change.
+    private var isPresented = true
+    /// The debounced recompute after a burst of defaults changes, while shown.
+    private var pendingDefaultsRecompute: DispatchWorkItem?
+    static let defaultsDebounce: TimeInterval = 0.1
 
     /// The `.shared` stores and the input language are main-actor state, so
     /// their defaults are applied in the body (Swift 5 evaluates default
@@ -242,16 +250,13 @@ final class APIAndModelsViewModel: ObservableObject {
 
         // The input language is changed in the island and in meeting settings;
         // the stores write UserDefaults too. Bursts collapse into one pass.
+        // Handled synchronously on the main thread (not through a debounced
+        // publisher), so opening the window right after a write sees it.
         NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
-            .debounce(for: .milliseconds(100), scheduler: RunLoop.main)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.recompute() }
-            }
+            .sink { [weak self] _ in Self.onMain { self?.defaultsChanged() } }
             .store(in: &observers)
         NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
-            .sink { [weak self] _ in
-                MainActor.assumeIsolated { self?.recompute() }
-            }
+            .sink { [weak self] _ in Self.onMain { self?.tavilyKeyChanged() } }
             .store(in: &observers)
     }
 
@@ -1069,6 +1074,59 @@ final class APIAndModelsViewModel: ObservableObject {
 
     // MARK: - Derived state
 
+    /// The Settings window shows (`true`) or no longer shows (`false`) this
+    /// model. While hidden, change notifications do nothing: the recompute
+    /// reads every provider key from the Keychain on the main thread (about
+    /// 40 ms with a full set of keys), and the island writes defaults from its
+    /// own controls (Drop Mode, languages) while their animations run.
+    /// Becoming shown always recomputes once, synchronously, before the window
+    /// draws: keys can change without any notification (a Settings Sync round
+    /// with only credentials, the app control plugin), so a "stale" flag
+    /// could not be trusted. It also takes over a pending debounced pass.
+    // WHY: .project-docs/decisions/2026-11-27-settings-models-recompute-while-hidden.md
+    func setPresented(_ presented: Bool) {
+        guard presented != isPresented else { return }
+        isPresented = presented
+        cancelPendingDefaultsRecompute()
+        if presented { recompute() }
+    }
+
+    private func defaultsChanged() {
+        guard isPresented else { return }
+        cancelPendingDefaultsRecompute()
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.pendingDefaultsRecompute = nil
+                guard self.isPresented else { return }
+                self.recompute()
+            }
+        }
+        pendingDefaultsRecompute = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.defaultsDebounce, execute: work)
+    }
+
+    /// Saved or removed locally or by Settings Sync: immediate while shown.
+    private func tavilyKeyChanged() {
+        guard isPresented else { return }
+        recompute()
+    }
+
+    private func cancelPendingDefaultsRecompute() {
+        pendingDefaultsRecompute?.cancel()
+        pendingDefaultsRecompute = nil
+    }
+
+    /// Notifications can be posted off the main thread (defaults written by
+    /// another thread); the model is main-actor state.
+    private nonisolated static func onMain(_ body: @escaping @MainActor () -> Void) {
+        if Thread.isMainThread {
+            MainActor.assumeIsolated { body() }
+        } else {
+            DispatchQueue.main.async { MainActor.assumeIsolated { body() } }
+        }
+    }
+
     private func recompute() {
         let chips = keyedAccounts().map(chip(for:))
         let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)))
@@ -1155,7 +1213,7 @@ final class APIAndModelsViewModel: ObservableObject {
         return KeyChip(
             account: account, title: title(of: account),
             statusText: record.map { Self.statusText(for: $0.status, account: account) } ?? "Not checked yet",
-            checkedAt: record?.checkedAt, serverModels: models
+            checkedAt: record?.checkedAt, serverModels: models, keyWorks: record?.status == .valid
         )
     }
 

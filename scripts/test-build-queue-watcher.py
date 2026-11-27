@@ -426,7 +426,21 @@ class WatcherTests(unittest.TestCase):
     def state(self):
         return json.loads((self.root / "whytap-build-queue-watcher-state.json").read_text())
 
-    def test_locked_screen_waits_without_backoff_and_starts_after_unlock(self):
+    def test_locked_screen_still_runs_validation_but_not_installs(self):
+        # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+        self.enqueue(1)
+        self.set_environment(screen_locked=True)
+        result = self.watcher("run")
+        self.assertEqual(len(self.sessions()), 1)
+        self.assertIn("screen locked: validation and merge only", result.stdout + result.stderr)
+        self.assertEqual(self.statuses(), {1: "done"})
+        self.assertEqual(self.watcher("environment", "--for", "suite").returncode, 0)
+        self.assertEqual(self.watcher("environment", ok=False).returncode, 3)
+        self.configure_watcher(validate_while_locked=False)
+        self.assertEqual(self.watcher("environment", "--for", "suite", ok=False).returncode, 3)
+
+    def test_locked_screen_waits_without_backoff_when_validation_must_wait_too(self):
+        self.configure_watcher(validate_while_locked=False)
         self.enqueue(1)
         self.set_environment(screen_locked=True)
         self.watcher("run")
@@ -478,14 +492,14 @@ class WatcherTests(unittest.TestCase):
         mirror = self.base / "orchestrator" / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.watcher("run")
         raised = [a for a in self.alerts() if a["state"] == "raised"]
         self.assertEqual([a["condition"] for a in raised], ["environment_wait"])
-        self.assertIn("screen locked", raised[0]["detail"])
-        self.set_environment(screen_locked=False)
+        self.assertIn("load 317", raised[0]["detail"])
+        self.set_environment(load=1)
         self.watcher("run")
         self.assertEqual([(a["state"], a["condition"]) for a in self.alerts()],
                          [("raised", "environment_wait"), ("cleared", "environment_wait")])
@@ -550,7 +564,7 @@ class WatcherTests(unittest.TestCase):
         mirror = blocker / "alerts.jsonl"
         self.configure_watcher(environment_alert_minutes=0, alerts_mirror=str(mirror))
         self.enqueue(1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         self.watcher("run")
         self.watcher("run")
         self.assertEqual([a["state"] for a in self.alerts()], ["raised"])
@@ -626,7 +640,7 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.watchdog_state()["undelivered_since"],
                          "2026-01-01T00:00:00.700000+00:00")
         self.configure_watcher(undelivered_minutes=-1)
-        self.set_environment(screen_locked=True)
+        self.set_environment(load=317, cpus=14)
         before, after = self.enqueue(1), self.enqueue(2)
         db = sqlite3.connect(self.root / "exodia-build-queue.sqlite3")
         for ticket, stamp in ((before, "00:00:00.400000"), (after, "00:00:00.800000")):
@@ -840,6 +854,112 @@ class WatcherTests(unittest.TestCase):
         result = self.watcher("run")
         self.assertFalse(self.sessions()[0]["origin_rules"])
         self.assertNotIn("rules from origin/main", result.stdout + result.stderr)
+
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    def test_a_ticket_whose_dependency_stays_blocked_is_returned_without_a_session(self):
+        self.configure_watcher(stale_dependency_minutes=0)
+        (self.control / "noop").touch()
+        parent = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(parent), "--status", "blocked", "--note", "finding")
+        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        self.watcher("run")
+        self.assertEqual(self.statuses()[child], "blocked")
+        self.assertEqual(self.sessions(), [])
+
+    def test_notes_keep_their_tail_and_the_archive_keeps_every_older_line(self):
+        self.configure_watcher(notes_max_bytes=4000)
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        notes.write_text("".join(f"first {n:03}\n" for n in range(500)))
+        self.enqueue(1)
+        self.watcher("run")
+        kept = notes.read_text().splitlines()
+        self.assertEqual((len(kept), kept[-1]), (120, "first 499"))
+        self.assertEqual(archive.read_text().splitlines(),
+                         [f"first {n:03}" for n in range(380)])
+        # A second rotation appends; one that has nothing older to move changes nothing.
+        with notes.open("a") as output:
+            output.write("".join(f"second {n:03}\n" for n in range(400)))
+        self.enqueue(2)
+        self.watcher("run")
+        self.assertEqual(notes.read_text().splitlines()[-1], "second 399")
+        older = archive.read_text().splitlines()
+        self.assertEqual((older[0], older[379], older[380]), ("first 000", "first 379",
+                                                              "first 380"))
+        self.assertEqual(len(older) + 120, 900)
+        # One line over the limit: archived whole, the notes keep its newest part.
+        notes.write_text("x" * 5000 + "\n")
+        self.enqueue(3)
+        self.watcher("run")
+        self.assertEqual(archive.read_text().splitlines(), older + ["x" * 5000])
+        self.assertLessEqual(notes.stat().st_size, 2000)
+        self.assertTrue(notes.read_text().startswith("[...] x"))
+
+    def test_every_byte_bound_of_the_notes_counts_utf8_bytes(self):
+        """Review item 5 on ticket 635: the notes and the archive stay within their
+        byte bounds whatever the text, and keep whole lines where a line fits."""
+        spec = importlib.util.spec_from_file_location("watcher_bytes", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        samples = {"ascii": "build ok", "two-byte": "сборка готова", "three-byte": "构建完成",
+                   "four-byte": "\U0001F680\U0001F527", "mixed": "ok \u00e9 \u4e2d \U0001F680"}
+        for name, text in samples.items():
+            with self.subTest(name):
+                lines = [f"{n:05} {text}\n".encode() for n in range(4000)]
+                data = b"".join(lines)
+                for limit in (1, 7, 100, 4096, len(data) - 1, len(data), len(data) + 1):
+                    tail = watcher.tail_lines(data, limit)
+                    self.assertLessEqual(len(tail), limit)
+                    self.assertTrue(data.endswith(tail))
+                    if limit >= len(lines[-1]):  # a whole line fits: only whole lines
+                        self.assertTrue(tail == data or tail in
+                                        [b"".join(lines[i:]) for i in range(len(lines))])
+        self.configure_watcher(notes_max_bytes=4000)
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        bound = watcher.NOTES_ARCHIVE_MAX_BYTES
+        line = "старая заметка \U0001F680 " + "ж" * 40 + "\n"
+        archive.write_text(line * (bound // len(line.encode()) + 200))  # over the bound
+        notes.write_text("".join(f"{n:03} новая \U0001F527 {'ю' * 30}\n" for n in range(400)))
+        self.enqueue(1)
+        self.watcher("run")
+        self.assertLessEqual(notes.stat().st_size, 4000)
+        self.assertLessEqual(archive.stat().st_size, bound)
+        moved = archive.read_text().splitlines()
+        self.assertEqual(moved[0], line.rstrip("\n"))  # starts at a whole line
+        kept = notes.read_text().splitlines()
+        self.assertEqual(int(moved[-1][:3]) + 1, int(kept[0][:3]))  # nothing lost between
+
+    def test_an_overlong_line_is_bounded_without_cutting_a_character(self):
+        """Review of ticket 641: every shape of overlong line, every cut offset."""
+        spec = importlib.util.spec_from_file_location("watcher_cuts", WATCHER)
+        watcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(watcher)
+        for char in ("a", "é", "中", "\U0001F680"):
+            line = (char * 60 + "\n").encode()
+            for limit in range(0, len(line) + 2):
+                with self.subTest(char=char, limit=limit):
+                    for cut in (watcher.utf8_tail(line, limit), watcher.tail_lines(line * 3, limit)):
+                        self.assertLessEqual(len(cut), limit)
+                        cut.decode("utf-8")  # never a split character
+        notes, archive = self.root / "whytap-builder-notes", self.root / "whytap-builder-notes.old"
+        rocket = "\U0001F680" * 60  # 240 bytes on one line
+        shapes = {"alone": [rocket], "newest after older lines": ["older one", "older two", rocket],
+                  "oldest before short lines": [rocket, "newer one", "newer two"]}
+        for number, (shape, lines) in enumerate(shapes.items(), 1):
+            with self.subTest(shape):
+                archive.unlink(missing_ok=True)
+                self.configure_watcher(notes_max_bytes=101)
+                notes.write_text("\n".join(lines) + "\n")
+                self.enqueue(number)
+                self.watcher("run")
+                kept, moved = notes.read_bytes(), archive.read_bytes()
+                self.assertLessEqual(len(kept), 101)
+                kept.decode("utf-8"), moved.decode("utf-8")
+                text = moved.decode() + kept.decode()
+                for whole in lines:  # every complete line survives whole somewhere
+                    self.assertIn(whole, text if whole != rocket else moved.decode())
+                if lines[-1] != rocket:
+                    self.assertTrue(kept.decode().endswith(lines[-1] + "\n"))
 
 class ActivationTests(WatcherTests):
     builder = "previous-builder-chat"

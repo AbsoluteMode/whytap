@@ -61,13 +61,14 @@ enum CodexStreamJSONParser {
                 let kind = (changes.first?["kind"] as? String) ?? "update"
                 return paths.isEmpty ? nil : .fileChangeStarted(paths: paths, kind: kind)
             case "error":
-                // Codex emits benign config/deprecation/under-development
-                // warnings on the SAME type:error channel as real failures,
-                // but the turn still completes — surfacing them tears the turn
-                // down on the client for nothing. Drop them; real errors pass.
-                let msg = (item["message"] as? String) ?? ""
-                if isBenignWarning(msg) { return nil }
-                return msg.isEmpty ? nil : .streamError(msg)
+                // An item-level error is a non-fatal notice: Codex keeps going
+                // and still ends with turn.completed. The user's own config
+                // produces many (unknown keys, hook timeouts, an unsupported
+                // service tier, a plugin marketplace that is offline), so none
+                // of them may tear the turn down. Real failures arrive as a
+                // top-level `error` or `turn.failed` below.
+                // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+                return nil
             default:
                 return nil
             }

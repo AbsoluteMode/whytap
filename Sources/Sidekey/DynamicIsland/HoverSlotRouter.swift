@@ -57,6 +57,7 @@ enum HoverSlotEffect: Equatable {
     case openTranslate
     case openSubtitles
     case openScreenshot
+    case openHelpCenter
     case quit
     case openPanel(HoverInlinePanel)
     /// A tool that is listed with a "Soon" badge: activating it does nothing.
@@ -70,7 +71,7 @@ enum HoverSlotEffect: Equatable {
         case .openPanel:
             return true
         case .toggleDropMode, .openSettings, .openHotkeys, .openNotes,
-             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .quit,
+             .toggleMeetingRecord, .openMonitor, .openCalendar, .openTranslate, .openSubtitles, .openScreenshot, .openHelpCenter, .quit,
              .comingSoon:
             return false
         }
@@ -117,6 +118,8 @@ enum HoverSlotEffect: Equatable {
             actions.openSubtitles()
         case .openScreenshot:
             actions.openScreenshot()
+        case .openHelpCenter:
+            actions.openHelpCenter()
         case .quit:
             actions.quitApplication()
         case .openPanel, .comingSoon:
@@ -163,6 +166,8 @@ enum HoverSlotRouter {
             return .openSubtitles
         case .screenshot:
             return .openScreenshot
+        case .help:
+            return .openHelpCenter
         case .quit:
             return .quit
         case .vocab:

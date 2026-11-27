@@ -14,6 +14,10 @@ extension FeatureHotkey {
         case .googleText: configuration.googleSearchTextShortcut = shortcut
         case .googleVoice: configuration.googleSearchVoiceShortcut = shortcut
         case .meetingRecord: configuration.meetingRecordShortcut = shortcut
+        case .agentLinkInsert: configuration.usefulLinksInsertShortcut = shortcut
+        case .agentLinkOpen: configuration.usefulLinksOpenShortcut = shortcut
+        case .agentLinkNext: configuration.usefulLinksNextShortcut = shortcut
+        case .agentLinkPrevious: configuration.usefulLinksPreviousShortcut = shortcut
         case .tool(let tool): configuration.toolShortcuts[tool] = shortcut
         }
         return true
@@ -27,7 +31,8 @@ extension FeatureHotkey {
                 shortcut: configuration.dropVoiceShortcut, gesture: gesture)
         case .agentVoice: configuration.agentVoiceGesture = gesture
         case .googleVoice: configuration.googleSearchVoiceGesture = gesture
-        case .agentText, .agentClose, .googleText, .meetingRecord, .tool: break
+        case .agentText, .agentClose, .googleText, .meetingRecord, .agentLinkInsert, .agentLinkOpen,
+             .agentLinkNext, .agentLinkPrevious, .tool: break
         }
     }
 
@@ -37,7 +42,8 @@ extension FeatureHotkey {
         switch self {
         case .dropVoice: return configuration.dropVoiceShortcut != .holdSpace
         case .agentVoice, .googleVoice: return true
-        case .agentText, .agentClose, .googleText, .meetingRecord, .tool: return false
+        case .agentText, .agentClose, .googleText, .meetingRecord, .agentLinkInsert, .agentLinkOpen,
+             .agentLinkNext, .agentLinkPrevious, .tool: return false
         }
     }
 }

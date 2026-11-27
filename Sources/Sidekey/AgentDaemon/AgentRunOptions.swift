@@ -64,7 +64,13 @@ struct AgentRunOptions: Equatable {
     var effort: String?
     var serviceTier: String?
     var workingDirectory: URL?
+    /// "Allow file edits and commands" (Features → Agent), mapped to each
+    /// CLI's own permission flags by `AgentHarnessFlags`.
     var allowActions: Bool
+    /// The running app's `whytap mcp` helper, added to a Claude Code or Codex
+    /// turn so Whytap's tools (app control, screen capture) work without the
+    /// Coding tools switch. `nil` outside a packaged app.
+    var whytapMCPCommand: [String]?
     var openCodeModelSpec: OpenCodeModelSpec?
     var openCodeProvider: OpenCodeModelProvider
     /// `<helper> case mcp` when the built-in agent is registered in Case.
@@ -91,6 +97,7 @@ struct AgentRunOptions: Equatable {
 
     init(model: String? = nil, effort: String? = nil, serviceTier: String? = nil,
          workingDirectory: URL? = nil, allowActions: Bool = true,
+         whytapMCPCommand: [String]? = nil,
          openCodeModelSpec: OpenCodeModelSpec? = nil,
          openCodeProvider: OpenCodeModelProvider = .openRouter,
          caseMCPCommand: [String]? = nil,
@@ -106,6 +113,7 @@ struct AgentRunOptions: Equatable {
         self.serviceTier = serviceTier
         self.workingDirectory = workingDirectory
         self.allowActions = allowActions
+        self.whytapMCPCommand = whytapMCPCommand
         self.openCodeModelSpec = openCodeModelSpec
         self.openCodeProvider = openCodeProvider
         self.caseMCPCommand = caseMCPCommand

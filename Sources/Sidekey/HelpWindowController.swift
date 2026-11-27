@@ -13,6 +13,8 @@ struct HelpHotkeyRowSpec: Equatable, Identifiable {
 
 enum HelpWindowContent {
     static let windowSize = CGSize(width: 520, height: 800)
+    /// The Help Center, where a user can ask a question (whytap.ai/help/).
+    static let helpCenterURL = BuildConfig.helpCenterURL
     static let learningCenterURL = BuildConfig.landingURL.appendingPathComponent("blob/main/README.md")
 
     @MainActor
@@ -264,6 +266,22 @@ private struct HelpView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            Button {
+                NSWorkspace.shared.open(HelpWindowContent.helpCenterURL)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "questionmark.bubble")
+                    Text("Ask a question")
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                }
+                .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .help(HelpWindowContent.helpCenterURL.absoluteString)
+            .accessibilityHint("Opens the Whytap Help Center in your browser")
 
             ScrollView {
                 VStack(spacing: 10) {

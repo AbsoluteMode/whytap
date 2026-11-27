@@ -39,7 +39,7 @@ struct NativeAgentFinalAnswer {
                 "parameters": object([
                     "status": ["type": "string", "enum": ["answered", "unverified", "needs_clarification"],
                                "description": "Use unverified when evidence cannot confirm the requested fact; needs_clarification when essential user information is missing."],
-                    "answer": ["type": "string", "description": "Direct, nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. Use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
+                    "answer": ["type": "string", "description": "Direct, nonempty answer rendered as Markdown in a ~320pt panel. Lead with a plain conclusion. A simple factual question gets 1-3 sentences only. Otherwise use compact tables, numbered steps, fenced code and at most one NOTE or WARNING callout where useful. Explain uncertainty when applicable. Put links in sources."],
                     "sources": ["type": "array", "items": source, "description": "Supporting public HTTP(S) links with short titles; empty when no sources are needed."],
                     insertField: ["type": "string", "description": "Ready-to-paste plain text shown first as the Insert card, which pastes into the field the user came from and replaces their selection there. The complete result when the user gave text (selected or in the request) and asked to rewrite, shorten, translate, fix or reformat it, or asked for a message or reply to send; the one exact shell command when they asked how to install, update, run or configure something. No Markdown fence, quotes or commentary. Empty string when nothing is meant to be pasted."],
                     "actions": ["type": "array", "items": ["anyOf": [path, copy]],
@@ -49,8 +49,10 @@ struct NativeAgentFinalAnswer {
 
     /// `openAICitations`: the turn ran on OpenAI (directly or an `openai/`
     /// model on OpenRouter), whose built-in search can leave its citation
-    /// markup in the text; other providers' output is never touched.
-    init(arguments: [String: Any], openAICitations: Bool = true) throws {
+    /// markup in the text. `anthropicCitations`: the turn ran on a Claude
+    /// model, which after its web search can copy its citation tags
+    /// (`<cite index="1-9">`) into finish_answer. Other output is never touched.
+    init(arguments: [String: Any], openAICitations: Bool = true, anthropicCitations: Bool = false) throws {
         let clean: (String) -> String = { openAICitations ? Self.withoutProviderCitationMarks($0) : $0 }
         guard Set(arguments.keys).subtracting([Self.insertField]) == ["status", "answer", "sources", "actions"],
               let rawStatus = arguments["status"] as? String, let status = Status(rawValue: rawStatus),
@@ -58,7 +60,10 @@ struct NativeAgentFinalAnswer {
               let sources = arguments["sources"] as? [[String: Any]],
               let actions = arguments["actions"] as? [[String: Any]],
               sources.count + actions.count <= 20 else { throw Self.invalid() }
-        let text = clean(answer).trimmingCharacters(in: .whitespacesAndNewlines)
+        // Claude's citation tags are cleaned from the prose only: Insert and
+        // Copy payloads are literal (they may be HTML with a <cite> of its own).
+        let prose = anthropicCitations ? Self.withoutCitationTags(answer) : answer
+        let text = clean(prose).trimmingCharacters(in: .whitespacesAndNewlines)
         let insertField = (arguments[Self.insertField] as? String).map(clean) ?? arguments[Self.insertField]
         guard !text.isEmpty, text.count <= 32_000, Self.hasAnswerContent(text, hasSources: !sources.isEmpty) else { throw Self.invalid() }
         let insert: String
@@ -132,6 +137,63 @@ struct NativeAgentFinalAnswer {
         }
         return result as String
     }
+
+    /// Claude's web search citation tags copied into an answer: an opening
+    /// tag with Anthropic's result index (`<cite index="1-9">`, `"1-2,4-5"`)
+    /// and, only when such a tag was found, `</cite>`. A plain HTML `<cite>`
+    /// stays.
+    /// `<cite index="1-9">` and `</cite>` are removed and the cited words
+    /// kept, outside literal spans (code, quotes) as for OpenAI's marks.
+    /// WHY: .project-docs/decisions/2026-11-26-agent-fast-search-answers.md
+    static func withoutCitationTags(_ text: String) -> String {
+        guard text.lowercased().contains("cite"), let regex = citationTag else { return text }
+        let string = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: string.length))
+        guard matches.contains(where: { $0.range(at: 1).location != NSNotFound }) else { return text }
+        // The tag's own quotes are not literal text: spans are found with
+        // each tag replaced by letters (spaces could make indented code).
+        let masked = NSMutableString(string: text)
+        for match in matches { masked.replaceCharacters(in: match.range, with: String(repeating: "x", count: match.range.length)) }
+        let literal = literalRanges(in: masked as String)
+        // Tags pair in order. An escaped tag (`\\<cite ...>`) is literal text:
+        // a real `</cite>` never closes it, an escaped `</cite>` closes it
+        // first. A `</cite>` is removed only when it closes an indexed
+        // provider tag; a plain HTML `<cite>` keeps its own.
+        enum Opener { case indexed, plain, escaped }
+        var open: [Opener] = [], removed: [NSRange] = []
+        func escaped(_ range: NSRange) -> Bool {
+            var count = 0, index = range.location - 1
+            while index >= 0, string.character(at: index) == 0x5C { count += 1; index -= 1 }
+            return count % 2 == 1
+        }
+        for match in matches where !literal.contains(where: { NSIntersectionRange($0, match.range).length > 0 }) {
+            let opening = match.range(at: 1).location != NSNotFound || match.range(at: 2).location != NSNotFound
+            if escaped(match.range) {
+                if opening { open.append(.escaped) }
+                else if open.last == .escaped { open.removeLast() }
+                // A closing tag after an indexed tag comes from the provider:
+                // a backslash before it is the end of the cited text.
+                else if open.last == .indexed { open.removeLast(); removed.append(match.range) }
+                continue
+            }
+            if match.range(at: 1).location != NSNotFound { open.append(.indexed); removed.append(match.range) }
+            else if opening { open.append(.plain) }
+            else {
+                while open.last == .escaped { open.removeLast() }
+                if open.popLast() == .indexed { removed.append(match.range) }
+            }
+        }
+        var result = text as NSString
+        for range in removed.sorted(by: { $0.location > $1.location }) {
+            result = result.replacingCharacters(in: range, with: "") as NSString
+        }
+        return result as String
+    }
+
+    /// Group 1: an indexed tag; group 2: any other opening `<cite>`; else `</cite>`.
+    private static let citationTag = try? NSRegularExpression(
+        pattern: #"(<cite\s+index="[0-9]+-[0-9]+(?:\s*,\s*[0-9]+-[0-9]+)*"\s*>)|(<cite(?:\s[^<>]*)?>)|</cite>"#,
+        options: [.caseInsensitive])
 
     private static let citationMarkup = try? NSRegularExpression(
         pattern: "(?:^|[ \\t]+)(\u{E200}cite(?:\u{E202}turn[0-9]+[a-z]+[0-9]+)+\u{E201})(?=$|[\\s.,;:!?)\\]])",

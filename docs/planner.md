@@ -114,7 +114,7 @@ Planner support preserve connections already configured on the target Mac.
 
 Calendar opens on **today** inside Hover. The header’s **Connect** (or
 **Calendars** once connected) opens the Calendars page, the same choice as
-Settings → Integrations → Calendars. It does not create a Whytap account. Previous/next day and Today stay in the panel;
+Settings → Features → Calendar → Calendars. It does not create a Whytap account. Previous/next day and Today stay in the panel;
 opening Calendar again always returns to today. Hover an event whose block cuts
 something for its full details; clicking it joins the meeting or opens the
 original. A meeting/original link opens only when explicitly clicked.
@@ -183,7 +183,7 @@ unrelated identifiers cannot be matched.
 **Direct connections (earlier builds, no longer offered).** Google, Outlook and
 Zoom sign-in stays in the code but has no button: Google requires OAuth
 verification and Microsoft shows an unverified publisher. Accounts already
-connected keep working, are listed in Settings → Integrations under **Connected
+connected keep working, are listed in Settings → Features → Calendar under **Connected
 directly** with Disconnect, and an expired sign-in points to Internet Accounts.
 
 **Google:** connected directly to Google Calendar API using a Desktop OAuth

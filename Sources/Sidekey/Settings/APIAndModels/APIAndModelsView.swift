@@ -19,6 +19,8 @@ struct APIAndModelsView: View {
         var failureText = "Key not accepted"
     }
     @State private var keyNotice: KeyNotice?
+    /// The shared download in the app; a fixed state in review renders.
+    private let onDeviceModel: OnDeviceSpeechModelController
     @State private var activeSheet: ActiveSheet?
     @State private var highlighted: Set<AIFeature> = []
     @State private var expandedGroup: String?
@@ -37,8 +39,9 @@ struct APIAndModelsView: View {
     init(viewModel: APIAndModelsViewModel, focusedFeature: Binding<AIFeature?>,
          initiallyExpandedGroup: String? = nil, initialSection: APIAndModelsSection = .models,
          usageStore: AIUsageStore? = nil, usageModel: AIUsageCostsViewModel? = nil,
-         initialKeyResult: Bool? = nil) {
+         initialKeyResult: Bool? = nil, onDeviceModel: OnDeviceSpeechModelController = .shared) {
         self.viewModel = viewModel
+        self.onDeviceModel = onDeviceModel
         self._keyNotice = State(initialValue: initialKeyResult.map { KeyNotice(accepted: $0) })
         self._focusedFeature = focusedFeature
         self._expandedGroup = State(initialValue: initiallyExpandedGroup)
@@ -212,7 +215,7 @@ struct APIAndModelsView: View {
     private var onDeviceBlock: some View {
         VStack(alignment: .leading, spacing: 0) {
             MacGroupTitle(title: "On this Mac")
-            OnDeviceSpeechCard(viewModel: viewModel, model: .shared)
+            OnDeviceSpeechCard(viewModel: viewModel, model: onDeviceModel)
         }
     }
 

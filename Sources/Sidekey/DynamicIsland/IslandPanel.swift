@@ -454,6 +454,27 @@ enum IslandPanelFramePolicy {
                       height: hostFrame.height)
     }
 
+    /// Hosting-view frame for the window AppKit actually created.
+    ///
+    /// AppKit snaps a window frame outward to whole points (a requested
+    /// 660.5 pt height becomes 661 pt with the top kept at the screen edge).
+    /// The island content is pinned to the host's TOP, while a host frame
+    /// starts at the window's BOTTOM-left: sizing the host to the requested
+    /// height left `actual - requested` (0.5 pt = one Retina pixel) of
+    /// wallpaper above the island whenever the camera band
+    /// (`safeAreaInsets.top`) is fractional, e.g. 27.5 pt. The height
+    /// therefore follows the actual window; the width stays the requested
+    /// width so the right-anchored hit zones keep their current x.
+    /// WHY: .project-docs/decisions/2026-11-26-island-host-fills-window-height.md
+    static func hostFrame(requestedWindowFrame: NSRect, actualWindowFrame: NSRect) -> NSRect {
+        NSRect(
+            x: 0,
+            y: 0,
+            width: requestedWindowFrame.width,
+            height: max(requestedWindowFrame.height, actualWindowFrame.height)
+        )
+    }
+
     static func hitTestSize(
         compactSize: CGSize,
         expandedSize: CGSize,
@@ -786,6 +807,10 @@ final class IslandPanel: NSPanel {
         host.expandedSize = expandedHitTestSize(layout: layout)
         self.host = host
         self.contentView = host
+        host.frame = IslandPanelFramePolicy.hostFrame(
+            requestedWindowFrame: initialFrame,
+            actualWindowFrame: frame
+        )
 
         // `notificationActive` stays false: the left morph zone is never made
         // hittable. The left-morph machinery is left dormant; a later
@@ -1005,6 +1030,16 @@ final class IslandPanel: NSPanel {
         // Use measured control frames instead of the inactive SwiftUI first-
         // mouse bridge. One owned down/drag/up sequence invokes at most once.
         switch event.type {
+        // Right-click or Control-click on a tool: Remove from Hover / Add to Hover.
+        // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
+        case .rightMouseDown:
+            if showHoverToolMenu(for: event) { return }
+        case .leftMouseDown where event.modifierFlags.contains(.control):
+            if showHoverToolMenu(for: event) { return }
+            if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
+                                        allowsAnswer: allowsAnswerPointerDispatch) {
+                return
+            }
         case .leftMouseDown:
             if hoverHitBridge.mouseDown(at: event.locationInWindow, in: self, allowed: allowsHoverPointerDispatch,
                                         allowsAnswer: allowsAnswerPointerDispatch) {
@@ -1106,6 +1141,24 @@ final class IslandPanel: NSPanel {
         }
 
         super.sendEvent(event)
+    }
+
+    /// The tool's context menu, popped up at the pointer. Like every other
+    /// click in this non-key panel, the target is found geometrically (the
+    /// SwiftUI context-menu bridge never sees a first click here). The menu
+    /// holds the drawer open while it tracks and after it closes.
+    private func showHoverToolMenu(for event: NSEvent) -> Bool {
+        guard let store = hoverHitBridge.layoutStore,
+              let target = hoverHitBridge.contextMenuTarget(at: event.locationInWindow, in: self,
+                                                            allowed: allowsHoverPointerDispatch),
+              let view = host ?? contentView else { return false }
+        let items = IslandHoverToolMenu.items(for: target, slots: store.slots)
+        guard !items.isEmpty else { return false }
+        let menu = IslandHoverToolMenu.menu(for: items, bridge: hoverHitBridge)
+        hoverHitBridge.toolMenuWillOpen()
+        NSMenu.popUpContextMenu(menu, with: event, for: view)
+        hoverHitBridge.toolMenuDidClose()
+        return true
     }
 
     /// The strip's computed hit rect in window/bounds-space (AppKit y-up,
@@ -1623,7 +1676,11 @@ final class IslandPanel: NSPanel {
             notificationActive: notificationActive
         )
         setFrame(targetFrame, display: display)
-        host?.frame = NSRect(origin: .zero, size: targetFrame.size)
+        // WHY: .project-docs/decisions/2026-11-26-island-host-fills-window-height.md
+        host?.frame = IslandPanelFramePolicy.hostFrame(
+            requestedWindowFrame: targetFrame,
+            actualWindowFrame: frame
+        )
         syncAgentComposerPanel()
     }
 

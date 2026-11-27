@@ -37,6 +37,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     ) {
         let permissionsViewModel = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false)
         let apiAndModelsViewModel = APIAndModelsViewModel()
+        // Created at launch and kept for the app's life; the window opens later.
+        apiAndModelsViewModel.setPresented(false)
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
         self.privacyPreferences = privacyPreferences ?? .shared
@@ -97,6 +99,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         if window?.isVisible != true {
             NotificationCenter.default.post(name: Self.didStartVisit, object: self)
         }
+        // Up to date before the window draws its first frame.
+        apiAndModelsViewModel.setPresented(true)
         if let feature {
             selection.focus(feature)
         } else {
@@ -115,6 +119,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     func windowWillClose(_ notification: Notification) {
         toolboxDeps.endToolSessions()
+        // WHY: .project-docs/decisions/2026-11-27-settings-models-recompute-while-hidden.md
+        apiAndModelsViewModel.setPresented(false)
     }
 
     func configure(toolboxDeps: ToolboxDeps) {

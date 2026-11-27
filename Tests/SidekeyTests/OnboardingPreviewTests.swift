@@ -1226,7 +1226,7 @@ final class OnboardingPreviewTests: XCTestCase {
     /// tool under the pointer or says what Toolbox is.
     func testToolboxShowsTheWholeCatalog() {
         let tools = OnboardingToolboxStage.tools
-        XCTAssertEqual(tools, HoverTool.allCases.filter { $0 != .settings })
+        XCTAssertEqual(tools, HoverTool.allCases.filter { $0 != .settings && $0 != .help })
         XCTAssertGreaterThan(tools.count, 6, "the whole catalog, not six tools")
         XCTAssertTrue(tools.contains(.calendar))
         XCTAssertFalse(tools.contains(.settings))

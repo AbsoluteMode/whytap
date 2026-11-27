@@ -248,7 +248,8 @@ struct OnboardingToolboxStage: View {
 
     /// The whole Toolbox catalog, as Settings → Toolbox lists it: every tool
     /// but Settings (always on the island), tools not out yet included.
-    static var tools: [HoverTool] { HoverTool.allCases.filter { $0 != .settings } }
+    // Help is not a ring tile: the last step already says where to ask.
+    static var tools: [HoverTool] { HoverTool.allCases.filter { $0 != .settings && $0 != .help } }
 
     /// What the card says: the tool's title and short description, or the
     /// line about Toolbox.

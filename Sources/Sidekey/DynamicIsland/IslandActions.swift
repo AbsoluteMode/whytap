@@ -69,6 +69,8 @@ struct IslandActions {
     var openTranslate: () -> Void = {}
     var openSubtitles: () -> Void = {}
     var openScreenshot: () -> Void = {}
+    /// Open the Help Center (whytap.ai/help/) in the browser.
+    var openHelpCenter: () -> Void = {}
     /// Open Settings on its default tab.
     var openSettings: () -> Void
     /// Open the Help / Hotkeys window

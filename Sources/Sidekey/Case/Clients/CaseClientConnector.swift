@@ -14,6 +14,11 @@ protocol CaseClientConnector {
     var displayName: String { get }
     /// The client is present on this Mac (used to offer it for registration).
     func isInstalled() -> Bool
+    /// The client's `whytap` MCP entry compared with what `install` writes for
+    /// `helperPath` (read only). Whytap does not judge someone else's entry:
+    /// anything but its own is `.custom`.
+    // WHY: .project-docs/decisions/2026-11-26-coding-tools-switches.md
+    func whytapEntry(helperPath: String) -> WhytapEntryState
     /// No `whytap` entry: adds `whytap` -> `<helperPath> mcp`. The canonical
     /// entry: nothing to add. Any other `whytap` entry, or one that cannot be
     /// read for certain, throws `.configuredManually` or `.unreadableConfig`
@@ -26,6 +31,15 @@ protocol CaseClientConnector {
     /// general Whytap server (also added by the plugin and the README line),
     /// and without a registration the broker already refuses its Case tools.
     func uninstall(helperPath: String?) throws
+}
+
+/// A client's `whytap` MCP entry: none, exactly the one Whytap writes for
+/// this app's helper, or anything else (the person's own, another build's,
+/// one that cannot be read).
+enum WhytapEntryState: Equatable, Sendable {
+    case none
+    case ours
+    case custom
 }
 
 /// The entry Connect writes, and the Case-only entry earlier builds wrote.
@@ -293,6 +307,13 @@ struct ClaudeCodeCaseConnector: CaseClientConnector {
     /// A user-scope `whytap` entry exists in `~/.claude.json` (read only).
     func isConfigured() -> Bool { (try? userServers())?[WhytapMCPEntry.name] != nil }
 
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        guard let servers = try? userServers() else { return .custom }
+        guard let entry = servers[WhytapMCPEntry.name] else { return .none }
+        return CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments)
+            ? .ours : .custom
+    }
+
     func install(helperPath: String) throws {
         // Read both files first: a broken one stops before anything changes.
         let current = try settings.read()
@@ -455,6 +476,15 @@ struct CodexCaseConnector: CaseClientConnector {
         return current != .absent && current != .uncertain
     }
 
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        guard let codex = locate() else { return .none }
+        switch entry(WhytapMCPEntry.name, codex: codex) {
+        case .absent: return .none
+        case .stdio(helperPath, WhytapMCPEntry.arguments): return .ours
+        default: return .custom
+        }
+    }
+
     func entry(_ name: String, codex: URL) -> CodexMCPEntry {
         guard let output = try? reader.read(executable: codex, arguments: ["mcp", "get", name, "--json"],
                                             environment: CaseClientEnvironment.make(home: home, executable: codex))
@@ -527,6 +557,16 @@ struct CursorCaseConnector: CaseClientConnector {
 
     func isConfigured() -> Bool {
         ((try? file.read())??["mcpServers"] as? [String: Any])?[WhytapMCPEntry.name] != nil
+    }
+
+    func whytapEntry(helperPath: String) -> WhytapEntryState {
+        let root: [String: Any]?
+        do { root = try file.read() } catch { return .custom }
+        guard let servers = root?["mcpServers"] else { return .none }
+        guard let object = servers as? [String: Any] else { return .custom }
+        guard let entry = object[WhytapMCPEntry.name] else { return .none }
+        return CaseMCPEntryOwnership.isCanonical(entry, helperPath: helperPath, arguments: WhytapMCPEntry.arguments)
+            ? .ours : .custom
     }
 
     func install(helperPath: String) throws {

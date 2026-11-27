@@ -176,6 +176,12 @@ What already existed (Sources/Sidekey/Backup):
   bad sections or another ID are ignored, a tampered snapshot is refused
   before anything is parked; pruning keeps 5 plus the parked one; low space
   is refused.
+- Ticket 652 item 1: a dangling link occupies its path. Every restore target
+  and rollback decision asks `ArtifactRestoreTransaction.entryExists` (lstat,
+  never following a link): a dangling link inside a covered root goes to the
+  checkpoint with the root, and a link at a covered root (created by the
+  preview or replacing a captured root) makes the restore fail before
+  committing, leaving the pre-apply state.
 - Queue tests: the tiers, the exclusions (including a removed Keychain call,
   interpolated code inside a string, a fake video), the recorded restore
   point (unknown ID, a path instead of an ID, another build, too old, wrong

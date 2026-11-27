@@ -830,7 +830,7 @@ struct ArtifactRestoreTransaction {
         do {
             try createPrivateDirectory(rollbackRoot)
             for target in targets {
-                let existed = FileManager.default.fileExists(atPath: target.path)
+                let existed = Self.entryExists(target)
                 guard existed else {
                     // Recorded anyway: a failure must also remove what the
                     // restore created where the user had nothing before.
@@ -1086,10 +1086,10 @@ struct ArtifactRestoreTransaction {
         var failures: [String] = []
         for step in journal.steps.reversed() {
             let target = URL(fileURLWithPath: step.target)
-            if !step.backup.isEmpty, FileManager.default.fileExists(atPath: step.backup) {
+            if !step.backup.isEmpty, Self.entryExists(URL(fileURLWithPath: step.backup)) {
                 let backup = URL(fileURLWithPath: step.backup)
                 do {
-                    if FileManager.default.fileExists(atPath: target.path) {
+                    if Self.entryExists(target) {
                         try FileManager.default.removeItem(at: target)
                     }
                     try FileManager.default.createDirectory(
@@ -1099,7 +1099,7 @@ struct ArtifactRestoreTransaction {
                 } catch {
                     failures.append(target.lastPathComponent)
                 }
-            } else if step.existedBefore == false, FileManager.default.fileExists(atPath: target.path) {
+            } else if step.existedBefore == false, Self.entryExists(target) {
                 // Nothing was here before the restore, so nothing imported may
                 // stay behind — an abandoned instruction file or dashboard
                 // would otherwise become live configuration.
@@ -1537,6 +1537,15 @@ struct ArtifactRestoreTransaction {
             guard rename(temporary.path, url.path) == 0 else { throw ArtifactBackupError.writeFailed }
             try ConfigBackupFiles.synchronizeDirectory(url.deletingLastPathComponent())
         } catch { throw ArtifactBackupError.writeFailed }
+    }
+
+    /// Whether anything occupies `url`, without following a link: `fileExists`
+    /// reports a dangling link as absent, so a restore would leave it in place.
+    /// Every restore target and rollback decision asks this.
+    /// WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+    static func entryExists(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0
     }
 
     private static func identity(_ url: URL) throws -> (device: UInt64, inode: UInt64) {

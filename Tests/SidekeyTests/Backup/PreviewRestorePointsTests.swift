@@ -125,6 +125,42 @@ final class PreviewRestorePointsTests: XCTestCase {
         XCTAssertFalse(environment(profile).transaction().hasPendingWork)
     }
 
+    /// Ticket 652 item 1: a link that points nowhere still occupies its path. Inside
+    /// a covered root it goes to the checkpoint with the root; as a covered root
+    /// itself (created by the preview, or replacing a root present at capture) it
+    /// is never followed: the restore fails before committing and leaves the
+    /// pre-apply state as it was.
+    func testDanglingLinksAreNeverMistakenForAbsentEntries() throws {
+        let profile = try makeProfile()
+        let l = profile.locations
+        try profile.write("{\"servers\": []}", to: l.monitorRoot.appendingPathComponent("servers.json"))
+        try profile.write("# Before", to: l.agentMemory)
+        let id = try create(profile)  // Notify root absent at capture
+
+        let inside = l.monitorRoot.appendingPathComponent("dangling.json")
+        try FileManager.default.createSymbolicLink(atPath: inside.path, withDestinationPath: "/nonexistent/x")
+        try apply(id, profile, sections: "workspace")
+        XCTAssertFalse(ArtifactRestoreTransaction.entryExists(inside))
+
+        let cases: [(String, URL)] = [("created by the preview", l.notifyRoot),
+                                      ("replacing a captured root", l.monitorRoot)]
+        for (name, root) in cases {
+            if ArtifactRestoreTransaction.entryExists(root) { try FileManager.default.removeItem(at: root) }
+            try FileManager.default.createDirectory(at: root.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+            try FileManager.default.createSymbolicLink(atPath: root.path, withDestinationPath: "/nonexistent/\(name)")
+            try profile.write("# Preview", to: l.agentMemory)
+            XCTAssertEqual(run(["apply", id, "--sections", "workspace"], profile).code, 0, name)
+            XCTAssertThrowsError(try ArtifactBackupEngine.applyPendingRestore(environment: environment(profile)), name)
+            XCTAssertEqual(try FileManager.default.destinationOfSymbolicLink(atPath: root.path),
+                           "/nonexistent/\(name)", name)
+            XCTAssertEqual(profile.contents(of: l.agentMemory), "# Preview", name)
+            try FileManager.default.removeItem(at: root)
+            _ = try? environment(profile).transaction().cancelPlanned()
+            environment(profile).transaction().disarm()
+        }
+    }
+
     func testCostsKeepWhatWasSpentWhileThePreviewRan() async throws {
         let profile = try makeProfile()
         func event(_ id: String) -> AIUsageEvent {

@@ -24,6 +24,8 @@ struct SettingsWindowView: View {
     /// What the Features screens read besides the view models; tests and
     /// previews replace it to show a Mac in another state.
     let featuresEnvironment: FeaturesEnvironment?
+    /// Integrations' Coding tools; tests pass fixed answers.
+    let codingTools: CodingToolsAccess?
     /// Owned here (not by `SettingsOtherView`) so the picker's options list
     /// survives tab switches — the detail pane recreates the tab views.
     @StateObject private var displayPickerViewModel = DisplayPickerViewModel()
@@ -48,7 +50,8 @@ struct SettingsWindowView: View {
         otherOnGoogleToggle: @escaping (Bool) -> Void = { _ in },
         privacyPreferences: PrivacyPreferences? = nil,
         screenshotProtectionChanged: @escaping (Bool) -> Void = { _ in },
-        featuresEnvironment: FeaturesEnvironment? = nil
+        featuresEnvironment: FeaturesEnvironment? = nil,
+        codingTools: CodingToolsAccess? = nil
     ) {
         self.permissionsViewModel = permissionsViewModel
         self.apiAndModelsViewModel = apiAndModelsViewModel
@@ -65,6 +68,7 @@ struct SettingsWindowView: View {
         self.privacyPreferences = privacyPreferences ?? .shared
         self.screenshotProtectionChanged = screenshotProtectionChanged
         self.featuresEnvironment = featuresEnvironment
+        self.codingTools = codingTools
     }
 
     /// The live environment: this window's own switches and Drop mode.
@@ -278,7 +282,7 @@ struct SettingsWindowView: View {
                 deps: toolboxDeps
             )
         case .integrations:
-            SettingsIntegrationsView()
+            SettingsIntegrationsView(codingTools: codingTools ?? .shared)
         case .backup:
             SettingsBackupView(openIntegrations: { selection.select(.integrations) })
         }

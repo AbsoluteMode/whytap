@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/EveryFeatureInFeaturesTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-24-settings-around-features.md, 2026-11-24-hover-notify-monitor-screens.md, 2026-11-26-notifications-in-notify.md, 2026-10-18-brightness-tool.md, 2026-11-23-calendar-macos-only.md]
+related: [2026-11-24-settings-around-features.md, 2026-11-24-hover-notify-monitor-screens.md, 2026-11-26-notifications-in-notify.md, 2026-10-18-brightness-tool.md, 2026-11-23-calendar-macos-only.md, 2026-11-26-coding-tools-switches.md]
 ---
 
 ## Context

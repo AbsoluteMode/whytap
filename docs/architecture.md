@@ -2057,8 +2057,29 @@ denies after a relaunch; if the seal cannot be written it is removed. Settings s
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
-with no suspension before the action. Settings -> Integrations -> Coding tools has a switch per
-tool; the gate reads the answer before a request and again before its
+with no suspension before the action. Settings -> Integrations -> Coding tools always
+lists Claude Code and Codex (CodingToolsAccess, presence read through
+CaseClientSetup.presence: installed, and CaseClientConnector.whytapEntry
+compares the `whytap` entry with what Connect writes for this app's helper:
+none, ours or custom; Whytap does not judge someone else's entry; without a
+helper that runs nothing is ours and setup refuses, so no new Yes), one switch
+each. A custom entry (another path, arguments, env, a URL, null, `{}`, Codex
+enabled = false, an unreadable file) shows as the person's own: switch off
+and not switchable without a Yes, no Yes recorded, entry left as it is. The switch is the gate's answer (decision == allow),
+so a Yes can always be turned off, also when the tool is not found or its entry
+is gone; the line under it says what is missing. Without a Yes a tool that is
+not found is grey, "Not installed on this Mac". On runs the same client setup
+as Case -> Connect and the onboarding (CaseClientSetup.connect: the `whytap`
+command and the canonical MCP entry) and, once Whytap's own entry is there and
+no answer was
+recorded meanwhile (HarnessAccessStore.revision), records Yes; Connected means
+entry plus Yes. Off records No and leaves the entry. Refresh re-reads the
+effective answer (loadIfNeeded: a Yes whose seal is gone disappears), the view
+follows every store change (objectWillChange, also a save that went through
+later), and a presence read started before a newer one was applied is
+dropped. Other apps with an answer (a live dictation
+client) keep a switch per answer below. WHY:
+.project-docs/decisions/2026-11-26-coding-tools-switches.md The gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,

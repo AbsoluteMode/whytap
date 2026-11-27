@@ -41,7 +41,9 @@ struct SettingsProjectFooter: View {
                 .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding)
                 .accessibilityHidden(true)
 
-            HStack(spacing: 4) {
+            // One link per row: three in a row truncated their labels in the
+            // narrow sidebar. WHY: .project-docs/decisions/2026-11-27-footer-links-vertical.md
+            VStack(alignment: .leading, spacing: 0) {
                 SettingsFooterLink(title: "Whytap", destination: BuildConfig.websiteURL)
                 SettingsFooterLink(title: "Help", destination: BuildConfig.helpCenterURL, symbol: "questionmark.circle")
                 SettingsFooterLink(title: "GitHub", destination: BuildConfig.landingURL, brand: "github")
@@ -121,7 +123,10 @@ private struct SettingsFooterLink: View {
                     .accessibilityHidden(true)
                 Text(title)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(SettingsFooterLinkStyle())
         .help(destination.absoluteString)

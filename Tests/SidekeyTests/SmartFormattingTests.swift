@@ -184,7 +184,8 @@ final class SmartRichTextPasteTests: XCTestCase {
         var suppression: [Bool] = []
         var events = 0
         let original = PasteboardSnapshot(items: [["private-test-type": Data([1,2,3])]])
-        let engine = AutoPasteEngine(flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true }, pasteboardWrite: { _ in XCTFail("Expected rich writer"); return nil }, richPasteboardWrite: { payload = $0; return (1,2) }, postEvent: { _,_,_ in events += 1 }, sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _,_ in }, pasteboardSnapshot: { original }, pasteboardRestore: { restored = $0 }, setClipboardSuppression: { suppression.append($0) })
+        var changeCount = 1
+        let engine = AutoPasteEngine(flagsState: { [] }, frontmostAppInfo: { nil }, activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true }, pasteboardWrite: { _ in XCTFail("Expected rich writer"); return nil }, richPasteboardWrite: { payload = $0; changeCount += 1; return (changeCount - 1, changeCount) }, postEvent: { _,_,_ in events += 1 }, sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _,_ in }, pasteboardSnapshot: { original }, pasteboardRestore: { restored = $0; changeCount += 1 }, setClipboardSuppression: { suppression.append($0) }, currentChangeCount: { changeCount })
         let success = await engine.paste("**Важно**", formatting: .telegram)
         await engine.waitForPendingRestore()
         XCTAssertTrue(success)

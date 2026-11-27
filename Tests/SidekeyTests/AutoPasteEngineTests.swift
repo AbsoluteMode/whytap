@@ -775,7 +775,8 @@ final class AutoPasteEngineTests: XCTestCase {
         _ = await engine.paste("two")
         await engine.waitForPendingRestore()
 
-        XCTAssertEqual(env.snapshotCalls, 2)
+        XCTAssertEqual(env.logs.filter { $0.message.hasSuffix("inherited=false") }.count, 2,
+                       "the second take snapshots the user's copy, not the first dictation")
         XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("mine".utf8)]])
     }
 
@@ -822,6 +823,293 @@ final class AutoPasteEngineTests: XCTestCase {
         XCTAssertEqual(env.restoreCalls.count, 1)
         XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems)
         XCTAssertTrue(restoredLine(env)?.contains("after=flush") ?? false)
+    }
+
+    // MARK: - Clipboard ownership (queue ticket 687 review)
+
+    /// A copy that lands between Drop's write and its ownership check is
+    /// not Drop's generation: not pasted, not overwritten, and not hidden
+    /// from clipboard history by the threshold.
+    func testQueue687FreshCopyAfterWriteDoesNotBecomeDropsOwnedGeneration() async {
+        let env = makeRestoreEnv()
+        env.onLog = { [unowned env] message in
+            guard message.hasPrefix("autopaste_clipboard_updated") else { return }
+            env.userCopies("fresh copy")
+        }
+        let engine = env.makeEngine()
+
+        let result = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("fresh copy".utf8)]])
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+        XCTAssertLessThan(env.suppressionThresholdCalls.max() ?? -1, 2)
+        XCTAssertFalse(engine.hasPendingRestore)
+    }
+
+    func testQueue687ClipboardReplacementBeforeCmdVAbortsWithoutPosting() async {
+        let env = makeRestoreEnv()
+        env.onAsyncSleep = { [unowned env] in
+            guard env.asyncSleepCalls.count == 1 else { return }
+            env.userCopies("newer copy")
+        }
+        let engine = env.makeEngine()
+
+        let result = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("newer copy".utf8)]])
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+    }
+
+    func testQueue687ModifierTimeoutDoesNotOverwriteANewerClipboardOwner() async {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[.maskCommand]], permission: true)
+        env.initialPasteboardItems = [["public.utf8-plain-text": Data("original".utf8)]]
+        env.onSleep = { [unowned env] _ in
+            guard env.sleepCalls.count == 1 else { return }
+            env.userCopies("newer copy")
+        }
+        let engine = env.makeEngine()
+
+        let result = await engine.paste("dictated")
+
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("newer copy".utf8)]])
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+    }
+
+    /// Quit while the paste waits before Cmd+V: the clipboard comes back at
+    /// once and the paste stops without a key event.
+    func testQueue687QuitAtThePrePasteAwaitRestoresImmediatelyAndStopsPosting() async {
+        let image: [[String: Data]] = [["public.png": Data([0x89, 0x50]), "public.utf8-plain-text": Data("caption".utf8)]]
+        let env = makeRestoreEnv(initial: image)
+        let engine = env.makeEngine()
+        var clipboardAtQuit: [[String: Data]]?
+        env.onAsyncSleep = { [unowned env, weak engine] in
+            guard env.asyncSleepCalls.count == 1 else { return }
+            engine?.flushPendingRestore()
+            clipboardAtQuit = env.pasteboardItems
+        }
+
+        let result = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertEqual(clipboardAtQuit, image)
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertEqual(env.restoreCalls.count, 1)
+    }
+
+    func testQuitBeforeCmdVLeavesANewerClipboardOwnerAlone() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        env.onAsyncSleep = { [unowned env, weak engine] in
+            guard env.asyncSleepCalls.count == 1 else { return }
+            env.userCopies("newer copy")
+            engine?.flushPendingRestore()
+        }
+
+        let result = await engine.paste("dictated")
+
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty)
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+        XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("newer copy".utf8)]])
+    }
+
+    func testQuitAfterCmdVLeavesANewerClipboardOwnerAlone() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+
+        _ = await engine.paste("dictated")
+        env.userCopies("newer copy")
+        engine.flushPendingRestore()
+        await engine.waitForPendingRestore()
+
+        XCTAssertTrue(env.restoreCalls.isEmpty)
+        XCTAssertEqual(env.pasteboardItems, [["public.utf8-plain-text": Data("newer copy".utf8)]])
+        XCTAssertFalse(engine.hasPendingRestore)
+    }
+
+    /// A second Drop must not replace the first dictation before the first
+    /// target read it; each target reads its own take, and the user's
+    /// clipboard comes back once at the end.
+    func testQueue687ASecondDropDoesNotReplaceWhatTheFirstRendererReads() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+
+        let first = await engine.paste("take one")
+        env.readerDelaysMs = [400]
+        env.advanceFixtureClock(by: 300)
+        let second = await engine.paste("take two")
+        env.readerDelaysMs = [50]                        // the second target reads its take
+        await engine.waitForPendingRestore()
+
+        XCTAssertTrue(first)
+        XCTAssertTrue(second)
+        XCTAssertEqual(env.readerSaw, ["take one", "take two"])
+        XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems)
+        XCTAssertEqual(env.restoreCalls.count, 1)
+        XCTAssertTrue(env.logs.contains(where: { $0.message.hasPrefix("autopaste_pasteboard_handed_over after=read") }))
+    }
+
+    /// Two pastes started together run one after the other.
+    func testConcurrentDropPastesRunOneAtATime() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+
+        async let one = engine.paste("take one")
+        async let two = engine.paste("take two")
+        let results = await [one, two]
+        await engine.waitForPendingRestore()
+
+        XCTAssertEqual(results, [true, true])
+        XCTAssertEqual(env.postedEvents.count, 8)
+        XCTAssertEqual(env.snapshotCalls, 1, "the later paste inherits the first snapshot")
+        XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems)
+    }
+
+    func testQueue687AStillRunningTargetLosingFocusInTheSettleDoesNotRedirectDrop() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        env.onAsyncSleep = { [unowned env] in
+            guard env.asyncSleepCalls.count == 1 else { return }
+            env.frontmost = Self.targetB
+        }
+
+        let result = await engine.paste("dictated")
+        await engine.waitForPendingRestore()
+
+        XCTAssertFalse(result)
+        XCTAssertTrue(env.postedEvents.isEmpty, "Cmd+V must not reach the app that took focus")
+        XCTAssertEqual(env.pasteboardItems, env.initialPasteboardItems, "the clipboard comes back at once")
+    }
+
+    /// Selection capture snapshots the pending dictation, copies the
+    /// selection and writes the dictation back: Drop recognises its
+    /// dictation and still gives the user's clipboard back.
+    func testQueue687SelectionFallbackDoesNotStrandPromisedDictationOnClipboard() async {
+        await assertSelectionRoundTripKeepsTheUsersClipboard(copies: true)
+    }
+
+    func testSelectionFallbackWithoutASelectionDoesNotStrandPromisedDictation() async {
+        await assertSelectionRoundTripKeepsTheUsersClipboard(copies: false)
+    }
+
+    private func assertSelectionRoundTripKeepsTheUsersClipboard(copies: Bool) async {
+        let board = NSPasteboard(name: .init("Queue687-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
+        let original = Pasteboard.snapshot(of: board)
+        let reads = PasteboardReadMonitor()
+        let engine = makeNamedBoardEngine(board, reads: reads)
+        let result = await engine.paste("dictated")
+        XCTAssertTrue(result)
+
+        let selection = SelectionFallback.Env(
+            frontmostPID: { Self.targetA.pid }, canCopy: { _ in true },
+            pasteboardSnapshot: { Pasteboard.snapshot(of: board) },
+            pasteboardRestore: { Pasteboard.restore($0, into: board) },
+            setSuppressed: { _ in }, scheduleUnsuppress: { _, work in work() },
+            postCmdC: {
+                guard copies else { return }
+                board.clearContents()
+                board.setString("selected text", forType: .string)
+            },
+            sleepAfterPost: {}, readPasteboardString: { board.string(forType: .string) },
+            currentChangeCount: { board.changeCount }, suppressThrough: { _ in },
+            dispatcher: { work in work() }
+        )
+        var captured: String?
+        SelectionFallback.captureAsync(targetPID: Self.targetA.pid, env: selection) { captured = $0 }
+        XCTAssertEqual(reads.readCount, 0, "selection capture's own snapshot is not the target's read")
+        await engine.waitForPendingRestore()
+
+        XCTAssertEqual(captured, copies ? "selected text" : nil)
+        XCTAssertEqual(Pasteboard.snapshot(of: board), original)
+        XCTAssertNil(board.string(forType: .string))
+    }
+
+    func testQueue687FailedScreenshotTextCopyDoesNotStrandPromisedDictation() async throws {
+        let board = NSPasteboard(name: .init("Queue687-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
+        let original = Pasteboard.snapshot(of: board)
+        let engine = makeNamedBoardEngine(board, reads: PasteboardReadMonitor(), realTime: true)
+        let result = await engine.paste("dictated")
+        XCTAssertTrue(result)
+
+        let copy = await ScreenshotTextCopy.perform(source: try Self.blankImage(), size: CGSize(width: 40, height: 20),
+            annotations: [], crop: CGRect(x: 0, y: 0, width: 40, height: 20), pasteboard: board,
+            recognize: { _ in "recognized text" }, write: { _, _ in false }, isCurrent: { true })
+        await engine.waitForPendingRestore()
+
+        XCTAssertEqual(copy, .failed)
+        XCTAssertEqual(Pasteboard.snapshot(of: board), original)
+        XCTAssertNil(board.string(forType: .string))
+    }
+
+    /// A successful explicit Shot text copy is the user's new clipboard:
+    /// Drop must not restore over it.
+    func testSuccessfulScreenshotTextCopyDuringTheWaitIsKept() async throws {
+        let board = NSPasteboard(name: .init("Queue687-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        board.clearContents()
+        board.setData(Data([0x89, 0x50, 0x4E, 0x47]), forType: .png)
+        let engine = makeNamedBoardEngine(board, reads: PasteboardReadMonitor(), realTime: true)
+        _ = await engine.paste("dictated")
+
+        let copy = await ScreenshotTextCopy.perform(source: try Self.blankImage(), size: CGSize(width: 40, height: 20),
+            annotations: [], crop: CGRect(x: 0, y: 0, width: 40, height: 20), pasteboard: board,
+            recognize: { _ in "recognized text" }, isCurrent: { true })
+        await engine.waitForPendingRestore()
+
+        XCTAssertEqual(copy, .copied)
+        XCTAssertEqual(board.string(forType: .string), "recognized text")
+    }
+
+    private func makeNamedBoardEngine(_ board: NSPasteboard, reads: PasteboardReadMonitor, realTime: Bool = false) -> AutoPasteEngine {
+        AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { Self.targetA }, activate: { _ in true },
+            isTerminated: { _ in false }, permissionGranted: { _ in true },
+            pasteboardWrite: { AutoPasteEngine.writePromisedText($0, to: board, reads: reads) },
+            postEvent: { _, _, _ in }, sleepUs: { _ in },
+            asyncSleepMs: realTime ? { try? await Task.sleep(nanoseconds: $0 * 1_000_000) } : { _ in await Task.yield() },
+            nowMs: realTime ? { DispatchTime.now().uptimeNanoseconds / 1_000_000 } : { 0 },
+            logEmit: { _, _ in },
+            pasteboardSnapshot: { Pasteboard.snapshot(of: board) },
+            pasteboardRestore: { Pasteboard.restore($0, into: board) },
+            currentChangeCount: { board.changeCount }, readMonitor: reads,
+            restoreTiming: realTime ? .init(pollMs: 10, afterReadMs: 50, fallbackMs: 300) : .standard
+        )
+    }
+
+    private static func blankImage() throws -> CGImage {
+        let context = try XCTUnwrap(CGContext(data: nil, width: 40, height: 20, bitsPerComponent: 8,
+            bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        return try XCTUnwrap(context.makeImage())
+    }
+
+    func testWhytapsOwnSnapshotOfThePendingDictationIsNotARead() {
+        let pb = NSPasteboard(name: .init("WhytapPromiseOwnRead-\(UUID().uuidString)"))
+        defer { pb.releaseGlobally() }
+        let reads = PasteboardReadMonitor()
+        XCTAssertNotNil(AutoPasteEngine.writePromisedText("dictated", to: pb, reads: reads))
+
+        let snapshot = Pasteboard.snapshot(of: pb)
+
+        XCTAssertEqual(snapshot.items.first?["public.utf8-plain-text"], Data("dictated".utf8))
+        XCTAssertNotNil(snapshot.items.first?[PromisedPasteboardPayload.transientMarker.rawValue])
+        XCTAssertEqual(reads.readCount, 0)
     }
 
     // MARK: - Real pasteboard (named, never the user's clipboard)
@@ -1174,6 +1462,7 @@ private final class TestEnv {
     var sleepCalls: [UInt32] = []
     var activatedPids: [pid_t] = []
     var logs: [LogLine] = []
+    var onLog: ((String) -> Void)?
 
     /// Initial pasteboard items returned by the snapshot collaborator.
     /// Empty by default — tests that exercise preserve/restore set this
@@ -1220,6 +1509,7 @@ private final class TestEnv {
     var asyncSleepCalls: [UInt64] = []
     private(set) var vDownAtMs: UInt64?
     var nowForTest: UInt64 { simulatedClockMs }
+    func advanceFixtureClock(by milliseconds: UInt64) { simulatedClockMs += milliseconds }
     var restoreTiming = AutoPasteEngine.RestoreTiming.standard
 
     private func serveDueReaders() {
@@ -1285,7 +1575,9 @@ private final class TestEnv {
                 guard self.pasteboardWriteSucceeds else { return nil }
                 self.pastedText = text
                 let before = self.changeCount
-                self.modelItems = [["public.utf8-plain-text": Data(text.utf8)]]
+                // Like the production writer: text plus the transient marker.
+                self.modelItems = [["public.utf8-plain-text": Data(text.utf8),
+                                    PromisedPasteboardPayload.transientMarker.rawValue: Data()]]
                 self.changeCount += 1
                 return (before: before, after: self.changeCount)
             },
@@ -1320,6 +1612,7 @@ private final class TestEnv {
             },
             logEmit: { [weak self] level, message in
                 self?.logs.append(LogLine(level: level, message: message))
+                self?.onLog?(message)
             },
             pasteboardSnapshot: { [weak self] in
                 guard let self else { return PasteboardSnapshot(items: []) }

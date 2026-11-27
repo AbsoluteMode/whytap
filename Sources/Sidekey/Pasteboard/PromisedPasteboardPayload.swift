@@ -39,6 +39,21 @@ final class PromisedPasteboardPayload: NSObject, NSPasteboardItemDataProvider {
     private let payload: [NSPasteboard.PasteboardType: Data]
     private let onRead: () -> Void
 
+    /// Depth of Whytap's own snapshot reads on the main thread
+    /// (`Pasteboard.snapshot`). Selection capture or a Shot copy that
+    /// snapshots the clipboard is not the paste target: its read of a
+    /// pending dictation must not end the wait for the target.
+    private static var ownReadDepth = 0
+
+    /// Runs `body` as one of Whytap's own reads. Main thread only; other
+    /// threads run `body` unchanged.
+    static func asOwnRead<T>(_ body: () -> T) -> T {
+        guard Thread.isMainThread else { return body() }
+        ownReadDepth += 1
+        defer { ownReadDepth -= 1 }
+        return body()
+    }
+
     init(payload: [NSPasteboard.PasteboardType: Data], onRead: @escaping () -> Void) {
         self.payload = payload
         self.onRead = onRead
@@ -51,6 +66,7 @@ final class PromisedPasteboardPayload: NSObject, NSPasteboardItemDataProvider {
     ) {
         guard let data = payload[type] else { return }
         item.setData(data, forType: type)
+        if Thread.isMainThread, Self.ownReadDepth > 0 { return }
         onRead()
     }
 

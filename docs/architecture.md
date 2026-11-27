@@ -207,13 +207,20 @@ Voice flow (Drop / dictation):
             (promised data + org.nspasteboard.TransientType marker,
             PromisedPasteboardPayload) -> Post Event preflight -> wait for
             modifiers released -> restore target focus -> settle ->
-            CGEvent Cmd+V (4-event sequence) -> return. The clipboard comes
-            back asynchronously 150 ms after the last read of the dictation
-            after Cmd+V, or after 2 s without one; a user copy in between
-            (changeCount moved) cancels the restore, and a take that starts
-            before it inherits the pending snapshot. Quitting restores at
-            once. A fixed 120 ms delay lost the race against busy Chromium/
-            Electron renderers. WHY:
+            CGEvent Cmd+V (4-event sequence) -> return. Drop owns only the
+            generation its write produced (a clipboard claim): newer content
+            before Cmd+V stops the paste (false) and is never restored over;
+            a remembered target that loses focus during the 80 ms
+            non-blocking settle stops it too. The clipboard comes back
+            asynchronously 150 ms after the last read of the dictation after
+            Cmd+V, or after 2 s without one. Drop pastes run one at a time;
+            a newer take waits for the previous target's read (or its
+            fallback) and inherits the snapshot. A Whytap round trip
+            (selection capture, failed Shot text copy) that writes the
+            dictation back is recognised by content and adopted; Whytap's
+            own snapshot reads are not counted as the target's. Quitting
+            restores at once, before or after Cmd+V. A fixed 120 ms delay
+            lost the race against busy Chromium/Electron renderers. WHY:
             .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
        A take that starts with the keyboard in one of Whytap's own native text
             editors (the floating Translate input, Settings fields) remembers

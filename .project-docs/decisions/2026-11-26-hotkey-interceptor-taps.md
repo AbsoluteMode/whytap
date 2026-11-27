@@ -119,25 +119,26 @@ catch it: secure input was off, and the key never reached Whytap at all.
    or both Options start nothing, and a press that gains another modifier
    while held is retired unjudged, as the gesture monitors cancel it.
    **Binding transitions are judged by event time, never by callback
-   order** (`HotkeyBindingTimeline`). Whytap learns which keys are bound
-   only when it reads the preferences, while writes are announced as they
-   happen (the `HotkeyPreferences` observer synchronously on the main
-   thread, the capability notification synchronously with its write)
-   without saying which key they touch. The timeline keeps the ordered log
-   of writes since the last read and folds it at each read into one start
-   time per key: the first read binds watched keys since forever; a key
-   newly watched is bound since the latest write in between (or the read
-   itself if none was announced); a key watched before and after, with
-   writes in between, is rebased to the latest write, because it may have
-   been switched off and on; a key not watched is unbound. A press is
-   eligible only if its key is bound and its event time is not before that
-   start. Every probe callback reads the preferences first, so announced
-   writes are folded before its press is judged, and every read retires the
-   held and pending presses the new starts exclude, even while another key
-   keeps the tap installed (a retired press still held starts nothing new
-   until it is released). Choosing the latest write can retire a valid press
-   made between two writes or during a hold that spans a write: that costs
-   at most one badge, never a false one.
+   order** (`HotkeyBindingTimeline`). The timeline is an ordered log of
+   snapshots of the bound keys. An announcement snapshot is taken when a
+   write is announced and before it lands (`HotkeyPreferences`
+   `objectWillChange` fires synchronously on the main thread before the
+   value changes), so it shows the state just before that write; a read
+   snapshot is taken whenever Whytap reads the preferences (the deferred
+   sync, every probe callback, every verdict). A key whose state differs
+   between two consecutive snapshots changed through the write the earlier
+   snapshot announced, at that write's time: that is the effective
+   transition of that binding, so a write for another shortcut (Screenshot
+   arrows, the many fields `apply` publishes in one turn) never moves it.
+   When the earlier snapshot is a read, or the change announced nothing
+   beforehand (a capability switch, posted after its write), the change is
+   placed at the later snapshot's time, the latest moment it can have
+   happened. A press is eligible only if its key is bound now and its event
+   time is not before its binding's start; every snapshot that moves a
+   start retires the held and pending presses it excludes, even while
+   another key keeps the tap installed (a retired press still held starts
+   nothing new until it is released). Each verdict also reads the
+   preferences first, as a defence for changes no snapshot saw.
 4. **Name possible interceptors only on that signal, in the press's own
    context.** When a press begins, the frontmost app and the exact filters
    (tap ids) that could act on it are recorded. Both are read when the
@@ -201,7 +202,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (66) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (69) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -271,7 +272,17 @@ regressions (`testBuilder709...`) and a matrix of writes, reads and
 callbacks in every order are in the suite. The builder's ticket 699 test
 changed a preference without announcing the write; it now announces it,
 as the app's observer does, because an unannounced change must be judged
-conservatively for the capability case. Removing the eligibility or frontmost-context checks fails
+conservatively for the capability case. Its seventh review (ticket 715) found that the
+"latest write" rule of that first timeline discarded a valid first press
+when a write for another shortcut followed the enabling one, and a verdict
+queued before the deferred read of a disable and re-enable. Snapshots taken
+at each announcement now place every transition at the write that made it;
+its two regressions (`testBuilder715...`) are in the suite, with timeline
+unit tests, an unrelated write during a hold keeping the press, and a
+rebind during a hold retiring it. Mutating the transition rule to "latest
+moment" or "earlier write" fails those tests; the 715 verdict regression is
+already closed by the announcement snapshot, so removing the read before a
+verdict alone fails none of them (it stays as a defence). Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

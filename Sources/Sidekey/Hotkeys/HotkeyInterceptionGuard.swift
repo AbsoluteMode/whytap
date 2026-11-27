@@ -121,24 +121,24 @@ final class HotkeyInterceptionGuard {
             }
         }
         // Posted synchronously with the capability write.
-        observe(NotificationCenter.default, .sidekeyCapabilityFlagsChanged) { guard_ in
-            guard_.bindingsWillChange(at: guard_.system.uptime())
-            guard_.bindingsOrSessionChanged()
-        }
+        // Posted after the capability write: no earlier announcement, so a
+        // change it reveals is placed at this moment.
+        observe(NotificationCenter.default, .sidekeyCapabilityFlagsChanged) { $0.capabilitiesChanged() }
         // Published as the value is written: note the write now, read the
         // new value on the next turn.
         preferencesObservation = HotkeyPreferences.shared.objectWillChange.sink { [weak self] _ in
             let writtenAt = ProcessInfo.processInfo.systemUptime
-            // The write time is recorded before any queued probe callback can
-            // run, so such a callback is judged against it.
+            // Fired before the value changes: the snapshot taken now is the
+            // state just before this write, at its time.
             if Thread.isMainThread {
                 MainActor.assumeIsolated { self?.bindingsWillChange(at: writtenAt) }
             }
             let onMain = Thread.isMainThread
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
-                    if !onMain { self?.bindingsWillChange(at: writtenAt) }
-                    self?.bindingsOrSessionChanged()
+                    // Off the main thread the state before the write could not
+                    // be read; the change is placed at this read instead.
+                    if !onMain { self?.capabilitiesChanged() } else { self?.bindingsOrSessionChanged() }
                 }
             }
         }
@@ -216,7 +216,24 @@ final class HotkeyInterceptionGuard {
     /// A shortcut preference was written at `time` (uptime); the sync that
     /// reads it may run later.
     func bindingsWillChange(at time: TimeInterval) {
-        timeline.noteWrite(at: time)
+        readBindings(at: time, announcesWrite: true)
+    }
+
+    /// A capability switch was written just now; it announced nothing.
+    func capabilitiesChanged() {
+        readBindings(at: system.uptime(), announcesWrite: false, causeUnknown: true)
+        syncProbe()
+    }
+
+    /// Adds a snapshot of the bound keys to the timeline and retires every
+    /// press, held or awaiting a verdict, that the new binding starts
+    /// exclude, even while another watched key keeps the tap installed.
+    private func readBindings(at time: TimeInterval, announcesWrite: Bool, causeUnknown: Bool = false) {
+        let moved = timeline.snapshot(system.watchedKeys(), at: time, announcesWrite: announcesWrite,
+                                      causeUnknown: causeUnknown)
+        guard !moved.isEmpty else { return }
+        let timeline = self.timeline
+        detector.retire { timeline.isEligible($0.key, eventTime: $0.eventTime) }
     }
 
     /// Shortcuts, capabilities, Accessibility or the session changed.
@@ -257,6 +274,11 @@ final class HotkeyInterceptionGuard {
     }
 
     private func decide(_ id: Int) {
+        // Read the bindings first: a rebind whose deferred sync is still
+        // queued behind this verdict retires the press before it is judged.
+        let generation = probeGeneration
+        syncProbe()
+        guard generation == probeGeneration else { return }
         guard let verdict = detector.decide(id, now: system.uptime()) else { return }
         guard case .blocked(let key) = verdict, let context = contexts.removeValue(forKey: id) else {
             contexts[id] = nil
@@ -290,14 +312,8 @@ final class HotkeyInterceptionGuard {
     /// The probe exists exactly while a modifier shortcut is live and the
     /// session is interactive.
     private func syncProbe() {
-        let watched = system.watchedKeys()
-        // Presses made before their key's current binding began (or of a key
-        // no longer bound) are retired, held or awaiting a verdict, even
-        // while another watched key keeps the tap installed.
-        if !timeline.observe(watched, at: system.uptime()).isEmpty {
-            let timeline = self.timeline
-            detector.retire { timeline.isEligible($0.key, eventTime: $0.eventTime) }
-        }
+        readBindings(at: system.uptime(), announcesWrite: false)
+        let watched = timeline.watched
         let needed = !watched.isEmpty && system.isSessionInteractive()
         if !needed {
             if probe.isRunning { stopProbe() }

@@ -325,61 +325,45 @@ struct HotkeyInterceptionDetector {
 
 /// When each modifier key's current binding began, so a press is judged
 /// only by its own event time against that moment, whatever order its
-/// probe callback, the preference writes and the syncs that read them run
-/// in.
+/// probe callback, the preference writes and the reads that see them run in.
 ///
-/// Whytap learns binding state only when it reads the preferences (an
-/// observation), while writes are announced as they happen without saying
-/// which key they touch (`HotkeyPreferences.apply` publishes many fields in
-/// one turn, capability switches publish nothing to it). The timeline is the
-/// ordered log of writes since the last observation, folded at the next
-/// observation into one start time per key:
-/// - the first observation: watched keys are bound since forever;
-/// - a key watched now that was not before: since the latest write in
-///   between, or since the observation itself when no write was announced;
-/// - a key watched before and now, with writes in between: since the latest
-///   of them, because it may have been switched off and on again;
-/// - a key not watched now: not bound.
-/// A press is eligible only if its key is bound and its event time is not
-/// before that start. Choosing the latest write can retire a valid press
-/// made between two writes; that only costs one badge, never a false one.
+/// The timeline is an ordered log of snapshots of the bound keys:
+/// - an announcement, taken when a write is announced and before it lands
+///   (`HotkeyPreferences.objectWillChange` fires before the value changes),
+///   so it shows the state just before that write;
+/// - a read, taken whenever Whytap reads the preferences (the deferred sync,
+///   every probe callback, every verdict), showing the state now.
+/// A key whose state differs between two consecutive snapshots changed
+/// through the write the earlier snapshot announced, at that write's time:
+/// that is the effective transition of that binding, so a write for another
+/// shortcut never moves it. When the earlier snapshot is a read, no write
+/// explains the change, and it is placed at the later snapshot's time, the
+/// latest moment it can have happened. A press is eligible only if its key
+/// is bound now and its event time is not before its binding's start.
 // WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
 struct HotkeyBindingTimeline {
     private(set) var boundSince: [HotkeyModifierKey: TimeInterval] = [:]
-    private var observed: Set<HotkeyModifierKey>?
-    private var writes: [TimeInterval] = []
+    private var last: (time: TimeInterval, keys: Set<HotkeyModifierKey>, announcesWrite: Bool)?
 
     var watched: Set<HotkeyModifierKey> { Set(boundSince.keys) }
 
-    /// A preference that may change a binding was written at `time`.
-    mutating func noteWrite(at time: TimeInterval) {
-        writes.append(time)
-    }
-
-    /// The bindings read at `time`. Returns the keys whose start moved.
+    /// Adds a snapshot. `announcesWrite`: taken as a write is announced,
+    /// before it lands. `causeUnknown`: a read after a change that announced
+    /// nothing beforehand (a capability switch), placed at `time`. Returns
+    /// the keys whose binding start moved.
     @discardableResult
-    mutating func observe(_ watched: Set<HotkeyModifierKey>, at time: TimeInterval) -> Set<HotkeyModifierKey> {
-        defer { observed = watched; writes = [] }
-        guard let previous = observed else {
-            boundSince = Dictionary(uniqueKeysWithValues: watched.map { ($0, -TimeInterval.infinity) })
+    mutating func snapshot(_ keys: Set<HotkeyModifierKey>, at time: TimeInterval,
+                           announcesWrite: Bool, causeUnknown: Bool = false) -> Set<HotkeyModifierKey> {
+        defer { last = (time, keys, announcesWrite) }
+        guard let last else {
+            boundSince = Dictionary(uniqueKeysWithValues: keys.map { ($0, -TimeInterval.infinity) })
             return []
         }
-        let latestWrite = writes.max()
+        let transition = last.announcesWrite && !causeUnknown ? last.time : time
         var moved = Set<HotkeyModifierKey>()
-        for key in HotkeyModifierKey.allCases {
-            let old = boundSince[key]
-            let new: TimeInterval?
-            if !watched.contains(key) {
-                new = nil
-            } else if !previous.contains(key) {
-                new = latestWrite ?? time
-            } else if let latestWrite {
-                new = max(old ?? latestWrite, latestWrite)
-            } else {
-                new = old
-            }
-            boundSince[key] = new
-            if new != old { moved.insert(key) }
+        for key in keys.symmetricDifference(last.keys) {
+            boundSince[key] = keys.contains(key) ? transition : nil
+            moved.insert(key)
         }
         return moved
     }

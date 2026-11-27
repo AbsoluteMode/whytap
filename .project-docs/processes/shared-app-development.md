@@ -328,7 +328,11 @@ notice files and receipts). A notice's id
 its exact batch, so sending it again is idempotent; an id counts only if the
 queue confirms its first and last events belong to one ticket, and a delivered
 receipt acknowledges only that range. Evidence that does not match holds its
-range, acknowledges nothing and raises an `inbox_invalid` alert. A newer result
+range, acknowledges nothing and raises an `inbox_invalid` alert. Each id is
+first appended to `whytap-build-queue-inbox-published.log` (if that fails,
+nothing is published): when Whycode took a file but lost its receipt, the range
+stays held under its own id and goes again only under that id; a delivered
+range stays held until all of its acknowledgements succeed. A newer result
 goes out while an older notice waits for its retry; once the ticket's newest
 event is acknowledged, older undelivered events are history. Notices cover
 events from the watcher's activation of this version on;

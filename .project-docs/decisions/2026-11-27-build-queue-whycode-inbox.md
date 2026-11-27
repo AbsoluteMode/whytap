@@ -65,6 +65,20 @@ a receipt per id, deduplication across restarts and rate caps.
   file `whytap-build-queue-inbox.json` keeps the notice scope's start (the only
   value read back; an unreadable one starts a new scope) and a journal of
   notices for people that nothing reads to decide.
+- One more piece of evidence is the sender's own: the append-only
+  `whytap-build-queue-inbox-published.log`, one `<id>\t<seconds>` line written
+  and synced before each notice file. Whycode can take a file into its ledger
+  and still fail to write the receipt (ticket 714 review), and it removes the
+  file first; the log keeps that range held under its own id, so a newer state
+  change goes out on its own and the older batch is sent again only under the
+  same id, after 10 minutes without file or receipt. If recording fails,
+  nothing is published. A line can only hold a range and resend that same id:
+  it never acknowledges anything, a line that does not match the queue is
+  skipped, and a time that is not a finite past number counts as now. Once the
+  ticket's newest event has been told, a lost older batch is history.
+- A delivered range stays held while any of its acknowledgements is pending;
+  the next pass acknowledges again from the same receipt, also after a
+  restart, and publishes nothing for those events.
 - Events are acknowledged only when the receipt says `delivered` (session or
   orchestrator), and only the events of that id's range. `queued` waits; with
   neither the file nor a receipt the batch is sent again under the same id.
@@ -113,6 +127,11 @@ a receipt per id, deduplication across restarts and rate caps.
   there is nothing to disagree: a crash at any point leaves either no file
   (the batch is sent again under the same id) or Whycode's file or receipt
   (the batch is read back from it).
+- Accepted residual risk: if the publication log is lost or damaged at the same
+  time as Whycode loses a receipt, a later state change can repeat that older
+  batch under a wider id, so the author reads those events twice. Nothing is
+  acknowledged wrongly. Closing it entirely needs Whycode to write the receipt
+  before it removes the file.
 - Title (200) and text (20,000) are counted in UTF-16 units like Whycode's
   JavaScript check, without cutting a character, and the file in bytes
   (128 KB).

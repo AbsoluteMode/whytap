@@ -19,6 +19,7 @@ from datetime import datetime, timezone
 import fcntl
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -46,6 +47,11 @@ INTEGRATION_LOCK = "exodia-integration.lock"
 ALERTS = "whytap-build-queue-alerts.jsonl"
 WATCHDOG = "whytap-build-queue-watchdog.json"
 INBOX_STATE = "whytap-build-queue-inbox.json"
+# Append-only: each notice id, written before its file. Whycode can take a file into its
+# ledger and lose the receipt; this keeps that batch held under its own id.
+INBOX_PUBLISHED = "whytap-build-queue-inbox-published.log"
+INBOX_RESEND_SECONDS = 600     # a published id with neither file nor receipt goes again
+INBOX_PUBLISHED_MAX_BYTES = 65536  # then only ids with unacknowledged events are kept
 INBOX_SOURCE = "whytap-build-queue"
 # A notice of its own for these; queued/in_progress events ride along with the next one.
 NOTICE_STATUSES = ("blocked", "pending_install", "done", "superseded", "cancelled")
@@ -53,6 +59,7 @@ FINAL_STATUSES = ("blocked", "done", "superseded", "cancelled")
 INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`, in UTF-16 units
 INBOX_FILE_LIMIT = 128 * 1024  # Whycode's limit for the whole file, in bytes
 RECEIPT_STATUSES = ("queued", "delivered", "rejected")
+ON_ITS_WAY = ("sent", "queued", "invalid", "lost", "acknowledging")  # hold their range
 ID_PATTERN = re.compile(r"(\d{1,12})-(\d{1,12})(?:\.r(\d{1,3}))?")  # first-last[.rN]
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
@@ -897,7 +904,51 @@ def notice_id(root, first, last, attempt):
         f".r{attempt}" if attempt > 1 else "")
 
 
-def inbox_evidence(root, inbox, scope, now, config):
+def read_publications(root, prefix, now):
+    """Ids this queue published: id -> when (newest line wins). A line that is not
+    `<id>\t<seconds>` of this queue is skipped; a time that is not a finite past number
+    counts as now. An entry can only hold its range and resend that same id."""
+    published = {}
+    try:
+        lines = (root / INBOX_PUBLISHED).read_text(errors="replace").splitlines()
+    except OSError:
+        return published
+    for line in lines:
+        message_id, _, stamp = line.partition("\t")
+        if not message_id.startswith(prefix) or \
+                not ID_PATTERN.fullmatch(message_id[len(prefix):]):
+            continue
+        try:
+            at = float(stamp)
+        except ValueError:
+            at = now
+        at = at if math.isfinite(at) and 0 <= at <= now else now
+        published[message_id] = max(published.get(message_id, 0), at)
+    return published
+
+
+def record_publication(root, message_id, now):
+    """Durable before the file exists: a failure here means nothing is published."""
+    fd = os.open(root / INBOX_PUBLISHED, os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600)
+    try:
+        os.write(fd, f"{message_id}\t{int(now)}\n".encode())
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def compact_publications(root, published, keep):
+    path = root / INBOX_PUBLISHED
+    try:
+        if path.stat().st_size <= INBOX_PUBLISHED_MAX_BYTES:
+            return
+        replace_bytes(path, "".join(f"{m}\t{int(published[m])}\n" for m in sorted(keep)
+                                    if m in published).encode())
+    except OSError as error:
+        log(f"inbox: publication log not compacted: {error}")
+
+
+def inbox_evidence(root, inbox, scope, now, config, published=None):
     """What Whycode holds or answered for this queue, read only from its folder and
     checked against the queue: the notice id names the ticket's event range, the queue
     says which events those are. A name or receipt that does not check out is listed as
@@ -907,6 +958,8 @@ def inbox_evidence(root, inbox, scope, now, config):
     for folder, kind in ((inbox, "file"), (inbox / "receipts", "receipt")):
         for path in folder.glob(prefix + "*.json"):
             paths.setdefault(path.name[:-len(".json")], {})[kind] = path
+    for message_id, at in (published or {}).items():
+        paths.setdefault(message_id, {})["log"] = at
     by_ticket = {}
     for event_id, (ticket, _acknowledged) in scope.items():
         by_ticket.setdefault(ticket, []).append(event_id)
@@ -917,7 +970,8 @@ def inbox_evidence(root, inbox, scope, now, config):
             first, last = (int(match.group(1)), int(match.group(2))) if match else (0, -1)
             if first > last or first not in scope or last not in scope \
                     or scope[first][0] != scope[last][0]:
-                invalid.append(message_id)
+                if set(found) != {"log"}:  # an old or stray log line is no alert
+                    invalid.append(message_id)
                 continue
             ticket = scope[last][0]
             events = [e for e in by_ticket[ticket] if first <= e <= last]
@@ -929,7 +983,14 @@ def inbox_evidence(root, inbox, scope, now, config):
                 notice["state"] = "settled"  # nothing left to tell; the receipt is not read
                 continue
             if "receipt" not in found:
-                notice["state"] = "sent"  # Whycode has not taken it yet
+                if "file" in found:
+                    notice["state"] = "sent"  # Whycode has not taken it yet
+                else:
+                    # Published (the log says so) but neither file nor receipt: Whycode
+                    # took it and lost the receipt, or the file never landed. The range
+                    # stays held and goes again under this same id, never another.
+                    notice["state"] = "lost"
+                    notice["resend_due"] = now - found["log"] >= INBOX_RESEND_SECONDS
                 continue
             receipt = read_receipt(found["receipt"], message_id)
             if receipt is None:
@@ -977,24 +1038,31 @@ def deliver_notices(root, config, now=None):
         if inbox is None:
             return summary
         scope = scope_events(root, since)
-        notices, summary["invalid"] = inbox_evidence(root, inbox, scope, now, config)
+        published = read_publications(root, inbox_sender(root) + ":events:", now)
+        notices, summary["invalid"] = inbox_evidence(root, inbox, scope, now, config,
+                                                     published)
         for message_id, notice in notices.items():
             if notice.get("state") == "delivered":
-                for event_id in notice["pending"]:
-                    acknowledge(root, event_id, "delivered")
+                told = notice["pending"]
+                notice["pending"] = [e for e in told
+                                     if not acknowledge(root, e, "delivered")]
+                if notice["pending"]:
+                    # Still covered by its receipt: the next pass acknowledges again,
+                    # nothing is published for these events meanwhile.
+                    notice["state"] = "acknowledging"
                 log(f"inbox: #{notice['ticket']} delivered to {notice.get('target') or '?'} "
-                    f"(events {', '.join(map(str, notice['pending']))})")
+                    f"(events {', '.join(map(str, told))})")
         unacknowledged = inbox_events(root, since)  # after the acknowledgements
         # A notice holds its range while Whycode has it (or its receipt is invalid), and
         # while a rejected one waits for its retry or was rejected for the last time.
         held, flight = {}, set()
         for notice in notices.values():
             state = notice.get("state")
-            if state in ("sent", "queued", "invalid"):
+            if state in ON_ITS_WAY:
                 flight.update(notice["pending"])
                 for event_id in notice["pending"]:
                     summary["in_flight"][event_id] = notice.get("waiting") or state
-            if state in ("sent", "queued", "invalid") or (
+            if state in ON_ITS_WAY or (
                     state == "rejected" and not notice.get("retry_due")):
                 held[notice["ticket"]] = max(held.get(notice["ticket"], 0), notice["last"])
         for message_id, notice in notices.items():
@@ -1006,6 +1074,23 @@ def deliver_notices(root, config, now=None):
         tickets = {}
         for event in unacknowledged:
             tickets.setdefault(event["ticket"], []).append(event)
+        # A lost notice Whycode may well have delivered: once its ticket's newest event
+        # was told, it is history like any older event, never sent again.
+        lost = {e for n in notices.values() if n.get("state") == "lost" for e in n["pending"]}
+        for message_id, notice in notices.items():
+            told = tickets.get(notice["ticket"], [{}])[-1].get("newest_acknowledged")
+            if notice.get("state") == "lost" and notice.get("resend_due") and not told:
+                try:
+                    events = [e for e in tickets.get(notice["ticket"], [])
+                              if notice["first"] <= e["id"] <= notice["last"]]
+                    if events:
+                        record_publication(root, message_id, now)
+                        write_inbox_file(inbox, message_id,
+                                         notice_payload(root, config, message_id, events))
+                        log(f"inbox: #{notice['ticket']} notice {message_id} sent again "
+                            "(no file and no receipt)")
+                except Exception as error:  # this notice only
+                    log(f"inbox: {message_id} not sent again: {type(error).__name__}: {error}")
         for ticket_id, pending in tickets.items():
             try:
                 if pending[-1]["newest_acknowledged"]:
@@ -1013,7 +1098,7 @@ def deliver_notices(root, config, now=None):
                     # notice, or the author's own command (a resubmission, a new head)
                     # whose response said so. Older events not on their way are history.
                     for event in pending:
-                        if event["id"] not in flight:
+                        if event["id"] not in flight or event["id"] in lost:
                             acknowledge(root, event["id"], "history: a newer state was told")
                     continue
                 # Every unacknowledged event above all held ranges: a contiguous range of
@@ -1033,6 +1118,8 @@ def deliver_notices(root, config, now=None):
                                if n.get("state") == "rejected" and batch & set(n["events"])],
                               default=0) + 1
                 message_id = notice_id(root, events[0]["id"], newest["id"], attempt)
+                record_publication(root, message_id, now)  # before the file, or nothing
+                published[message_id] = now
                 write_inbox_file(inbox, message_id,
                                  notice_payload(root, config, message_id, events))
                 log(f"inbox: #{ticket_id} notice {message_id} written "
@@ -1045,6 +1132,8 @@ def deliver_notices(root, config, now=None):
                     summary["in_flight"][event["id"]] = "sent"
             except Exception as error:  # this ticket only
                 log(f"inbox: no notice for #{ticket_id}: {type(error).__name__}: {error}")
+        compact_publications(root, published, {m for m, n in notices.items()
+                                                if n.get("state") != "settled"})
         # A journal for people (`status`); nothing ever reads it back to decide.
         write_json(path, {"since": since, "invalid": summary["invalid"], "messages": {
             message_id: {"ticket": n["ticket"], "events": n["events"], "attempt": n["attempt"],

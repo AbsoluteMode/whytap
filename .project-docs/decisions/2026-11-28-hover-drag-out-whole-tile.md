@@ -14,8 +14,14 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-28 the maintainer reported (ORCH-TASK 39 REV 6) that a tool added to the hover still appears with a lag and asked for a smooth, good animation (translated).
     confirmed_at: 2026-11-28
+  - type: user-confirmed
+    reference: On 2026-11-28, on preview build 1794 with PR #539, the maintainer found (ORCH-TASK 39 REV 7) that the removal boundary was much farther than the visible panel and asked that carrying the tile out past the panel be enough (translated).
+    confirmed_at: 2026-11-28
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandHoverHitBridge.swift
+    confirmed_at: 2026-11-28
+  - type: repository
+    reference: Tests/SidekeyTests/DynamicIsland/IslandHoverDrawerFrameTests.swift
     confirmed_at: 2026-11-28
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHoverAddTransactionTests.swift
@@ -50,6 +56,16 @@ maintainer also found that a tool added from More appeared with a lag
   and a release there is a reorder (over a cell) or keeps the order. Escape
   still cancels. Without the drawer's frame the grid plus 24 pt stands in for
   it; without the tile's frame the pointer decides as before.
+- **The glass is the frame (REV 7).** The glass backdrop reports its own
+  frame as the `.drawer` region (`islandHoverGlassSurface(reportingDrawerTo:)`),
+  and `regionFrame` measures a region by its bounds limited to its visible
+  rect. Before, the drawer frame came from the `.navigation` region's
+  `visibleRect`, which since macOS 14 (views no longer clip to their bounds by
+  default) is the whole visible area of the island window, not the view: in
+  the offscreen island 700 x 520 around a 310 x 311 glass panel (300 pt more
+  on the left, 90 on the right, 169 below, 40 above). The live window is
+  agent-sized (notification zone on the left, the agent wing on the right,
+  the answer zone below), so a tile had to leave the whole window.
 - **One transaction per add or remove.** `IslandHoverHitBridge.editLayout`
   changes the layout, the edit hold and the released press inside the same
   `withAnimation`. `mouseUp` runs the action first and clears the press only
@@ -86,6 +102,13 @@ maintainer also found that a tool added from More appeared with a lag
   frame; the cue appears the moment the whole tile is out and goes when a
   sliver returns; the earlier REV 4 cases. These cases fail with the
   pointer-only rule.
+- `IslandHoverDrawerFrameTests` (the real island, offscreen) pins the
+  removal frame to the glass: 310 x 311 (compact width x drawer height),
+  300 / 90 / 169 / 40 pt inside the window's left / right / bottom / top,
+  every tile inside it, the first one at the grid's 12 pt inset. A lifted
+  tile 1 pt past the glass on the left, right, below or above toward the
+  notch shows the cue and is removed; 1 pt still over the glass is not. The
+  frame test fails with the `visibleRect` measurement.
 - `IslandHoverAddTransactionTests` counts body evaluations of a view
   observing the store and the bridge: none happen inside `pin`, `unpin` or
   the release of a click on a More row. The control case (mixed

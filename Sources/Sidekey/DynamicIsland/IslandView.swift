@@ -1273,7 +1273,10 @@ struct IslandView: View {
                         .onReceive(hoverHitBridge.dismissals) { dismissHoverMenu() }
                         // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
                         // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
-                        .islandHoverGlassSurface()
+                        // The glass backdrop also reports its frame: a dragged tile that
+                        // has left it entirely is removed.
+                        // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+                        .islandHoverGlassSurface(reportingDrawerTo: hoverHitBridge)
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.

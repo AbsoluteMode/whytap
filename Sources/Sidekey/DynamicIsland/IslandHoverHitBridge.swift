@@ -5,7 +5,12 @@ import SwiftUI
 struct IslandHoverHitTargetID: Hashable {
     /// `moreTools` (the More rows) and `moreToggle` (the footer chevron) take
     /// clicks together with `tile`: they are on screen with the grid.
-    enum Surface: Hashable { case tile, result, navigation, update, deliveryFailure, agentAnswer, moreTools, moreToggle }
+    enum Surface: Hashable {
+        case tile, result, navigation, update, deliveryFailure, agentAnswer, moreTools, moreToggle
+        /// The hover drawer's glass panel itself (never a click target): the
+        /// frame a dragged tile must leave to be removed.
+        case drawer
+    }
     enum UpdateAction: Hashable { case download, skip, install, later }
     enum DisplayAction: Hashable { case hold }
     enum DeliveryFailureAction: Hashable { case retry, dismiss }
@@ -417,13 +422,27 @@ final class IslandHoverHitBridge: ObservableObject {
         return true
     }
 
-    /// The drawer's visible frame in window coordinates (its navigation
-    /// region covers the whole drawer).
-    private func drawerFrame(in window: NSWindow) -> CGRect? {
-        guard let region = regions[.navigation]?.view, region.window === window,
+    /// The drawer's glass panel in window coordinates, reported by the glass
+    /// backdrop itself (`islandHoverGlassSurface(reportingDrawerTo:)`).
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    func drawerFrame(in window: NSWindow) -> CGRect? { regionFrame(.drawer, in: window) }
+
+    /// A live control's hit frame in window coordinates (what a press and a
+    /// lift measure).
+    func targetFrame(_ id: IslandHoverHitTargetID, in window: NSWindow) -> CGRect? {
+        snapshots(in: window, allowsHover: true, allowsAnswer: false).first { $0.id == id }?.frame
+    }
+
+    /// A registered region's frame in window coordinates, limited to what is
+    /// visible. `visibleRect` alone is not: since macOS 14 views do not clip
+    /// to their bounds by default, and a region's visible rect came back as
+    /// the whole island window (700 x 520 around a 310 x 311 drawer).
+    func regionFrame(_ surface: IslandHoverHitTargetID.Surface, in window: NSWindow) -> CGRect? {
+        guard let region = regions[surface]?.view, region.window === window,
               !region.isHiddenOrHasHiddenAncestor else { return nil }
-        let frame = region.convert(region.visibleRect, to: nil)
-        return frame.isEmpty ? nil : frame
+        let visible = region.bounds.intersection(region.visibleRect)
+        guard !visible.isNull, !visible.isEmpty else { return nil }
+        return region.convert(visible, to: nil)
     }
 
     /// The lifted tool takes the place of the cell under the pointer at once.

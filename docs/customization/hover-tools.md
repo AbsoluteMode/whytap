@@ -137,7 +137,10 @@ pointer leaving, returning and leaving again. For a stuttering add/remove, run
 `IslandHoverDrawerMotionTests` with `WHYTAP_HOVER_MOTION_DIR` set: it hosts the
 real drawer offscreen, reports main-thread time per change and writes frame
 strips ([decision](../../.project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md)).
-`IslandHoverAddLatencyTests` does the same for an add in the real island. An add
+The removal frame is the glass panel the backdrop reports (`.drawer`);
+`IslandHoverDrawerFrameTests` pins it to the glass on every side. Measure a
+region by its bounds, never `visibleRect` alone (since macOS 14 it can be the
+whole window). `IslandHoverAddLatencyTests` does the same for an add in the real island. An add
 or remove must change the layout, the edit hold and the press in one animated
 transaction (`editLayout`); `IslandHoverAddTransactionTests` fails on a
 synchronous update inside the click

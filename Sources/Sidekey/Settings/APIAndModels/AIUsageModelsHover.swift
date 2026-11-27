@@ -28,6 +28,9 @@ struct AIUsageModelsHoverState: Equatable {
     }
 
     enum Event: Equatable {
+        /// A mouse-down off the rows and off the open detail: the click
+        /// that closed a transient popover, now handled explicitly.
+        case clickedOutside
         /// The pointer's location re-read without the pointer moving.
         case pointer(Pointer)
         /// The pointer itself moved (any changed screen point).
@@ -102,6 +105,9 @@ struct AIUsageModelsHoverState: Equatable {
                 // pointer; activation elsewhere (Return) to the keyboard.
                 keyboardRow = pointerRow == id ? nil : id
             }
+        case .clickedOutside:
+            open = nil; keyboardRow = nil; pending = nil; suppressedRow = nil
+            if pointer == .detail { pointer = .outside }
         case .escape:
             open = nil; keyboardRow = nil; pending = nil
             suppressedRow = pointerRow
@@ -222,6 +228,12 @@ final class AIUsageModelsHoverController: ObservableObject {
         }
         var next = state
         next.send(event, now: now())
+        if next.keyboardRow != nil, next.keyboardRow != state.keyboardRow {
+            // Keyboard ownership starts here: only motion from where the
+            // pointer is now may take it back, not a move made while Costs
+            // saw no pointer events (builder, ticket 719).
+            lastPoint = mouseLocation()
+        }
         if next != state { state = next }
         reschedule()
         syncPresentation()
@@ -275,9 +287,26 @@ final class AIUsageModelsHoverController: ObservableObject {
         return .outside
     }
 
+    /// The Settings window shows the table: visible and not minimized.
+    private var hostAvailable: Bool {
+        guard let window = anchor?.window else { return false }
+        return window.isVisible && !window.isMiniaturized
+    }
+
+    /// A detail whose window was hidden, minimized or closed is retired, so
+    /// returning to Settings never resurrects it (builder, ticket 719).
+    private func retireIfHostGone() -> Bool {
+        // Without an anchor there is no host to judge yet (it registers with
+        // the view); the view's disappearance retires everything itself.
+        guard anchor != nil, state.open != nil || state.pending != nil, !hostAvailable else { return false }
+        send(.disabled) // resets every owner and the open row; enabled state is unchanged
+        return true
+    }
+
     /// Re-reads the pointer. A changed screen point is motion; the first
     /// sample and the same point again (poll, scroll, layout) are re-reads.
     func checkPointer(at point: NSPoint? = nil) {
+        if retireIfHostGone() { return }
         let point = point ?? mouseLocation()
         let moved = lastPoint.map { $0 != point } ?? false
         lastPoint = point
@@ -312,7 +341,11 @@ final class AIUsageModelsHoverController: ObservableObject {
             presenter(row, rect)
             return
         }
-        guard let window = anchor.window, window.isVisible else { return }
+        guard hostAvailable else {
+            presentedID = nil
+            if popover?.isShown == true { popover?.close() }
+            return
+        }
         let popover = self.popover ?? makePopover()
         if presentedID != id || hosting?.rootView == nil { hosting?.rootView = content(for: row) }
         presentedID = id
@@ -361,8 +394,13 @@ final class AIUsageModelsHoverController: ObservableObject {
     func start() {
         if monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(
-                matching: [.mouseMoved, .scrollWheel, .mouseEntered, .mouseExited]) { [weak self] event in
-                self?.checkPointer()
+                matching: [.mouseMoved, .scrollWheel, .mouseEntered, .mouseExited,
+                           .leftMouseDown, .rightMouseDown, .otherMouseDown]) { [weak self] event in
+                guard let self else { return event }
+                switch event.type {
+                case .leftMouseDown, .rightMouseDown, .otherMouseDown: self.mouseDown(event)
+                default: self.checkPointer()
+                }
                 return event
             }
         }
@@ -373,6 +411,22 @@ final class AIUsageModelsHoverController: ObservableObject {
                 MainActor.assumeIsolated { self?.send(.escape) }
             }
         }
+    }
+
+    /// A real click (not motion, scroll or geometry) off the rows and off the
+    /// detail closes it. Clicks on a row reach that row's own handler (same
+    /// row closes, another row opens); clicks inside the detail are kept.
+    func mouseDown(_ event: NSEvent) {
+        let window = event.window ?? NSApp.window(withWindowNumber: event.windowNumber)
+        let inDetail = window != nil && window === popover?.contentViewController?.view.window
+        // The click's own point, not wherever the pointer is when this runs.
+        let point = window.map { $0.convertPoint(toScreen: event.locationInWindow) } ?? mouseLocation()
+        mouseDown(atScreen: point, inDetail: inDetail)
+    }
+
+    func mouseDown(atScreen point: NSPoint, inDetail: Bool = false) {
+        guard state.open != nil, !inDetail else { return }
+        if resolve(point) == .outside { send(.clickedOutside) }
     }
 
     func stop() {

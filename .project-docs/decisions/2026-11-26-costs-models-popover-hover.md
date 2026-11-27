@@ -83,9 +83,11 @@ which the maintainer does not want.
   builder tickets 693, 701 and 711). Focus or keyboard activation gives the
   detail and fill to that row; only real pointer motion, any changed screen
   point, takes them back. The first pointer sample and re-reads of a resting
-  pointer (poll, scroll, layout) never change ownership. A click on the row
-  under the pointer belongs to the pointer; activating the open row closes
-  it; Escape closes until the pointer leaves the row.
+  pointer (poll, scroll, layout) never change ownership; the pointer's
+  actual point is sampled when keyboard ownership begins, so a move made
+  while Costs saw no pointer events does not count (ticket 719). A click on
+  the row under the pointer belongs to the pointer; activating the open row
+  closes it; Escape closes until the pointer leaves the row.
 - The detail is one `NSPopover` with `.applicationDefined` behavior, owned
   by `AIUsageModelsHoverController` and positioned from the open row's name
   frame through the anchor view. AppKit never closes it, so there is no
@@ -94,6 +96,14 @@ which the maintainer does not want.
   row/time tokens could not attribute correctly. The detail closes only from
   the state (pointer, click, Escape, focus, rows, disabled) and when the app
   resigns active.
+- The outside click a transient popover handled natively is explicit: an
+  app-local mouse-down monitor closes the detail when the click's own point
+  is off the rows and off the detail. Mouse-downs on a row are left to that
+  row's handler (same row closes, another opens); clicks inside the detail
+  keep it; motion and scrolling are never clicks (ticket 719).
+- A detail whose Settings window is hidden, minimized or closed is retired
+  on the next pointer read and never shown again by returning to Settings
+  (ticket 719).
 - A disabled Costs view (its real `isEnabled`) resolves nothing: the
   app-wide mouse monitor, hover callbacks and focus cannot open a detail.
 - Rows leaving the table retire every reference to them (`rowsChanged`), fed
@@ -136,7 +146,9 @@ a resting pointer, repeated activation, disabled table) and
 `testBuilder701…` (motion within a row and outside, focus leaving, click
 ownership, a delayed dismissal of an older presentation) and
 `testBuilder711…` (first sample, layout under a resting pointer, half-point
-motion, closes by every route followed by reopening). Dismissal-class probes
+motion, closes by every route followed by reopening) and `testBuilder719…`
+(a move before Tab, an outside click at the resting point, a hidden Settings
+window), plus mouse-down routing for rows and the header. Dismissal-class probes
 are adapted because the event no longer exists: they now check that nothing
 from an earlier presentation can close a later one. A hosting test shows the
 real application-defined popover beside the name, moves it to another row and

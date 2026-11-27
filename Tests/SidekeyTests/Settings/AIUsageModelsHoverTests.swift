@@ -252,12 +252,16 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
                           styleMask: .borderless, backing: .buffered, defer: true)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        // Ordered in far off every display: a hidden Settings window retires
+        // its detail, so the host must count as shown.
+        window.orderFrontRegardless()
         try await settle()
         bands = try measureRowBands()
     }
 
     override func tearDown() async throws {
         controller.stop()
+        window.orderOut(nil)
         window.contentView = nil; window.close()
         try? FileManager.default.removeItem(at: storeURL)
     }
@@ -374,6 +378,36 @@ final class AIUsageModelsHoverHostingTests: XCTestCase {
         moveMouse(to: screenPoint(x: 60, yFromTop: 20)); try await settle()
         try await Task.sleep(for: .milliseconds(400))
         XCTAssertNil(controller.presentedRowID)
+    }
+
+    /// The controller's mouse-down route at a screen point (the test
+    /// harness gives its windows no window number, so synthetic events carry
+    /// no window to convert from).
+    private func mouseDown(at point: NSPoint) throws {
+        controller.mouseDown(atScreen: point)
+    }
+
+    /// Ticket 719: a click off the rows closes a pointer-owned or a
+    /// keyboard-owned detail; a mouse-down on a row is left to that row's
+    /// handler (same row closes, another opens), and motion is never a click.
+    func test_mouse_down_routes() async throws {
+        moveMouse(to: try center("Meetings")); try await wait(AIUsageModelsHoverState.openDelay)
+        try mouseDown(at: try center("Drop Fast"))
+        XCTAssertEqual(controller.state.open, "Meetings", "a row's mouse-down does not close by itself")
+        controller.send(.clicked("Drop Fast")) // that row's own click handler
+        XCTAssertEqual(controller.state.open, "Drop Fast")
+
+        controller.send(.focused("Agent"))
+        moveMouse(to: try center("Agent", x: 300)) // motion: the pointer owns Agent now
+        try mouseDown(at: screenPoint(x: 600, yFromTop: 20))
+        XCTAssertNil(controller.state.open, "a click on the header closes")
+
+        moveMouse(to: screenPoint(x: 600, yFromTop: 24))
+        controller.send(.focused("Translation"))
+        moveMouse(to: screenPoint(x: 600, yFromTop: 24)) // the same point again is not a click or motion
+        XCTAssertEqual(controller.state.open, "Translation")
+        try mouseDown(at: screenPoint(x: 600, yFromTop: 24))
+        XCTAssertNil(controller.state.open, "a click at the resting point closes the keyboard detail")
     }
 
     /// The second report's break: every row's NSView claimed the whole window.
@@ -700,5 +734,82 @@ extension AIUsageModelsHoverHostingTests {
         moveMouse(to: NSPoint(x: start.x + 0.5, y: start.y))
         XCTAssertTrue(controller.isPresented("Meetings"),
                       "A single physical pixel on a 2x display is real movement")
+    }
+}
+
+// Builder findings on queue ticket 719 (2026-11-27), kept under the names the
+// builder used for its probes.
+
+extension AIUsageModelsHoverHostingTests {
+    func testBuilder719PointerMotionBeforeTabDoesNotTakeBackKeyboardOwnership() async throws {
+        for target in ["Drop Fast", "outside"] {
+            controller.send(.disabled)
+            let previous = try center("Meetings")
+            moveMouse(to: previous)
+            controller.send(.escape)
+
+            // This move happened while Costs wasn't receiving pointer events
+            // (e.g. the pointer was in another app, with no open detail to poll).
+            // The pointer is already resting at its new point when Tab opens Agent.
+            pointer = target == "outside" ? screenPoint(x: 350, yFromTop: 20) : try center(target)
+            controller.send(.focused("Agent"))
+            controller.checkPointer()
+            XCTAssertEqual(controller.state.open, "Agent", target)
+            XCTAssertEqual(controller.state.keyboardRow, "Agent", target)
+            XCTAssertTrue(controller.state.highlighted("Agent"), target)
+        }
+
+        // A physical change after focus must still give control back.
+        controller.send(.focused("Agent"))
+        moveMouse(to: try center("Drop Fast"))
+        XCTAssertEqual(controller.state.open, "Drop Fast")
+    }
+
+    func testBuilder719OutsideMouseDownDismissesKeyboardDetailWithoutPointerMotion() async throws {
+        controller.presenter = nil
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        try await settle()
+
+        let header = screenPoint(x: 600, yFromTop: 20)
+        moveMouse(to: header)
+        XCTAssertEqual(controller.resolve(header), .outside)
+        controller.send(.focused("Agent"))
+        try await settle()
+        XCTAssertEqual(controller.presentedRowID, "Agent")
+
+        let local = window.convertPoint(fromScreen: header)
+        for kind in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            let click = try XCTUnwrap(NSEvent.mouseEvent(with: kind, location: local,
+                modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+                context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            NSApp.sendEvent(click)
+        }
+        try await settle()
+        XCTAssertNil(controller.state.open, "A same-app click outside the rows and the detail dismisses it")
+        XCTAssertNil(controller.presentedRowID, "The application-defined popover must actually close")
+    }
+
+    func testBuilder719HiddenSettingsDoesNotKeepItsKeyboardDetail() async throws {
+        controller.presenter = nil
+        window.orderFrontRegardless()
+        defer { window.orderOut(nil) }
+        try await settle()
+
+        moveMouse(to: screenPoint(x: 600, yFromTop: 20))
+        controller.send(.focused("Agent"))
+        try await settle()
+        XCTAssertEqual(controller.presentedRowID, "Agent")
+
+        // Hide this window while the application remains active.
+        window.orderOut(nil)
+        controller.checkPointer()
+        try await settle()
+        XCTAssertNil(controller.state.open, "A hidden parent window should retire its presentation")
+        XCTAssertNil(controller.presentedRowID, "The popover must be gone with its parent")
+        window.orderFrontRegardless()
+        controller.checkPointer()
+        try await settle()
+        XCTAssertNil(controller.presentedRowID, "Reopening Settings must not resurrect the keyboard detail")
     }
 }

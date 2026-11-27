@@ -1164,6 +1164,12 @@ Island display selection (multi-monitor):
   through currentDescriptor()/currentVisibleFrame() and follow
   selectionDidChangeNotification. WHY:
   docs/decisions/2026-07-07-island-display-selection-not-nsscreen-main.md
+  The plate's top is the screen top and its height the camera band, which can
+  be fractional (27.5 pt). AppKit snaps the island window outward to whole
+  points, so IslandPanelFramePolicy.hostFrame sizes the hosting view to the
+  actual window height (width stays as requested); a host of the requested
+  height left a one-pixel line above the island. WHY:
+  .project-docs/decisions/2026-11-26-island-host-fills-window-height.md
 
 Now Playing:
   MediaRemoteNowPlayingSource runs the vendored adapter as a long-lived child

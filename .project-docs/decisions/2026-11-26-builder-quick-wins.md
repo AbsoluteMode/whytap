@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: scripts/build-dmg.sh
     confirmed_at: 2026-11-26
-related: [2026-11-23-builder-queue-flaky-tests.md, 2026-11-23-builder-queue-cheap-fixes.md, ../processes/shared-app-development.md]
+related: [2026-11-23-builder-queue-flaky-tests.md, 2026-11-23-builder-queue-cheap-fixes.md, ../processes/shared-app-development.md, 2026-11-26-preview-before-validation.md]
 ---
 
 # Builder quick wins

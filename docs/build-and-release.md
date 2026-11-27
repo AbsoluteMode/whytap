@@ -97,8 +97,14 @@ vendored Sparkle and MediaRemote frameworks keep their prebuilt slices), signs
 with the same identity, runs the same signature, designated-requirement and
 native `--installation-check` checks, adds `ExodiaLocalBuild` to `Info.plist`
 and writes `build/Whytap-<version>-build<n>-local-arm64.json` (source commit,
-version, build, flavor, signing, CDHash) instead of a DMG and its release
-manifest. It refuses notarization and the legacy mode; `user-release.sh`
+version, build, flavor, signing, CDHash, composition) instead of a DMG and its
+release manifest. `EXODIA_BUILD_COMPOSITION='{"base": "<main SHA>",
+"members": [{"ticket": <id>, "head": "<SHA>"}]}'` names the unmerged preview
+PRs the build carries
+([preview decision](../.project-docs/decisions/2026-11-26-preview-before-validation.md));
+the script refuses it unless the base and every head are in the built source,
+and stores it in `Info.plist` as `ExodiaBuildComposition` (main only by
+default). It refuses notarization and the legacy mode; `user-release.sh`
 refuses it for any upload. The installer still compares the designated
 requirement with the installed app, waits for a fresh meeting gate before a
 normal Quit and keeps a signed rollback bundle. Public and community releases

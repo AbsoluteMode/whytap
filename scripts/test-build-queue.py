@@ -5,6 +5,8 @@ from concurrent.futures import ThreadPoolExecutor
 import importlib.util
 from datetime import datetime, timezone
 import json
+from datetime import datetime, timedelta, timezone
+import plistlib
 import os
 from pathlib import Path
 import sqlite3
@@ -32,6 +34,8 @@ class QueueTests(unittest.TestCase):
         self.git("-c", "user.name=Queue Test", "-c", "user.email=queue@example.invalid",
                  "commit", "--allow-empty", "-qm", "fixture")
         self.head = self.git("rev-parse", "HEAD").strip()
+        self.app = Path(self.temp.name) / "Applications" / "Whytap.app"  # never the real one
+        self.points = Path(self.temp.name) / "restore-points"  # never the owner's
         self.pulls = Path(self.temp.name) / "pulls.git"  # GitHub's refs/pull/<n>/head
         subprocess.run(["git", "init", "-q", "--bare", str(self.pulls)], check=True)
         self.call("configure", "--builder-thread", "builder")
@@ -43,6 +47,8 @@ class QueueTests(unittest.TestCase):
         result = subprocess.run(["python3", str(SCRIPT), "--actor", actor, *args],
                                 cwd=cwd or self.repo, capture_output=True, text=True,
                                 env={**HERMETIC_ENV, "WHYTAP_BUILD_QUEUE_PULL_REMOTE": str(self.pulls),
+                                     "WHYTAP_INSTALLED_APP": str(self.app),
+                                     "WHYTAP_RESTORE_POINTS_DIR": str(self.points),
                                      **(env or {})})
         self.assertEqual(result.returncode == 0, ok, result.stdout + result.stderr)
         return json.loads(result.stdout if ok else result.stderr)
@@ -59,6 +65,8 @@ class QueueTests(unittest.TestCase):
             path.parent.mkdir(parents=True, exist_ok=True)
             if content is None:
                 path.unlink()
+            elif isinstance(content, bytes):
+                path.write_bytes(content)
             else:
                 path.write_text(content)
         self.git("add", "-A")
@@ -878,6 +886,475 @@ class QueueTests(unittest.TestCase):
                   '["SidekeyTests.A/testB"]')
         self.call("set", "--ticket", str(ticket), "--status", "queued", "--note", "load")
         self.assertEqual(self.ticket(ticket)["protected_pending"], [])  # validated again
+
+
+    # Preview lane and release batches.
+    # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md,
+    #      .project-docs/decisions/2026-11-26-release-batches.md
+    # Each scenario of the builder's workflow probe for ticket 628 has a test here.
+
+    def lane(self, **settings):
+        (self.repo / ".git" / "whytap-build-queue-builder.json").write_text(
+            json.dumps({"preview_lane": True, **settings}))
+        self.token = Path(self.temp.name) / "orchestrator-token"
+        self.token.write_text("t" * 40)
+        self.call("configure-orchestrator", "--orchestrator", "orchestrator",
+                  "--token-file", str(self.token))
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+
+    def install(self, members, build, base="", restore_points=0):
+        """What a verified install leaves: the app itself names its composition."""
+        plist = self.app / "Contents" / "Info.plist"
+        plist.parent.mkdir(parents=True, exist_ok=True)
+        info = {"CFBundleVersion": str(build), "ExodiaSourceRevision": base or self.head,
+                "ExodiaBuildComposition": json.dumps({
+                    "base": base or self.head,
+                    "members": [{"ticket": t["id"], "head": t["head"]} for t in members]})}
+        if restore_points:
+            info["ExodiaRestorePointVersion"] = restore_points
+        plist.write_bytes(plistlib.dumps(info))
+
+    def preview(self, pr, head=None, session="worker", ok=True):
+        return self.call("enqueue", "--pr", f"https://github.com/example/app/pull/{pr}",
+                         "--head", head or self.change(f"Sources/App/View{pr}.swift",
+                                                       f"struct View{pr} {{}}"),
+                         "--title", f"Preview {pr}", "--checks", "branch build",
+                         "--acceptance", "Open it; it does not lag", "--session", session,
+                         "--preview", ok=ok)
+
+    def train(self):
+        return [{"id": t["ticket"], "head": t["head"]} for t in self.call("status")["preview_train"]]
+
+    def previewed(self, pr, build):
+        """Claim, install (train + it) and record a preview as the preview session does."""
+        ticket = self.preview(pr)["ticket"]
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], ticket["id"])
+        self.install(self.train() + [ticket], build)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        return self.ticket(ticket["id"])
+
+    def decide(self, command, ticket, build, *extra, actor="orchestrator", ok=True, head=None):
+        args = ["--ticket", str(ticket["id"]), "--head", head or ticket["head"],
+                "--build", str(build), "--token-file", str(self.token), *extra]
+        if command == "approve":
+            args += ["--by", "owner: feature OK"]
+        return self.call(command, *args, "--note", "relayed", actor=actor, ok=ok)
+
+    def admit(self, files, mode=None):
+        self.git("checkout", "-q", "--detach", self.head)
+        head = self.commit(files)
+        if mode:
+            for name in files:
+                (self.repo / name).chmod(0o755)
+            self.git("add", "-A")
+            self.git("-c", "user.name=Q", "-c", "user.email=q@example.invalid", "commit",
+                     "-qm", "mode")
+            head = self.git("rev-parse", "HEAD").strip()
+        return self.call("preview-admit", "--base", self.head, "--commit", head)
+
+    def test_admission_accepts_only_preview_safe_kinds_of_input(self):  # 628 item 1
+        safe = self.admit({"Sources/App/Panel.swift": "struct Panel { let title = \"Hi\" }\n",
+                           "Resources/en.lproj/Main.strings": "\"a\" = \"b\";\n",
+                           "Resources/Icon.png": b"\x89PNG\r\n\x1a\nrest",
+                           "docs/note.md": "text\n"})
+        self.assertEqual((safe["admissible"], safe["tier"], safe["reasons"]),
+                         (True, "plain", []))
+        for files in ({"Sources/App/Panel.swift": "func update() { PlannerSettings.shared.reset() }\n"},
+                      {"Sources/App/ImportedBundle.swift":
+                       "let panel = Bundle(url: candidateURL)?.principalClass\n"},
+                      {"Resources/ViewSupport.bin": b"binary\x00opaque"},
+                      {"Resources/Logo.svg": b"<svg>\x00</svg>"},
+                      {"Resources/Icon.png": "not a png"},
+                      {"Resources/Defaults.plist": "<plist/>"},
+                      {"scripts/tool.py": "print(1)\n"},
+                      {"Package.swift": "// swift-tools-version"}):
+            with self.subTest(files=list(files)):
+                self.assertFalse(self.admit(files)["admissible"])
+        # A changed line that calls an unchanged helper in the same file is judged with it.
+        self.git("checkout", "-q", "--detach", self.head)
+        base = self.commit({"Sources/App/Panel.swift":
+                            "func reset() { UserDefaults.standard.removeAll() }\n"})
+        head = self.commit({"Sources/App/Panel.swift":
+                            "func reset() { UserDefaults.standard.removeAll() }\nfunc tap() { reset() }\n"})
+        self.assertFalse(self.call("preview-admit", "--base", base, "--commit", head)["admissible"])
+        self.assertFalse(self.admit({"Sources/App/Run.swift": "struct Run {}\n"},
+                                    mode="755")["admissible"])
+        self.git("checkout", "-q", "--detach", self.head)
+        link = self.repo / "Resources" / "SupportLink.svg"
+        link.parent.mkdir(exist_ok=True)
+        link.symlink_to("../Outside")
+        self.git("add", "-A")
+        self.git("-c", "user.name=Q", "-c", "user.email=q@example.invalid", "commit", "-qm", "l")
+        self.assertFalse(self.call("preview-admit", "--base", self.head, "--commit",
+                                   self.git("rev-parse", "HEAD").strip())["admissible"])
+
+    # Restore-point tier. WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+
+    def restore_point(self, build, minutes_ago=1, ident="0b9a7c1e-3f52-4d8a-9c47-5e0f1a2b3c4d"):
+        """What the outgoing app's `--restore-point create` leaves on this Mac."""
+        self.points.mkdir(exist_ok=True)
+        made = datetime.now(timezone.utc) - timedelta(minutes=minutes_ago)
+        point = self.points / ident
+        point.mkdir(exist_ok=True)
+        (point / "manifest.json").write_text("{}")
+        (point / "record.json").write_text(json.dumps({
+            "id": ident.upper(), "sequence": 1, "reason": "preview",
+            "createdAt": made.strftime("%Y-%m-%dT%H:%M:%SZ"), "appBuild": str(build),
+            "archiveBytes": 6, "sections": ["settings", "workspace"]}))
+        return ident
+
+    def test_settings_code_is_previewed_only_with_a_restore_point(self):
+        settings = {"Sources/Sidekey/Settings/Panel.swift":
+                    "func save() { UserDefaults.standard.set(true, forKey: \"x\") }\n"}
+        refused = self.admit(settings)
+        self.assertFalse(refused["admissible"])
+        self.assertIn("makes no restore points", refused["reasons"][-1])
+        self.install([], 1800, restore_points=1)
+        admitted = self.admit(settings)
+        self.assertEqual((admitted["admissible"], admitted["tier"],
+                          admitted["restore_point_required"]), (True, "restore_point", True))
+        # Comments, string text and the To-do hover tool's case name are not uses.
+        self.assertTrue(self.admit({"Sources/Sidekey/Settings/Copy.swift":
+                                    "// Keys live in the Keychain\n"
+                                    "let hint = \"Sparkle updates, Keychain keys\"\n"
+                                    "let tool = HoverTool.caseVault\n"
+                                    "let store = PlannerStore.shared\n"})["admissible"])
+        self.assertTrue(self.admit({"Resources/FeatureVideos/drop.mp4":
+                                    b"\x00\x00\x00\x18ftypmp42rest"})["admissible"])
+        for files in ({"Sources/Sidekey/Settings/Keys.swift":
+                       "let key = try ProviderKeyStore.shared.read()\n"},
+                      {"Sources/Sidekey/Settings/Sync.swift":
+                       "let task = URLSession.shared.dataTask(with: url)\n"},
+                      {"Sources/Sidekey/Settings/Tidy.swift":
+                       "try FileManager.default.removeItem(at: url)\n"},
+                      {"Sources/Sidekey/Settings/Update.swift": "let updater = SPUUpdater()\n"},
+                      {"Sources/Sidekey/Settings/Mic.swift":
+                       "AVCaptureDevice.requestAccess(for: .audio) { _ in }\n"},
+                      {"Sources/Sidekey/Settings/Interp.swift":
+                       "let s = \"\\(ProviderKeyStore.shared.count)\"\n"},
+                      {"Sources/Sidekey/Backup/Restore.swift": "struct Restore {}\n"},
+                      {"Sources/Sidekey/SidekeyAppMain.swift": "struct Main {}\n"},
+                      {"Sources/WhytapCLI/main.swift": "print(1)\n"},
+                      {"Resources/FeatureVideos/drop.mp4": "not a video"},
+                      {"scripts/build-queue.py": "print(1)\n"}):
+            with self.subTest(files=list(files)):
+                self.assertFalse(self.admit(files)["admissible"])
+        # Removing a Keychain call changes credential handling as much as adding one.
+        self.git("checkout", "-q", "--detach", self.head)
+        base = self.commit({"Sources/Sidekey/Settings/Keys.swift":
+                            "func k() { SecItemDelete(query) }\n"})
+        head = self.commit({"Sources/Sidekey/Settings/Keys.swift": "func k() {}\n"})
+        self.assertFalse(self.call("preview-admit", "--base", base, "--commit",
+                                   head)["admissible"])
+
+    def test_a_restore_point_preview_needs_the_outgoing_apps_restore_point(self):
+        self.lane()
+        self.install([], 1800, restore_points=1)
+        ticket = self.preview(1, self.change("Sources/Sidekey/Settings/Panel.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        claim = self.call("preview-claim")
+        self.assertEqual(claim["ticket"]["preview_tier"], "restore_point")
+        record = lambda point: self.call("preview-restore-point", "--ticket", str(ticket["id"]),
+                                         "--restore-point", point, ok=False)
+        record("0b9a7c1e-3f52-4d8a-9c47-000000000000")  # none on this Mac
+        record("../../outside")  # an ID, never a path
+        record(self.restore_point(1799))  # made by another build
+        record(self.restore_point(1800, minutes_ago=180))  # not right before this install
+        # Only a published restore point of the app's layout counts.
+        other = "1c2d3e4f-0000-4000-8000-000000000001"
+        self.restore_point(1800, ident=other)
+        (self.points / other / "manifest.json").unlink()
+        record(other)  # record without its snapshot
+        flat = "1c2d3e4f-0000-4000-8000-000000000002"
+        self.restore_point(1800, ident=flat)
+        (self.points / flat / "record.json").rename(self.points / (flat + ".json"))
+        record(flat)  # the earlier flat layout
+        named = "1c2d3e4f-0000-4000-8000-000000000003"
+        self.restore_point(1800, ident=named)
+        data = json.loads((self.points / named / "record.json").read_text())
+        data["id"] = other
+        (self.points / named / "record.json").write_text(json.dumps(data))
+        record(named)  # a record naming another restore point
+        linked = "1c2d3e4f-0000-4000-8000-000000000004"
+        (self.points / linked).symlink_to(self.points / self.restore_point(1800))
+        record(linked)  # a link to another restore point
+        record("." + "incoming-" + self.restore_point(1800))  # unpublished work
+        self.call("preview-restore-point", "--ticket", str(ticket["id"]), "--restore-point",
+                  self.restore_point(1800), actor="worker", ok=False)
+        point = self.restore_point(1800)
+        # Installed without it: never offered to the owner.
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1801, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed", ok=False)
+        self.install([], 1800, restore_points=1)
+        self.assertEqual(self.call("preview-restore-point", "--ticket", str(ticket["id"]),
+                                   "--restore-point", point.upper())["restore_point"], point)
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1801, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "awaiting_approval")
+
+    def test_the_owner_can_roll_his_data_back_with_a_rejection(self):
+        self.lane()
+        self.install([], 1800, restore_points=1)
+        plain = self.previewed(2, 1801)
+        self.decide("reject", plain, 1801, "--restore-data", ok=False)  # no restore point
+        self.decide("reject", plain, 1801)
+        self.install([], 1801, restore_points=1)
+        ticket = self.preview(1, self.change("Sources/Sidekey/Settings/Panel.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        self.call("preview-claim")
+        point = self.restore_point(1801)
+        self.call("preview-restore-point", "--ticket", str(ticket["id"]), "--restore-point", point)
+        self.install([{"id": ticket["id"], "head": ticket["head"]}], 1802, restore_points=1)
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "installed")
+        self.decide("reject", ticket, 1802, "--restore-data", "--sections", "settings,keys",
+                    ok=False)
+        self.decide("reject", ticket, 1802, "--restore-data", "--sections", "settings")
+        pending = {"ticket": ticket["id"], "restore_point": point, "sections": ["settings"]}
+        status = self.call("status")
+        self.assertTrue(status["preview_rebuild"])
+        self.assertLessEqual(pending.items(), status["data_restore"].items())
+        claim = self.call("preview-claim")
+        self.assertTrue(claim["rebuild"])
+        self.assertEqual(claim["data_restore"]["restore_point"], point)
+        self.call("data-restored", "--restore-point", point, "--note", "x", actor="worker",
+                  ok=False)
+        self.call("data-restored", "--restore-point", "other", "--note", "x", ok=False)
+        self.call("data-restored", "--restore-point", point, "--note", "applied, launched")
+        self.assertIsNone(self.call("status")["data_restore"])
+        events = self.call("events", "--pending", "--ticket", str(ticket["id"]))
+        self.assertIn("rolled back to restore point", events[-1]["note"])
+
+    def test_an_inadmissible_or_stacked_preview_goes_to_normal_validation(self):
+        self.lane()
+        unsafe = self.preview(1, self.change("Sources/App/Store.swift",
+                                             "let x = UserDefaults.standard"))["ticket"]
+        self.assertEqual(self.call("preview-claim")["moved_to_normal_lane"], [unsafe["id"]])
+        self.assertEqual(self.ticket(unsafe["id"])["lane"], "")
+        parent = self.previewed(2, 1801)
+        self.git("checkout", "-q", "--detach", parent["head"])
+        child = self.preview(3, self.commit({"Sources/App/Child.swift": "struct Child {}"}))
+        claim = self.call("preview-claim")  # built on an unmerged PR: never previewed
+        self.assertEqual(claim["moved_to_normal_lane"], [child["ticket"]["id"]])
+        self.assertIn("builds on open PRs", self.ticket(child["ticket"]["id"])["note"])
+
+    def test_the_builder_never_relays_the_owners_decisions(self):  # 628 item 2
+        self.lane()
+        self.call("configure-orchestrator", "--orchestrator", "builder", "--token-file",
+                  str(self.token), ok=False)
+        ticket = self.previewed(1, 1801)
+        self.decide("approve", ticket, 1801, actor="builder", ok=False)
+        self.decide("approve", ticket, 1801, actor="worker", ok=False)
+        self.call("approve", "--ticket", str(ticket["id"]), "--head", ticket["head"], "--build",
+                  "1801", "--by", "owner", "--note", "x", actor="orchestrator", ok=False)
+        self.decide("approve", ticket, 1801)
+        self.assertEqual(self.ticket(ticket["id"])["status"], "approved")
+
+    def test_every_preview_in_an_install_is_decided_against_that_build(self):  # 628 item 2
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)  # the app now carries both
+        self.assertEqual((self.ticket(first["id"])["preview_build"],
+                          self.ticket(second["id"])["preview_build"]), ("1802", "1802"))
+        self.decide("approve", first, 1801, ok=False)  # not what the owner runs now
+        self.decide("approve", first, 1802)
+        self.decide("reject", second, 1802, head=first["head"], ok=False)
+        self.install([], 1803)  # the app no longer carries it
+        self.decide("reject", second, 1803, ok=False)
+
+    def test_release_auto_needs_an_enabled_threshold_that_is_reached(self):  # 628 item 2
+        self.lane()
+        self.decide("approve", self.previewed(1, 1801), 1801)
+        self.call("release", "--auto", "--by", "auto", ok=False)  # trigger off by default
+        self.lane(release_after_approved=2)
+        self.call("release", "--auto", "--by", "auto", ok=False)  # one of two
+        self.lane(release_after_approved=1)
+        self.call("release", "--auto", "--by", "auto", actor="worker", ok=False)
+        self.assertEqual(self.call("release", "--auto", "--by", "auto")["batch"], 1)
+
+    def test_the_final_handoff_sees_a_later_hold_and_a_superseded_head(self):  # 628 item 3/4
+        self.lane()
+        ordinary = self.enqueue(9)["ticket"]
+        self.call("claim")
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        members = json.dumps([{"ticket": ticket["id"], "head": ticket["head"]}])
+        handoff = lambda build=1801: self.call("preview-handoff", "--base", self.head,
+                                               "--members", members, "--ticket",
+                                               str(ticket["id"]), "--build", str(build))
+        self.assertFalse(handoff()["clear"])  # no installed app to compare with
+        self.install([], 1800)
+        self.assertTrue(handoff()["clear"])
+        self.install([], 1801)  # another install got there first
+        self.assertIn("already build 1801", handoff()["problems"][0])
+        self.assertTrue(handoff(1802)["clear"])
+        self.call("set", "--ticket", str(ordinary["id"]), "--status", "pending_install",
+                  "--hold", "--note", "a person must act")
+        self.assertIn("waits for its install", handoff(1802)["problems"][0])
+        self.update(ordinary["id"], "done")
+        self.assertTrue(handoff(1802)["clear"])
+        fix = self.preview(1, self.change("Sources/App/View1.swift", "struct Fixed {}"))["ticket"]
+        self.assertFalse(handoff(1802)["clear"])  # the compiling head was replaced
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "queued", "--note", "stop")
+        self.assertEqual(self.ticket(ticket["id"])["status"], "superseded")
+        self.assertEqual(fix["queued_at"], ticket["queued_at"])  # the fix keeps its place
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+
+    def test_the_final_handoff_refuses_whatever_it_cannot_prove(self):  # 655 item 3
+        """Never older code over newer data: an unreadable installed app or a base
+        behind the current main stops the Quit."""
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        members = json.dumps([{"ticket": ticket["id"], "head": ticket["head"]}])
+        handoff = lambda base=None: self.call(
+            "preview-handoff", "--base", base or self.head, "--members", members,
+            "--ticket", str(ticket["id"]), "--build", "1801")
+        self.install([], 1800)
+        self.assertTrue(handoff()["clear"])
+        plist = self.app / "Contents" / "Info.plist"
+        good = plist.read_bytes()
+        broken = [
+            None,  # missing
+            b"not a plist",
+            plistlib.dumps({"CFBundleVersion": "18x0", "ExodiaSourceRevision": self.head}),
+            plistlib.dumps({"CFBundleVersion": "1800"}),  # no base
+            plistlib.dumps({"CFBundleVersion": "1800", "ExodiaSourceRevision": self.head,
+                            "ExodiaBuildComposition": "{not json"}),
+        ] + [plistlib.dumps({"CFBundleVersion": "1800", "ExodiaSourceRevision": self.head,
+                             "ExodiaBuildComposition": json.dumps({"base": self.head,
+                                                                   "members": m})})
+             for m in ([{"ticket": True, "head": ticket["head"]}],
+                       [{"ticket": -1, "head": ticket["head"]}],
+                       [{"ticket": 1, "head": ticket["head"]}] * 2,
+                       [{"ticket": 1, "head": "abc"}], "x")]
+        for index, data in enumerate(broken):
+            with self.subTest(case=index):
+                if data is None:
+                    plist.unlink()
+                else:
+                    plist.write_bytes(data)
+                self.assertFalse(handoff()["clear"])
+                plist.write_bytes(good)
+        # main moved on: a base without it is refused until recomposed.
+        old = self.head
+        later = self.change("Sources/App/Runtime.swift", "struct Migrates {}")
+        self.git("update-ref", "refs/remotes/origin/main", later)
+        problems = handoff(old)["problems"]
+        self.assertTrue(any("does not contain the current main" in p for p in problems), problems)
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        self.assertFalse(handoff(old)["clear"])  # main unknown
+        self.git("update-ref", "refs/remotes/origin/main", old)
+        self.assertTrue(handoff(old)["clear"])
+        for bad in ([{"ticket": True, "head": ticket["head"]}],
+                    [{"ticket": ticket["id"], "head": ticket["head"]}] * 2):
+            self.call("preview-handoff", "--base", old, "--members", json.dumps(bad),
+                      "--build", "1801", ok=False)
+
+    def test_a_recovered_preview_waits_behind_a_local_install(self):  # 628 item 3
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")  # its session then dies
+        merged = self.enqueue(9)["ticket"]
+        self.call("claim")
+        self.call("set", "--ticket", str(merged["id"]), "--status", "pending_install",
+                  "--install-first", "--note", "merged; gate busy")
+        held = self.call("preview-claim")
+        self.assertEqual((held["held_for_install"], held["active"]), ([merged["id"]], None))
+        self.assertEqual(self.ticket(ticket["id"])["status"], "queued")  # keeps its place
+
+    def test_a_historical_receipt_does_not_stop_previews(self):  # 628 item 6
+        self.lane()
+        receipt = self.enqueue(9)["ticket"]
+        self.call("claim")
+        self.call("set", "--ticket", str(receipt["id"]), "--status", "pending_install",
+                  "--note", "public release published; remote install unverified")
+        self.assertEqual(self.call("status")["local_install_blockers"], [])
+        ticket = self.preview(1)["ticket"]
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], ticket["id"])
+
+    def test_a_release_batch_respects_the_install_boundary(self):  # 628 item 3
+        self.lane()
+        self.decide("approve", self.previewed(1, 1801), 1801)
+        merged = self.enqueue(8)["ticket"]
+        self.assertEqual(self.call("claim")["ticket"]["id"], merged["id"])
+        self.call("set", "--ticket", str(merged["id"]), "--status", "pending_install", "--hold",
+                  "--note", "a person must act")
+        self.call("release", "--by", "owner: release", "--token-file", str(self.token),
+                  actor="orchestrator")
+        self.git("checkout", "-q", "--detach", self.head)
+        docs = self.enqueue(9, self.commit({"docs/x.md": "x"}))["ticket"]
+        self.git("update-ref", "refs/remotes/origin/main", self.head)
+        claimed = self.call("claim")
+        self.assertEqual(claimed["ticket"]["id"], docs["id"])  # the batch waits, docs go
+
+    def test_installed_state_comes_from_the_app_itself(self):  # 628 item 4
+        self.lane()
+        ticket = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        self.install([ticket], 1801)  # swapped, then the session died before recording
+        fix = self.preview(1, self.change("Sources/App/View1.swift", "struct Fix {}"))["ticket"]
+        status = self.call("status")
+        self.assertEqual(status["installed_app"]["members"],
+                         [{"ticket": ticket["id"], "head": ticket["head"]}])
+        self.assertTrue(status["preview_rebuild"])  # it carries a head nobody wants now
+        self.call("set", "--ticket", str(ticket["id"]), "--status", "awaiting_approval",
+                  "--note", "late record")  # a newer ticket exists: superseded, not recorded
+        self.assertEqual(self.ticket(ticket["id"])["status"], "superseded")
+        self.assertEqual(self.call("preview-claim")["ticket"]["id"], fix["id"])
+        self.install([], 1802)
+        self.call("set", "--ticket", str(fix["id"]), "--status", "awaiting_approval", "--note",
+                  "not installed", ok=False)  # the app does not carry it
+
+    def test_a_release_batch_keeps_its_merge_order_and_checkpoints(self):  # 628 item 5
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)
+        self.decide("approve", second, 1802)  # approved out of FIFO order
+        self.decide("approve", first, 1802)
+        self.call("release", "--by", "owner: release", "--token-file", str(self.token),
+                  actor="orchestrator")
+        order = [t["id"] for t in self.call("claim")["tickets"]]
+        self.assertEqual(order, [first["id"], second["id"]])
+        again = self.call("claim")["active_batch"]  # after a restart: the same order
+        self.assertEqual([t["id"] for t in again["tickets"]], order)
+        self.call("set", "--ticket", str(first["id"]), "--status", "pending_install",
+                  "--install-first", "--note", "merged at abc; batch member 1 of 2")
+        self.assertEqual([t["id"] for t in self.call("claim")["active_batch"]["tickets"]],
+                         [second["id"]])  # the checkpoint: only the unmerged member remains
+        self.call("release", "--by", "again", "--token-file", str(self.token),
+                  actor="orchestrator", ok=False)  # one batch at a time
+
+    def test_a_moved_member_head_leaves_the_batch_and_the_others_go_on(self):  # 628 item 4
+        self.lane()
+        first = self.previewed(1, 1801)
+        second = self.previewed(2, 1802)
+        self.decide("approve", first, 1802)
+        self.decide("approve", second, 1802)
+        self.call("release", "--by", "owner", "--token-file", str(self.token),
+                  actor="orchestrator")
+        self.git("push", "-q", str(self.pulls), f"{self.change('Sources/App/X.swift', 'x')}:"
+                 "refs/pull/1/head")
+        self.git("push", "-q", str(self.pulls), f"{second['head']}:refs/pull/2/head")
+        claimed = self.call("claim")
+        self.assertEqual(([t["id"] for t in claimed["tickets"]], claimed["returned_moved_heads"]),
+                         ([second["id"]], [first["id"]]))
+        self.assertNotIn(first["id"], [t["ticket"] for t in self.call("status")["preview_train"]])
+
+    def test_switching_the_lane_off_strands_nothing(self):  # 628 item 6
+        self.lane()
+        building = self.preview(1)["ticket"]
+        self.call("preview-claim")
+        waiting = self.preview(2)["ticket"]
+        moved = self.call("preview-lane-off")["moved_to_normal_lane"]
+        self.assertEqual(sorted(moved), sorted([building["id"], waiting["id"]]))
+        self.assertEqual({self.ticket(t)["status"] for t in moved}, {"queued"})
+        (self.repo / ".git" / "whytap-build-queue-builder.json").write_text("{}")
+        later = self.preview(3)["ticket"]
+        self.assertEqual(later["lane"], "")
 
 
 if __name__ == "__main__":

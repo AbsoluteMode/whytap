@@ -1,3 +1,4 @@
+import AppKit
 import CoreGraphics
 import Foundation
 
@@ -614,6 +615,17 @@ enum IslandLanguageControl {
             ?? language.code.uppercased()
     }
 
+    /// The name shown while the pointer is over a chip and read by VoiceOver.
+    /// English names tell apart languages that share a flag (Spanish and
+    /// Galician under Spain, English and Welsh). A curated chip that groups
+    /// several languages under one flag names the shown one and the rest.
+    // WHY: .project-docs/decisions/2026-11-28-language-picker-scrolls-inside-panel.md
+    static func nameHint(for option: IslandLanguageOption) -> String {
+        guard let language = option.language else { return option.label }
+        let others = option.variantLanguages.filter { $0.code != language.code }.count
+        return others > 0 ? "\(language.englishName) +\(others) more" : language.englishName
+    }
+
     static func autoOption() -> IslandLanguageOption {
         IslandLanguageOption(
             id: autoOptionID,
@@ -797,6 +809,49 @@ enum IslandLanguagePickerLayout {
         inputTopInset + inputSize.height + inputToFlagGap
             + CGFloat(flagRowCount - 1) * (flagChipSize.height + rowVerticalSpacing)
             + flagChipSize.height + edgeInset
+    }
+
+    static let nameHintFontSize: CGFloat = 10
+    static let nameHintHeight: CGFloat = 17
+    static let nameHintHorizontalPadding: CGFloat = 7
+    private static let nameHintGap: CGFloat = 3
+
+    /// Natural size of the name hint capsule for `text`.
+    static func nameHintSize(for text: String) -> CGSize {
+        let font = NSFont.systemFont(ofSize: nameHintFontSize, weight: .medium)
+        let width = ceil((text as NSString).size(withAttributes: [.font: font]).width)
+        return CGSize(width: width + 2 * nameHintHorizontalPadding, height: nameHintHeight)
+    }
+
+    /// Where the name hint for a chip goes, in panel coordinates. It sits
+    /// above the chip's visible part, or below it when that would cover the
+    /// search field or leave `visibleArea`, and is always clamped inside the
+    /// panel (inset by `edgeInset`), so neither the scroll viewport nor the
+    /// drawer edge clips it. Wider-than-panel text is capped and truncated.
+    static func nameHintFrame(
+        anchor: CGRect,
+        size: CGSize,
+        panelSize: CGSize,
+        visibleArea: CGRect
+    ) -> CGRect {
+        let bounds = CGRect(origin: .zero, size: panelSize).insetBy(dx: edgeInset, dy: 0)
+        let width = max(0, min(size.width, bounds.width))
+        let height = size.height
+        let visibleAnchor = anchor.intersection(visibleArea)
+        let target = visibleAnchor.isNull || visibleAnchor.isEmpty ? anchor : visibleAnchor
+
+        let x = min(max(target.midX - width / 2, bounds.minX), max(bounds.minX, bounds.maxX - width))
+        let above = target.minY - nameHintGap - height
+        let below = target.maxY + nameHintGap
+        let y: CGFloat
+        if above >= max(0, visibleArea.minY) {
+            y = above
+        } else if below + height <= panelSize.height {
+            y = below
+        } else {
+            y = min(max(0, above), max(0, panelSize.height - height))
+        }
+        return CGRect(x: x, y: y, width: width, height: height)
     }
 
     enum Content: Equatable {

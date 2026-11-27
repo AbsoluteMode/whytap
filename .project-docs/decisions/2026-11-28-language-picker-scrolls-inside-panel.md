@@ -2,14 +2,17 @@
 id: language-picker-scrolls-inside-panel-2026-11-28
 type: decision
 title: Language picker flags scroll inside a fixed-height drawer
-summary: The island's input and output language pickers keep one drawer height that fits the curated four-row flag grid; search results or variant lists that need more rows scroll inside a clipped viewport below the search field instead of drawing below the drawer over other windows.
+summary: The island's input and output language pickers keep one drawer height that fits the curated four-row flag grid; search results or variant lists that need more rows scroll inside a clipped viewport below the search field instead of drawing below the drawer over other windows. Hovering a flag shows its English name in a capsule kept inside the drawer, and the same name is the VoiceOver label.
 status: confirmed
 tags: [island, hover, language-picker, layout, scrolling]
-canonical_for: [language-picker-drawer-height]
+canonical_for: [language-picker-drawer-height, language-picker-name-hint]
 verified_at: 2026-11-28
 sources:
   - type: user-confirmed
     reference: On 2026-11-28 the owner reported (orchestrator task 110, screenshot) that typing "e" in the Output Language picker drew a fourth flag row and a lone Spain flag below the glass panel, over other windows.
+    confirmed_at: 2026-11-28
+  - type: user-confirmed
+    reference: On 2026-11-28 the owner chose, as REV 1 of orchestrator task 110, to show the language name while the pointer is over a flag (for example Galician versus Spanish, Welsh versus English) and to keep the grid layout unchanged.
     confirmed_at: 2026-11-28
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandDropModeControl.swift
@@ -54,6 +57,22 @@ underneath showed through.
   `ScrollView` clipped to that viewport; scrolling is disabled when the
   content fits. A new result set starts at the top.
 
+### Name hint (REV 1)
+
+- `IslandLanguageControl.nameHint` is the language's English name;
+  a curated flag that groups several languages reads "Spanish +3 more";
+  Auto and Off keep their own text and show no hint. The same string is
+  each chip's accessibility label.
+- The hint is a small capsule in the search field's style, drawn at the
+  panel level (outside the scroll view) and never hit-testable.
+  `IslandLanguagePickerLayout.nameHintFrame` puts it above the chip's
+  visible part, or below it when above would cover the search field, and
+  clamps it inside the panel minus the edge inset; text wider than the
+  panel is capped and truncated. While hovered, a scrolled chip moves its
+  hint with it; a new query or a selection removes it.
+- The picker has no arrow-key navigation over flags (keyboard input goes to
+  the search field only), so there is no keyboard selection to label.
+
 ## Why
 
 The drawer keeps one size per mode, like History, Tasks and Calendar, and
@@ -63,6 +82,12 @@ the pointer and could close the hover. A clipped scroll view makes drawing
 and hit-testing agree: only visible flags receive clicks. The partly visible
 fourth search row shows that more results exist.
 
+The hint follows the island's own hover language rather than a system
+tooltip, which appears after a delay and is not used by other island
+surfaces. English names match the owner's examples and the existing
+`englishName` used for output-language prompts; the app has no localized UI
+strings to follow.
+
 ## What was tested
 
 Layout tests at four island widths cover the curated grids (input and
@@ -70,7 +95,11 @@ output) fitting without scrolling, a catalog-sized grid and a short pane
 scrolling, row counts and scrolling for "", "e", "a", "span" and a
 no-match query, the three-row scroll boundary, variants, the band minus gap
 equalling the drawer, unique language IDs in every result and the Galician
-case. The live island was not exercised by the worker.
+case. Name hint tests cover Spanish/Galician and English/Welsh in the "e"
+results, distinct English names across the catalog, Auto/Off, a grouped
+curated flag and its variants, and placement: first row below, bottom row
+above, left and right edge clamping, a chip peeking at the bottom or half
+under the search field, text wider than the panel and a very short panel. The live island was not exercised by the worker.
 
 ## Rejected
 
@@ -79,5 +108,8 @@ case. The live island was not exercised by the worker.
 - Clip without scrolling: hides results that cannot be reached.
 - Shrink search targets to fit five rows: smaller click targets, and longer
   queries still overflow.
+- System `.help` tooltip for the name: delayed, unlike other island hints.
+- Native names in the hint: do not tell an English-reading user that the
+  second Spain flag is Galician.
 
 2026-11-28, PR: see fix/output-language-picker-overflow.

@@ -238,3 +238,167 @@ final class IslandLanguagePickerGridTests: XCTestCase {
         }
     }
 }
+
+/// Hovering a flag shows its English name (also the VoiceOver label), so
+/// languages sharing a flag can be told apart; the hint stays on the panel.
+final class IslandLanguageNameHintTests: XCTestCase {
+    private typealias Layout = IslandLanguagePickerLayout
+
+    private func option(_ code: String, in options: [IslandLanguageOption]) -> IslandLanguageOption {
+        try! XCTUnwrap(options.first { $0.language?.code == code }, code)
+    }
+
+    func test_searchResultsNameLanguagesThatShareAFlag() {
+        let options = IslandLanguageControl.filteredOptions(
+            query: "e",
+            leading: IslandLanguageControl.offOption()
+        )
+
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: option("es", in: options)), "Spanish")
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: option("gl", in: options)), "Galician")
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: option("en", in: options)), "English")
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: option("cy", in: options)), "Welsh")
+
+        let names = options.filter { $0.language != nil }.map(IslandLanguageControl.nameHint(for:))
+        XCTAssertEqual(Set(names).count, names.count, "every result has a distinct name")
+    }
+
+    func test_everyLanguageHasADistinctEnglishName() {
+        let names = AppLanguage.all.map(\.englishName)
+        XCTAssertTrue(names.allSatisfy { !$0.isEmpty })
+        XCTAssertEqual(Set(names).count, names.count)
+    }
+
+    func test_leadingChipsKeepTheirOwnLabels() {
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: IslandLanguageControl.offOption()), "Off")
+        XCTAssertEqual(IslandLanguageControl.nameHint(for: IslandLanguageControl.autoOption()), "Auto")
+    }
+
+    func test_groupedCuratedFlagNamesItsLanguageAndCountsTheRest() {
+        let curated = IslandLanguageControl.pickerOptions()
+        let spain = try! XCTUnwrap(curated.first { $0.countryCode == "ES" })
+        XCTAssertTrue(spain.hasLanguageVariants)
+        let others = spain.variantLanguages.count - 1
+        XCTAssertEqual(
+            IslandLanguageControl.nameHint(for: spain),
+            "\(try! XCTUnwrap(spain.language).englishName) +\(others) more"
+        )
+
+        // Expanded variants name each language on its own.
+        let variants = IslandLanguageControl.variantOptions(for: spain)
+        let names = variants.map(IslandLanguageControl.nameHint(for:))
+        XCTAssertTrue(names.contains("Spanish"))
+        XCTAssertTrue(names.contains("Catalan"))
+        XCTAssertEqual(names, variants.compactMap { $0.language?.englishName })
+        XCTAssertTrue(names.allSatisfy { !$0.contains("more") })
+    }
+
+    // MARK: Placement
+
+    private let panel = CGSize(width: 328, height: Layout.drawerHeight)
+
+    private func searchGrid(_ query: String) -> Layout.Grid {
+        let count = IslandLanguageControl.filteredOptions(
+            query: query,
+            leading: IslandLanguageControl.offOption()
+        ).count
+        return Layout.grid(panelSize: panel, count: count, content: .filtered)
+    }
+
+    private func hint(_ text: String, anchor: CGRect, grid: Layout.Grid, panel: CGSize? = nil) -> CGRect {
+        Layout.nameHintFrame(
+            anchor: anchor,
+            size: Layout.nameHintSize(for: text),
+            panelSize: panel ?? self.panel,
+            visibleArea: grid.viewport
+        )
+    }
+
+    private func assertOnPanel(_ frame: CGRect, panel: CGSize? = nil, file: StaticString = #filePath, line: UInt = #line) {
+        let size = panel ?? self.panel
+        XCTAssertGreaterThanOrEqual(frame.minX, Layout.edgeInset - 0.001, file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxX, size.width - Layout.edgeInset + 0.001, file: file, line: line)
+        XCTAssertGreaterThanOrEqual(frame.minY, -0.001, file: file, line: line)
+        XCTAssertLessThanOrEqual(frame.maxY, size.height + 0.001, file: file, line: line)
+    }
+
+    func test_firstRowHintGoesBelowSoItNeverCoversTheSearchField() {
+        let grid = searchGrid("e")
+        let first = try! XCTUnwrap(grid.flagFrames.first)
+        let frame = hint("Off", anchor: first, grid: grid)
+
+        XCTAssertGreaterThanOrEqual(frame.minY, first.maxY)
+        XCTAssertGreaterThan(frame.minY, grid.input.maxY)
+        assertOnPanel(frame)
+    }
+
+    func test_lastVisibleRowHintGoesAboveInsideTheDrawer() {
+        let grid = Layout.grid(
+            panelSize: panel,
+            count: IslandLanguageControl.pickerOptions().count,
+            content: .fullGrid
+        )
+        let bottom = try! XCTUnwrap(grid.flagFrames.max { $0.maxY < $1.maxY })
+        let frame = hint("Galician", anchor: bottom, grid: grid)
+
+        XCTAssertLessThanOrEqual(frame.maxY, bottom.minY)
+        XCTAssertGreaterThanOrEqual(frame.minY, grid.viewport.minY)
+        assertOnPanel(frame)
+    }
+
+    func test_edgeChipHintsAreClampedInsideThePanel() {
+        let grid = searchGrid("e")
+        let leftmost = try! XCTUnwrap(grid.flagFrames.min { $0.minX < $1.minX })
+        let rightmost = try! XCTUnwrap(grid.flagFrames.max { $0.maxX < $1.maxX })
+
+        let left = hint("Azerbaijani", anchor: leftmost, grid: grid)
+        let right = hint("Azerbaijani", anchor: rightmost, grid: grid)
+
+        XCTAssertEqual(left.minX, Layout.edgeInset, accuracy: 0.001)
+        XCTAssertEqual(right.maxX, panel.width - Layout.edgeInset, accuracy: 0.001)
+        assertOnPanel(left)
+        assertOnPanel(right)
+    }
+
+    func test_partlyScrolledChipAnchorsToItsVisiblePart() {
+        let grid = searchGrid("e")
+        // The fourth row peeks 7pt into the viewport's bottom edge.
+        let peeking = try! XCTUnwrap(grid.flagFrames.first { $0.minY < panel.height && $0.maxY > panel.height })
+        let frame = hint("Serbian", anchor: peeking, grid: grid)
+
+        XCTAssertLessThanOrEqual(frame.maxY, peeking.minY)
+        assertOnPanel(frame)
+
+        // Scrolled up so the chip is half hidden under the search field.
+        let scrolled = CGRect(x: peeking.minX, y: grid.viewport.minY - 10, width: peeking.width, height: peeking.height)
+        let below = hint("Serbian", anchor: scrolled, grid: grid)
+        XCTAssertGreaterThanOrEqual(below.minY, scrolled.maxY)
+        assertOnPanel(below)
+    }
+
+    func test_textWiderThanThePanelIsCapped() {
+        let grid = searchGrid("e")
+        let long = String(repeating: "Galician ", count: 20)
+        let frame = hint(long, anchor: try! XCTUnwrap(grid.flagFrames.first), grid: grid)
+
+        XCTAssertEqual(frame.width, panel.width - 2 * Layout.edgeInset, accuracy: 0.001)
+        assertOnPanel(frame)
+    }
+
+    func test_shortPanelKeepsTheHintInside() {
+        let short = CGSize(width: 328, height: 70)
+        let grid = Layout.grid(panelSize: short, count: 33, content: .filtered)
+        let first = try! XCTUnwrap(grid.flagFrames.first)
+        let frame = hint("Galician", anchor: first, grid: grid, panel: short)
+
+        assertOnPanel(frame, panel: short)
+    }
+
+    func test_hintSizeGrowsWithText() {
+        let short = Layout.nameHintSize(for: "Thai")
+        let long = Layout.nameHintSize(for: "Azerbaijani")
+        XCTAssertGreaterThan(long.width, short.width)
+        XCTAssertEqual(short.height, Layout.nameHintHeight)
+        XCTAssertGreaterThan(short.width, 2 * Layout.nameHintHorizontalPadding)
+    }
+}

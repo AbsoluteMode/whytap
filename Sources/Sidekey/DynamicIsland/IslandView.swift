@@ -3317,6 +3317,10 @@ struct IslandLanguagePickerPanel: View {
     @State private var placeholderStartDate = Date()
     @State private var searchFocused = false
     @State private var expandedLanguageGroup: IslandLanguageOption?
+    /// The chip under the pointer and its frame in the panel's space.
+    @State private var hoveredChip: IslandLanguageHoveredChip?
+
+    static let coordinateSpaceName = "IslandLanguagePickerPanel"
 
     private var options: [IslandLanguageOption] {
         if isFiltering {
@@ -3364,7 +3368,11 @@ struct IslandLanguagePickerPanel: View {
                     grid: grid,
                     isFiltering: isFiltering,
                     isChoosingLanguageVariant: isChoosingLanguageVariant,
-                    onActivateOption: activateOption
+                    onActivateOption: activateOption,
+                    onHoverChip: { hoveredChip = $0 },
+                    onUnhoverChip: { id in
+                        if hoveredChip?.id == id { hoveredChip = nil }
+                    }
                 )
 
                 ZStack {
@@ -3389,7 +3397,30 @@ struct IslandLanguagePickerPanel: View {
                 )
                 .position(x: inputFrame.midX, y: inputFrame.midY)
                 .accessibilityLabel("Search language")
+
+                if let hoveredChip,
+                   let option = options.first(where: { $0.id == hoveredChip.id }),
+                   option.language != nil {
+                    // Only language chips get a hint; Auto/Off show their text
+                    // and are the only pinned chips, so the anchor is a
+                    // scrolling chip seen through the viewport.
+                    let text = IslandLanguageControl.nameHint(for: option)
+                    let frame = IslandLanguagePickerLayout.nameHintFrame(
+                        anchor: hoveredChip.frame,
+                        size: IslandLanguagePickerLayout.nameHintSize(for: text),
+                        panelSize: proxy.size,
+                        visibleArea: grid.viewport
+                    )
+                    IslandLanguageNameHint(text: text)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                }
             }
+            .coordinateSpace(name: Self.coordinateSpaceName)
+            .animation(.easeOut(duration: 0.10), value: hoveredChip?.id)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -3402,10 +3433,12 @@ struct IslandLanguagePickerPanel: View {
             if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 expandedLanguageGroup = nil
             }
+            hoveredChip = nil
         }
     }
 
     private func activateOption(_ option: IslandLanguageOption) {
+        hoveredChip = nil
         guard !isFiltering, option.hasLanguageVariants else {
             expandedLanguageGroup = nil
             onSelectLanguage(option.language)
@@ -3585,6 +3618,8 @@ private struct IslandLanguageFlagCloud: View {
     let isFiltering: Bool
     let isChoosingLanguageVariant: Bool
     let onActivateOption: (IslandLanguageOption) -> Void
+    let onHoverChip: (IslandLanguageHoveredChip) -> Void
+    let onUnhoverChip: (String) -> Void
 
     var body: some View {
         let pinned = Array(options.prefix(grid.pinnedFrames.count))
@@ -3628,6 +3663,13 @@ private struct IslandLanguageFlagCloud: View {
             showsLanguageLabel: isChoosingLanguageVariant,
             action: {
                 onActivateOption(option)
+            },
+            onHoverChange: { hovering, panelFrame in
+                if hovering {
+                    onHoverChip(IslandLanguageHoveredChip(id: option.id, frame: panelFrame))
+                } else {
+                    onUnhoverChip(option.id)
+                }
             }
         )
         .frame(width: frame.width, height: frame.height)
@@ -3642,14 +3684,41 @@ private struct IslandLanguageFlagCloud: View {
     }
 }
 
+struct IslandLanguageHoveredChip: Equatable {
+    let id: String
+    let frame: CGRect
+}
+
+/// Name of the hovered language: a small capsule in the search field's
+/// style, placed by `IslandLanguagePickerLayout.nameHintFrame`.
+private struct IslandLanguageNameHint: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: IslandLanguagePickerLayout.nameHintFontSize, weight: .medium))
+            .foregroundStyle(IslandInk.color.opacity(0.92))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, IslandLanguagePickerLayout.nameHintHorizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Capsule().fill(Color.black.opacity(0.78)))
+            .overlay(Capsule().stroke(IslandInk.color.opacity(0.18), lineWidth: 0.8))
+    }
+}
+
 private struct IslandLanguageFlagChip: View {
     let option: IslandLanguageOption
     let selected: Bool
     let enlarged: Bool
     let showsLanguageLabel: Bool
     let action: () -> Void
+    /// Hover state with the chip's frame in the picker panel's space; sent
+    /// again when the frame moves (scrolling) while hovered.
+    let onHoverChange: (Bool, CGRect) -> Void
 
     @State private var hovering = false
+    @State private var panelFrame: CGRect = .zero
 
     var body: some View {
         let usesCapsuleChrome = showsLanguageLabel
@@ -3675,10 +3744,19 @@ private struct IslandLanguageFlagChip: View {
             )
             .scaleEffect(hovering ? IslandLanguageFlagChipStyle.hoverScale(for: option) : 1)
             .contentShape(Rectangle())
-            .onHover { hovering = $0 }
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .named(IslandLanguagePickerPanel.coordinateSpaceName))
+            } action: { frame in
+                panelFrame = frame
+                if hovering { onHoverChange(true, frame) }
+            }
+            .onHover { isHovering in
+                hovering = isHovering
+                onHoverChange(isHovering, panelFrame)
+            }
             .onTapGesture { action() }
             .animation(.easeOut(duration: 0.10), value: hovering)
-            .accessibilityLabel(option.label)
+            .accessibilityLabel(IslandLanguageControl.nameHint(for: option))
             .accessibilityAddTraits(.isButton)
     }
 

@@ -920,7 +920,13 @@ Hover capsules and materials:
   30 pt white icon disk with 17 pt blue symbols and a normal-case 11 pt title.
   No small status captions are drawn; current values remain in VoiceOver.
   Record lights its icon red with a soft glow while recording, alongside the
-  existing right-wing indicator. The grid supplies each instance's exact width through
+  existing right-wing indicator. A Smart/Fast switch (click or hotkey) animates
+  only the views that change: the tile symbol replaces itself
+  (`.contentTransition(.symbolEffect(.replace))`) and the right-band ON
+  Smart/Fast status enters, both with `IslandDropModeControl.switchAnimation`
+  (0.3 s smooth, none with Reduce Motion), never a transaction over the whole
+  island (.project-docs/decisions/2026-11-28-drop-mode-switch-motion.md).
+  The grid supplies each instance's exact width through
   IslandHoverControlsLayout.tileWidth(panelWidth:): (panelWidth - 24 - 16) / 3.
   User feedback on 2026-10-18 called the 24 pt disks and 12 pt symbols too small;
   larger icons retain the same capsule and text sizes.

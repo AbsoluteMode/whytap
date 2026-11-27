@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 
 enum IslandHoverPanelIconStyle {
     static let legacyCircleSize: CGFloat = 28
@@ -198,6 +199,14 @@ enum IslandDropModeControl {
             return "island-drop-smart"
         }
     }
+
+    /// The visible Smart/Fast switch (tile symbol, island status). Reduce
+    /// Motion switches without movement.
+    // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+    static func switchAnimation(reduceMotion: Bool) -> Animation? {
+        reduceMotion ? nil : .smooth(duration: switchDuration)
+    }
+    static let switchDuration: TimeInterval = 0.3
 
     static func nextMode(after mode: TranscriptionMode) -> TranscriptionMode {
         switch mode {

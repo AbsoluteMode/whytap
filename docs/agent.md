@@ -46,9 +46,9 @@ words, To-do, and, after a one-time Yes, meeting notes.
 
 ## Answers and actions
 
-Links, file or folder paths and text to insert that the Agent lists at the
-end of its answer appear as action cards with keyboard shortcuts to select,
-insert and open them. Those shortcuts are changed on Settings → Features → Agent (and in
+Links, returned file or folder paths and a single command to run appear as
+action cards with keyboard shortcuts to select, insert and open them, even
+when the Agent writes them as ordinary text in its answer. Those shortcuts are changed on Settings → Features → Agent (and in
 Hotkeys). Nothing opens or is inserted until you act. **Escape** closes
 the answer.
 

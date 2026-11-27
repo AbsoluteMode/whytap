@@ -2,7 +2,7 @@
 id: subtitle-soniox-engine-2026-11-25
 type: decision
 title: Subtitles run on Soniox live translation, OpenAI only without a Soniox key
-summary: Subtitles stream system audio to Soniox stt-rt-v6 one-way translation with the Soniox key Drop already uses; the original and its translation arrive in one WebSocket and pair as before. Without a readable Soniox key Subtitles fall back to OpenAI gpt-realtime-translate with the OpenAI key; without either Start names the missing key. There is no engine choice in Keys & models. A sentence's translation arrives about 0.5-1 s after it ends instead of 3.6-4 s, at about $0.12 per audio hour instead of $3.06.
+summary: Subtitles stream system audio to Soniox stt-rt-v6 one-way translation with the Soniox key Drop already uses; the original and its translation arrive in one WebSocket and pair as before. Without a readable Soniox key Subtitles fall back to OpenAI gpt-realtime-translate with the OpenAI key; without either Start names the missing key. An explicit engine choice in Keys & models was added on 2026-11-27 (2026-11-27-subtitle-engine-choice.md); this rule remains the default without one. A sentence's translation arrives about 0.5-1 s after it ends instead of 3.6-4 s, at about $0.12 per audio hour instead of $3.06.
 status: confirmed
 tags: [translation, subtitles, soniox, openai, latency, routing]
 canonical_for: [subtitle-soniox-engine]
@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SonioxRealtimeTranslateAdapterTests.swift
     confirmed_at: 2026-11-25
-related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-11-25-subtitle-soniox-live-original.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-11-25-subtitle-soniox-live-original.md, 2026-11-27-subtitle-engine-choice.md]
 ---
 
 # Subtitles run on Soniox live translation, OpenAI only without a Soniox key
@@ -143,7 +143,9 @@ status) serves frames and handshakes, and logs carry only a documented type,
 
 ## Rejected
 
-- An engine choice in Keys & models (Soniox / OpenAI): cancelled by the user.
+- An engine choice in Keys & models (Soniox / OpenAI): cancelled by the user
+  on 2026-11-25; added on 2026-11-27 at the owner's request, see
+  [Subtitles engine choice](2026-11-27-subtitle-engine-choice.md).
 - Showing Soniox's non-final tokens (later taken for the live row's
   original, 2026-11-25-subtitle-soniox-live-original.md): faster by a few hundred ms, but shown
   words would change and move.

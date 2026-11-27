@@ -59,7 +59,7 @@ final class APIAndModelsPresentationTests: XCTestCase {
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { nil },
             onDevice: OnDeviceSpeechReadiness(isReady: { false }),
-            agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs)
+            agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init())
         )
     }
 
@@ -239,37 +239,4 @@ final class APIAndModelsPresentationTests: XCTestCase {
         XCTAssertEqual(model.rows.first { $0.feature == .dropSmartCleanup }?.modelSummary, route.model)
     }
 
-    /// Tavily's own notification (local save/delete and Settings Sync).
-    func testTavilyKeyChangesWaitWhileClosedAndApplyImmediatelyWhileOpen() throws {
-        let model = makeModel()
-        model.setPresented(false)
-        let account = TavilySearch.keychainAccount
-        func syncTavily() { SettingsSyncLiveReload.reload(items: [SettingsSyncItem.secret(account)], defaults: defaults) }
-
-        try keys.save("synthetic-key", account: account)
-        counter.reads = 0
-        syncTavily()
-        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
-        XCTAssertEqual(counter.reads, 0, "Closed: saving does no Keychain pass")
-        XCTAssertFalse(model.searchRow.tavilyConnected)
-        model.setPresented(true)
-        XCTAssertTrue(model.searchRow.tavilyConnected)
-
-        try keys.delete(account: account)
-        syncTavily()
-        XCTAssertFalse(model.searchRow.tavilyConnected, "Open: removal shows immediately")
-        try keys.save("synthetic-key", account: account)
-        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
-        XCTAssertTrue(model.searchRow.tavilyConnected, "Open: saving shows immediately")
-
-        model.setPresented(false)
-        counter.reads = 0
-        try keys.delete(account: account)
-        syncTavily()
-        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
-        XCTAssertEqual(counter.reads, 0, "Closed: removing does no Keychain pass")
-        XCTAssertTrue(model.searchRow.tavilyConnected)
-        model.setPresented(true)
-        XCTAssertFalse(model.searchRow.tavilyConnected)
-    }
 }

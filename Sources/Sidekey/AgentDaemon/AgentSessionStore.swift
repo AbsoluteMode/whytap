@@ -43,14 +43,10 @@ final class AgentSessionStore: AgentSessionStoring {
     func sessionID(for provider: CLIProviderID) -> String? {
         let stored: (id: String?, updatedAt: Date?)
         switch provider {
-        case .native:
-            stored = (snapshot.native, snapshot.nativeUpdatedAt)
         case .claude:
             stored = (snapshot.claude, snapshot.claudeUpdatedAt)
         case .codex:
             stored = (snapshot.codex, snapshot.codexUpdatedAt)
-        case .opencode:
-            stored = (snapshot.opencode, snapshot.opencodeUpdatedAt)
         }
         guard let id = stored.id else { return nil }
         // No timestamp (legacy sessions.json) means unknown age — do not resume.
@@ -63,18 +59,12 @@ final class AgentSessionStore: AgentSessionStoring {
         let normalized = Self.normalized(sessionID)
         let updatedAt = normalized == nil ? nil : now()
         switch provider {
-        case .native:
-            snapshot.native = normalized
-            snapshot.nativeUpdatedAt = updatedAt
         case .claude:
             snapshot.claude = normalized
             snapshot.claudeUpdatedAt = updatedAt
         case .codex:
             snapshot.codex = normalized
             snapshot.codexUpdatedAt = updatedAt
-        case .opencode:
-            snapshot.opencode = normalized
-            snapshot.opencodeUpdatedAt = updatedAt
         }
         persist()
     }

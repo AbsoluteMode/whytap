@@ -3,7 +3,7 @@ id: agent-command-utf8-locale-2026-11-20
 type: decision
 title: Agent commands always run with a UTF-8 locale
 summary: Commands started by the native Whytap Agent always get a UTF-8 LANG, the app's own when it is UTF-8 and en_US.UTF-8 otherwise, because an app opened from Finder has no locale and tools such as pbcopy then corrupt every non-ASCII character.
-status: confirmed
+status: stale
 tags: [agent, commands, locale, clipboard, encoding]
 canonical_for: [agent-command-locale]
 verified_at: 2026-11-20
@@ -11,16 +11,18 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-20 the user reported that the agent copied a file with Cyrillic text and the clipboard on his second computer held a broken copy while the file itself was fine. After the cause was explained and he asked whether other languages would work, he approved the fix.
     confirmed_at: 2026-11-20
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentCommand.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentCommand.swift
     confirmed_at: 2026-11-20
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentCommandLocaleTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentCommandLocaleTests.swift
     confirmed_at: 2026-11-20
-related: [2026-10-22-native-agent.md]
+related: [2026-10-22-native-agent.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Agent commands always run with a UTF-8 locale
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in agent's run_command was removed; commands are the user's Claude Code or Codex's own.
 
 ## Context
 

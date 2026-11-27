@@ -366,9 +366,9 @@ final class AgentControllerTests: XCTestCase {
     func testCancelledTurnLateEventsCannotChangeNewAnswerOrSession() async {
         let snapshot = makeSnapshot()
         let sessions = InMemoryAgentSessionStore()
-        sessions.setSessionID("original-session", for: .opencode)
-        let firstProvider = ManualCLIProvider(id: .opencode)
-        let secondProvider = ManualCLIProvider(id: .opencode)
+        sessions.setSessionID("original-session", for: .codex)
+        let firstProvider = ManualCLIProvider(id: .codex)
+        let secondProvider = ManualCLIProvider(id: .codex)
         var provider = firstProvider
         let response = AskResponseStore()
         let controller = AgentController(
@@ -390,14 +390,14 @@ final class AgentControllerTests: XCTestCase {
         XCTAssertEqual(response.streamingText, "")
         XCTAssertNil(response.errorCode)
         XCTAssertEqual(AppState.shared.agentPhase, .executing)
-        XCTAssertEqual(sessions.sessionID(for: .opencode), "original-session")
+        XCTAssertEqual(sessions.sessionID(for: .codex), "original-session")
 
         secondProvider.lastSessionID = "second-session"
         secondProvider.continuations[0].yield(.finalAnswer(text: "Second answer"))
         secondProvider.continuations[0].yield(.done(sources: []))
         await waitUntil { response.streamCompleted }
         XCTAssertEqual(response.streamingText, "Second answer")
-        XCTAssertEqual(sessions.sessionID(for: .opencode), "second-session")
+        XCTAssertEqual(sessions.sessionID(for: .codex), "second-session")
     }
 
     func testSubmitWithNoConnectedProviderShowsNotConnectedAndDoesNotRun() async {
@@ -431,7 +431,7 @@ final class AgentControllerTests: XCTestCase {
             if case .stateError(let b) = block, b.code == "not_connected" { return b.message }
             return nil
         }.first
-        XCTAssertEqual(notConnectedMessage, "Turn on Agent in Settings → Features → Agent. Its model is set there too.")
+        XCTAssertEqual(notConnectedMessage, "The Agent runs on your own Claude Code or Codex. Choose one in Settings → Keys & models → Harness.")
         XCTAssertEqual(controller.state, .idle)
         // The "connect first" prompt surfaces as a transient wing notice — the
         // turn never dispatched, so no answer panel opens.

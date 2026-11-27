@@ -255,10 +255,11 @@ struct APIAndModelsView: View {
                     }
                     .id("shared.\(row.kind.rawValue)")
                 }
-                MacCard(needsSetup: viewModel.searchRow.needsSetup) {
-                    searchRow(viewModel.searchRow)
-                }
-                .id("shared.search")
+                HarnessModelsCard(model: viewModel.harness,
+                                  expanded: Binding(get: { expandedGroup == HarnessModelsCard.groupID },
+                                                    set: { expandedGroup = $0 ? HarnessModelsCard.groupID : nil }),
+                                  focused: $focusedGroup)
+                    .id(HarnessModelsCard.groupID)
                 ForEach(viewModel.groups.filter { $0.audioTranslate != nil }) { group in
                     MacCard(needsSetup: group.needsSetup) {
                         groupRow(group)
@@ -337,74 +338,10 @@ struct APIAndModelsView: View {
         .accessibilityValue(row.needsSetup ? "\(row.label), Needs setup" : row.label)
     }
 
-    // MARK: - Search
-
-    /// The Agent's web search, laid out like Speech and LLM: what it searches
-    /// with now, a menu of what it can use, and what that costs.
-    // WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
-    private func searchRow(_ row: AgentSearchRow) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            GeometryReader { geometry in
-                let menuWidth = max(120, geometry.size.width - 28 - 116 - 12)
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(Self.searchTitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(MacSettingsTheme.text)
-                        Text(Self.searchCaption)
-                            .font(.system(size: 10.5))
-                            .foregroundStyle(MacSettingsTheme.text3)
-                            .lineLimit(1)
-                    }
-                    .frame(width: 116, alignment: .leading)
-                    MacMenu(title: row.current.label, minWidth: menuWidth, maxWidth: menuWidth) {
-                        if let builtIn = row.builtIn {
-                            Button { viewModel.selectSearch(.auto) } label: {
-                                if row.current == builtIn { Label(builtIn.label, systemImage: "checkmark") } else { Text(builtIn.label) }
-                            }
-                        }
-                        if row.tavilyConnected {
-                            Button { viewModel.selectSearch(.tavily) } label: {
-                                if row.current == .tavily { Label("Tavily", systemImage: "checkmark") } else { Text("Tavily") }
-                            }
-                        } else {
-                            if row.builtIn != nil { Divider() }
-                            Button("Add a Tavily key…", action: showKeySetup)
-                        }
-                    }
-                }
-                .padding(.horizontal, 14)
-                .frame(height: geometry.size.height)
-            }
-            .frame(height: 54)
-            if let agentLine = row.agentLine {
-                Text(agentLine)
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(MacSettingsTheme.text3)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                    .padding(.horizontal, 14)
-                    .padding(.bottom, 2)
-            }
-            Text(row.current.priceNote)
-                .font(.system(size: 11.5))
-                .foregroundStyle(row.needsSetup ? MacSettingsTheme.orange : MacSettingsTheme.text2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 9)
-        }
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel(Self.searchTitle)
-        .accessibilityValue(row.needsSetup ? "\(row.current.label), Needs setup" : row.current.label)
-    }
-
-    static let searchTitle = "Search"
-    static let searchCaption = "Agent web search"
-
     static func sharedCaption(_ kind: SharedModelKind) -> String {
         switch kind {
         case .speech: return "Drop, voice, Meetings"
-        case .llm: return "Cleanup, notes, Agent"
+        case .llm: return "Text features"
         }
     }
 
@@ -615,24 +552,25 @@ struct APIAndModelsView: View {
 
     private static let providerSlotWidth: CGFloat = 132
 
-    /// Subtitles' model row, laid out like every single-model row: the engine
-    /// the keys give is preselected and the menu offers only it (Soniox with
-    /// its key, otherwise OpenAI). Without either key the card shows the same
-    /// setup contour as any row without a model, and the menu leads to API keys.
-    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+    /// Subtitles' engine, laid out like every single-model row: Soniox live
+    /// translation or OpenAI gpt-realtime-translate. An engine without its key
+    /// stays selectable; the menu then leads to API keys for that key.
+    // WHY: .project-docs/decisions/2026-11-27-subtitle-engine-choice.md
     private func fixedModelRow(_ slot: AudioTranslateSlot) -> some View {
         GeometryReader { geometry in
             let modelWidth = max(90, geometry.size.width - 52 - 20 - Self.providerSlotWidth)
             HStack(spacing: 10) {
-                Text("Model")
+                Text("Engine")
                     .font(.system(size: 11.5))
                     .foregroundStyle(MacSettingsTheme.text2)
                     .frame(width: 52, alignment: .leading)
                 MacMenu(title: slot.label, minWidth: modelWidth, maxWidth: modelWidth) {
-                    Button {} label: { Label(slot.label, systemImage: "checkmark") }
+                    ForEach(SubtitleAudioTranslate.Engine.allCases, id: \.self) { engine in
+                        engineItem(engine, slot: slot)
+                    }
                     if !slot.isActive {
                         Divider()
-                        Button("Add a Soniox key…", action: showKeySetup)
+                        Button(Self.addKeyTitle(slot.selected), action: showKeySetup)
                     }
                 }
                 Color.clear.frame(width: Self.providerSlotWidth, height: 1)
@@ -641,9 +579,20 @@ struct APIAndModelsView: View {
         }
         .frame(height: MacPopupMetrics.height)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Subtitles")
-        .accessibilityValue(slot.isActive ? "" : "Needs setup")
-        .help(slot.isActive ? slot.label : "Add a Soniox key (or an OpenAI key) in API keys.")
+        .accessibilityLabel("Subtitles engine")
+        .accessibilityValue(slot.isActive ? slot.label : "\(slot.label), Needs setup")
+        .help(slot.isActive ? slot.label : "Add the \(slot.selected.providerName) key in API keys.")
+    }
+
+    private func engineItem(_ engine: SubtitleAudioTranslate.Engine, slot: AudioTranslateSlot) -> some View {
+        let title = slot.keyState(engine) == .present ? engine.label : engine.label + " — no key"
+        return Button { viewModel.selectSubtitlesEngine(engine) } label: {
+            if engine == slot.selected { Label(title, systemImage: "checkmark") } else { Text(title) }
+        }
+    }
+
+    static func addKeyTitle(_ engine: SubtitleAudioTranslate.Engine) -> String {
+        engine == .openAI ? "Add an OpenAI key…" : "Add a Soniox key…"
     }
 
     private func pickers(for row: FeatureRow, paired: Bool) -> some View {
@@ -775,6 +724,15 @@ struct APIAndModelsView: View {
         Task { @MainActor in
             await Task.yield()
             focusedFeature = nil
+            // The Agent's engine is the Harness row: a link to the Agent
+            // (its setup card, the island's "Choose a harness") opens it.
+            if feature == .agent {
+                expandedGroup = HarnessModelsCard.groupID
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) {
+                    scroller.scrollTo(HarnessModelsCard.groupID, anchor: .center)
+                }
+                return
+            }
             highlight([feature], scrollTo: feature, scroller: scroller, seconds: 1)
         }
     }
@@ -810,7 +768,7 @@ struct ProviderKindIcon: View {
         self.size = size
     }
 
-    /// A key tile outside the model providers (Tavily web search) draws its bundled mark the same way.
+    /// A mark outside the model providers draws its bundled asset the same way.
     init(assetName: String, size: CGFloat = 16) {
         self.assetName = assetName
         systemName = "globe"

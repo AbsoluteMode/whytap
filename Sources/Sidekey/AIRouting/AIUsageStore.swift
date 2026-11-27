@@ -94,7 +94,7 @@ enum AIUsageStoreError: Error { case unavailable, invalidEvent }
 
 /// The actor serializes inserts and snapshots. A separate database and table
 /// never change the existing meetings/history stores. Primary IDs deduplicate
-/// resumed file jobs and repeated OpenCode parts; each new paid retry has its
+/// resumed file jobs and repeated parts; each new paid retry has its
 /// own ID. A failed insert remains a visible error instead of becoming zero.
 actor AIUsageStore {
     static let changed = Notification.Name("AIUsageStore.changed")

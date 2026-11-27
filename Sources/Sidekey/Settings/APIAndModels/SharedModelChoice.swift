@@ -23,7 +23,7 @@ enum SharedModelKind: String, CaseIterable, Identifiable, Sendable {
     var features: [AIFeature] {
         switch self {
         case .speech: return [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .meetings]
-        case .llm: return [.dropSmartCleanup, .meetingNotes, .agent, .translation]
+        case .llm: return [.dropSmartCleanup, .meetingNotes, .translation]
         }
     }
 

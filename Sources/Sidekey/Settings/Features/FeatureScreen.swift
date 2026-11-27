@@ -33,7 +33,9 @@ struct FeatureScreenContext {
             models.useOnDeviceModel(for: feature)
         case .chooseModel(let feature):
             selection.focus(feature)
-        case .addKey, .fixKey, .addOpenAIKey:
+        case .chooseHarness:
+            selection.focus(.agent)
+        case .addKey, .fixKey, .addSubtitlesKey:
             selection.showAPIKeys()
         case .allow(.keyboard):
             permissions.requestAccessibility()
@@ -74,7 +76,7 @@ struct FeatureScreenContext {
         case .dropShortcut:
             guard case .unmet = check.state else { return nil }
             return FeatureCatalog.consequence(of: check, for: feature, snapshot: snapshot)
-        case .permission, .subtitlesKey:
+        case .permission, .subtitlesKey, .harness:
             return nil
         }
     }

@@ -61,13 +61,12 @@ final class NativeSettingsRenderTests: XCTestCase {
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
             keyChecker: offline, probe: offline, endpoints: offline, inputLanguage: { "ru" })
         let permissions = PermissionsSettingsViewModel(onComplete: {}, autoComplete: false)
-        let agent = AgentModeViewModel(store: AgentProviderStore(defaults: defaults), probe: { _ in .notInstalled }, notify: { _ in })
         for dark in [false, true] {
             for width in [960.0, 1280.0] {
                 for tab in [SettingsWindowTab.other, .apiAndModels] {
                     let selection = SettingsWindowSelection(selectedTab: tab)
                     let shell = SettingsWindowView(permissionsViewModel: permissions, apiAndModelsViewModel: models,
-                        selection: selection, agentModeViewModel: agent,
+                        selection: selection,
                         otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
                         otherMeetingsEnabled: { true }, privacyPreferences: PrivacyPreferences(defaults: defaults))
                     try render(shell, size: NSSize(width: width, height: width == 960 ? 560 : 760), dark: dark,

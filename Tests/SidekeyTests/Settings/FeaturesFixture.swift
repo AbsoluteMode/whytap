@@ -43,7 +43,6 @@ struct FeaturesFixture {
     let routing: AIRoutingStore
     let models: APIAndModelsViewModel
     let permissions: PermissionsSettingsViewModel
-    let agent: AgentModeViewModel
     let hotkeys: HotkeyPreferences
     let environment: FeaturesEnvironment
     /// Hover, Notify and Monitor read only these: a layout in the test's own
@@ -110,8 +109,6 @@ struct FeaturesFixture {
             relaunch: { nil },
             runtimeRefresh: { _, _ in })
 
-        agent = AgentModeViewModel(store: AgentProviderStore(defaults: defaults),
-                                   probe: { _ in .notInstalled }, notify: { _ in })
         hotkeys = HotkeyPreferences(defaults: defaults)
         let controller = OnDeviceSpeechModelController(store: FixedStore(modelStatus))
         await controller.refresh()
@@ -174,7 +171,7 @@ struct FeaturesFixture {
     func shell(selection: SettingsWindowSelection) -> SettingsWindowView {
         SettingsWindowView(
             permissionsViewModel: permissions, apiAndModelsViewModel: models,
-            selection: selection, agentModeViewModel: agent,
+            selection: selection,
             otherVolumeDuckConfig: VolumeDuckConfig(defaults: defaults),
             privacyPreferences: PrivacyPreferences(defaults: defaults),
             featuresEnvironment: environment,

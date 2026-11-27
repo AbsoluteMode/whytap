@@ -40,16 +40,50 @@ final class SubtitleAudioTranslateTests: XCTestCase {
         XCTAssertEqual(openAI.0, .openAI)
         XCTAssertEqual(openAI.1, "openai-synthetic")
         XCTAssertThrowsError(try SubtitleAudioTranslate.engineAndKey(from: keyStore())) { error in
-            XCTAssertEqual(error as? SubtitleAudioTranslate.Unavailable, .missingKey)
+            XCTAssertEqual(error as? SubtitleAudioTranslate.Unavailable, .missingKey(nil))
         }
         // An unreadable Soniox key falls back to a readable OpenAI one, and
         // is named when there is none.
         XCTAssertEqual(SubtitleAudioTranslate.engine(soniox: .unreadable, openAI: .present), .openAI)
         XCTAssertNil(SubtitleAudioTranslate.engine(soniox: .unreadable, openAI: .missing))
-        XCTAssertEqual(SubtitleAudioTranslate.unavailable(soniox: .unreadable, openAI: .missing), .unreadableKey)
-        XCTAssertEqual(SubtitleAudioTranslate.unavailable(soniox: .missing, openAI: .missing), .missingKey)
+        XCTAssertEqual(SubtitleAudioTranslate.unavailable(soniox: .unreadable, openAI: .missing), .unreadableKey(nil))
+        XCTAssertEqual(SubtitleAudioTranslate.unavailable(soniox: .missing, openAI: .missing), .missingKey(nil))
         XCTAssertEqual(SubtitleAudioTranslate.Engine.soniox.label, "Soniox · stt-rt-v6")
         XCTAssertEqual(SubtitleAudioTranslate.Engine.openAI.label, "OpenAI · gpt-realtime-translate")
+    }
+
+    /// An engine chosen in Keys & models runs with its own key and never
+    /// falls back to the other provider; Start then names the missing key.
+    /// WHY: .project-docs/decisions/2026-11-27-subtitle-engine-choice.md
+    func testAChosenEngineUsesOnlyItsOwnKey() throws {
+        let both = try keyStore(openAI: "openai-synthetic", soniox: "soniox-synthetic")
+        XCTAssertEqual(try SubtitleAudioTranslate.engineAndKey(from: both, choice: .openAI).1, "openai-synthetic")
+        XCTAssertEqual(try SubtitleAudioTranslate.engineAndKey(from: both, choice: .soniox).1, "soniox-synthetic")
+        XCTAssertThrowsError(try SubtitleAudioTranslate.engineAndKey(from: try keyStore(soniox: "soniox-synthetic"), choice: .openAI)) {
+            XCTAssertEqual($0 as? SubtitleAudioTranslate.Unavailable, .missingKey(.openAI))
+        }
+        XCTAssertThrowsError(try SubtitleAudioTranslate.engineAndKey(from: try keyStore(openAI: "openai-synthetic"), choice: .soniox)) {
+            XCTAssertEqual($0 as? SubtitleAudioTranslate.Unavailable, .missingKey(.soniox))
+        }
+        XCTAssertNil(SubtitleAudioTranslate.engine(choice: .openAI, soniox: .present, openAI: .missing))
+        XCTAssertEqual(SubtitleAudioTranslate.unavailable(choice: .openAI, soniox: .present, openAI: .unreadable), .unreadableKey(.openAI))
+        XCTAssertEqual(TranslationIssue.from(SubtitleAudioTranslate.Unavailable.missingKey(.openAI), feature: .subtitlesAudio).message,
+                       "Subtitles on OpenAI need an OpenAI key. Add it in Keys & models.")
+        XCTAssertEqual(TranslationIssue.from(SubtitleAudioTranslate.Unavailable.missingKey(.soniox), feature: .subtitlesAudio).message,
+                       "Subtitles on Soniox need a Soniox key. Add it in Keys & models.")
+    }
+
+    func testTheRowShowsTheChoiceAndOnlyRunsWithItsKey() {
+        var slot = AudioTranslateSlot(soniox: .present, openAI: .missing)
+        XCTAssertEqual(slot.selected, .soniox, "no choice: Soniox with its key")
+        XCTAssertTrue(slot.isActive)
+        slot.choice = .openAI
+        XCTAssertEqual(slot.selected, .openAI)
+        XCTAssertFalse(slot.isActive, "OpenAI chosen without its key")
+        XCTAssertEqual(slot.label, "OpenAI · gpt-realtime-translate")
+        XCTAssertEqual(AudioTranslateSlot(soniox: .missing, openAI: .present).selected, .openAI, "no Soniox key: OpenAI")
+        XCTAssertEqual(AudioTranslateSlot(soniox: .missing, openAI: .missing).selected, .soniox)
+        XCTAssertEqual(APIAndModelsView.addKeyTitle(.openAI), "Add an OpenAI key…")
     }
 
     /// A refusal while opening names the engine that refused.
@@ -66,10 +100,10 @@ final class SubtitleAudioTranslateTests: XCTestCase {
 
     // MARK: - Key
 
-    func testTheOpenAIKeyIsTheOnlyRequirement() throws {
+    func testTheOpenAIEngineNamesTheOpenAIKey() throws {
         XCTAssertEqual(try SubtitleAudioTranslate.key(from: keyStore(openAI: "synthetic")), "synthetic")
         XCTAssertThrowsError(try SubtitleAudioTranslate.key(from: keyStore())) { error in
-            XCTAssertEqual(error as? SubtitleAudioTranslate.Unavailable, .missingKey)
+            XCTAssertEqual(error as? SubtitleAudioTranslate.Unavailable, .missingKey(.openAI))
         }
         XCTAssertEqual(SubtitleAudioTranslate.KeyState(.unreadable), .unreadable)
         XCTAssertEqual(SubtitleAudioTranslate.KeyState(.absent), .missing)
@@ -78,7 +112,7 @@ final class SubtitleAudioTranslateTests: XCTestCase {
     func testStartWithoutTheKeySaysWhyAndCapturesNothing() async throws {
         let audio = FixtureSubtitleAudio()
         let model = LiveSubtitleModel(makeAudio: { audio },
-                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
+                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey(nil) })
         await model.start()?.value
         XCTAssertEqual(model.phase, .failed)
         XCTAssertEqual(model.issue?.message, "Subtitles need a Soniox or OpenAI key. Add one in Keys & models.")
@@ -87,7 +121,7 @@ final class SubtitleAudioTranslateTests: XCTestCase {
     }
 
     func testAnUnreadableKeyIsNamedToo() {
-        let issue = TranslationIssue.from(SubtitleAudioTranslate.Unavailable.unreadableKey, feature: .subtitlesAudio)
+        let issue = TranslationIssue.from(SubtitleAudioTranslate.Unavailable.unreadableKey(nil), feature: .subtitlesAudio)
         XCTAssertEqual(issue.message, "Whytap couldn't read the Subtitles key from the Keychain. Check it in Keys & models.")
         XCTAssertEqual(issue.feature, .subtitlesAudio)
     }

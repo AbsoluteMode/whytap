@@ -3,7 +3,7 @@ id: native-agent-app-control-2026-11-22
 type: decision
 title: The built-in Agent controls Whytap with the plugin's own tools
 summary: The native Agent gets the whytap_* application-control tools from the MCP catalog and runs them in process through the broker's controller, with app-owned change lines.
-status: confirmed
+status: stale
 tags: [agent, native-agent, app-control, settings, models, todo, meetings, tools]
 canonical_for: [native-agent-app-control]
 verified_at: 2026-11-22
@@ -11,16 +11,18 @@ sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer asked that the Whytap agent can control Whytap too, like the external harnesses do through the plugin (orchestrator task 52).
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentAppControl.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentAppControl.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-agent-toolbox-hotkeys.md]
+related: [2026-10-22-native-agent.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-agent-toolbox-hotkeys.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # The built-in Agent controls Whytap
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in agent's single `whytap` tool was removed; the Agent reaches the same operations through the per-turn `whytap` MCP server.
 
 ## Context
 

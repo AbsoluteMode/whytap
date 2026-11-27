@@ -214,13 +214,14 @@ final class FeatureCatalogTests: XCTestCase {
         XCTAssertEqual(missing.map(\.action), [.useOnDeviceModel(.meetings), .addKey(.meetingNotes)])
     }
 
-    func testAgentOnWithoutAModelNeedsSetup() {
+    func testAgentOnWithoutAHarnessNeedsSetup() {
         var snapshot = readyDrop()
         snapshot.agentOn = true
         let status = FeatureCatalog.status(for: .agent, snapshot: snapshot)
         XCTAssertEqual(status.word, "Needs setup")
-        XCTAssertEqual(status.reason, "No text model")
-        snapshot.models[.agent] = .ok
+        XCTAssertEqual(status.reason, "No harness chosen")
+        XCTAssertEqual(status.missing.first?.action, .chooseHarness)
+        snapshot.harnessReady = true
         XCTAssertEqual(FeatureCatalog.status(for: .agent, snapshot: snapshot), .ready(note: nil),
                        "Voice, microphone and screen are optional for the Agent")
     }
@@ -305,7 +306,7 @@ final class FeatureCatalogTests: XCTestCase {
         snapshot.microphoneGranted = false
         snapshot.agentOn = true
         snapshot.googleOn = true
-        snapshot.models[.agent] = .ok
+        snapshot.harnessReady = true
         let agent = FeatureCatalog.checks(for: .agent, snapshot: snapshot)
         let google = FeatureCatalog.checks(for: .googleSearch, snapshot: snapshot)
         func say(_ checks: [FeatureCheck], _ kind: FeatureRequirement.Kind, _ feature: AppFeature) -> String {

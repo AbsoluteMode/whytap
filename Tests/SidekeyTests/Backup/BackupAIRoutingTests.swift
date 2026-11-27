@@ -4,7 +4,7 @@ import XCTest
 @MainActor
 final class BackupAIRoutingTests: XCTestCase {
     private func routing(_ servers: [ServerEndpoint], model: String = "synthetic-model") throws -> Data {
-        var routes = [AIFeature.agent.rawValue: FeatureRoute(account: .anthropic, model: model)]
+        var routes = [AIFeature.translation.rawValue: FeatureRoute(account: .anthropic, model: model)]
         if let server = servers.first {
             routes[AIFeature.dropFast.rawValue] = FeatureRoute(account: .server(server.id), model: "synthetic-speech")
         }
@@ -40,7 +40,7 @@ final class BackupAIRoutingTests: XCTestCase {
         let restored = AIRoutingStore(defaults: target.defaults)
         XCTAssertTrue(restored.isMigrated)
         XCTAssertEqual(restored.server(first.id), first)
-        XCTAssertEqual(restored.route(for: .agent)?.account, .anthropic)
+        XCTAssertEqual(restored.route(for: .translation)?.account, .anthropic)
         for account in [first.keyAccount, second.keyAccount, ProviderAccount.anthropicKeychainAccount] {
             XCTAssertEqual(target.credentialStores[account]?.value, "synthetic-" + account)
         }
@@ -277,7 +277,7 @@ final class BackupAIRoutingTests: XCTestCase {
         try ConfigBackupRegistry.apply(captured, sections: [.models], to: profile.defaults)
         let routing = AIRoutingStore(defaults: profile.defaults)
         XCTAssertTrue(routing.isMigrated)
-        XCTAssertEqual(routing.route(for: .agent)?.account, .anthropic)
+        XCTAssertEqual(routing.route(for: .translation)?.account, .anthropic)
         XCTAssertNotNil(profile.defaults.object(forKey: ConfigBackupRegistry.aiRoutingPreservedKey))
     }
 }

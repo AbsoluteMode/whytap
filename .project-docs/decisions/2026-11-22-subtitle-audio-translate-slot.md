@@ -38,7 +38,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SubtitleAudioTranslateTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-10-19-api-and-models.md, 2026-10-20-translation-tools.md, 2026-11-21-free-api-report.md, 2026-11-23-subtitle-steady-overlay.md, 2026-11-25-subtitle-overlay-move-resize-scroll.md, 2026-11-25-subtitle-soniox-engine.md]
+related: [2026-11-21-subtitle-speech-translation.md, 2026-11-21-subtitle-phrase-pairs.md, 2026-10-19-api-and-models.md, 2026-10-20-translation-tools.md, 2026-11-21-free-api-report.md, 2026-11-23-subtitle-steady-overlay.md, 2026-11-25-subtitle-overlay-move-resize-scroll.md, 2026-11-25-subtitle-soniox-engine.md, 2026-11-27-subtitle-engine-choice.md]
 ---
 
 # Subtitles run only on OpenAI Audio translate

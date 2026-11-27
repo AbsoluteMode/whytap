@@ -14,8 +14,8 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AppControl/AppControlToolbox.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentAppControlTests.swift
     confirmed_at: 2026-11-22
 related: [2026-11-22-native-agent-app-control.md, 2026-10-21-app-control-plugin.md, 2026-11-23-agent-drop-lists.md]
 ---

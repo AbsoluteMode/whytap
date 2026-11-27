@@ -1,10 +1,9 @@
 import Foundation
 
+/// The Agent's harness: the user's own Claude Code or Codex.
 enum CLIProviderID: String, Codable, CaseIterable {
     case claude
     case codex
-    case opencode
-    case native
 }
 
 /// Result of a Connect probe.

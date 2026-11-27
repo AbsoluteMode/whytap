@@ -38,36 +38,73 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
-    /// The Search row under Speech and LLM: built-in, Tavily and Off.
-    func test_render_search_row() async throws {
+    /// Models with the Harness row: a Mac that has to choose one (closed and
+    /// open), Claude Code ready, and Codex with Fast mode.
+    func test_render_harness_row() async throws {
         guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
             throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
         }
         let directory = URL(fileURLWithPath: output, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        for state in ["builtin", "tavily", "off"] {
+        for state in ["choose-closed", "choose-open", "claude", "codex"] {
             let suite = UUID().uuidString
             let defaults = UserDefaults(suiteName: suite)!
-            let file = directory.appendingPathComponent("search-catalog.json")
+            let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
             try Data("{}".utf8).write(to: file)
             defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
+            if state.hasPrefix("choose") { defaults.set("opencode", forKey: AgentProviderStore.legacyKey) }
             let routing = AIRoutingStore(defaults: defaults)
             let box = InMemoryTokenStore.Box()
             let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
-            let account: ProviderAccount = state == "builtin" ? .anthropic : .openAI
-            try keys.save("synthetic-key", account: XCTUnwrap(account.keychainAccount(in: routing)))
-            if state == "tavily" { try keys.save("synthetic-key", account: TavilySearch.keychainAccount) }
-            routing.setRoute(FeatureRoute(account: account, model: state == "builtin" ? "claude-sonnet-5-5" : "gpt-4.1-nano"), for: .agent)
+            for account in [ProviderAccount.elevenLabs, .anthropic, .soniox] {
+                try keys.save("synthetic-key", account: XCTUnwrap(account.keychainAccount(in: routing)))
+            }
+            routing.setRoute(FeatureRoute(account: .elevenLabs, model: ModelRegistry.elevenLabsRealtimeModel), for: .dropFast)
             let stub = NoNetwork(list: [])
             let catalogs = ModelCatalogStore(fileURL: file, fetcher: stub)
+            let settings = AgentSettingsStore(defaults: defaults, codexConfig: .init(), whytapMCPCommand: { nil })
+            let store = AgentProviderStore(defaults: defaults)
+            let harness = HarnessSettingsModel(
+                store: store, settings: settings,
+                probe: { _ in .connected(sessionID: nil) },
+                refreshClaude: { settings in
+                    settings.updateClaudeCatalog(ClaudeModelCatalog(models: [
+                        ClaudeModelOption(value: "default", displayName: "Default (recommended)",
+                                          supportedEffortLevels: ["low", "medium", "high", "xhigh"]),
+                        ClaudeModelOption(value: "sonnet", displayName: "Sonnet 5.5",
+                                          supportedEffortLevels: ["low", "medium", "high"]),
+                    ], cliVersion: "2.1.325"))
+                },
+                refreshCodex: { settings in
+                    settings.updateCodexCatalog([CodexModelOption(
+                        model: "gpt-6.2", displayName: "GPT-6.2",
+                        supportedReasoningEfforts: [.init(reasoningEffort: "low"), .init(reasoningEffort: "medium"),
+                                                    .init(reasoningEffort: "high")],
+                        defaultReasoningEffort: "medium",
+                        serviceTiers: [.init(id: "priority", name: "Fast", description: "Faster replies, uses more of your plan")],
+                        isDefault: true)])
+                })
+            switch state {
+            case "claude":
+                await harness.choose(.claude)
+                settings.claudeEffort = "high"
+            case "codex":
+                await harness.choose(.codex)
+                harness.setFastMode(true)
+            default: break
+            }
             let vm = APIAndModelsViewModel(routing: routing, keys: keys, catalogs: catalogs,
                 checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
                 keyChecker: stub, probe: stub, endpoints: stub,
-                agentSettings: AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs))
+                inputLanguage: { nil }, onDevice: OnDeviceSpeechReadiness(isReady: { false }),
+                agentSettings: settings, harness: harness, subtitleDefaults: defaults)
+            XCTAssertNil(vm.groups.first { $0.title == "Search" }, "Search left Models")
+            let expanded = state == "choose-closed" ? nil : HarnessModelsCard.groupID
             for dark in [false, true] {
-                try await render(APIAndModelsView(viewModel: vm, focusedFeature: .constant(nil)),
-                    size: NSSize(width: 640, height: 620), dark: dark,
-                    to: directory.appendingPathComponent("search-\(state)-\(dark ? "dark" : "light").png"))
+                try await render(
+                    APIAndModelsView(viewModel: vm, focusedFeature: .constant(nil), initiallyExpandedGroup: expanded),
+                    size: NSSize(width: 720, height: 980), dark: dark,
+                    to: directory.appendingPathComponent("harness-\(state)-\(dark ? "dark" : "light").png"))
             }
         }
     }
@@ -355,59 +392,6 @@ final class APIAndModelsRenderTests: XCTestCase {
             size: NSSize(width: 360, height: 150),
             to: directory.appendingPathComponent("provider-menu-items.png")
         )
-    }
-
-    func test_render_tavily_api_keys() async throws {
-        guard let output = ProcessInfo.processInfo.environment["EXODIA_APIMODELS_RENDER_DIR"] else {
-            throw XCTSkip("set EXODIA_APIMODELS_RENDER_DIR to write the pictures")
-        }
-        let directory = URL(fileURLWithPath: output, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
-            .deletingLastPathComponent().deletingLastPathComponent()
-        ProviderBrandIconAsset.clearCacheForTesting()
-        ProviderBrandIconAsset.setResourceDirectoryForTesting(root.appendingPathComponent("Resources/UsefulLinkIcons"))
-        defer {
-            ProviderBrandIconAsset.clearCacheForTesting()
-            ProviderBrandIconAsset.setResourceDirectoryForTesting(nil)
-        }
-        let suite = UUID().uuidString
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let catalog = directory.appendingPathComponent("tavily-catalog.json")
-        try Data("{}".utf8).write(to: catalog)
-        defer { try? FileManager.default.removeItem(at: catalog) }
-        let routing = AIRoutingStore(defaults: defaults)
-        let box = InMemoryTokenStore.Box()
-        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
-        let offline = NoNetwork(list: [])
-        let vm = APIAndModelsViewModel(routing: routing, keys: keys,
-            catalogs: ModelCatalogStore(fileURL: catalog, fetcher: offline), checks: ModelCheckStore(defaults: defaults),
-            keyStatuses: KeyStatusStore(defaults: defaults), keyChecker: offline, probe: offline, endpoints: offline)
-        for connected in [false, true] {
-            if connected { try keys.save("existing-fixture-key", account: TavilySearch.keychainAccount) }
-            else { try keys.delete(account: TavilySearch.keychainAccount) }
-            for dark in [false, true] {
-                for width in [560.0, 760.0] {
-                    let settings = vm.makeTavilySettings()
-                    XCTAssertEqual(settings.configured, connected, "The moved form uses the same credential account")
-                    if connected { settings.draftKey = "fixture-replacement" }
-                    try await render(ProviderKeyTiles(viewModel: vm, initiallyExpanded: .tavily, tavily: settings)
-                        .padding(18), size: NSSize(width: width, height: 850), dark: dark,
-                        to: directory.appendingPathComponent("tavily-keys-\(connected ? "connected" : "new")-\(dark ? "dark" : "light")-\(Int(width)).png"),
-                        inspect: { window in
-                            settings.draftKey = "fixture-draft"
-                            let unrelated = NSWindow(contentRect: .zero, styleMask: .borderless, backing: .buffered, defer: true)
-                            unrelated.isReleasedWhenClosed = false
-                            unrelated.close()
-                            XCTAssertFalse(settings.draftKey.isEmpty)
-                            window.close()
-                            XCTAssertTrue(settings.draftKey.isEmpty)
-                            XCTAssertNil(settings.message)
-                        })
-                }
-            }
-        }
     }
 
     /// The one server window (a new server, an LLM and a transcription model,

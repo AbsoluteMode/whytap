@@ -17,10 +17,12 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SpeechTranslationTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-23-builder-queue-flaky-tests.md]
+related: [2026-11-23-builder-queue-flaky-tests.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Test suite speed
+
+> Superseded 2026-11-27: Tavily removed; its onboarding preview stand-in is gone. See [the agent harness](2026-11-27-agent-harness-cli.md).
 
 ## Context
 

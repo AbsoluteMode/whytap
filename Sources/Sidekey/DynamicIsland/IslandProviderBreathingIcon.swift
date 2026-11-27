@@ -40,17 +40,10 @@ final class ProviderBreathingMarkView: NSView {
     private(set) var brand: TranscriptionProviderBrand
     private(set) var reduceMotion: Bool
     private let markLayer = CALayer()
-    private(set) var modelImage: NSImage?
-    private var modelImageTask: Task<Void, Never>?
-    private let iconLoader: @MainActor (AgentModelBrand) async -> NSImage?
 
-    init(brand: TranscriptionProviderBrand, reduceMotion: Bool,
-         iconLoader: @escaping @MainActor (AgentModelBrand) async -> NSImage? = {
-             await AgentModelIconStore.shared.image(for: $0)
-         }) {
+    init(brand: TranscriptionProviderBrand, reduceMotion: Bool) {
         self.brand = brand
         self.reduceMotion = reduceMotion
-        self.iconLoader = iconLoader
         super.init(frame: NSRect(x: 0, y: 0, width: Self.slotSide, height: Self.slotSide))
         setAccessibilityElement(true)
         setAccessibilityRole(.image)
@@ -64,13 +57,10 @@ final class ProviderBreathingMarkView: NSView {
         layoutMarkLayer()
         reloadContents()
         applyMotionState()
-        loadModelImage()
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-    deinit { modelImageTask?.cancel() }
 
     override var intrinsicContentSize: NSSize {
         NSSize(width: Self.slotSide, height: Self.slotSide)
@@ -80,9 +70,7 @@ final class ProviderBreathingMarkView: NSView {
         if brand != self.brand {
             self.brand = brand
             setAccessibilityLabel(brand.label)
-            modelImage = nil
             reloadContents()
-            loadModelImage()
         }
         if reduceMotion != self.reduceMotion {
             self.reduceMotion = reduceMotion
@@ -121,7 +109,7 @@ final class ProviderBreathingMarkView: NSView {
         let scale = window?.backingScaleFactor
             ?? NSScreen.main?.backingScaleFactor
             ?? 2
-        let image = Self.markImage(for: brand, image: modelImage)
+        let image = Self.markImage(for: brand)
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         markLayer.contentsScale = scale
@@ -165,24 +153,10 @@ final class ProviderBreathingMarkView: NSView {
         markLayer.add(pulse, forKey: Self.breathingAnimationKey)
     }
 
-    /// Start optional artwork work after the bundled mark is already visible.
-    private func loadModelImage() {
-        modelImageTask?.cancel()
-        guard let modelBrand = brand.modelBrand else { return }
-        let loader = iconLoader
-        modelImageTask = Task { [weak self] in
-            let image = await loader(modelBrand)
-            guard !Task.isCancelled, let self, self.brand.modelBrand == modelBrand else { return }
-            self.modelImage = image
-            self.reloadContents()
-        }
-    }
-
-    /// Flatten source alpha to neutral white, including colorful remote marks.
-    private static func markImage(for brand: TranscriptionProviderBrand, image: NSImage? = nil) -> NSImage? {
+    /// Flatten source alpha to neutral white, including colorful marks.
+    private static func markImage(for brand: TranscriptionProviderBrand) -> NSImage? {
         let base: NSImage?
-        if let image { base = image }
-        else if let assetName = brand.assetName {
+        if let assetName = brand.assetName {
             base = ProviderBrandIconAsset.image(named: assetName, pointSize: markSide)
         } else if let systemName = brand.systemName {
             base = NSImage(systemSymbolName: systemName, accessibilityDescription: nil)?
@@ -211,7 +185,7 @@ final class ProviderBreathingMarkView: NSView {
             operation: .sourceOver,
             fraction: 1
         )
-        let isModelMark = brand.modelBrand != nil || brand.assetName?.hasPrefix("model-") == true
+        let isModelMark = brand.assetName?.hasPrefix("model-") == true
         (isModelMark ? NSColor(white: 0.72, alpha: 1) : NSColor.white.withAlphaComponent(0.72)).set()
         NSRect(origin: .zero, size: canvas).fill(using: .sourceAtop)
         rendered.unlockFocus()

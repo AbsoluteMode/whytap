@@ -113,9 +113,9 @@ struct AIRoutingMigration {
     }
 
     private func agentRoutes() -> [AIFeature: FeatureRoute] {
-        // The same test as `AgentSettingsStore.selectedOpenCodeModel`: a single
-        // model ID, without whitespace.
-        guard let model = defaults.string(forKey: Self.agentModelKey).map(OpenCodeEnvironment.normalizeModel),
+        // The earlier OpenCode agent's model: a single model ID, without
+        // whitespace.
+        guard let model = defaults.string(forKey: Self.agentModelKey).map(AgentModelBrand.normalizedOpenRouterModel),
               !model.isEmpty, !model.contains(where: \.isWhitespace),
               hasKey(.openRouter)
         else { return [:] }

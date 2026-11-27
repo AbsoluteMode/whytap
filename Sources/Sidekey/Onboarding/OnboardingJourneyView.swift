@@ -85,7 +85,7 @@ struct OnboardingJourneyView: View {
     static func wireSceneStep(_ step: OnboardingStep) -> OnboardingWireScene.Step? {
         switch step {
         case .source: return .source
-        case .speechKey, .llmKey, .search: return .speechKey
+        case .speechKey, .llmKey: return .speechKey
         default: return nil
         }
     }
@@ -204,8 +204,6 @@ struct OnboardingJourneyView: View {
             OnboardingKeyStage(kind: .speech, model: model, scene: wireScene)
         case .llmKey:
             OnboardingKeyStage(kind: .languageModel, model: model, scene: wireScene)
-        case .search:
-            OnboardingKeyStage(kind: .search, model: model, scene: wireScene)
         case .language:
             OnboardingLanguageStage(model: model)
         case .keyboard, .microphone, .inputMonitoring, .screenRecording:

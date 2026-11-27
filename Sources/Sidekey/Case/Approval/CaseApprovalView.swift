@@ -717,7 +717,7 @@ final class CaseApprovalPanel: NSPanel {
 
     /// Where the card goes: centered under the island, below the meeting nudge or
     /// the agent answer card (which hangs `agentWingGap` under the island) if shown.
-    /// The built-in agent running `whytap case run` shows both at once.
+    /// An Agent turn that runs `whytap case run` shows both at once.
     static func frame(islandFrame: NSRect, cardHeight: CGFloat, meetingNudgeVisible: Bool,
                       agentAnswerHeight: CGFloat = 0) -> NSRect {
         let nudge = meetingNudgeVisible ? MeetingPillPanel.suggestionNudgeHeight : 0

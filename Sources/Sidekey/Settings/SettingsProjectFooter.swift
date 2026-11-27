@@ -45,8 +45,9 @@ struct SettingsProjectFooter: View {
             // narrow sidebar. WHY: .project-docs/decisions/2026-11-27-footer-links-vertical.md
             VStack(alignment: .leading, spacing: 0) {
                 SettingsFooterLink(title: "Whytap", destination: BuildConfig.websiteURL)
-                SettingsFooterLink(title: "Help", destination: BuildConfig.helpCenterURL, symbol: "questionmark.circle")
                 SettingsFooterLink(title: "GitHub", destination: BuildConfig.landingURL, brand: "github")
+                // Help is last, as in most macOS apps and menus (owner, 2026-11-27).
+                SettingsFooterLink(title: "Help", destination: BuildConfig.helpCenterURL, symbol: "questionmark.circle")
             }
             .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding - 6)
         }

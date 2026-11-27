@@ -36,6 +36,12 @@ enum Pasteboard {
     /// pasteboard so `NSPasteboard.general` is never mutated. Production
     /// callers use the parameterless `snapshot()`.
     static func snapshot(of pb: NSPasteboard) -> PasteboardSnapshot {
+        // A pending Drop dictation read here is Whytap's own read, not the
+        // paste target's (see `PromisedPasteboardPayload`).
+        PromisedPasteboardPayload.asOwnRead { capture(pb) }
+    }
+
+    private static func capture(_ pb: NSPasteboard) -> PasteboardSnapshot {
         var captured: [[String: Data]] = []
         guard let items = pb.pasteboardItems else {
             return PasteboardSnapshot(items: [])

@@ -857,7 +857,7 @@ def handoff_problems(db, base, members, ticket=None, build=None):
 
 def block_moved_head(db, ticket, snapshot):
     """A queued ticket whose PR head moved after submission goes back to its author
-    before any builder reviews the old commit. True when it was returned. Only a
+    before any builder builds the old commit. True when it was returned. Only a
     ticket queued before the remote read started is judged: one submitted (or
     requeued) while the read was in flight may be newer than the snapshot."""
     submitted = ticket["submitted_at"] or ticket["queued_at"]
@@ -1165,7 +1165,7 @@ def run(args):
                     # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
                     # Returned without review (a stale dependency, a moved head): the
                     # untouched head goes back to its place without spending the PR's
-                    # resubmission priority. A head a builder reviewed and blocked stays
+                    # resubmission priority. A head a builder checked and blocked stays
                     # blocked: its fix is a new head.
                     check_dependencies(db, args.pr, args.depends_on)
                     db.execute("UPDATE tickets SET depends_on=?, dependencies=? WHERE id=?",

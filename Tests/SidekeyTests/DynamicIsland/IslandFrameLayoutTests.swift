@@ -26,7 +26,11 @@ final class IslandFrameLayoutTests: XCTestCase {
                        IslandDropModeControl.musicStripHeight + IslandDropModeControl.musicStripBottomGap)
         XCTAssertEqual(IslandView.hoverPanelHeight(for: .history, musicActive: false, toolCount: 13),
                        IslandDropModeControl.historyHoverPanelHeight)
+        // The language pickers' drawer fits their four-row grid; see
+        // IslandLanguagePickerGridTests.
         XCTAssertEqual(IslandView.hoverPanelHeight(for: .languagePicker, musicActive: false, toolCount: 13),
+                       IslandDropModeControl.languagePickerHoverPanelHeight)
+        XCTAssertEqual(IslandView.hoverPanelHeight(for: .vocabularyEditor, musicActive: false, toolCount: 13),
                        IslandDropModeControl.hoverPanelHeight)
     }
 

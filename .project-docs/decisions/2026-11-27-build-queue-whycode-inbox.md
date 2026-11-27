@@ -89,8 +89,12 @@ a receipt per id, deduplication across restarts and rate caps.
   own.
 - A notice published while its record failed (a crash, a full disk) is
   recovered from its file or receipt: the id names the batch's newest event, so
-  the batch is that ticket's unacknowledged events up to it. It is never sent
-  again under another id.
+  the batch is that ticket's unacknowledged events up to it that no notice in
+  flight holds (a rejected attempt holds none, so a lost retry recovers its
+  whole batch), the latest attempt first. It is never sent again under another
+  id. A recovered file or a record that is not a valid object affects only its
+  own notice, and a rejection stops counting for the alert once a later attempt
+  is on its way (second review, ticket 696).
 - Title (200) and text (20,000) are counted in UTF-16 units like Whycode's
   JavaScript check, without cutting a character, and the file in bytes
   (128 KB).

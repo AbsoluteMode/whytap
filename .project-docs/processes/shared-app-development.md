@@ -322,8 +322,9 @@ command's response, and earlier undelivered events of that ticket are then
 history). A `rejected` notice raises the alert and is sent again under a new id
 after `inbox_retry_minutes` (30), `inbox_max_attempts` (6) times at most; an
 invalid receipt is ignored for that notice only. A published notice whose
-record was lost is recovered from its file or receipt and never resent under
-another id. Title and text are bounded in Whycode's units (UTF-16) and the file
+record was lost (including a retry after a rejection) is recovered from its
+file or receipt and never resent under another id; a malformed one affects only
+itself. Title and text are bounded in Whycode's units (UTF-16) and the file
 in bytes. Notices cover events from the watcher's activation of this version
 on; `whytap-build-queue-inbox.json` in the Git common directory records each
 notice and its receipt. Until `activate` installs this version, the installed

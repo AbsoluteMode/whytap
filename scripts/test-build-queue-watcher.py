@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import signal
 import sqlite3
 import subprocess
@@ -1052,22 +1053,28 @@ class WatcherTests(unittest.TestCase):
 
     def test_a_rejected_notice_alerts_at_once_and_is_retried_under_a_new_id(self):
         self.fake_whycode()
-        self.configure_watcher(inbox_retry_minutes=0, inbox_max_attempts=2,
+        self.configure_watcher(inbox_retry_minutes=999, inbox_max_attempts=2,
                                undelivered_minutes=999)
         self.cancel(self.enqueue(1))
         self.watcher("run")
         [first] = self.notices()
         self.whycode_answers(first, "rejected", reason="unknown project: /nowhere")
-        self.watcher("run")
+        self.watcher("run")  # raised at once, long before undelivered_minutes
         alert = next(a for a in self.alerts() if a["condition"] == "undelivered:1")
         self.assertIn("unknown project: /nowhere", alert["detail"])
+        self.assertEqual(self.notices(), [])  # the retry waits for its interval
+        self.configure_watcher(inbox_retry_minutes=0, inbox_max_attempts=2,
+                               undelivered_minutes=999)
+        self.watcher("run")
         [second] = self.notices()
         self.assertEqual(second["id"], first["id"] + ".r2")
         self.whycode_answers(second, "rejected", reason="rate cap: 50 waiting")
         self.watcher("run")
         self.watcher("run")
         self.assertEqual(self.notices(), [])  # attempts used up: only the alert remains
-        self.assertEqual([a["state"] for a in self.alerts()], ["raised"])
+        alerts = [(a["state"], a.get("detail", "")) for a in self.alerts()]
+        self.assertEqual([state for state, _ in alerts], ["raised", "cleared", "raised"])
+        self.assertIn("rate cap: 50 waiting", alerts[-1][1])
 
     def test_a_notice_lost_without_a_receipt_is_written_again_under_its_id(self):
         self.fake_whycode()
@@ -1239,6 +1246,111 @@ class WatcherTests(unittest.TestCase):
         self.deliver()
         events = self.ticket_events(ticket)
         self.assertTrue(all(e["acknowledged_at"] for e in events if e["status"] != "done"))
+
+    def lose_the_record_of_a_published_retry(self):
+        """A rejected first attempt is recorded, then its retry is published while the
+        record write fails (#696 review)."""
+        self.fake_whycode()
+        ticket = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "pending_install", "--note",
+                   "pending marker")
+        self.deliver()
+        [original] = self.notices()
+        self.whycode_answers(original, "rejected", reason="temporary rejection")
+        self.deliver()  # records the rejection
+        module = self.watcher_module()
+        config = module.load_config(self.root)
+        later = time.time() + config["inbox_retry_minutes"] * 60 + 2
+        with patch.object(module, "write_json", side_effect=OSError("disk full")):
+            module.deliver_notices(self.root, config, later)
+        [retry] = self.notices()
+        self.assertEqual(retry["id"], original["id"] + ".r2")
+        return ticket, module, config, later, retry
+
+    def check_lost_retry(self, receipt_only, transition):
+        ticket, module, config, later, retry = self.lose_the_record_of_a_published_retry()
+        if receipt_only:
+            self.whycode_answers(retry, "delivered", target={"kind": "session"})
+        if transition:
+            self.queue("set", "--ticket", str(ticket), "--status", "done", "--note",
+                       "done marker")
+        module.deliver_notices(self.root, config, later + 2)
+        notices = [n for n in self.notices() if n["id"] != retry["id"]]
+        if transition:
+            [done] = notices
+            self.assertIn("done marker", done["text"])
+            self.assertNotIn("pending marker", done["text"])
+        else:
+            self.assertEqual(notices, [])  # nothing new, nothing sent twice
+        if not receipt_only:
+            self.whycode_answers(retry, "delivered", target={"kind": "session"})
+            module.deliver_notices(self.root, config, later + 4)
+        pending = [e for e in self.ticket_events(ticket) if e["status"] != "done"]
+        self.assertTrue(all(e["acknowledged_at"] for e in pending), pending)
+        state = json.loads((self.root / "whytap-build-queue-inbox.json").read_text())
+        self.assertEqual(state["messages"][retry["id"]]["status"], "delivered")
+
+    def test_a_lost_retry_record_is_recovered_from_its_file(self):
+        self.check_lost_retry(receipt_only=False, transition=False)
+
+    def test_a_lost_retry_record_is_recovered_from_its_file_after_a_transition(self):
+        self.check_lost_retry(receipt_only=False, transition=True)
+
+    def test_a_lost_retry_record_is_recovered_from_its_receipt(self):
+        self.check_lost_retry(receipt_only=True, transition=False)
+
+    def test_a_lost_retry_record_is_recovered_from_its_receipt_after_a_transition(self):
+        self.check_lost_retry(receipt_only=True, transition=True)
+
+    def test_a_retry_in_flight_clears_the_earlier_rejection_from_the_alert(self):
+        self.fake_whycode()
+        self.configure_watcher(inbox_retry_minutes=999, undelivered_minutes=999)
+        self.cancel(self.enqueue(1))
+        self.deliver()
+        [first] = self.notices()
+        self.whycode_answers(first, "rejected", reason="rate cap: busy")
+        self.watcher("run")  # raised: nothing else is on its way
+        self.assertEqual(self.notices(), [])
+        self.configure_watcher(inbox_retry_minutes=0, undelivered_minutes=999)
+        self.watcher("run")  # the retry is out: the rejection no longer counts
+        self.assertEqual([n["id"] for n in self.notices()], [first["id"] + ".r2"])
+        self.assertEqual([(a["state"], a["condition"]) for a in self.alerts()],
+                         [("raised", "undelivered:1"), ("cleared", "undelivered:1")])
+
+    def test_a_malformed_recovered_notice_stops_no_other_ticket(self):
+        for broken in ("[]", '"text"', "7", "{", json.dumps({"id": "someone-else"})):
+            with self.subTest(broken=broken):
+                self.tearDown_inbox()
+                self.fake_whycode()
+                self.cancel(self.enqueue(len(self.statuses()) + 1))
+                module = self.watcher_module()
+                with patch.object(module, "write_json", side_effect=OSError("disk full")):
+                    self.deliver(module)
+                [notice] = self.notices()
+                (self.inbox / (notice["id"] + ".json")).write_text(broken)
+                second = self.cancel(self.enqueue(len(self.statuses()) + 1))
+                self.deliver()
+                texts = [path.read_text() for path in self.inbox.glob("*.json")]
+                self.assertTrue(any(f"ticket #{second}:" in text for text in texts))
+
+    def tearDown_inbox(self):
+        """Each subtest starts with an empty fake Whycode and notice record."""
+        shutil.rmtree(self.base / "Whycode", ignore_errors=True)
+        (self.root / "whytap-build-queue-inbox.json").unlink(missing_ok=True)
+
+    def test_a_corrupt_notice_record_stops_no_delivery(self):
+        self.fake_whycode()
+        path = self.root / "whytap-build-queue-inbox.json"
+        state = json.loads(path.read_text())
+        state["messages"] = {"broken": [], "also": "x"}
+        path.write_text(json.dumps(state))
+        ticket = self.cancel(self.enqueue(1))
+        self.deliver()
+        self.assertTrue(any(f"ticket #{ticket}:" in n["text"] for n in self.notices()))
+        path.write_text("[]")  # an unreadable record file starts a new scope
+        self.watcher("run")
+        self.assertIn("since", json.loads(path.read_text()))
 
     def test_lengths_are_counted_in_whycodes_units(self):
         self.fake_whycode()

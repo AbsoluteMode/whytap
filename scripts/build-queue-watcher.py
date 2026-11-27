@@ -583,7 +583,7 @@ def age_minutes(stamp, now):
 def findings(root, config, context, previous, now, inbox=None):
     """Conditions worth a person's attention, keyed so one episode raises once and
     clears only when its condition is resolved."""
-    inbox = inbox or {}
+    inbox = inbox if isinstance(inbox, dict) else {}
     tickets, undelivered = ticket_rows(root, previous["undelivered_since"])
     found = {}
     open_work = any(t["status"] in ("queued", "in_progress") or t["retry"] == "meeting"
@@ -620,15 +620,19 @@ def findings(root, config, context, previous, now, inbox=None):
     # a receipt, start or requeue of an open ticket, and anything a newer event replaced,
     # rides along with its next notice. A rejected notice counts at once.
     # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
-    rejected = {}
-    for message_id, record in inbox.get("messages", {}).items():
-        if record.get("status") == "rejected":
-            for event_id in record.get("events", []):
-                rejected[event_id] = f"Whycode inbox rejected {message_id}: " \
-                                     f"{record.get('reason', '')}"
-    in_flight = {event_id: record for record in inbox.get("messages", {}).values()
+    messages = inbox.get("messages") if isinstance(inbox, dict) else None
+    messages = {k: v for k, v in messages.items() if isinstance(v, dict)} \
+        if isinstance(messages, dict) else {}
+    in_flight = {event_id: record for record in messages.values()
                  if record.get("status") in ("sent", "queued")
                  for event_id in record.get("events", [])}
+    rejected = {}  # a later attempt in flight supersedes an earlier rejection
+    for message_id, record in messages.items():
+        if record.get("status") == "rejected":
+            for event_id in record.get("events", []):
+                if event_id not in in_flight:
+                    rejected[event_id] = f"Whycode inbox rejected {message_id}: " \
+                                         f"{record.get('reason', '')}"
     for e in undelivered:
         late = age_minutes(e["created_at"], now)
         rides_along = e["ticket_status"] not in FINAL_STATUSES and (
@@ -694,6 +698,8 @@ def ensure_inbox_scope(root, now=None):
     the undelivered alert (sending days-old results would wake sessions for stale news)."""
     path = root / INBOX_STATE
     state = read_json(path, {})
+    if not isinstance(state, dict):
+        state = {}  # unreadable: a new scope; earlier events stay with the alert
     if not state.get("since"):
         state["since"] = datetime.fromtimestamp(
             now or time.time(), timezone.utc).isoformat(timespec="microseconds")
@@ -894,26 +900,34 @@ def recover_published(root, inbox, messages, unacknowledged):
     prefix = inbox_sender(root) + ":event:"
     names = {path.name[:-len(".json")] for folder in (inbox, inbox / "receipts")
              for path in folder.glob(prefix + "*.json")}
-    claimed = {event_id for record in messages.values() for event_id in record.get("events", [])}
+    # Only a notice still in flight holds its events: a rejected attempt's events are
+    # exactly what a lost retry carried.
+    claimed = {event_id for record in messages.values()
+               if record.get("status") in ("sent", "queued")
+               for event_id in record.get("events", [])}
     found = []
     for message_id in names - set(messages):
         match = re.fullmatch(r"(\d+)(?:\.r(\d+))?", message_id[len(prefix):])
         if match:
-            found.append((int(match.group(1)), int(match.group(2) or 1), message_id))
-    for newest, attempt, message_id in sorted(found):
-        ticket = ticket_of_event(root, newest)
-        events = [e["id"] for e in unacknowledged if e["ticket"] == ticket
-                  and e["id"] <= newest and e["id"] not in claimed]
-        claimed.update(events)
-        if not events:
-            continue  # already acknowledged: nothing left to cover
-        payload = read_json(inbox / (message_id + ".json"), {})
-        messages[message_id] = {"ticket": ticket, "events": events, "status": "sent",
-                                "sent": time.time(), "attempt": attempt,
-                                "payload": payload if payload.get("id") == message_id else None,
-                                "recovered": True}
-        log(f"inbox: recovered notice {message_id} for #{ticket} (events "
-            f"{', '.join(map(str, events))})")
+            found.append((int(match.group(1)), -int(match.group(2) or 1), message_id))
+    # The latest attempt of a batch claims it first; an earlier attempt of it is moot.
+    for newest, negative_attempt, message_id in sorted(found):
+        try:
+            ticket = ticket_of_event(root, newest)
+            events = [e["id"] for e in unacknowledged if e["ticket"] == ticket
+                      and e["id"] <= newest and e["id"] not in claimed]
+            claimed.update(events)
+            if not events:
+                continue  # already acknowledged: nothing left to cover
+            payload = read_json(inbox / (message_id + ".json"), {})
+            valid = isinstance(payload, dict) and payload.get("id") == message_id
+            messages[message_id] = {"ticket": ticket, "events": events, "status": "sent",
+                                    "sent": time.time(), "attempt": -negative_attempt,
+                                    "payload": payload if valid else None, "recovered": True}
+            log(f"inbox: recovered notice {message_id} for #{ticket} (events "
+                f"{', '.join(map(str, events))})")
+        except Exception as error:  # this notice only
+            log(f"inbox: {message_id} not recovered: {type(error).__name__}: {error}")
 
 
 def settle_receipt(root, inbox, message_id, record, now):
@@ -974,7 +988,8 @@ def deliver_notices(root, config, now=None):
         if inbox is None:
             write_json(path, state)
             return state
-        messages = state["messages"]
+        messages = state["messages"] = {k: v for k, v in state["messages"].items()
+                                        if isinstance(v, dict)}
         unacknowledged = inbox_events(root, state["since"])
         recover_published(root, inbox, messages, unacknowledged)
         for message_id, record in list(messages.items()):

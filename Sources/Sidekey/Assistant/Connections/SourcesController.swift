@@ -105,6 +105,10 @@ final class SourcesController: ObservableObject {
     /// apply or call anything, and its lease is revoked at once.
     private var generations: [String: Int] = [:]
     private var leases: [String: SourceLease] = [:]
+    /// Runs a folder call (tests may hold it to revoke during a read).
+    var folderReader: @Sendable (FolderSource, String, MCPValue) async throws -> MCPToolResult = { folder, tool, arguments in
+        try await SourcesController.folderCall(folder, tool: tool, arguments: arguments)
+    }
     private var masks: [String: SourceSecretMask] = [:]
     private var lastUsed: [String: Date] = [:]
     private var exits: [String: [Date]] = [:]
@@ -375,9 +379,31 @@ final class SourcesController: ObservableObject {
         validated[id] = nil
         // Known values are masked from tool metadata before it is pinned,
         // stored, classified or shown; a tool whose name carries one is dropped.
+        // A list is applied only if it is still the client's current list
+        // after every await (the list itself and the classification); a list
+        // overtaken by a change notice is read again, at most three times.
         let mask = mask(id)
-        let (tools, epoch) = try await client.listTools(timeout: 20, transform: { mask.tool($0) })
-        guard isCurrent(id, generation), clients[id] === client, let record = record(id) else { throw MCPError.cancelled }
+        for _ in 0..<3 {
+            let (tools, epoch) = try await client.listTools(timeout: 20, transform: { mask.tool($0) })
+            guard isCurrent(id, generation), clients[id] === client else { throw MCPError.cancelled }
+            guard await client.currentEpoch == epoch else { continue }
+            guard let suggestion = try await classify(id, tools, client: client, generation: generation) else { continue }
+            guard await client.currentEpoch == epoch, isCurrent(id, generation), clients[id] === client else { continue }
+            // No await between this check and applying: the list applied is the current one.
+            applyTools(tools, to: id, suggestion: suggestion.value)
+            validated[id] = Validation(client: ObjectIdentifier(client), epoch: epoch)
+            return
+        }
+        throw MCPError.cancelled
+    }
+
+    private struct Classified { let value: SourceToolModelClassifier.Suggestion? }
+
+    /// The model suggestion for the tools nothing else settles, or nil when
+    /// the source was revoked meanwhile (the caller then reads the list again
+    /// or stops).
+    private func classify(_ id: String, _ tools: [MCPToolInfo], client: MCPClient, generation: Int) async throws -> Classified? {
+        guard let record = record(id) else { throw MCPError.cancelled }
         let fresh = tools.filter { tool in record.decisions[tool.name]?.pinHash != tool.pinHash }
         let undecided = SourceToolClassifier.undecided(fresh, presets: [:])
         var suggestion: SourceToolModelClassifier.Suggestion?
@@ -386,10 +412,7 @@ final class SourcesController: ObservableObject {
             suggestion = await classifier.run(undecided.isEmpty ? tools : undecided)
             guard isCurrent(id, generation), clients[id] === client else { throw MCPError.cancelled }
         }
-        applyTools(tools, to: id, suggestion: suggestion)
-        // Bound to this client and the epoch of this exact list: a newer
-        // notice or session makes the client refuse calls under it.
-        validated[id] = Validation(client: ObjectIdentifier(client), epoch: epoch)
+        return Classified(value: suggestion)
     }
 
     /// The live client's current list is the one applied.
@@ -467,7 +490,10 @@ final class SourcesController: ObservableObject {
                                                lease: lease, epoch: validation.epoch, expectedPin: pin)
         } catch let error as MCPError { throw mask.error(error) }
         // Revoked or reclassified while the server answered: discard it.
-        guard lease.isValid, isCurrent(id, generation), approvedPin(id, tool: tool) == pin else { throw MCPError.notAllowed }
+        // The client returned it only under the approved list; the controller
+        // checks its own side again: same lease, generation, validation and pin.
+        guard lease.isValid, isCurrent(id, generation), validated[id] == validation,
+              approvedPin(id, tool: tool) == pin else { throw MCPError.notAllowed }
         lastUsed[id] = Date()
         return mask.result(result)
     }
@@ -639,7 +665,8 @@ final class SourcesController: ObservableObject {
             timeout = 20
         }
         try stillCurrent()
-        let client = MCPClient(transport: transport)
+        // Server text is masked with this source's values when decoded.
+        let client = MCPClient(transport: transport, mask: mask(record.id))
         do { try await client.connect(timeout: timeout) }
         catch { await client.close(); throw error }
         return client
@@ -671,7 +698,9 @@ final class SourcesController: ObservableObject {
     /// Revokes every source first, synchronously, then closes them together.
     func stopAll() async {
         var closing: [MCPClient] = []
-        for id in Set(clients.keys).union(connecting.keys).union(generations.keys) {
+        // Every source, including folders and ones loaded from disk that never
+        // connected: their leases are revoked before anything is awaited.
+        for id in Set(sources.map(\.id)).union(leases.keys).union(clients.keys).union(connecting.keys).union(generations.keys) {
             bump(id)
             validated[id] = nil
             connecting.removeValue(forKey: id)?.cancel()
@@ -736,7 +765,7 @@ final class SourcesController: ObservableObject {
             guard let folder = FolderSource(record: record), let pin = approvedPin(sourceID, tool: tool) else { throw MCPError.notAllowed }
             let lease = lease(sourceID)
             lastUsed[sourceID] = Date()
-            let result = try await Self.folderCall(folder, tool: tool, arguments: arguments)
+            let result = try await folderReader(folder, tool, arguments)
             // The same result-time revocation check as a server call.
             guard lease.isValid, isCurrent(sourceID, generation), approvedPin(sourceID, tool: tool) == pin else {
                 throw MCPError.notAllowed

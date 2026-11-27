@@ -173,7 +173,9 @@ final class SourcesControllerTests: XCTestCase {
         let (controller, script, log, _) = try fixture()
         let id = try await approved(controller, script, log)
         FakeMCPServer.setMode("notify_change", file: modeFile)
-        _ = try await controller.callRead(sourceID: id, tool: "get_me", arguments: .object([:]))
+        // The server announces a change before answering: that answer is discarded too.
+        do { _ = try await controller.callRead(sourceID: id, tool: "get_me", arguments: .object([:])); XCTFail() }
+        catch let error as MCPError { XCTAssertEqual(error, .notAllowed) }
         FakeMCPServer.setMode("normal", file: modeFile)
         async let first = try? controller.callRead(sourceID: id, tool: "search_issues", arguments: .object(["query": .string("a")]))
         async let second = try? controller.callRead(sourceID: id, tool: "search_issues", arguments: .object(["query": .string("b")]))

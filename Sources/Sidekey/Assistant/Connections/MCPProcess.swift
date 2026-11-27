@@ -68,6 +68,7 @@ final class MCPProcess: @unchecked Sendable {
     private var exited = false
     private var stopping = false
     private var stderrTail = Data()
+    private var stderrCut = false
     private var overflowed = false
     private let writeQueue = DispatchQueue(label: "com.rootwise.sidekey.mcp.stdin")
     private let finished = DispatchGroup()
@@ -172,7 +173,7 @@ final class MCPProcess: @unchecked Sendable {
                 guard count > 0 else { break }
                 lock.lock()
                 stderrTail.append(contentsOf: buffer[0..<count])
-                if stderrTail.count > 4096 { stderrTail = stderrTail.suffix(4096) }
+                if stderrTail.count > 4096 { stderrTail = stderrTail.suffix(4096); stderrCut = true }
                 lock.unlock()
             }
             close(stderrFD)
@@ -209,20 +210,21 @@ final class MCPProcess: @unchecked Sendable {
     /// cancelled or late write stops within 50 ms. A write stopped part-way
     /// would leave half a message in the stream, so the server is stopped too;
     /// so is a server that stops reading its input.
-    func write(_ data: Data, deadline: Date, isCancelled: @escaping @Sendable () -> Bool = { false }) async throws {
+    func write(_ data: Data, deadline: Date, isCancelled: @escaping @Sendable () -> Bool = { false },
+               authorize: @escaping @Sendable () -> Bool = { true }) async throws {
         guard data.count < Self.maxWriteBytes else { throw MCPError.tooLarge(limit: Self.maxWriteBytes) }
         var payload = data
         payload.append(10)
         let message = payload
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
             writeQueue.async { [self] in
-                do { try writeNow(message, deadline: deadline, isCancelled: isCancelled); continuation.resume() }
+                do { try writeNow(message, deadline: deadline, isCancelled: isCancelled, authorize: authorize); continuation.resume() }
                 catch { continuation.resume(throwing: error) }
             }
         }
     }
 
-    private func writeNow(_ payload: Data, deadline: Date, isCancelled: () -> Bool) throws {
+    private func writeNow(_ payload: Data, deadline: Date, isCancelled: () -> Bool, authorize: () -> Bool) throws {
         lock.lock()
         let open = stdinOpen
         lock.unlock()
@@ -235,6 +237,13 @@ final class MCPProcess: @unchecked Sendable {
                     if offset > 0 { stop() }
                     throw MCPError.cancelled
                 }
+                // The deadline holds before every write, even to a pipe with room.
+                guard deadline.timeIntervalSinceNow > 0 else {
+                    if offset > 0 { stop() }
+                    throw MCPError.timedOut(seconds: seconds)
+                }
+                // The send boundary: checked right before the first byte leaves.
+                if offset == 0, !authorize() { throw MCPError.notAllowed }
                 let written = Darwin.write(stdinFD, raw.baseAddress! + offset, raw.count - offset)
                 if written >= 0 { offset += written; continue }
                 if errno == EINTR { continue }
@@ -283,10 +292,18 @@ final class MCPProcess: @unchecked Sendable {
         }
     }
 
+    /// The last complete stderr line, unclipped (the caller masks, then
+    /// clips). A line whose start was cut off by the 4 KB bound is not
+    /// returned: it could begin with the end of a secret value.
     private func lastStderrLine() -> String? {
-        lock.lock(); let tail = stderrTail; lock.unlock()
-        let lines = String(decoding: tail, as: UTF8.self).split(whereSeparator: \.isNewline)
+        lock.lock(); let tail = stderrTail; let cut = stderrCut; lock.unlock()
+        var text = String(decoding: tail, as: UTF8.self)
+        if cut {
+            guard let newline = text.firstIndex(where: \.isNewline) else { return nil }
+            text = String(text[text.index(after: newline)...])
+        }
+        let lines = text.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        return lines.last.map { String($0.prefix(200)) }
+        return lines.last
     }
 }

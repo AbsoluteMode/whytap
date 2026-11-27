@@ -207,6 +207,20 @@ struct SourceSecretMask: Sendable {
 
     func contains(_ text: String) -> Bool { needles.contains { text.contains($0) } }
 
+    /// Every string and key of a decoded message, masked.
+    func value(_ value: MCPValue) -> MCPValue {
+        guard !isEmpty else { return value }
+        switch value {
+        case .string(let text): return .string(self(text))
+        case .array(let items): return .array(items.map(self.value))
+        case .object(let object):
+            var masked: [String: MCPValue] = [:]
+            for (key, item) in object { masked[self(key)] = self.value(item) }
+            return .object(masked)
+        default: return value
+        }
+    }
+
     func result(_ result: MCPToolResult) -> MCPToolResult {
         MCPToolResult(text: self(result.text), isError: result.isError, shortened: result.shortened)
     }
@@ -225,7 +239,7 @@ struct SourceSecretMask: Sendable {
     /// title, description and schema. A tool whose name carries one is dropped.
     func tool(_ tool: MCPToolInfo) -> MCPToolInfo? {
         guard !isEmpty else { return tool }
-        if contains(tool.name) { return nil }
+        if contains(tool.name) || tool.name.contains(SourceCredentialPolicy.masked) { return nil }
         var copy = tool
         copy.title = tool.title.map { self($0) }
         copy.description = self(tool.description)

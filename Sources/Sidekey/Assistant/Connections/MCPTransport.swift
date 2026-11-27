@@ -8,10 +8,18 @@ protocol MCPTransport: AnyObject, Sendable {
     /// Sends one message before `deadline`. `responseID` is the id of a
     /// request whose response the caller waits for (HTTP reads the reply from
     /// this POST's body). Cancelling the calling task stops the actual I/O.
-    func send(_ message: Data, responseID: Int?, deadline: Date) async throws
+    /// `authorize` is checked right before the first byte leaves (and the
+    /// deadline before every write); when it fails nothing is sent.
+    func send(_ message: Data, responseID: Int?, deadline: Date, authorize: @escaping @Sendable () -> Bool) async throws
     /// HTTP needs the negotiated version on every later request.
     func setProtocolVersion(_ version: String)
     func close() async
+}
+
+extension MCPTransport {
+    func send(_ message: Data, responseID: Int?, deadline: Date) async throws {
+        try await send(message, responseID: responseID, deadline: deadline, authorize: { true })
+    }
 }
 
 enum MCPTransportEvent: Sendable {
@@ -33,42 +41,47 @@ final class MCPStdioTransport: MCPTransport, @unchecked Sendable {
     private let launch: MCPStdioLaunch
     private let lock = NSLock()
     private var process: MCPProcess?
+    private var closed = false
 
     init(launch: MCPStdioLaunch) { self.launch = launch }
 
     func start(onEvent: @escaping @Sendable (MCPTransportEvent) -> Void) async throws {
-        let secrets = launch.secrets.filter { $0.count >= 4 }
+        let mask = SourceSecretMask(launch.secrets)
+        guard !lock.withLock({ closed }) else { throw MCPError.cancelled }
         let process = try MCPProcess(
             executable: launch.executable, arguments: launch.arguments, environment: launch.environment,
             directory: launch.directory,
             onLine: { onEvent(.message($0)) },
             onExit: { status, line, overflow in
                 if overflow { onEvent(.closed(.tooLarge(limit: MCPProcess.maxLineBytes))); return }
-                onEvent(.closed(.exited(status: status, detail: line.map { Self.mask($0, secrets: secrets) })))
+                // Masked whole, then clipped: no fragment of a value survives the clip.
+                onEvent(.closed(.exited(status: status, detail: line.map { String(mask($0).prefix(200)) })))
             })
-        lock.withLock { self.process = process }
+        // Closed while starting: the late process is stopped, never kept.
+        let keep = lock.withLock { () -> Bool in
+            guard !closed else { return false }
+            self.process = process
+            return true
+        }
+        guard keep else { process.stop(); throw MCPError.cancelled }
     }
 
-    func send(_ message: Data, responseID: Int?, deadline: Date) async throws {
+    func send(_ message: Data, responseID: Int?, deadline: Date, authorize: @escaping @Sendable () -> Bool) async throws {
         guard let process = lock.withLock({ self.process }) else { throw MCPError.notConnected }
         let cancelled = MCPCancelFlag()
         try await withTaskCancellationHandler {
-            try await process.write(message, deadline: deadline, isCancelled: { cancelled.isSet })
+            try await process.write(message, deadline: deadline, isCancelled: { cancelled.isSet }, authorize: authorize)
         } onCancel: { cancelled.raise() }
     }
 
     func setProtocolVersion(_ version: String) {}
 
     func close() async {
-        guard let process = lock.withLock({ self.process }) else { return }
+        guard let process = lock.withLock({ () -> MCPProcess? in closed = true; return self.process }) else { return }
         process.stop()
         await Task.detached { process.waitUntilStopped() }.value
     }
 
-    /// Replaces each known secret value, so an echoed token never reaches the UI.
-    static func mask(_ text: String, secrets: [String]) -> String {
-        secrets.reduce(text) { $0.replacingOccurrences(of: $1, with: "••••") }
-    }
 }
 
 /// Streamable HTTP (MCP 2025-03-26 and later): each message is a POST; the
@@ -88,6 +101,7 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
     private var answered = false
     private var protocolVersion: String?
     private var onEvent: (@Sendable (MCPTransportEvent) -> Void)?
+    private var closed = false
 
     init(url: URL, headers: [String: String], session: URLSession = .shared) {
         self.url = url; self.headers = headers; self.session = session
@@ -102,12 +116,17 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
 
     func start(onEvent: @escaping @Sendable (MCPTransportEvent) -> Void) async throws {
         guard Self.isAllowed(url) else { throw MCPError.insecureURL }
-        lock.withLock { self.onEvent = onEvent }
+        let started = lock.withLock { () -> Bool in
+            guard !closed else { return false }
+            self.onEvent = onEvent
+            return true
+        }
+        guard started else { throw MCPError.cancelled }
     }
 
     func setProtocolVersion(_ version: String) { lock.withLock { protocolVersion = version } }
 
-    func send(_ message: Data, responseID: Int?, deadline: Date) async throws {
+    func send(_ message: Data, responseID: Int?, deadline: Date, authorize: @escaping @Sendable () -> Bool) async throws {
         guard let deliver = lock.withLock({ onEvent }) else { throw MCPError.notConnected }
         let seconds = MCPDeadline.seconds(until: deadline)
         guard deadline.timeIntervalSinceNow > 0 else { throw MCPError.timedOut(seconds: seconds) }
@@ -122,6 +141,9 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
         if let session { request.setValue(session, forHTTPHeaderField: "Mcp-Session-Id") }
         if let version { request.setValue(version, forHTTPHeaderField: "MCP-Protocol-Version") }
         let bytes: URLSession.AsyncBytes, response: URLResponse
+        // The send boundary: nothing leaves after a revocation or the deadline.
+        guard authorize() else { throw MCPError.notAllowed }
+        guard deadline.timeIntervalSinceNow > 0 else { throw MCPError.timedOut(seconds: seconds) }
         do { (bytes, response) = try await self.session.bytes(for: request, delegate: self) }
         catch is CancellationError { throw MCPError.cancelled }
         catch let error as URLError where error.code == .cancelled { throw MCPError.cancelled }
@@ -182,7 +204,7 @@ final class MCPHTTPTransport: NSObject, MCPTransport, URLSessionTaskDelegate, @u
 
     func close() async {
         let id = lock.withLock { () -> String? in
-            defer { sessionID = nil; onEvent = nil }
+            defer { sessionID = nil; onEvent = nil; closed = true }
             return sessionID
         }
         guard let id else { return }

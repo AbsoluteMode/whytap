@@ -59,8 +59,11 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
 - **Bounds:** 16 MB per message, tool results clipped to 24,000 characters
   before any model sees them, Agent calls 10 s, proof 15 s, connect 20 s
   (HTTP) or 90 s (stdio, since a first `npx`/`uvx` run downloads). Each is
-  one deadline for the whole operation (initialize and its notice; every page
-  of a list). Cancellation and deadlines stop the actual I/O: stdin writes
+  one deadline for the whole operation (starting the transport, initialize
+  and its notice; every page of a list); a transport start that finishes after
+  the deadline or a cancellation is closed at once. Every stdin write checks
+  the deadline before each write (even when the pipe has room) and HTTP before
+  the request. Cancellation and deadlines stop the actual I/O: stdin writes
   poll every 50 ms and check cancellation (a write stopped part-way stops the
   server), HTTP sends are URLSession tasks that are cancelled, the HTTP
   session's closing DELETE is bounded to 3 s without reading its body, and
@@ -87,7 +90,12 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   example `--session <id>`).
 - **Known values** (`SourceSecretMask`): each source's secret values
   (6 characters or longer, raw, JSON-escaped and percent-encoded, and the
-  token part of an authorization header value) are masked out of everything a server wrote
+  token part of an authorization header value) are masked out of everything a server wrote,
+  at the point it is decoded (`MCPClient` masks every string and key of every
+  message; the stdio transport masks the exit line) and before any clip
+  derived from it, so a description, result or error clipped later can never
+  keep a fragment of a value. An stderr line whose start fell outside the 4 KB
+  tail is dropped rather than shown;
   before it reaches Settings, the manifest or a model: tool results
   (including structured content), error results, JSON-RPC error and
   protocol text, exit detail, proof summaries and tool metadata (title,
@@ -123,7 +131,13 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   a `list_changed` notice, an ended client or another HTTP session (a later
   answer naming a different `Mcp-Session-Id` ends the client) moves the
   epoch. `callTool` checks the caller's `SourceLease`, the epoch and the
-  tool's pin in the same actor step that sends the request. Each source has
+  tool's pin in the same actor step that registers the request; the transport
+  checks the lease and the still-current epoch again right before the first
+  byte leaves (stdin write or HTTP request), and the answer is returned only
+  if the lease, epoch and pin still hold when it arrives (a change notice that
+  precedes it voids it). Every completed list starts a new epoch, and a list is
+  applied only if it is still current after the list and the classification
+  (otherwise it is read again, at most three times). Each source has
   a generation and a lease, both replaced by stop, disable, removal, new
   values, every class change and every approval; the old lease is revoked
   synchronously, so a revocation wins even after the controller's own
@@ -131,7 +145,8 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   approved pin again and discards a late answer (server and folder alike).
   Every await before a launch (executable lookup, environment) is followed by
   a current-generation check before a process or session starts. Stopping all
-  revokes every source first and then closes them together.
+  revokes every source first (including folders and sources loaded from disk
+  that never connected) and then closes them together.
 - **The Agent** gets one strict function, `source_call(tool, arguments)`.
   `tool` is an enum of approved Read tools of enabled sources; each tool's
   compact signature is in the system prompt (bounded to 10,000 characters),
@@ -270,6 +285,18 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   forms Whytap can't carry; the working folder set or the launch refused;
   cancelled and timed-out writes, one handshake deadline, and the deadline
   helper not waiting.
+- Third builder review (ticket 644), each remaining class: a server places
+  the known value across every clip limit (tool description, result,
+  structured content, error result for the model, proof line, JSON-RPC error,
+  exit detail, the stderr tail, the protocol string) and no surface keeps a
+  10-character fragment; a call revoked while held at the transport's send
+  boundary sends nothing; an answer preceded by a change notice is not
+  returned; a list overtaken by a notice during classification is read again;
+  a folder read in flight from a source loaded from disk is discarded by
+  disable, remove, reclassification and stop all; a 25 ms connect over a
+  250 ms transport start returns at its deadline and the late start is closed;
+  an expired or unauthorized write reaches neither a writable pipe nor an HTTP
+  request. Mutating the decode mask and the answer check makes these fail.
 - The Agent loop: a source search answered; an injected instruction in a
   source result followed by `run_command`, `write_file` and `fetch_url`
   calls runs nothing and the next request's catalog lacks those tools and

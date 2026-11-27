@@ -61,8 +61,15 @@ struct MCPToolResult: Equatable, Sendable {
 /// Approval is bound to the exact list: `listTools` returns the epoch it was
 /// read under and records each tool's pin; `callTool` checks the caller's
 /// lease, the epoch and the tool's pin in the same actor step that sends the
-/// request. A `tools/list_changed` notice or an ended session moves the epoch,
-/// so nothing approved on an older list is sent.
+/// request, the transport checks the same authorization again right before
+/// the first byte leaves, and the answer is returned only if the epoch and pin
+/// still hold when it arrives. A `tools/list_changed` notice, every completed
+/// list and an ended session move the epoch, so nothing approved on an older
+/// list is sent or returned.
+///
+/// Every server text is masked with the source's known values when it is
+/// decoded, before anything derived from it is clipped (descriptions, results,
+/// error messages), so a clip can never leave a fragment of a value.
 /// WHY: .project-docs/decisions/2026-11-26-agent-sources.md
 actor MCPClient {
     static let requestedVersion = "2025-06-18"
@@ -70,6 +77,9 @@ actor MCPClient {
     static let maxTools = 500
 
     private let transport: MCPTransport
+    private let mask: SourceSecretMask
+    /// `listEpoch` and the closed state, readable off the actor at the send boundary.
+    private let authority = MCPAuthority()
     private var pending: [Int: CheckedContinuation<MCPValue, Error>] = [:]
     private var abandoned: Set<Int> = []
     private var nextID = 1
@@ -86,7 +96,15 @@ actor MCPClient {
     private var sends: [Int: Task<Void, Never>] = [:]
     private var started = false
 
-    init(transport: MCPTransport) { self.transport = transport }
+    init(transport: MCPTransport, mask: SourceSecretMask = SourceSecretMask([])) {
+        self.transport = transport
+        self.mask = mask
+    }
+
+    private func moveEpoch() {
+        listEpoch += 1
+        authority.set(epoch: listEpoch, open: closedError == nil)
+    }
 
     var isOpen: Bool { started && closedError == nil }
 
@@ -96,11 +114,26 @@ actor MCPClient {
     /// The connection's identity for approval: same client, same list.
     var currentEpoch: Int? { isOpen && pinsEpoch == listEpoch ? listEpoch : nil }
 
+    /// One deadline and one cancellation for starting the transport,
+    /// initialize and the initialized notice. A start that finishes after the
+    /// deadline or a cancellation is closed at once.
     func connect(timeout: TimeInterval) async throws {
         guard !started else { return }
         started = true
-        // One deadline for starting, initialize and the initialized notice.
         let deadline = Date().addingTimeInterval(timeout)
+        do {
+            try await MCPDeadline.run(until: deadline, timeout: .timedOut(seconds: MCPDeadline.seconds(until: deadline))) {
+                try await self.handshake(deadline: deadline)
+            }
+        } catch {
+            let failure = error as? MCPError ?? .notConnected
+            end(failure)
+            await transport.close()
+            throw failure
+        }
+    }
+
+    private func handshake(deadline: Date) async throws {
         let (stream, continuation) = AsyncStream<MCPTransportEvent>.makeStream()
         consumer = Task { [weak self] in
             for await event in stream { await self?.handle(event) }
@@ -110,6 +143,11 @@ actor MCPClient {
             let failure = error as? MCPError ?? .notConnected
             closedError = failure
             throw failure
+        }
+        // Started late: the caller already gave up (deadline or cancellation).
+        guard !Task.isCancelled, deadline.timeIntervalSinceNow > 0, closedError == nil else {
+            await transport.close()
+            throw closedError ?? MCPError.cancelled
         }
         let result = try await request("initialize", params: .object([
             "protocolVersion": .string(Self.requestedVersion),
@@ -136,17 +174,22 @@ actor MCPClient {
         for _ in 0..<20 {
             let params: MCPValue? = cursor.map { .object(["cursor": .string($0)]) }
             let result = try await request("tools/list", params: params, deadline: deadline)
+            // Already masked when decoded; descriptions are clipped only now.
             tools += (result["tools"]?.array ?? []).compactMap(MCPToolInfo.init).compactMap(transform)
             cursor = result["nextCursor"]?.string
             if cursor == nil || tools.count >= Self.maxTools { break }
         }
         var seen = Set<String>()
         let unique = Array(tools.filter { seen.insert($0.name).inserted }.prefix(Self.maxTools))
-        if listEpoch == epoch {
-            pins = Dictionary(uniqueKeysWithValues: unique.map { ($0.name, $0.pinHash) })
-            pinsEpoch = epoch
-        }
-        return (unique, epoch)
+        // A completed list starts a new epoch: calls approved under an older
+        // list, even one with the same tools, are no longer sent or returned.
+        // A list overtaken by a change notice keeps its old epoch, which is
+        // never current again.
+        guard listEpoch == epoch else { return (unique, epoch) }
+        moveEpoch()
+        pins = Dictionary(uniqueKeysWithValues: unique.map { ($0.name, $0.pinHash) })
+        pinsEpoch = listEpoch
+        return (unique, listEpoch)
     }
 
     /// Calls a tool and turns its content into text, clipped to
@@ -154,11 +197,18 @@ actor MCPClient {
     /// valid, the list is still `epoch` and the tool's pin is `expectedPin`.
     func callTool(_ name: String, arguments: MCPValue, timeout: TimeInterval, maxCharacters: Int,
                   lease: SourceLease, epoch: Int, expectedPin: String) async throws -> MCPToolResult {
+        let authority = authority
         let result = try await request("tools/call", params: .object(["name": .string(name), "arguments": arguments]),
-                                       deadline: Date().addingTimeInterval(timeout)) { [self] in
+                                       deadline: Date().addingTimeInterval(timeout),
+                                       authorize: { lease.isValid && authority.isCurrent(epoch) }) { [self] in
             guard lease.isValid, listEpoch == epoch, pinsEpoch == epoch, pins[name] == expectedPin else {
                 throw MCPError.notAllowed
             }
+        }
+        // The answer counts only under the list it was approved for: a change
+        // notice or a new list that arrived first voids it.
+        guard lease.isValid, isOpen, listEpoch == epoch, pinsEpoch == epoch, pins[name] == expectedPin else {
+            throw MCPError.notAllowed
         }
         return Self.toolResult(result, maxCharacters: maxCharacters)
     }
@@ -177,7 +227,7 @@ actor MCPClient {
     /// fail, sends stop, and the epoch moves so no approval carries over.
     private func end(_ error: MCPError) {
         closedError = closedError ?? error
-        listEpoch += 1
+        moveEpoch()
         failAll(.cancelled)
         sends.values.forEach { $0.cancel() }
         sends.removeAll()
@@ -211,6 +261,7 @@ actor MCPClient {
     /// `gate` runs in the same actor step that registers and sends the
     /// request; if it throws, nothing is sent.
     private func request(_ method: String, params: MCPValue?, deadline: Date,
+                         authorize: @escaping @Sendable () -> Bool = { true },
                          gate: (() throws -> Void)? = nil) async throws -> MCPValue {
         if let closedError { throw closedError }
         let id = nextID
@@ -227,7 +278,7 @@ actor MCPClient {
         defer { timer.cancel() }
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<MCPValue, Error>) in
-                register(id, continuation, data: data, deadline: deadline, gate: gate)
+                register(id, continuation, data: data, deadline: deadline, authorize: authorize, gate: gate)
             }
         } onCancel: {
             Task { [weak self] in await self?.abandon(id, reason: .cancelled) }
@@ -235,14 +286,15 @@ actor MCPClient {
     }
 
     private func register(_ id: Int, _ continuation: CheckedContinuation<MCPValue, Error>, data: Data, deadline: Date,
-                          gate: (() throws -> Void)?) {
+                          authorize: @escaping @Sendable () -> Bool, gate: (() throws -> Void)?) {
         if abandoned.remove(id) != nil { continuation.resume(throwing: MCPError.cancelled); return }
         if let closedError { continuation.resume(throwing: closedError); return }
         do { try gate?() } catch { continuation.resume(throwing: error); return }
         pending[id] = continuation
         let transport = transport
         sends[id] = Task { [weak self] in
-            do { try await transport.send(data, responseID: id, deadline: deadline) }
+            // The transport checks `authorize` again right before the first byte.
+            do { try await transport.send(data, responseID: id, deadline: deadline, authorize: authorize) }
             catch { await self?.sendFailed(id, error as? MCPError ?? .network) }
             await self?.sendFinished(id)
         }
@@ -295,11 +347,13 @@ actor MCPClient {
         switch event {
         case .closed(let error):
             if closedError == nil { closedError = error }
-            listEpoch += 1
+            moveEpoch()
             failAll(closedError ?? error)
         case .message(let data):
             // Servers sometimes print logs to stdout; a non-JSON line is skipped.
-            guard let value = try? MCPValue.decode(data) else { return }
+            guard let decoded = try? MCPValue.decode(data) else { return }
+            // Masked whole, before any clip derived from it.
+            let value = mask.value(decoded)
             for message in value.array ?? [value] { await handleMessage(message) }
         }
     }
@@ -329,6 +383,16 @@ actor MCPClient {
             }
             return
         }
-        if method == "notifications/tools/list_changed" { listEpoch += 1 }
+        if method == "notifications/tools/list_changed" { moveEpoch() }
     }
+}
+
+/// The client's list epoch and open state, readable from any thread, so a
+/// transport can check a call's authorization at the moment it sends.
+final class MCPAuthority: @unchecked Sendable {
+    private let lock = NSLock()
+    private var epoch = 0
+    private var open = true
+    func set(epoch: Int, open: Bool) { lock.withLock { self.epoch = epoch; self.open = open } }
+    func isCurrent(_ epoch: Int) -> Bool { lock.withLock { open && self.epoch == epoch } }
 }

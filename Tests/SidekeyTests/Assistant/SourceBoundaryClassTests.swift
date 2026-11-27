@@ -264,6 +264,210 @@ final class SourceBoundaryClassTests: XCTestCase {
         await controller.stopAll()
     }
 
+    // MARK: - Third review (ticket 644), class 1: masking happens before every clip
+
+    /// Any 10-character piece of the sentinel: a clipped fragment counts as a leak.
+    static func leaksFragment(_ text: String) -> Bool {
+        let secret = Array(sentinel)
+        return (0...(secret.count - 10)).contains { text.contains(String(secret[$0..<$0 + 10])) }
+    }
+
+    /// The server places the known value right across each limit Whytap
+    /// applies (tool description 2,000, result 24,000, structured content,
+    /// error result 2,000 for the model, proof 120, JSON-RPC error 200, exit
+    /// detail 200 and the 4 KB stderr tail): no surface keeps a fragment.
+    func testAValueStraddlingEveryClipLimitLeavesNoFragmentOnAnySurface() async throws {
+        let s = Self.sentinel
+        var classified: [String] = []
+        let classifier = SourceToolModelClassifier { tools in classified.append(SourceToolModelClassifier.prompt(tools)); return nil }
+        let (controller, _) = try makeController(classifier: classifier)
+        let fake = try FakeMCPServer.install()
+        addTeardownBlock { try? FileManager.default.removeItem(at: fake.directory) }
+        var draft = SourceDraft(name: "Clip", kind: .github, transport: .stdio(command: fake.script.path, arguments: [], directory: nil))
+        draft.environment = [SourceValue(name: "FAKE_MODE", secret: false, value: "clip"),
+                             SourceValue(name: "SECRET_TOKEN", secret: true, value: nil)]
+        draft.secrets["SECRET_TOKEN"] = s
+        let added = await controller.add(draft)
+        let id = try XCTUnwrap(added)
+        var seen: [String] = []
+        seen.append("\(controller.statuses)")          // proof failure, clipped to 120
+        seen.append(try String(contentsOf: controller.fileURL, encoding: .utf8))
+        seen += classified
+        seen += controller.record(id)?.tools.map(\.description) ?? []
+        let catalog = try XCTUnwrap(controller.agentCatalog())
+        seen.append(NativeAgentSources.prompt(catalog))
+        let tool = try XCTUnwrap(catalog.tools.first { $0.tool == "search_issues" })
+        for query in ["text", "structured", "iserror", "rpc", "exit", "exitcut"] {
+            let call = NativeAgentToolCall(id: query, name: NativeAgentSources.toolName,
+                                           arguments: ["tool": tool.id, "arguments": #"{"query":"\#(query)"}"#])
+            let (result, _) = await NativeAgentSources.execute(call, catalog: catalog)
+            seen.append(result.text)                      // what the model receives
+            do { seen.append(try await controller.callRead(sourceID: id, tool: "search_issues",
+                                                           arguments: .object(["query": .string(query)])).text) }
+            catch let error as MCPError { seen += [error.message, error.agentMessage, "\(error)"] }
+            seen.append("\(controller.statuses)")         // exit and error text in Settings
+        }
+        for (index, text) in seen.enumerated() {
+            XCTAssertFalse(Self.leaksFragment(text), "surface \(index): …\(text.suffix(260))")
+        }
+        XCTAssertTrue(seen.joined().contains(SourceCredentialPolicy.masked), "The value was there and was masked")
+    }
+
+    func testAnUnsupportedProtocolStringIsMaskedBeforeItsClip() async throws {
+        let fake = try FakeMCPServer.install()
+        defer { try? FileManager.default.removeItem(at: fake.directory) }
+        let launch = FakeMCPServer.launch(fake.script, mode: "clip_protocol", extra: ["SECRET_TOKEN": Self.sentinel])
+        let client = MCPClient(transport: MCPStdioTransport(launch: launch), mask: SourceSecretMask([Self.sentinel]))
+        do { try await client.connect(timeout: 10); XCTFail() }
+        catch let error as MCPError {
+            guard case .unsupportedProtocol = error else { return XCTFail("\(error)") }
+            XCTAssertFalse(Self.leaksFragment(error.message), error.message)
+        }
+        await client.close()
+    }
+
+    // MARK: - Class 2: a list that changed while it was being classified is never applied
+
+    func testAListOvertakenByAChangeNoticeDuringClassificationIsReadAgainNotApplied() async throws {
+        let gate = TestCheckpoint()
+        await gate.arm()
+        var runs = 0
+        let classifier = SourceToolModelClassifier { _ in runs += 1; await gate.pass(); return nil }
+        let (controller, _) = try makeController(classifier: classifier)
+        let fake = try FakeMCPServer.install()
+        addTeardownBlock { try? FileManager.default.removeItem(at: fake.directory) }
+        var draft = SourceDraft(name: "Notes", kind: .github, transport: .stdio(command: fake.script.path, arguments: [], directory: nil))
+        // The server announces a change right after its first list, then describes search_issues differently.
+        draft.environment = [SourceValue(name: "FAKE_MODE", secret: false, value: "clip"),
+                             SourceValue(name: "FAKE_NOTIFY_AFTER_LIST", secret: false, value: "1"),
+                             SourceValue(name: "FAKE_LOG", secret: false, value: fake.log.path)]
+        let adding = Task { await controller.add(draft) }
+        try await gate.untilWaiting()
+        try await Task.sleep(nanoseconds: 300_000_000)    // the notice arrives while classification waits
+        await gate.release()
+        let addedID = await adding.value
+        let id = try XCTUnwrap(addedID)
+        let record = try XCTUnwrap(controller.record(id))
+        XCTAssertGreaterThanOrEqual(runs, 1)
+        XCTAssertEqual(record.tools.first { $0.name == "search_issues" }?.description,
+                       "Search issues by text. NEW: also sends them elsewhere.",
+                       "The list applied is the one read after the notice, not the stale one")
+    }
+
+    // MARK: - Class 2: folder sources, also ones loaded from disk, are revoked mid-read
+
+    func testAFolderReadInFlightIsDiscardedByEveryRevocationIncludingAFolderLoadedFromDisk() async throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("folder-rev-" + UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("retry notes".utf8).write(to: folder.appendingPathComponent("notes.md"))
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let (writer, directory) = try makeController()
+        let added = await writer.add(SourceDraft(name: "Notes", kind: .folder, transport: .folder(path: folder.path)))
+        let id = try XCTUnwrap(added)
+        for revocation in Revocation.allCases {
+            // A fresh controller loads the folder from disk, as after a relaunch.
+            let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: InMemoryTokenStore.Box()) })
+            let loaded = SourcesController(directory: directory, keys: keys, classifier: nil)
+            loaded.loadIfNeeded()
+            let gate = TestCheckpoint()
+            await gate.arm()
+            loaded.folderReader = { folder, tool, arguments in
+                await gate.pass()
+                return try await SourcesController.folderCall(folder, tool: tool, arguments: arguments)
+            }
+            let reading = Task { try await loaded.callRead(sourceID: id, tool: "search", arguments: .object(["query": .string("retry")])) }
+            try await gate.untilWaiting()
+            switch revocation {
+            case .disable: await loaded.setEnabled(false, id: id)
+            case .remove: await loaded.remove(id)
+            case .reclassify: loaded.setClass(.outward, tool: "search", id: id)
+            case .stopAll: await loaded.stopAll()
+            }
+            await gate.release()
+            do { let result = try await reading.value; XCTFail("\(revocation): got \(result.text)") }
+            catch let error as MCPError { XCTAssertEqual(error, .notAllowed, "\(revocation)") }
+            // Put the manifest back for the next case.
+            try JSONEncoder().encode(writer.sources).write(to: writer.fileURL)
+        }
+    }
+
+    // MARK: - Class 2: the send boundary and the answer are bound to the approved list
+
+    func testAuthorizationIsCheckedAtTheSendBoundaryAndOnTheAnswer() async throws {
+        // Revoked between the client's check and the transport's first byte.
+        let transport = ScriptedTransport()
+        let client = MCPClient(transport: transport)
+        try await client.connect(timeout: 5)
+        let (tools, epoch) = try await client.listTools(timeout: 5)
+        let lease = SourceLease()
+        transport.holdCalls = true
+        let calling = Task {
+            try await client.callTool("search", arguments: .object([:]), timeout: 5, maxCharacters: 100,
+                                      lease: lease, epoch: epoch, expectedPin: tools[0].pinHash)
+        }
+        try await transport.untilHeld()
+        lease.revoke()
+        transport.releaseCalls()
+        do { _ = try await calling.value; XCTFail() } catch let error as MCPError { XCTAssertEqual(error, .notAllowed) }
+        XCTAssertEqual(transport.sentCalls, 0, "Nothing left after the revocation")
+
+        // A change notice that precedes the answer voids it.
+        let (fresh, current) = try await client.listTools(timeout: 5)
+        transport.noticeBeforeAnswer = true
+        do {
+            _ = try await client.callTool("search", arguments: .object([:]), timeout: 5, maxCharacters: 100,
+                                          lease: SourceLease(), epoch: current, expectedPin: fresh[0].pinHash)
+            XCTFail()
+        } catch let error as MCPError { XCTAssertEqual(error, .notAllowed) }
+        XCTAssertEqual(transport.sentCalls, 1, "It was sent, but its answer was not returned")
+        await client.close()
+    }
+
+    // MARK: - Class 3: one deadline from the start of a connect; every write
+
+    func testConnectDeadlineCoversASlowTransportStartAndClosesItWhenItFinishesLate() async throws {
+        let transport = ScriptedTransport()
+        transport.startDelay = 0.25
+        let client = MCPClient(transport: transport)
+        let started = Date()
+        do { try await client.connect(timeout: 0.025); XCTFail() }
+        catch let error as MCPError { guard case .timedOut = error else { return XCTFail("\(error)") } }
+        XCTAssertLessThan(Date().timeIntervalSince(started), 0.2, "The deadline holds while the transport starts")
+        try await Task.sleep(nanoseconds: 400_000_000)
+        XCTAssertTrue(transport.closedAfterStart, "A start that finished late was closed")
+    }
+
+    func testAWriteChecksItsDeadlineAndAuthorizationEvenWhenThePipeHasRoom() async throws {
+        let lines = LockedBox<Int>()
+        lines.set(0)
+        let process = try MCPProcess(executable: "/bin/cat", arguments: [], environment: [:],
+                                     onLine: { _ in lines.set((lines.value ?? 0) + 1) }, onExit: { _, _, _ in })
+        defer { process.stop() }
+        do { try await process.write(Data("{}".utf8), deadline: Date().addingTimeInterval(-1)); XCTFail() }
+        catch let error as MCPError { guard case .timedOut = error else { return XCTFail("\(error)") } }
+        do { try await process.write(Data("{}".utf8), deadline: .distantFuture, authorize: { false }); XCTFail() }
+        catch let error as MCPError { XCTAssertEqual(error, .notAllowed) }
+        try await process.write(Data("{}".utf8), deadline: .distantFuture)
+        try await Task.sleep(nanoseconds: 300_000_000)
+        XCTAssertEqual(lines.value, 1, "Only the authorized, timely write reached the pipe")
+    }
+
+    func testAnHTTPSendChecksAuthorizationAndDeadlineBeforeTheRequest() async throws {
+        StubURLProtocol.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [StubURLProtocol.self]
+        let session = URLSession(configuration: configuration)
+        defer { session.invalidateAndCancel(); StubURLProtocol.reset() }
+        StubURLProtocol.handler = { _ in (200, ["Content-Type": "application/json"], Data("{}".utf8)) }
+        let transport = MCPHTTPTransport(url: URL(string: "https://mcp.example.com/mcp")!, headers: [:], session: session)
+        try await transport.start { _ in }
+        do { try await transport.send(Data("{}".utf8), responseID: 1, deadline: .distantFuture, authorize: { false }); XCTFail() }
+        catch let error as MCPError { XCTAssertEqual(error, .notAllowed) }
+        do { try await transport.send(Data("{}".utf8), responseID: 1, deadline: Date().addingTimeInterval(-1)); XCTFail() }
+        catch let error as MCPError { guard case .timedOut = error else { return XCTFail("\(error)") } }
+        XCTAssertTrue(StubURLProtocol.capturedRequests.isEmpty)
+    }
+
     // MARK: - Fixture
 
     private func makeController(classifier: SourceToolModelClassifier? = nil,
@@ -309,5 +513,71 @@ actor TestCheckpoint {
             try await Task.sleep(nanoseconds: 20_000_000)
         }
         XCTFail("The checkpoint was never reached")
+    }
+}
+
+/// An in-memory MCP server for client tests: it answers initialize,
+/// tools/list and tools/call, can hold calls at the send boundary, announce a
+/// change before an answer, and start slowly.
+final class ScriptedTransport: MCPTransport, @unchecked Sendable {
+    private let lock = NSLock()
+    private var onEvent: (@Sendable (MCPTransportEvent) -> Void)?
+    private var held: [CheckedContinuation<Void, Never>] = []
+    private var closed = false
+    private var started = false
+    var startDelay: TimeInterval = 0
+    var holdCalls = false
+    var noticeBeforeAnswer = false
+    private(set) var sentCalls = 0
+    private(set) var closedAfterStart = false
+
+    func start(onEvent: @escaping @Sendable (MCPTransportEvent) -> Void) async throws {
+        if startDelay > 0 { Thread.sleep(forTimeInterval: startDelay) }
+        lock.withLock { self.onEvent = onEvent; started = true }
+    }
+
+    func send(_ message: Data, responseID: Int?, deadline: Date, authorize: @escaping @Sendable () -> Bool) async throws {
+        guard let value = try? MCPValue.decode(message), let method = value["method"]?.string else { return }
+        let deliver = lock.withLock { onEvent }
+        if method == "tools/call", holdCalls {
+            await withCheckedContinuation { continuation in lock.withLock { held.append(continuation) } }
+        }
+        guard authorize() else { throw MCPError.notAllowed }
+        guard let id = value["id"] else { return }
+        let result: MCPValue
+        switch method {
+        case "initialize": result = .object(["protocolVersion": .string("2025-06-18"), "capabilities": .object([:])])
+        case "tools/list": result = .object(["tools": .array([.object(["name": .string("search"), "description": .string("s"),
+                                                                       "inputSchema": .object(["type": .string("object")])])])])
+        default:
+            lock.withLock { sentCalls += 1 }
+            if noticeBeforeAnswer {
+                deliver?(.message(try MCPValue.object(["jsonrpc": .string("2.0"), "method": .string("notifications/tools/list_changed")]).encoded()))
+            }
+            result = .object(["content": .array([.object(["type": .string("text"), "text": .string("answer")])])])
+        }
+        deliver?(.message(try MCPValue.object(["jsonrpc": .string("2.0"), "id": id, "result": result]).encoded()))
+    }
+
+    func untilHeld() async throws {
+        for _ in 0..<200 {
+            if lock.withLock({ !held.isEmpty }) { return }
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+        XCTFail("No call reached the transport")
+    }
+
+    func releaseCalls() {
+        let waiting = lock.withLock { () -> [CheckedContinuation<Void, Never>] in defer { held = [] }; holdCalls = false; return held }
+        waiting.forEach { $0.resume() }
+    }
+
+    func setProtocolVersion(_ version: String) {}
+
+    func close() async {
+        lock.withLock {
+            closed = true
+            if started { closedAfterStart = true }
+        }
     }
 }

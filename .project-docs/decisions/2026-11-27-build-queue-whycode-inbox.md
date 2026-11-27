@@ -57,18 +57,32 @@ a receipt per id, deduplication across restarts and rate caps.
   along with the next state change. An open ticket's newest event settles for
   90 seconds first, so a burst of builder updates becomes one turn. Both keep
   Whycode's limit of four inbox turns per session per hour for real results.
+- **The sender keeps no state it trusts.** Each pass derives everything from
+  two sources of truth: the queue (events and their acknowledgements) and
+  Whycode's inbox folder (our notice files it has not taken and its receipts).
+  A notice id names its exact batch, so sending the same batch again gives the
+  same id and Whycode's ledger keeps it single: re-sending is idempotent. The
+  file `whytap-build-queue-inbox.json` keeps the notice scope's start (the only
+  value read back; an unreadable one starts a new scope) and a journal of
+  notices for people that nothing reads to decide.
 - Events are acknowledged only when the receipt says `delivered` (session or
-  orchestrator). `queued` waits; a file gone without a receipt is written again
-  under the same id (Whycode's ledger keeps it single). `rejected` raises the
-  undelivered alert at once and is retried under a new id (`.r2`, ...) after
-  30 minutes, six attempts at most.
+  orchestrator), and only the events of that id's range. `queued` waits; with
+  neither the file nor a receipt the batch is sent again under the same id.
+  `rejected` raises the undelivered alert at once and is retried under a new id
+  (`.r2`, ...) once 30 minutes have passed since the receipt file was written
+  (its file time, no number from the file), six attempts at most.
 - Ids are `whytap-build-queue:<hash of the Git common directory>:events:<first>-<last>`
   (plus `.r<attempt>` for a retry). The hash keeps another clone's queue, which
   also counts from 1, out of Whycode's ledger; the range names the exact batch.
-  A notice holds its events while it is on its way or waits for its retry, and
-  a notice rejected for the last time keeps them with the alert. A new batch is
-  every unacknowledged event of its ticket newer than all held ones, so it is a
-  contiguous range and a newer result never waits for an older retry.
+  An id is evidence only if the queue confirms it: its first and last events
+  exist in scope and belong to one ticket; then the range is that ticket's
+  events between them. Anything else (a range across tickets, unknown events,
+  a backwards range, an invalid receipt) acknowledges nothing, holds its range
+  and raises an `inbox_invalid` alert. A notice holds its events while Whycode
+  has it or waits for its retry, and one rejected for the last time keeps them
+  with the alert. A new batch is every unacknowledged event of its ticket newer
+  than all held ones, so it is a contiguous range and a newer result never
+  waits for an older retry.
   `project` is the main checkout.
 - Events the author's own `enqueue` writes (its receipt, the supersede of its
   older head, a resubmitted return) are acknowledged by that command: its
@@ -89,18 +103,16 @@ a receipt per id, deduplication across restarts and rate caps.
   they ride along with the next result. A return without review (the ticket's `auto_returned`) asks only to
   wait for the dependency and resubmit the same head, or to enqueue the newer
   head, never to change code.
-- One notice's failure stops no other: an invalid receipt (wrong shape, id or
-  status) is ignored for that notice, and each ticket's batch is handled on its
-  own.
-- A notice published while its record failed (a crash, a full disk, a lost
-  rejection beside it) is recovered from its file or receipt: its id's range is
-  the exact batch, whatever the records on disk still say. It is never sent
-  again under another id. Each record's fields are checked (status, ticket,
-  events, attempt, times, payload, receipt) before any shared calculation, by
-  delivery and the watchdog alike; an invalid one is dropped and its notice
-  recovered from its evidence, so it affects only itself. A rejection stops
-  counting for the alert once a later attempt is on its way (reviews of tickets
-  696 and 703).
+- One notice's failure stops no other: each piece of evidence and each
+  ticket's batch is handled on its own. A rejection stops counting for the
+  alert once a later attempt is on its way.
+- Why stateless: the reviews of tickets 694, 696, 703 and 708 each found
+  another way a sender record could disagree with what was published (a lost
+  write, a lost rejection beside a lost retry, a malformed or out-of-range
+  value). Checking records harder only moved the boundary. Without records
+  there is nothing to disagree: a crash at any point leaves either no file
+  (the batch is sent again under the same id) or Whycode's file or receipt
+  (the batch is read back from it).
 - Title (200) and text (20,000) are counted in UTF-16 units like Whycode's
   JavaScript check, without cutting a character, and the file in bytes
   (128 KB).
@@ -118,6 +130,10 @@ a receipt per id, deduplication across restarts and rate caps.
   so a stored message is never read.
 - One notice per event: a block after a start would cost two turns of the
   hourly cap and repeat context.
+- A sender record per notice, validated and recovered from evidence (rounds 2
+  to 4): every interleaving of lost writes needed its own repair.
+- One notice in flight per ticket: simpler ranges, but a newer result would
+  wait behind an older notice's retry.
 - Forbidding Harness Link in the prompt outright: the installed watcher reads
   the prompt from origin/main before `activate`, so the first review (ticket
   694) found merging alone would leave authors with no delivery at all.

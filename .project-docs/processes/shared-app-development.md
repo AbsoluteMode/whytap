@@ -320,18 +320,21 @@ replaced them (events the author's `enqueue` writes, such as its receipt, the
 supersede of its older head or a resubmitted return, are acknowledged by that
 command's response, and earlier undelivered events of that ticket are then
 history). A `rejected` notice raises the alert and is sent again under a new id
-after `inbox_retry_minutes` (30), `inbox_max_attempts` (6) times at most; an
-invalid receipt is ignored for that notice only. A notice's id
+after `inbox_retry_minutes` (30) from the receipt file's time,
+`inbox_max_attempts` (6) times at most. The sender keeps no state it trusts:
+each pass derives everything from the queue and Whycode's inbox folder (unread
+notice files and receipts). A notice's id
 (`whytap-build-queue:<hash>:events:<first>-<last>`, `.r<n>` for a retry) names
-its exact batch, so a notice whose record was lost (including a retry after a
-rejection) is recovered from its file or receipt and never resent under another
-id; an invalid record or file affects only its own notice. A newer result goes
-out while an older notice waits for its retry; once the ticket's newest event
-is acknowledged, older undelivered events are history. Title and text are bounded in Whycode's units (UTF-16) and the file
-in bytes. Notices cover events from the watcher's activation of this version
-on; `whytap-build-queue-inbox.json` in the Git common directory records each
-notice and its receipt. Until `activate` installs this version, the installed
-watcher does not deliver and its run context lacks `author_notices`, so the
+its exact batch, so sending it again is idempotent; an id counts only if the
+queue confirms its first and last events belong to one ticket, and a delivered
+receipt acknowledges only that range. Evidence that does not match holds its
+range, acknowledges nothing and raises an `inbox_invalid` alert. A newer result
+goes out while an older notice waits for its retry; once the ticket's newest
+event is acknowledged, older undelivered events are history. Notices cover
+events from the watcher's activation of this version on;
+`whytap-build-queue-inbox.json` in the Git common directory keeps that start
+and a journal for people, never read back to decide. Until `activate` installs
+this version, the installed watcher does not deliver and its run context lacks `author_notices`, so the
 builder prompt keeps the earlier Harness Link delivery for that run.
 `whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
 current episodes and outbox. `scripts/build-queue-metrics.py --since <date>

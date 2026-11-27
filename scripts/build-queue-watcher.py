@@ -53,8 +53,7 @@ FINAL_STATUSES = ("blocked", "done", "superseded", "cancelled")
 INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`, in UTF-16 units
 INBOX_FILE_LIMIT = 128 * 1024  # Whycode's limit for the whole file, in bytes
 RECEIPT_STATUSES = ("queued", "delivered", "rejected")
-RECORD_STATUSES = ("sent", "queued", "delivered", "rejected")
-INBOX_KEPT_MESSAGES = 1000    # delivered records kept in the inbox state
+ID_PATTERN = re.compile(r"(\d{1,12})-(\d{1,12})(?:\.r(\d{1,3}))?")  # first-last[.rN]
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
 ACTIVATED_SOURCES = ("build-queue.py", "build-queue-watcher.py", "build-queue-builder-prompt.md",
@@ -621,17 +620,13 @@ def findings(root, config, context, previous, now, inbox=None):
     # a receipt, start or requeue of an open ticket, and anything a newer event replaced,
     # rides along with its next notice. A rejected notice counts at once.
     # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
-    messages = valid_records(inbox.get("messages"))  # the same checks as delivery
-    in_flight = {event_id: record for record in messages.values()
-                 if record.get("status") in ("sent", "queued")
-                 for event_id in record.get("events", [])}
-    rejected = {}  # a later attempt in flight supersedes an earlier rejection
-    for message_id, record in messages.items():
-        if record.get("status") == "rejected":
-            for event_id in record.get("events", []):
-                if event_id not in in_flight:
-                    rejected[event_id] = f"Whycode inbox rejected {message_id}: " \
-                                         f"{record.get('reason', '')}"
+    rejected = inbox.get("rejected") or {}
+    in_flight = inbox.get("in_flight") or {}
+    if inbox.get("invalid"):
+        found["inbox_invalid"] = {
+            "notices": inbox["invalid"][:20],
+            "detail": f"{len(inbox['invalid'])} Whycode inbox file(s) or receipt(s) of this "
+                      "queue do not match it; they hold their range until a person looks"}
     for e in undelivered:
         late = age_minutes(e["created_at"], now)
         rides_along = e["ticket_status"] not in FINAL_STATUSES and (
@@ -643,10 +638,9 @@ def findings(root, config, context, previous, now, inbox=None):
         elif inbox.get("unavailable"):
             why = "Whycode inbox unavailable: " + inbox["unavailable"]
         elif e["id"] in in_flight:
-            receipt = in_flight[e["id"]].get("receipt") or {}
-            why = ("Whycode has not answered the notice yet (Whycode closed?)" if not receipt
-                   else "Whycode holds the notice: " + str(receipt.get("waiting")
-                                                           or receipt.get("status")))
+            why = ("Whycode has not answered the notice yet (Whycode closed?)"
+                   if in_flight[e["id"]] == "sent" else "Whycode holds the notice: "
+                   + in_flight[e["id"]])
         else:
             why = "no notice sent (before the inbox scope, or not settled)"
         key = f"undelivered:{e['ticket']}"
@@ -663,7 +657,9 @@ def findings(root, config, context, previous, now, inbox=None):
 # builder acknowledged them anyway. The watcher now writes one file per ticket batch into
 # Whycode's inbox (spec: whycode docs/session-inbox.md); Whycode continues the author's
 # session or hands the notice to the project's orchestrator and answers with a receipt.
-# An event is acknowledged only when its receipt says `delivered`.
+# An event is acknowledged only when its receipt says `delivered`. The sender keeps no
+# state it trusts: each pass derives everything from the queue and Whycode's folder, and
+# a notice id names its exact event range, so sending again is idempotent.
 
 
 def inbox_sender(root):
@@ -694,17 +690,19 @@ def inbox_folder(config):
 
 def ensure_inbox_scope(root, now=None):
     """Events from the first run of this version on are delivered; older ones stay with
-    the undelivered alert (sending days-old results would wake sessions for stale news)."""
+    the undelivered alert (sending days-old results would wake sessions for stale news).
+    This start is the only thing read back from the file; an unreadable one starts anew."""
     path = root / INBOX_STATE
     state = read_json(path, {})
-    if not isinstance(state, dict):
-        state = {}  # unreadable: a new scope; earlier events stay with the alert
-    if not state.get("since"):
-        state["since"] = datetime.fromtimestamp(
+    since = state.get("since") if isinstance(state, dict) else None
+    try:
+        datetime.fromisoformat(since)
+        return since
+    except (TypeError, ValueError):
+        since = datetime.fromtimestamp(
             now or time.time(), timezone.utc).isoformat(timespec="microseconds")
-        state.setdefault("messages", {})
-        write_json(path, state)
-    return state
+        write_json(path, {"since": since, "messages": {}})
+        return since
 
 
 def inbox_events(root, since):
@@ -724,15 +722,6 @@ def inbox_events(root, since):
             "JOIN tickets t ON t.id = e.ticket "
             "JOIN events n ON n.id = (SELECT MAX(id) FROM events x WHERE x.ticket = e.ticket) "
             "WHERE e.acknowledged_at IS NULL AND e.created_at >= ? ORDER BY e.id", (since,))]
-    finally:
-        db.close()
-
-
-def ticket_of_event(root, event_id):
-    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
-    try:
-        row = db.execute("SELECT ticket FROM events WHERE id = ?", (event_id,)).fetchone()
-        return row[0] if row else None
     finally:
         db.close()
 
@@ -863,6 +852,17 @@ def notice_payload(root, config, message_id, events):
         room //= 2  # escapes can make a short text a large file
 
 
+def scope_events(root, since):
+    """Every event in the notice scope: id -> (ticket, acknowledged)."""
+    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    try:
+        return {row[0]: (row[1], bool(row[2])) for row in db.execute(
+            "SELECT id, ticket, acknowledged_at IS NOT NULL FROM events WHERE created_at >= ?",
+            (since,))}
+    finally:
+        db.close()
+
+
 def write_inbox_file(inbox, message_id, payload):
     """`<id>.json.tmp`, then an atomic rename to `<id>.json` (Whycode reads only .json)."""
     final = inbox / (message_id + ".json")
@@ -876,113 +876,80 @@ def write_inbox_file(inbox, message_id, payload):
     os.rename(temporary, final)
 
 
-def read_receipt(inbox, message_id):
-    """Whycode's answer, or None while there is none or it is not a valid receipt."""
-    path = inbox / "receipts" / (message_id + ".json")
-    if path.is_symlink() or not path.exists():
+def read_receipt(path, message_id):
+    """Whycode's answer, or None when it is not a valid receipt for this id."""
+    if path.is_symlink():
         return None
     try:
         receipt = json.loads(path.read_text())
     except (OSError, ValueError):
-        receipt = None
+        return None
     if not isinstance(receipt, dict) or receipt.get("id") != message_id \
             or receipt.get("status") not in RECEIPT_STATUSES:
-        return "invalid"
+        return None
     return receipt
 
 
-def notice_id(root, events, attempt):
-    """The id names the batch: its first and last event. A ticket has at most one notice
-    in flight, so a batch is every unacknowledged event of its ticket in that range."""
-    return f"{inbox_sender(root)}:events:{events[0]['id']}-{events[-1]['id']}" + (
+def notice_id(root, first, last, attempt):
+    """The id is the batch: its ticket's events from `first` to `last`. The same batch
+    and attempt always get the same id, so sending it again is idempotent in Whycode."""
+    return f"{inbox_sender(root)}:events:{first}-{last}" + (
         f".r{attempt}" if attempt > 1 else "")
 
 
-def valid_record(record):
-    """A notice record as this watcher writes it; anything else is dropped and, if it
-    was published, recovered from its file or receipt."""
-    def integer(value):
-        return type(value) is int and value > 0
-    def number(value):
-        return type(value) in (int, float)
-    return (isinstance(record, dict) and record.get("status") in RECORD_STATUSES
-            and integer(record.get("ticket"))
-            and isinstance(record.get("events"), list) and record["events"]
-            and all(integer(e) for e in record["events"])
-            and integer(record.get("attempt", 1))
-            and number(record.get("sent", 0)) and number(record.get("rejected", 0))
-            and number(record.get("delivered", 0))
-            and isinstance(record.get("payload") or {}, dict)
-            and isinstance(record.get("receipt") or {}, dict)
-            and isinstance(record.get("reason", ""), str))
-
-
-def valid_records(messages):
-    return {k: v for k, v in messages.items() if isinstance(k, str) and valid_record(v)} \
-        if isinstance(messages, dict) else {}
-
-
-def recover_published(root, inbox, messages, unacknowledged):
-    """A notice can be published while recording it fails (a crash, a full disk), and an
-    invalid record is dropped. The notice's file or receipt is the durable evidence, and
-    its id names the exact batch whatever the records on disk still say. Recovered, it is
-    never sent again under another id."""
+def inbox_evidence(root, inbox, scope, now, config):
+    """What Whycode holds or answered for this queue, read only from its folder and
+    checked against the queue: the notice id names the ticket's event range, the queue
+    says which events those are. A name or receipt that does not check out is listed as
+    invalid and holds its range without acknowledging anything."""
     prefix = inbox_sender(root) + ":events:"
-    names = {path.name[:-len(".json")] for folder in (inbox, inbox / "receipts")
-             for path in folder.glob(prefix + "*.json")}
-    for message_id in sorted(names - set(messages)):
+    paths = {}
+    for folder, kind in ((inbox, "file"), (inbox / "receipts", "receipt")):
+        for path in folder.glob(prefix + "*.json"):
+            paths.setdefault(path.name[:-len(".json")], {})[kind] = path
+    by_ticket = {}
+    for event_id, (ticket, _acknowledged) in scope.items():
+        by_ticket.setdefault(ticket, []).append(event_id)
+    notices, invalid = {}, []
+    for message_id, found in sorted(paths.items()):
         try:
-            match = re.fullmatch(r"(\d+)-(\d+)(?:\.r(\d+))?", message_id[len(prefix):])
-            if not match:
+            match = ID_PATTERN.fullmatch(message_id[len(prefix):])
+            first, last = (int(match.group(1)), int(match.group(2))) if match else (0, -1)
+            if first > last or first not in scope or last not in scope \
+                    or scope[first][0] != scope[last][0]:
+                invalid.append(message_id)
                 continue
-            first, last = int(match.group(1)), int(match.group(2))
-            ticket = ticket_of_event(root, last)
-            events = [e["id"] for e in unacknowledged
-                      if e["ticket"] == ticket and first <= e["id"] <= last]
-            if not events:
-                continue  # already acknowledged: nothing left to cover
-            payload = read_json(inbox / (message_id + ".json"), {})
-            valid = isinstance(payload, dict) and payload.get("id") == message_id
-            messages[message_id] = {"ticket": ticket, "events": events, "status": "sent",
-                                    "sent": time.time(), "attempt": int(match.group(3) or 1),
-                                    "payload": payload if valid else None, "recovered": True}
-            log(f"inbox: recovered notice {message_id} for #{ticket} (events "
-                f"{', '.join(map(str, events))})")
+            ticket = scope[last][0]
+            events = [e for e in by_ticket[ticket] if first <= e <= last]
+            pending = [e for e in events if not scope[e][1]]
+            notice = {"ticket": ticket, "first": first, "last": last, "events": events,
+                      "pending": pending, "attempt": int(match.group(3) or 1)}
+            notices[message_id] = notice
+            if not pending:
+                notice["state"] = "settled"  # nothing left to tell; the receipt is not read
+                continue
+            if "receipt" not in found:
+                notice["state"] = "sent"  # Whycode has not taken it yet
+                continue
+            receipt = read_receipt(found["receipt"], message_id)
+            if receipt is None:
+                invalid.append(message_id)
+                notice["state"] = "invalid"  # holds its range for a person to look at
+                continue
+            notice["state"] = receipt["status"]
+            notice["waiting"] = clip(receipt.get("waiting") or "", 200)
+            notice["reason"] = clip(receipt.get("reason") or "", 300)
+            target = receipt.get("target")
+            notice["target"] = target.get("kind") if isinstance(target, dict) else None
+            if notice["state"] == "rejected":
+                # The receipt file's own time: no number from the file is trusted.
+                rejected_at = found["receipt"].stat().st_mtime
+                notice["retry_due"] = notice["attempt"] < config["inbox_max_attempts"] and \
+                    now - rejected_at >= config["inbox_retry_minutes"] * 60
         except Exception as error:  # this notice only
-            log(f"inbox: {message_id} not recovered: {type(error).__name__}: {error}")
-
-
-def settle_receipt(root, inbox, message_id, record, now):
-    receipt = read_receipt(inbox, message_id)
-    if receipt == "invalid":
-        if not record.get("invalid_receipt"):
-            log(f"inbox: ignoring an invalid receipt for {message_id}")  # once per notice
-        record["invalid_receipt"] = True
-        receipt = None
-    if receipt is None:
-        # Whycode is closed, or has not looked yet. A file gone without a receipt is
-        # written again under the same id: Whycode's ledger keeps it single.
-        if record.get("payload") and not (inbox / (message_id + ".json")).exists() and \
-                now - record.get("sent", now) > 600:
-            write_inbox_file(inbox, message_id, record["payload"])
-            record["sent"] = now
-        return
-    status = receipt["status"]
-    record["receipt"] = {k: receipt.get(k) for k in ("status", "at", "waiting", "reason",
-                                                     "target")}
-    if status == "delivered":
-        acknowledged = [e for e in record["events"] if acknowledge(root, e, "delivered")]
-        if len(acknowledged) == len(record["events"]):
-            record.update(status="delivered", delivered=now)
-            target = receipt.get("target") if isinstance(receipt.get("target"), dict) else {}
-            log(f"inbox: #{record['ticket']} delivered to {target.get('kind', '?')} "
-                f"(events {', '.join(map(str, record['events']))})")
-    elif status == "rejected":
-        record.update(status="rejected", rejected=now,
-                      reason=str(receipt.get("reason", ""))[:300])
-        log(f"inbox: #{record['ticket']} rejected: {record['reason']}")
-    else:
-        record["status"] = "queued"
+            invalid.append(message_id)
+            log(f"inbox: {message_id} unreadable: {type(error).__name__}: {error}")
+    return notices, invalid
 
 
 def acknowledge(root, event_id, why):
@@ -995,61 +962,62 @@ def acknowledge(root, event_id, why):
 
 
 def deliver_notices(root, config, now=None):
-    """Model-free, one pass: settle receipts (acknowledge on `delivered`), then send one
-    notice per ticket whose newest event is an unacknowledged state change. Returns the
-    inbox state the watchdog reads; never raises into the caller, and one notice's
-    failure never stops another's."""
+    """Model-free, one pass, without sender state: the queue and Whycode's inbox folder
+    are the only truth, so no lost or damaged record can make a notice go twice under
+    another id or acknowledge the wrong events. A delivered receipt acknowledges its
+    range; a new notice goes for each ticket whose newest event is an unacknowledged
+    state change. Returns a summary for the watchdog; never raises into the caller, and
+    one notice's or ticket's failure never stops another's."""
     now = now or time.time()
     path = root / INBOX_STATE
+    summary = {"unavailable": "", "rejected": {}, "in_flight": {}, "invalid": []}
     try:
-        state = ensure_inbox_scope(root, now)
-        if not isinstance(state.get("messages"), dict):
-            state["messages"] = {}
-        inbox, unavailable = inbox_folder(config)
-        state["unavailable"] = unavailable
+        since = ensure_inbox_scope(root, now)
+        inbox, summary["unavailable"] = inbox_folder(config)
         if inbox is None:
-            write_json(path, state)
-            return state
-        messages = state["messages"] = valid_records(state["messages"])
-        unacknowledged = inbox_events(root, state["since"])
-        recover_published(root, inbox, messages, unacknowledged)
-        for message_id, record in list(messages.items()):
-            if record.get("status") in ("sent", "queued"):
-                try:
-                    settle_receipt(root, inbox, message_id, record, now)
-                except Exception as error:  # this notice only
-                    log(f"inbox: {message_id} not settled: {type(error).__name__}: {error}")
-        unacknowledged = inbox_events(root, state["since"])  # after the acknowledgements
-        # A notice holds its events while it is on its way or waits for a retry, and a
-        # notice rejected for the last time keeps them with the alert. A new batch is every
-        # unacknowledged event of its ticket newer than all of those, so it is a contiguous
-        # range of the ticket's events, which its id names.
-        held, flight, attempts = {}, set(), {}
-        for record in messages.values():
-            status, attempt = record["status"], record.get("attempt", 1)
-            for event_id in record["events"]:
-                attempts[event_id] = max(attempts.get(event_id, 0), attempt)
-            if status in ("sent", "queued"):
-                flight.update(record["events"])
-            if status in ("sent", "queued") or status == "rejected" and (
-                    attempt >= config["inbox_max_attempts"]
-                    or now - record.get("rejected", now) < config["inbox_retry_minutes"] * 60):
-                held[record["ticket"]] = max([held.get(record["ticket"], 0), *record["events"]])
+            return summary
+        scope = scope_events(root, since)
+        notices, summary["invalid"] = inbox_evidence(root, inbox, scope, now, config)
+        for message_id, notice in notices.items():
+            if notice.get("state") == "delivered":
+                for event_id in notice["pending"]:
+                    acknowledge(root, event_id, "delivered")
+                log(f"inbox: #{notice['ticket']} delivered to {notice.get('target') or '?'} "
+                    f"(events {', '.join(map(str, notice['pending']))})")
+        unacknowledged = inbox_events(root, since)  # after the acknowledgements
+        # A notice holds its range while Whycode has it (or its receipt is invalid), and
+        # while a rejected one waits for its retry or was rejected for the last time.
+        held, flight = {}, set()
+        for notice in notices.values():
+            state = notice.get("state")
+            if state in ("sent", "queued", "invalid"):
+                flight.update(notice["pending"])
+                for event_id in notice["pending"]:
+                    summary["in_flight"][event_id] = notice.get("waiting") or state
+            if state in ("sent", "queued", "invalid") or (
+                    state == "rejected" and not notice.get("retry_due")):
+                held[notice["ticket"]] = max(held.get(notice["ticket"], 0), notice["last"])
+        for message_id, notice in notices.items():
+            if notice.get("state") == "rejected":
+                for event_id in notice["pending"]:
+                    if event_id not in flight:  # a later attempt on its way supersedes it
+                        summary["rejected"][event_id] = \
+                            f"Whycode inbox rejected {message_id}: {notice.get('reason', '')}"
         tickets = {}
         for event in unacknowledged:
             tickets.setdefault(event["ticket"], []).append(event)
-        stamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
         for ticket_id, pending in tickets.items():
             try:
                 if pending[-1]["newest_acknowledged"]:
                     # The ticket's latest state already reached the author: a delivered
                     # notice, or the author's own command (a resubmission, a new head)
-                    # whose response said so. Older events not on their way are history,
-                    # not work to wake the author for.
+                    # whose response said so. Older events not on their way are history.
                     for event in pending:
                         if event["id"] not in flight:
                             acknowledge(root, event["id"], "history: a newer state was told")
                     continue
+                # Every unacknowledged event above all held ranges: a contiguous range of
+                # the ticket's events, which the id names exactly.
                 events = [e for e in pending if e["id"] > held.get(ticket_id, 0)]
                 if not events:
                     continue  # the newest is on its way; older ones wait for it
@@ -1060,29 +1028,33 @@ def deliver_notices(root, config, now=None):
                 if newest["ticket_status"] not in FINAL_STATUSES and \
                         youngest * 60 < config["inbox_settle_seconds"]:
                     continue
-                attempt = max(attempts.get(e["id"], 0) for e in events) + 1
-                message_id = notice_id(root, events, attempt)
-                payload = notice_payload(root, config, message_id, events)
-                write_inbox_file(inbox, message_id, payload)
-                messages[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
-                                        "status": "sent", "sent": now, "sent_at": stamp,
-                                        "attempt": attempt, "payload": payload}
+                batch = {e["id"] for e in events}
+                attempt = max([n["attempt"] for n in notices.values()
+                               if n.get("state") == "rejected" and batch & set(n["events"])],
+                              default=0) + 1
+                message_id = notice_id(root, events[0]["id"], newest["id"], attempt)
+                write_inbox_file(inbox, message_id,
+                                 notice_payload(root, config, message_id, events))
                 log(f"inbox: #{ticket_id} notice {message_id} written "
                     f"(events {', '.join(str(e['id']) for e in events)})")
-                write_json(path, state)  # each published notice is recorded at once
+                notices[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
+                                       "pending": [e["id"] for e in events], "state": "sent",
+                                       "attempt": attempt}
+                for event in events:  # on its way now: an earlier rejection no longer counts
+                    summary["rejected"].pop(event["id"], None)
+                    summary["in_flight"][event["id"]] = "sent"
             except Exception as error:  # this ticket only
                 log(f"inbox: no notice for #{ticket_id}: {type(error).__name__}: {error}")
-        done = [k for k, v in messages.items() if v["status"] == "delivered"]
-        for message_id in done[:-INBOX_KEPT_MESSAGES]:
-            messages.pop(message_id)
-        for record in messages.values():
-            if record.get("status") == "delivered":
-                record.pop("payload", None)  # the text lives in the queue; keep the file small
-        write_json(path, state)
-        return state
+        # A journal for people (`status`); nothing ever reads it back to decide.
+        write_json(path, {"since": since, "invalid": summary["invalid"], "messages": {
+            message_id: {"ticket": n["ticket"], "events": n["events"], "attempt": n["attempt"],
+                         "status": n.get("state"), **{k: n[k] for k in ("waiting", "reason",
+                                                                        "target") if n.get(k)}}
+            for message_id, n in notices.items() if n.get("state") != "settled"}})
+        return summary
     except Exception as error:  # delivery must never stop a build or the watchdog
         log(f"inbox delivery failed: {type(error).__name__}: {error}")
-        return read_json(path, {})
+        return summary
 
 
 def alert_targets(root, config):

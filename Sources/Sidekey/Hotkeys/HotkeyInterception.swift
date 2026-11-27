@@ -121,8 +121,9 @@ enum HotkeyInterceptorClassifier {
     }
 
     /// The candidates of a verdict, judged against the context the press
-    /// began in: the same frontmost app, and only filters that already
-    /// existed then. A changed context gives no candidates.
+    /// began in: the same frontmost app, and only the very filters (by tap
+    /// id) that existed then and still exist. A replacement tap of the same
+    /// app, or a changed frontmost app, gives no candidates.
     static func candidates(
         in taps: [EventTapRecord],
         context: HotkeyPressContext,
@@ -131,24 +132,25 @@ enum HotkeyInterceptorClassifier {
         process: (pid_t) -> InterceptorProcess?
     ) -> [SecureInputApp] {
         guard frontmostPID == context.frontmostPID else { return [] }
-        let present = candidates(in: taps, ownPID: ownPID, frontmostPID: frontmostPID, process: process)
-        return present.filter { context.filterOwners.contains($0.pid) }
+        let surviving = taps.filter { context.filterIDs.contains($0.id) }
+        return candidates(in: surviving, ownPID: ownPID, frontmostPID: frontmostPID, process: process)
     }
 
-    /// Owners of the modifier filters that could act on a press made with
+    /// The modifier filters (tap ids) that could act on a press made with
     /// `frontmostPID` in front.
-    static func filterOwners(in taps: [EventTapRecord], ownPID: pid_t, frontmostPID: pid_t?) -> Set<pid_t> {
+    static func filterIDs(in taps: [EventTapRecord], ownPID: pid_t, frontmostPID: pid_t?) -> Set<UInt32> {
         Set(taps.filter { tap in
             tap.filtersModifiers && tap.tappingPID > 0 && tap.tappingPID != ownPID
                 && (tap.tappedPID == 0 || tap.tappedPID == frontmostPID)
-        }.map(\.tappingPID))
+        }.map(\.id))
     }
 }
 
-/// What surrounded a press when it began.
+/// What surrounded a press when it began, read on the main thread close
+/// enough to the event that nothing could have changed in between.
 struct HotkeyPressContext: Equatable {
     let frontmostPID: pid_t?
-    let filterOwners: Set<pid_t>
+    let filterIDs: Set<UInt32>
 }
 
 /// Compares two views of the same modifier press: the physical one, seen by
@@ -206,7 +208,8 @@ struct HotkeyInterceptionDetector {
     private var heldPress: [HotkeyModifierKey: Int] = [:]
     /// A key that went down with other modifiers: no press until released.
     private var heldIneligible: Set<HotkeyModifierKey> = []
-    private var deliveredHeld: Set<HotkeyModifierKey> = []
+    /// Event times of every delivered event that had the key down alone,
+    /// whether or not the release before it was delivered.
     private var deliveredDowns: [HotkeyModifierKey: [TimeInterval]] = [:]
     private var nextID = 0
 
@@ -246,24 +249,40 @@ struct HotkeyInterceptionDetector {
 
     /// A `flagsChanged` that reached Whytap's shortcut monitors. Returns the
     /// presses already judged blocked that this delivery proves arrived.
+    ///
+    /// Every event with the key down alone is kept by its own event time,
+    /// with no delivered press boundaries: a release that never reached the
+    /// monitors cannot hide the next press. Which press an event belongs to
+    /// is decided by the physical presses' boundaries alone.
     mutating func delivered(rawFlags: UInt64, eventTime: TimeInterval) -> [Int] {
         var reversed: [Int] = []
-        for key in HotkeyModifierKey.allCases {
-            let held = HotkeyFlags.isHeld(key, rawFlags)
-            if held, !deliveredHeld.contains(key) {
-                deliveredHeld.insert(key)
-                deliveredDowns[key, default: []].append(eventTime)
-                if deliveredDowns[key]!.count > 32 { deliveredDowns[key]!.removeFirst() }
-                for (id, press) in presses where press.key == key && press.verdict == .blocked(key)
-                    && Self.matches(press, eventTime) {
-                    presses[id]?.verdict = .delivered(key)
-                    reversed.append(id)
-                }
-            } else if !held {
-                deliveredHeld.remove(key)
+        for key in HotkeyModifierKey.allCases where HotkeyFlags.isOnly(key, rawFlags) {
+            deliveredDowns[key, default: []].append(eventTime)
+            if deliveredDowns[key]!.count > 64 { deliveredDowns[key]!.removeFirst() }
+            for (id, press) in presses where press.key == key && press.verdict == .blocked(key)
+                && Self.matches(press, eventTime) {
+                presses[id]?.verdict = .delivered(key)
+                reversed.append(id)
             }
         }
         return reversed
+    }
+
+    /// The key stopped being a shortcut: its presses, held or awaiting a
+    /// verdict, are retired, and a press still held starts nothing new.
+    mutating func retire(keysOutside watched: Set<HotkeyModifierKey>) {
+        for (id, press) in presses where !watched.contains(press.key) && press.verdict == nil {
+            presses[id]?.eligible = false
+        }
+        for key in HotkeyModifierKey.allCases where !watched.contains(key) {
+            if heldPress.removeValue(forKey: key) != nil { heldIneligible.insert(key) }
+        }
+    }
+
+    /// The press began in a context that cannot be established: it is
+    /// retired unjudged.
+    mutating func retire(_ id: Int) {
+        presses[id]?.eligible = false
     }
 
     /// The verdict for a press, once it is due: nil before its deadline, for

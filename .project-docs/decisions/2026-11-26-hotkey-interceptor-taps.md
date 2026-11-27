@@ -101,7 +101,11 @@ catch it: secure input was off, and the key never reached Whytap at all.
    of the same key whose event timestamp is the same hardware event (within
    2 ms), or lies inside that press's own down-to-up interval (an app that
    swallows and re-posts the key while it is held). A later delivered press
-   never covers an earlier lost one. Both sides use the events' own
+   never covers an earlier lost one. The delivered side keeps every event
+   with the key down alone by its event time, with no delivered press
+   boundaries of its own: a release that never reached the monitors cannot
+   hide the next press; which press an event belongs to is decided by the
+   physical boundaries alone. Both sides use the events' own
    timestamps, so a busy main thread does not change the match; deadlines
    use main-thread time. A released press is judged 0.3 s after the release
    was seen, never earlier by the 0.5 s hold deadline; a press still held is
@@ -113,13 +117,20 @@ catch it: secure input was off, and the key never reached Whytap at all.
    its key goes down alone (`HotkeyFlags.isOnly`, the rule of
    `ModifierOnlyHotkeyMonitor` and the gesture state machine): Shift+Right ⌥
    or both Options start nothing, and a press that gains another modifier
-   while held is retired unjudged, as the gesture monitors cancel it.
+   while held is retired unjudged, as the gesture monitors cancel it. A key
+   that stops being a shortcut retires its held and pending presses at once,
+   even while another watched key keeps the tap installed; a press still held
+   then starts nothing new until it is released.
 4. **Name possible interceptors only on that signal, in the press's own
-   context.** When a press begins, the frontmost app and the owners of the
-   modifier filters that could act on it are recorded. On a lost press the
+   context.** When a press begins, the frontmost app and the exact filters
+   (tap ids) that could act on it are recorded. Both are read when the
+   probe's callback reaches the main thread; if that is more than 50 ms
+   after the probe saw the event, they may describe a later moment, so the
+   press is not attributed at all. A tap that replaces another one of the
+   same app gets a new id and inherits nothing. On a lost press the
    tap list is read again: candidates are enabled active filters with
    flagsChanged in their mask, owned by another process, global or filtering
-   the frontmost app, that already existed when the press began. If another
+   the frontmost app, that are the very taps recorded when the press began. If another
    app came to the front in between, nothing is shown. The tap list proves
    which apps could have taken the press, not which one did, so the text
    names them as possible interceptors: "Punto Switcher may be intercepting
@@ -172,7 +183,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (40) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (49) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -205,7 +216,15 @@ still reporting, bindings followed only on delivered modifiers, Shift+Right
 ⌥ starting an Option-only candidate, candidates read without the press's
 context, and a two-candidate label (575 pt) running off small displays. Its
 five failing detector assertions are scenarios above; points 1 to 5 answer
-each finding. Removing the eligibility or frontmost-context checks fails
+each finding. Its second review (ticket 686) found three remaining cases: a
+delivered release that never arrived hid the next press, a key unbound
+while another watched key kept the tap left its pending press alive, and
+attribution intersected owner pids (a replacement tap inherited the old
+one's context) and read the context on a late callback. Its four
+regressions (`testQueueReview...`) are in the suite, with neighbours of
+each class: no delivered releases at all around a lost press, a delivered
+chord with Shift, unbinding and rebinding while held, a late callback of a
+hold, the same tap id surviving the verdict. Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

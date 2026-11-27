@@ -49,6 +49,11 @@ final class HotkeyInterceptionGuard {
     static let maxDecisionRetries = 3
     /// After an app launches, its tap is usually up within this time.
     static let launchSettleDelay: TimeInterval = 3
+    /// The frontmost app and the tap list are read when the probe's callback
+    /// reaches the main thread. Later than this after the probe saw the
+    /// event, they may describe a moment after the press, so the press is
+    /// not attributed at all.
+    static let maximumContextLag: TimeInterval = 0.05
 
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "hotkey")
 
@@ -159,11 +164,17 @@ final class HotkeyInterceptionGuard {
         for change in changes {
             switch change {
             case .began(let id, let at):
+                guard system.uptime() - seenAt <= Self.maximumContextLag else {
+                    // The main thread was late: what is in front now, and
+                    // which taps exist now, may not be what the press met.
+                    detector.retire(id)
+                    continue
+                }
                 let front = system.frontmostPID()
                 contexts[id] = HotkeyPressContext(
                     frontmostPID: front,
-                    filterOwners: HotkeyInterceptorClassifier.filterOwners(in: system.tapList(), ownPID: system.ownPID,
-                                                                          frontmostPID: front))
+                    filterIDs: HotkeyInterceptorClassifier.filterIDs(in: system.tapList(), ownPID: system.ownPID,
+                                                                    frontmostPID: front))
                 schedule(id, due: at + HotkeyInterceptionDetector.holdDecision)
             case .ended(let id, let at):
                 schedule(id, due: at + HotkeyInterceptionDetector.decisionDelay)
@@ -245,7 +256,11 @@ final class HotkeyInterceptionGuard {
     /// The probe exists exactly while a modifier shortcut is live and the
     /// session is interactive.
     private func syncProbe() {
-        let needed = !system.watchedKeys().isEmpty && system.isSessionInteractive()
+        let watched = system.watchedKeys()
+        // A key that stopped being a shortcut keeps no pending press, even
+        // while another watched key keeps the tap installed.
+        detector.retire(keysOutside: watched)
+        let needed = !watched.isEmpty && system.isSessionInteractive()
         if !needed {
             if probe.isRunning { stopProbe() }
             return

@@ -108,7 +108,7 @@ final class HotkeyInterceptionTests: XCTestCase {
         let taps = ordinaryTaps + [puntoTap]
         let context = HotkeyPressContext(
             frontmostPID: frontPID,
-            filterOwners: HotkeyInterceptorClassifier.filterOwners(in: taps, ownPID: ownPID, frontmostPID: frontPID))
+            filterIDs: HotkeyInterceptorClassifier.filterIDs(in: taps, ownPID: ownPID, frontmostPID: frontPID))
         XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: context, frontmostPID: frontPID,
                                                              ownPID: ownPID, process: process), [punto])
         XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: context, frontmostPID: 777,
@@ -116,7 +116,7 @@ final class HotkeyInterceptionTests: XCTestCase {
                        "another app came to front before the verdict")
         let before = HotkeyPressContext(
             frontmostPID: frontPID,
-            filterOwners: HotkeyInterceptorClassifier.filterOwners(in: ordinaryTaps, ownPID: ownPID, frontmostPID: frontPID))
+            filterIDs: HotkeyInterceptorClassifier.filterIDs(in: ordinaryTaps, ownPID: ownPID, frontmostPID: frontPID))
         XCTAssertEqual(HotkeyInterceptorClassifier.candidates(in: taps, context: before, frontmostPID: frontPID,
                                                              ownPID: ownPID, process: process), [],
                        "a filter that appeared after the press began cannot have taken it")
@@ -778,5 +778,143 @@ final class HotkeyBlockerBadgeStackTests: XCTestCase {
         XCTAssertEqual(punto.fallbackSymbol, "keyboard")
         XCTAssertEqual(dia.fallbackSymbol, "lock.fill")
         XCTAssertEqual(punto.label, "Punto Switcher is intercepting Right Option")
+    }
+}
+
+/// Regressions from the builder's review of queue ticket 686.
+extension HotkeyInterceptionTests {
+    func testQueueReviewMatchesExactDownWhenPreviousReleaseWasNotDelivered() {
+        var detector = HotkeyInterceptionDetector()
+        let first = firstID(phys(&detector, rightOptionDown, 10))!
+        _ = detector.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        phys(&detector, noModifiers, 10.1)
+        XCTAssertEqual(detector.decide(first, now: 10.4), .delivered(.rightOption))
+
+        let second = firstID(phys(&detector, rightOptionDown, 10.6))!
+        _ = detector.delivered(rawFlags: rightOptionDown, eventTime: 10.6)
+        phys(&detector, noModifiers, 10.7)
+        _ = detector.delivered(rawFlags: noModifiers, eventTime: 10.7)
+        XCTAssertEqual(detector.decide(second, now: 11.1), .delivered(.rightOption))
+    }
+
+    func testQueueReviewDisablingOneWatchedModifierRetiresItsPendingPress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: 100.1)
+        probeSees(probe, world, noModifiers)
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: 100.2)
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: 100.5)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testQueueReviewReplacementTapDoesNotInheritPressContext() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: 100.1)
+        probeSees(probe, world, noModifiers)
+        let replacement = EventTapRecord(id: 89, location: .session, isActiveFilter: true, enabled: true,
+                                         tappingPID: puntoPID, tappedPID: frontPID, eventsOfInterest: keysAndModifiers)
+        world.taps = ordinaryTaps + [replacement]
+        world.advance(to: 100.5)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}
+
+extension HotkeyInterceptionTests {
+    func testQueueReviewLateCallbackCannotUseATapFromAfterThePress() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+
+        // The HID probe observed the press at 100. The main-thread callback
+        // runs after a different app and filter have arrived.
+        world.advance(to: 100.2)
+        world.front = 777
+        world.taps.append(puntoTap)
+        probe.deliver?(rightOptionDown, 100, 100)
+        probe.deliver?(noModifiers, 100.1, 100.1)
+        world.advance(to: 100.6)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+}
+
+/// The same three classes, beyond the builder's exact cases.
+extension HotkeyInterceptionTests {
+    func testNoDeliveredReleasesAtAllStillMatchesEachPressByItsOwnBoundaries() {
+        var d = HotkeyInterceptionDetector()
+        let a = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 10)
+        phys(&d, noModifiers, 10.1)
+        let lost = firstID(phys(&d, rightOptionDown, 10.5))!
+        phys(&d, noModifiers, 10.6)
+        let c = firstID(phys(&d, rightOptionDown, 11))!
+        _ = d.delivered(rawFlags: rightOptionDown, eventTime: 11)
+        phys(&d, noModifiers, 11.1)
+        XCTAssertEqual(d.decide(a, now: 12), .delivered(.rightOption))
+        XCTAssertEqual(d.decide(lost, now: 12), .blocked(.rightOption), "between two arrivals, with no releases delivered")
+        XCTAssertEqual(d.decide(c, now: 12), .delivered(.rightOption))
+    }
+
+    func testADeliveredChordWithShiftDoesNotCountAsTheShortcut() {
+        var d = HotkeyInterceptionDetector()
+        let id = firstID(phys(&d, rightOptionDown, 10))!
+        _ = d.delivered(rawFlags: rightOptionDown | shift, eventTime: 10) // rewritten on the way
+        phys(&d, noModifiers, 10.1)
+        XCTAssertEqual(d.decide(id, now: 10.4), .blocked(.rightOption))
+    }
+
+    func testUnbindingWhileHeldAndRebindingBeforeReleaseJudgesNothing() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.watched = [.rightCommand]
+        guard_.bindingsOrSessionChanged()
+        world.watched = [.rightCommand, .rightOption]
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty, "the press began while it was a shortcut that was then removed")
+
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the next press is judged again")
+    }
+
+    func testLateCallbackOfAHoldIsNotAttributed() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let t = world.uptime
+        world.uptime = t + HotkeyInterceptionGuard.maximumContextLag + 0.05
+        probe.deliver?(rightOptionDown, t, t)
+        world.advance(to: t + 2)
+        XCTAssertTrue(presenter.presented.isEmpty)
+    }
+
+    func testTheSameTapSurvivingTheVerdictIsNamed() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.taps = [puntoTap] + ordinaryTaps // reordered list, same tap id
+        world.advance(to: world.uptime + 1)
+        XCTAssertEqual(presenter.presented.first?.badge.app, punto)
     }
 }

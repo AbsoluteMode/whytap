@@ -287,9 +287,10 @@ Monitoring), sees the physical press first. When Whytap's `NSEvent` shortcut
 monitors never see that same press held (matched per press by event
 timestamp; a key pressed together with Shift or another modifier is never
 judged, as the monitors would not take it either), `HotkeyInterceptionGuard`
-reads `CGGetEventTapList` and names the owners of enabled active
-flagsChanged filters that existed when the press began, with the same app
-in front, as possible interceptors: the logo shakes in the same pill right of the island, at full
+reads `CGGetEventTapList` and names the owners of the very enabled active
+flagsChanged filters (by tap id) that existed when the press began, with the
+same app in front, as possible interceptors; a press whose context could not
+be read promptly is not attributed: the logo shakes in the same pill right of the island, at full
 strength, for about 3 s, then hides; it never stays dimmed. Every new lost
 press shows it again and restarts the time. Hovering reads "Punto Switcher
 may be intercepting Right Option"; a label too long for the space beside

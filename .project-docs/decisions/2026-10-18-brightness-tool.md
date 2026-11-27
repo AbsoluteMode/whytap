@@ -51,7 +51,7 @@ sources:
     reference: Sources/Sidekey/Brightness/BrightnessKeyEventTap.swift
     confirmed_at: 2026-10-19
   - type: repository
-    reference: Sources/Sidekey/Brightness/ToolboxDisplayPane.swift
+    reference: Sources/Sidekey/Brightness/DisplayBrightnessSettings.swift
     confirmed_at: 2026-10-19
   - type: repository
     reference: Sources/Sidekey/DynamicIsland/IslandView.swift
@@ -92,7 +92,7 @@ sources:
   - type: url
     reference: https://developer.apple.com/videos/play/wwdc2022/10114/ (Display EDR content with Core Image, Metal, and SwiftUI)
     confirmed_at: 2026-10-19
-related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-17-native-hover-glass.md, 2026-10-28-brightness-hold.md]
+related: [../project.md, 2026-10-17-hover-tool-search.md, 2026-10-17-native-hover-glass.md, 2026-10-28-brightness-hold.md, 2026-11-26-every-feature-in-features.md]
 ---
 
 # Brightness tool

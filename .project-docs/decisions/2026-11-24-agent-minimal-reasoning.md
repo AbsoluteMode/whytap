@@ -2,7 +2,7 @@
 id: agent-minimal-reasoning-2026-11-24
 type: decision
 title: The built-in Agent asks for the least reasoning its model accepts
-summary: The built-in Agent sends the lowest reasoning setting its model takes, from the tables Drop Smart uses - OpenAI none, minimal or low; Anthropic low effort with thinking off on Claude Haiku 5.5 and Claude Sonnet 5 and between_tools on Claude Sonnet 5.5; OpenRouter off or the lowest level of its catalog entry. In a turn with the provider's own web search OpenAI minimal becomes low and Claude Sonnet 5.5 keeps its own thinking. Any HTTP 400 on the turn's first request that carried a reasoning field is repeated once at OpenAI low or without the field, as in Smart; the error text is not read.
+summary: The built-in Agent sends the lowest reasoning setting its model takes, from the tables Drop Smart uses - OpenAI none, minimal or low; Anthropic low effort with thinking off on Claude Haiku 5.5 and Claude Sonnet 5 and between_tools on Claude Sonnet 5.5; OpenRouter off or the lowest level of its catalog entry. In a turn with the provider's own web search OpenAI minimal becomes low (Claude Sonnet 5.5 kept its own thinking there until 2026-11-26, see 2026-11-26-agent-fast-search-answers.md). Any HTTP 400 on the turn's first request that carried a reasoning field is repeated once at OpenAI low or without the field, as in Smart; the error text is not read.
 status: confirmed
 tags: [agent, native-agent, anthropic, openai, openrouter, effort, reasoning, latency, diagnostics]
 canonical_for: [agent-reasoning]
@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/NativeAgentMinimalReasoningTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-23-agent-low-effort.md, 2026-11-24-smart-minimal-reasoning.md]
+related: [2026-11-23-agent-low-effort.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-26-agent-fast-search-answers.md]
 ---
 
 # The built-in Agent asks for the least reasoning
@@ -82,6 +82,10 @@ the tables Smart uses; nothing is duplicated.
     identical `finish_answer` calls in one response (see below), which the
     Agent rejects: no `thinking` field is sent and low effort stays, as before
     this change.
+    Superseded on 2026-11-26 (2026-11-26-agent-fast-search-answers.md): its
+    own default thinking held the first byte about 9 s, so it gets
+    `between_tools` beside the search too and the first valid
+    `finish_answer` is taken.
   The provider's search is on by default for models that have it, so in the
   default setup GPT-5, GPT-5 mini, GPT-5 nano and Claude Sonnet 5.5 behave as
   they did on 2026-11-23; they get the lower setting when the Agent's search

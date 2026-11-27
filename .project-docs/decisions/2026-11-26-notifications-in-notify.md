@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Settings/SettingsWindowTabTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-24-settings-around-features.md, 2026-11-24-hover-notify-monitor-screens.md, 2026-10-20-whytap-links.md, 2026-11-24-lil-bro.md]
+related: [2026-11-24-settings-around-features.md, 2026-11-24-hover-notify-monitor-screens.md, 2026-10-20-whytap-links.md, 2026-11-24-lil-bro.md, 2026-11-26-every-feature-in-features.md]
 ---
 
 ## Context

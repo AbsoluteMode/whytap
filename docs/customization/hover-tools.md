@@ -36,7 +36,7 @@ All paths below start at `Sources/Sidekey/`.
 | Floating text translation and system-audio subtitles | `Translation/TranslationWindowController.swift`, `Translation/LiveSubtitleModel.swift` |
 | Inline monitoring, picker and refresh lifecycle | `Monitor/MonitorHoverPanel.swift`, `Monitor/MonitorStore.swift` |
 | Inline brightness strip, backlight hold, Extra boost (display table + EDR trigger) | `Brightness/IslandBrightnessStrip.swift`, `Brightness/ScreenBrightnessController.swift`, `Brightness/GammaBrightnessBoost.swift`, `Brightness/BrightnessHeadroomTrigger.swift` |
-| Brightness keys (event tap, steps, Extra gesture) and the Settings -> Toolbox -> Display pane | `Brightness/BrightnessKeys.swift`, `Brightness/BrightnessKeyEventTap.swift`, `Brightness/ToolboxDisplayPane.swift` |
+| Brightness keys (event tap, steps, Extra gesture) and the Settings -> Features -> Display settings | `Brightness/BrightnessKeys.swift`, `Brightness/BrightnessKeyEventTap.swift`, `Brightness/DisplayBrightnessSettings.swift` |
 | Measured pointer targets, viewport clipping and down/up ownership | `DynamicIsland/IslandHoverHitBridge.swift`, `DynamicIsland/IslandPanel.swift` |
 | Catalog search, aliases, AppKit search field and keyboard commands | `DynamicIsland/IslandHoverToolSearch.swift` |
 | Drag/drop catalog, fixed Add and selected layout | `Settings/ToolboxSettingsView.swift` |

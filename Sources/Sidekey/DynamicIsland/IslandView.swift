@@ -1226,6 +1226,7 @@ struct IslandView: View {
                             onOpenCalendar: actions.openCalendar,
                             onOpenTranslate: actions.openTranslate,
                             onOpenSubtitles: actions.openSubtitles,
+                            onOpenHelpCenter: actions.openHelpCenter,
                             onOpenScreenshot: actions.openScreenshot,
                             onOpenHelp: actions.openHelp,
                             onQuit: actions.quitApplication,
@@ -2592,6 +2593,7 @@ private struct IslandDropModeHoverPanel: View {
     var onOpenCalendar: () -> Void = {}
     var onOpenTranslate: () -> Void = {}
     var onOpenSubtitles: () -> Void = {}
+    var onOpenHelpCenter: () -> Void = {}
     var onOpenScreenshot: () -> Void = {}
     let onOpenHelp: () -> Void
     let onQuit: () -> Void
@@ -2972,6 +2974,7 @@ private struct IslandDropModeHoverPanel: View {
         case .openCalendar: onOpenCalendar()
         case .openTranslate: onOpenTranslate()
         case .openSubtitles: onOpenSubtitles()
+        case .openHelpCenter: onOpenHelpCenter()
         case .openScreenshot: onOpenScreenshot()
         case .quit: onQuit()
         case .comingSoon: break

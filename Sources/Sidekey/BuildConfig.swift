@@ -41,6 +41,14 @@ enum BuildConfig {
     static let landingURL = URL(string: "https://github.com/AbsoluteMode/whytap")!
     #endif
 
+    /// The Whytap website, opened in the user's browser only.
+    static let websiteURL = URL(string: "https://whytap.ai")!
+
+    /// Help Center: the Ask page where a question gets an answer. The single
+    /// constant behind every Help item (Settings footer, Help window, island
+    /// tool search). WHY: .project-docs/decisions/2026-11-26-help-center-link.md
+    static let helpCenterURL = URL(string: "https://whytap.ai/help/")!
+
     /// Public-facing Privacy Policy URL. `nil` hides the link entirely so no
     /// surface renders a broken affordance.
     static let privacyPolicyURL: URL? = nil

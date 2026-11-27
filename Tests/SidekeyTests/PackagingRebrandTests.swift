@@ -160,27 +160,31 @@ final class PackagingRebrandTests: XCTestCase {
         let identity = try makeSigningIdentity(in: identities, name: "release")
         let other = try makeSigningIdentity(in: identities, name: "other")
 
-        let missing = try runBuildFixture(certificate: identity.certificate)
+        let key = try String(contentsOf: identity.key, encoding: .utf8)
+        let runs = try concurrently([
+            { try self.runBuildFixture(certificate: identity.certificate) },
+            { try self.runBuildFixture(certificate: identity.certificate,
+                  environment: ["EXODIA_COMMUNITY_SIGNING_KEY_FILE": other.key.path]) },
+            { try self.runBuildFixture(certificate: identity.certificate,
+                  environment: ["EXODIA_COMMUNITY_SIGNING_KEY": key]) },
+            { try self.runBuildFixture(certificate: identity.certificate,
+                  environment: ["EXODIA_COMMUNITY_SIGNING": "adhoc"]) },
+        ])
+        let (missing, mismatched, matching, optedOut) = (runs[0], runs[1], runs[2], runs[3])
         XCTAssertEqual(missing.result.status, 1, missing.result.output)
         XCTAssertTrue(missing.result.output.contains("EXODIA_COMMUNITY_SIGNING_KEY"), missing.result.output)
         XCTAssertNil(missing.calls, missing.result.output)
 
-        let mismatched = try runBuildFixture(certificate: identity.certificate,
-            environment: ["EXODIA_COMMUNITY_SIGNING_KEY_FILE": other.key.path])
         XCTAssertEqual(mismatched.result.status, 1, mismatched.result.output)
         XCTAssertTrue(mismatched.result.output.contains("does not match"), mismatched.result.output)
         XCTAssertNil(mismatched.calls, mismatched.result.output)
 
         // The keychain is prepared only after compiling, so no security call precedes it.
-        let matching = try runBuildFixture(certificate: identity.certificate,
-            environment: ["EXODIA_COMMUNITY_SIGNING_KEY": try String(contentsOf: identity.key, encoding: .utf8)])
         XCTAssertEqual(matching.result.status, 64, matching.result.output)
         XCTAssertEqual(matching.calls, "compiler\n")
         XCTAssertTrue(matching.result.output.contains("Code signing: certificate:" + identity.sha1),
                       matching.result.output)
 
-        let optedOut = try runBuildFixture(certificate: identity.certificate,
-            environment: ["EXODIA_COMMUNITY_SIGNING": "adhoc"])
         XCTAssertEqual(optedOut.result.status, 64, optedOut.result.output)
         XCTAssertEqual(optedOut.calls, "compiler\n")
         XCTAssertTrue(optedOut.result.output.contains("Code signing: adhoc"), optedOut.result.output)
@@ -212,36 +216,40 @@ final class PackagingRebrandTests: XCTestCase {
             }.joined(separator: "\n") + "\n     \(identities.count) valid identities found\n"
         }
 
-        let otherTeam = try runBuildFixture(teamID: team, securityOutput: listing([(renewal, "OTHERTEAM1")]))
+        let renewed = listing([(identity, team), (renewal, team)])
+        let runs = try concurrently([
+            { try self.runBuildFixture(teamID: team, securityOutput: listing([(renewal, "OTHERTEAM1")])) },
+            { try self.runBuildFixture(teamID: team, securityOutput: listing([(identity, team)])) },
+            { try self.runBuildFixture(teamID: team, securityOutput: renewed) },
+            { try self.runBuildFixture(teamID: team, securityOutput: renewed,
+                  environment: ["EXODIA_DEVELOPER_ID_IDENTITY": renewal.lowercased()]) },
+            { try self.runBuildFixture(teamID: team, securityOutput: renewed,
+                  environment: ["EXODIA_DEVELOPER_ID_IDENTITY": String(repeating: "A", count: 40)]) },
+            { try self.runBuildFixture(teamID: team, environment: ["EXODIA_COMMUNITY_SIGNING": "adhoc"]) },
+        ])
+        let (otherTeam, found, ambiguous) = (runs[0], runs[1], runs[2])
+        let (chosen, unknown, optedOut) = (runs[3], runs[4], runs[5])
         XCTAssertEqual(otherTeam.result.status, 1, otherTeam.result.output)
         XCTAssertTrue(otherTeam.result.output.contains("no valid Developer ID Application certificate of team " + team),
                       otherTeam.result.output)
         XCTAssertEqual(otherTeam.calls, "identity-lookup\n")
 
-        let found = try runBuildFixture(teamID: team, securityOutput: listing([(identity, team)]))
         XCTAssertEqual(found.result.status, 64, found.result.output)
         XCTAssertEqual(found.calls, "identity-lookup\ncompiler\n")
         XCTAssertTrue(found.result.output.contains("Code signing: team:" + team), found.result.output)
         XCTAssertTrue(found.result.output.contains("Developer ID identity: " + identity), found.result.output)
 
         // After a renewal both certificates stay valid until the old one expires.
-        let renewed = listing([(identity, team), (renewal, team)])
-        let ambiguous = try runBuildFixture(teamID: team, securityOutput: renewed)
         XCTAssertEqual(ambiguous.result.status, 1, ambiguous.result.output)
         XCTAssertTrue(ambiguous.result.output.contains("EXODIA_DEVELOPER_ID_IDENTITY"), ambiguous.result.output)
         XCTAssertEqual(ambiguous.calls, "identity-lookup\n")
 
-        let chosen = try runBuildFixture(teamID: team, securityOutput: renewed,
-            environment: ["EXODIA_DEVELOPER_ID_IDENTITY": renewal.lowercased()])
         XCTAssertEqual(chosen.result.status, 64, chosen.result.output)
         XCTAssertTrue(chosen.result.output.contains("Developer ID identity: " + renewal), chosen.result.output)
 
-        let unknown = try runBuildFixture(teamID: team, securityOutput: renewed,
-            environment: ["EXODIA_DEVELOPER_ID_IDENTITY": String(repeating: "A", count: 40)])
         XCTAssertEqual(unknown.result.status, 1, unknown.result.output)
         XCTAssertNil(unknown.calls?.range(of: "compiler"), unknown.result.output)
 
-        let optedOut = try runBuildFixture(teamID: team, environment: ["EXODIA_COMMUNITY_SIGNING": "adhoc"])
         XCTAssertEqual(optedOut.result.status, 64, optedOut.result.output)
         XCTAssertEqual(optedOut.calls, "compiler\n")
         XCTAssertTrue(optedOut.result.output.contains("Code signing: adhoc"), optedOut.result.output)
@@ -546,18 +554,21 @@ final class PackagingRebrandTests: XCTestCase {
 
     /// Only Developer ID code can be notarized.
     func test_notarizationNeedsTheDeveloperIDTeam() throws {
-        let adhoc = try runBuildFixture(arguments: ["--preflight-only"], environment: ["EXODIA_NOTARIZE": "1"])
+        let runs = try concurrently([
+            { try self.runBuildFixture(arguments: ["--preflight-only"], environment: ["EXODIA_NOTARIZE": "1"]) },
+            { try self.runBuildFixture(teamID: "TEAMID1234",
+                  environment: ["EXODIA_NOTARIZE": "1", "EXODIA_COMMUNITY_SIGNING": "adhoc"]) },
+            { try self.runBuildFixture(teamID: "TEAMID1234", environment: ["EXODIA_NOTARIZE": "yes"]) },
+        ])
+        let (adhoc, optedOut, invalid) = (runs[0], runs[1], runs[2])
         XCTAssertEqual(adhoc.result.status, 1, adhoc.result.output)
         XCTAssertTrue(adhoc.result.output.contains("cannot be notarized"), adhoc.result.output)
         XCTAssertNil(adhoc.calls, adhoc.result.output)
 
-        let optedOut = try runBuildFixture(teamID: "TEAMID1234",
-            environment: ["EXODIA_NOTARIZE": "1", "EXODIA_COMMUNITY_SIGNING": "adhoc"])
         XCTAssertEqual(optedOut.result.status, 1, optedOut.result.output)
         XCTAssertTrue(optedOut.result.output.contains("cannot be notarized"), optedOut.result.output)
         XCTAssertNil(optedOut.calls, optedOut.result.output)
 
-        let invalid = try runBuildFixture(teamID: "TEAMID1234", environment: ["EXODIA_NOTARIZE": "yes"])
         XCTAssertEqual(invalid.result.status, 2, invalid.result.output)
         XCTAssertNil(invalid.calls, invalid.result.output)
     }
@@ -573,40 +584,44 @@ final class PackagingRebrandTests: XCTestCase {
             (["NAME                PROJECT  DESCRIPTION"] + names.map { "\($0)  whytap" }).joined(separator: "\n") + "\n"
         }
 
-        let empty = try runBuildFixture(teamID: team, securityOutput: identities,
-                                        caseListing: listing(["GITHUB_LENDING_KEY"]), environment: notarize)
+        let runs = try concurrently([
+            { try self.runBuildFixture(teamID: team, securityOutput: identities,
+                  caseListing: listing(["GITHUB_LENDING_KEY"]), environment: notarize) },
+            { try self.runBuildFixture(teamID: team, securityOutput: identities,
+                  caseListing: listing(["ASC_API_KEY_ID", "ASC_API_KEY_P8_OLD", "ASC_API_KEY_P8"]), environment: notarize) },
+            { try self.runBuildFixture(teamID: team, securityOutput: identities, environment: notarize) },
+            { try self.runBuildFixture(teamID: team, securityOutput: identities, caseListing: "",
+                  caseStatus: 4, environment: notarize) },
+            { try self.runBuildFixture(teamID: team, securityOutput: identities,
+                  caseListing: listing(["ASC_API_KEY_ID", "ASC_API_KEY_ISSUER_ID", "ASC_API_KEY_P8"]), environment: notarize) },
+            { try self.runBuildFixture(teamID: team, securityOutput: identities, caseListing: listing([])) },
+        ])
+        let (empty, partial, noHelper) = (runs[0], runs[1], runs[2])
+        let (locked, ready, plain) = (runs[3], runs[4], runs[5])
         XCTAssertEqual(empty.result.status, 1, empty.result.output)
         XCTAssertTrue(empty.result.output.contains("Missing keys: ASC_API_KEY_ID ASC_API_KEY_ISSUER_ID ASC_API_KEY_P8"),
                       empty.result.output)
         XCTAssertTrue(empty.result.output.contains("Whytap Case project whytap"), empty.result.output)
         XCTAssertEqual(empty.calls, "identity-lookup\nnotary-tools\ncase-ls\n")
 
-        let partial = try runBuildFixture(teamID: team, securityOutput: identities,
-            caseListing: listing(["ASC_API_KEY_ID", "ASC_API_KEY_P8_OLD", "ASC_API_KEY_P8"]), environment: notarize)
         XCTAssertEqual(partial.result.status, 1, partial.result.output)
         XCTAssertTrue(partial.result.output.contains("Missing keys: ASC_API_KEY_ISSUER_ID\n"), partial.result.output)
         XCTAssertNil(partial.calls?.range(of: "compiler"), partial.result.output)
 
-        let noHelper = try runBuildFixture(teamID: team, securityOutput: identities, environment: notarize)
         XCTAssertEqual(noHelper.result.status, 1, noHelper.result.output)
         XCTAssertTrue(noHelper.result.output.contains("its command is missing"), noHelper.result.output)
         XCTAssertEqual(noHelper.calls, "identity-lookup\nnotary-tools\n")
 
-        let locked = try runBuildFixture(teamID: team, securityOutput: identities, caseListing: "",
-                                         caseStatus: 4, environment: notarize)
         XCTAssertEqual(locked.result.status, 1, locked.result.output)
         XCTAssertTrue(locked.result.output.contains("could not list project whytap (exit 4)"), locked.result.output)
         XCTAssertNil(locked.calls?.range(of: "compiler"), locked.result.output)
 
-        let ready = try runBuildFixture(teamID: team, securityOutput: identities,
-            caseListing: listing(["ASC_API_KEY_ID", "ASC_API_KEY_ISSUER_ID", "ASC_API_KEY_P8"]), environment: notarize)
         XCTAssertEqual(ready.result.status, 64, ready.result.output)
         XCTAssertEqual(ready.calls, "identity-lookup\nnotary-tools\ncase-ls\ncompiler\n")
         XCTAssertTrue(ready.result.output.contains("Notarization key found in Whytap Case project whytap"),
                       ready.result.output)
 
         // Without notarization neither Apple's notary tools nor Case are used.
-        let plain = try runBuildFixture(teamID: team, securityOutput: identities, caseListing: listing([]))
         XCTAssertEqual(plain.calls, "identity-lookup\ncompiler\n")
     }
 
@@ -977,6 +992,21 @@ final class PackagingRebrandTests: XCTestCase {
         process.waitUntilExit()
         return (process.terminationStatus,
                 String(decoding: data, as: UTF8.self))
+    }
+
+    /// Runs independent fixtures at once and returns their results in order.
+    /// Each `runBuildFixture` has its own directory, stubs and marker, so the
+    /// runs share nothing; one run is about a second of process start-up that
+    /// a test with six cases used to wait six times in a row.
+    // WHY: .project-docs/decisions/2026-11-26-test-suite-speed.md
+    private func concurrently<T>(_ jobs: [() throws -> T]) throws -> [T] {
+        var results = [Result<T, Error>?](repeating: nil, count: jobs.count)
+        let lock = NSLock()
+        DispatchQueue.concurrentPerform(iterations: jobs.count) { index in
+            let result = Result { try jobs[index]() }
+            lock.withLock { results[index] = result }
+        }
+        return try results.map { try XCTUnwrap($0).get() }
     }
 
     /// Runs build-dmg.sh in a minimal committed checkout whose compiler stub exits 64.

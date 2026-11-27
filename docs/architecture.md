@@ -20,7 +20,7 @@ Native macOS client (Swift + SwiftUI + AppKit, SwiftPM). BYOK: the
 user's provider keys or their own OpenAI-compatible endpoints, plus optional
 dictation on this Mac (one downloaded speech model, no on-device LLM); free, MIT. Two hotkeys: hold Space in an editable
 field -> voice -> paste; Right Command tap (text) / hold (voice) -> local
-native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers (except Lil Bro's opt-in answers from whytap.ai),
+native Whytap Agent -> the user's selected model/provider -> answer in the island. No account, no Whytap servers,
 no telemetry. The project and product name is **Whytap**, reaffirmed by the user
 on 2026-10-21; use it in replies, current documentation and new features.
 The module and most internal
@@ -365,8 +365,18 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   plus thinking disabled on Claude Haiku 5.5 and Claude Sonnet 5 and
   between_tools on Claude Sonnet 5.5; OpenRouter reasoning off or the lowest
   level of its saved catalog entry). In a turn with the provider's own web
-  search OpenAI minimal becomes low and Claude Sonnet 5.5 gets no thinking
-  field. The setting follows the request that starts the turn (after a
+  search OpenAI minimal becomes low; Claude Sonnet 5.5 keeps between_tools
+  there too (since 2026-11-26), and several finish_answer calls alone in one
+  response give the first valid one; text after a search is never read as
+  the answer (an end_turn without finish_answer gets the completion request);
+  on a turn that ran the search, Claude's indexed citation tags (<cite
+  index="1-9"> and then </cite>) are removed from the answer prose outside
+  code, never from Insert or Copy; a malformed finish_answer beside a valid
+  one does not fail the batch; finish_answer calls beside a pending search
+  all wait for it; a direct Anthropic request carries a cache_control
+  breakpoint on the system block only after an accepted request of the
+  turn with the same system, tools and search tool. WHY:
+  .project-docs/decisions/2026-11-26-agent-fast-search-answers.md The setting follows the request that starts the turn (after a
   refused provider search, the one without it) and is kept after the first
   accepted exchange. Before that, any HTTP 400 (or OpenRouter 404 "no
   endpoints ... requested parameters") to a request that carried a reasoning
@@ -1070,9 +1080,10 @@ Brightness inside hover:
   and Extra; cooling does not restart them. A display change, lost readback or
   quit ends Hold; the target never transfers or persists. WHY:
   .project-docs/decisions/2026-10-28-brightness-hold.md
-  Settings -> Toolbox -> Display (ToolboxDisplayPane) holds Hold brightness,
-  Extra and Brightness keys without a slider; it reads the display on appear,
-  starts no polling of its own and scrolls in the 188 pt Toolbox area. Brightness keys
+  Settings -> Features -> Display (DisplayBrightnessSettings, until 2026-11-26
+  the Toolbox pane ToolboxDisplayPane) holds Hold brightness, Extra and
+  Brightness keys without a slider; it reads the display on appear and starts
+  no polling of its own. Brightness keys
   are off by default and saved. BrightnessKeyEventTap, a head-insert session
   tap for system-defined events on a SpaceHoldMonitor.TapThread, takes the
   brightness key presses from macOS, so its indicator does not show: sixteenth
@@ -1210,6 +1221,12 @@ Island display selection (multi-monitor):
   through currentDescriptor()/currentVisibleFrame() and follow
   selectionDidChangeNotification. WHY:
   docs/decisions/2026-07-07-island-display-selection-not-nsscreen-main.md
+  The plate's top is the screen top and its height the camera band, which can
+  be fractional (27.5 pt). AppKit snaps the island window outward to whole
+  points, so IslandPanelFramePolicy.hostFrame sizes the hosting view to the
+  actual window height (width stays as requested); a host of the requested
+  height left a one-pixel line above the island. WHY:
+  .project-docs/decisions/2026-11-26-island-host-fills-window-height.md
 
 Now Playing:
   MediaRemoteNowPlayingSource runs the vendored adapter as a long-lived child
@@ -1464,10 +1481,12 @@ equal dates and empty queries keep catalog order. Older caches refresh once for 
 Up/Down and Return choose enabled results; Escape clears then closes. Opening
 the picker refreshes stale/failed catalogs automatically; the footer has no
 Refresh models or Other model ID actions. Custom servers offer only the models
-added in their window, typed or from /models. API keys uses square provider tiles opening an
+added in their window, typed or from /models. API keys uses compact provider tiles (rows as tall as their
+tallest tile, the tab fits the default window unscrolled) opening an
 inline Save/Remove form (a server's tile opens its window instead) with no extra helper/status copy; a short Key accepted
 or Key not accepted notice reports the result. Failed checks keep the previous key. WHY:
 .project-docs/decisions/2026-10-21-provider-key-tiles.md;
+.project-docs/decisions/2026-11-27-compact-key-tiles.md;
 .project-docs/decisions/2026-10-20-model-search.md
 
 Other selection menus use MacMenu/MacPopup: a 30 pt neutral control with 8 pt corners
@@ -1493,7 +1512,8 @@ AgentOtherSection is only the shared switch logic and words. WHY:
 
 Settings is being rebuilt around features, in steps. FeatureCatalog
 (Settings/Features) is the list of features as data: for each AppFeature (Drop,
-Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots) its
+Agent, Meeting Notes, Google search, Translate & Subtitles, Screenshots,
+History, Display, To-do, Calendar, Case, Hover, Notify, Monitor) its
 name, one phrase, bundled clip if any, shortcuts (FeatureHotkey, keys read live
 from HotkeyConfiguration), how it is turned on, where its settings are shown
 today, and its requirements (a model route, a macOS permission, the OpenAI key
@@ -1533,7 +1553,7 @@ Hover; Backup and Integrations from General's More group
 sidebarHome row stays selected, and SettingsBackBar above it leads back
 (SettingsWindowSelection.backLink). The former Notifications tab repeated
 Notify's list and is gone: like agentMode, the notifications id stays only
-for links, What's new and Lil Bro, and opens the Notify screen
+for links and What's new, and opens the Notify screen
 (SettingsWindowTab.featureScreen). WHY:
 .project-docs/decisions/2026-11-26-notifications-in-notify.md
 
@@ -1551,7 +1571,9 @@ stays), Add a key and Fix the key (SettingsWindowSelection.showAPIKeys opens
 Keys & models on API keys; the sidebar entry still opens Models), Allow,
 Restart Whytap and Retry; the back link to Features uses
 MacButtonInteractionStyle like the Features rows; Settings holds
-Mode, Language you speak, Lower other audio and Stop Drop automatically (off
+Mode, Language you speak, Language Drop writes in (Smart's output language,
+PrivacyPreferences.targetLanguage through FeaturesEnvironment.targetLanguage,
+the island's Output Lang), Lower other audio and Stop Drop automatically (off
 and disabled unless the shortcut is Toggle); Vocab and Filler open their
 island editors. The same switches remain in the island. Every
 feature screen is built from Features/FeatureScreen.swift: FeatureScreenContext
@@ -1570,7 +1592,9 @@ the switch (FeatureSwitchModel) writes the same flag as Other and the island
 through FeaturesEnvironment.setAgent/setMeetings/setGoogle; the Agent's
 connects the native Agent first (AgentOtherSection.turn) and moves only once
 it is on, otherwise the card says why. The Agent screen adds Allow file edits
-and commands and things to ask; Meeting Notes adds the note-ready notification
+and commands and things to ask, and its shortcuts include the four keys of the
+links under an answer (FeatureHotkey.agentLink*, the usefulLinks* fields
+Hotkeys edits); Meeting Notes adds the note-ready notification
 and Open notes (the Meetings tab). whytap://settings/agentMode and the Agent's
 setup prompt open the Agent screen (SettingsWindowTab.agentMode resolves to
 Features). Translate & Subtitles, Screenshots, To-do (AppFeature.todo) and
@@ -1581,6 +1605,26 @@ Translate and Subtitles in their Toolbox panes, Shot's capture
 (FeaturesEnvironment.openScreenshot), To-do and Case in the island. To-do and
 Case need nothing and read Ready. WHY:
 .project-docs/decisions/2026-11-24-settings-around-features.md
+
+History (AppFeature.history, tool clipboard), Display (display, tool
+brightness) and Calendar (calendar, tool calendar) were island tiles only and
+are features with screens too: their Open shortcut and a "Use it" row that
+opens the island panel. Display's settings are DisplayBrightnessSettings
+(Hold brightness, Extra, Brightness keys; formerly the Toolbox pane, which now
+only offers Open Display settings) and it lists Keyboard control as optional,
+for Brightness keys. Calendar's screen holds SettingsCalendarIntegrationsView
+(moved out of Integrations, which keeps GitHub and Coding tools) and is Ready
+once it shows a calendar (FeatureSetupSnapshot.calendarConnected: macAccess is
+ready, the same check as the Calendars card, or an account an earlier build
+connected; never while CalendarAvailability is closed), otherwise quietly Not
+set up. Saved access not checked yet, taken back or with no calendars is not
+Ready: Features Home calls prepareMacCalendars() on appear and on activation
+(no prompt, no events) and snapshotCountChanges follows the value. The open
+Drop screen rereads both languages on UserDefaults.didChangeNotification, so
+Output Lang changed in the island shows at once. History needs nothing. Hover's
+row chevron leads a tool to its feature's screen (HoverFeatureView.feature(for:);
+Drop's tiles to Drop, Record and Notes to Meeting Notes), else to Toolbox. WHY:
+.project-docs/decisions/2026-11-26-every-feature-in-features.md
 
 Hover, Notify and Monitor are features with their own screens too. Hover
 (HoverFeatureView) lists the island's tools in HoverLayoutStore order with
@@ -1599,52 +1643,6 @@ Claude Code, Codex, Cursor and Antigravity, Show prompt and Copy prompt.
 CodingAgentPrompt builds the text from NotifyPaths / the Monitor root and the
 enforced contracts. Copying goes through FeaturesEnvironment.copyText. WHY:
 .project-docs/decisions/2026-11-24-hover-notify-monitor-screens.md
-
-Lil Bro is a guide drawn over the whole Settings window (Settings/LilBro): a
-pixel boy ("Hood", 14x16 cells at 2 pt per pixel) who lives on the "Lil Bro ·
-ask anything" entry at the bottom of the sidebar. The window is his map:
-views report themselves with lilBroSpot (sidebar rows, his entry, each
-Features row, the pane) and every MacCard with lilBroBlock, in the
-"lilBro.window" coordinate space. LilBroPlanner turns that map into runs along
-a block, arc jumps (up to 90 pt) and his amber ladder for higher blocks; the
-layer samples LilBroSegment every frame, Reduce Motion makes him appear at
-the place. A click catches him and opens his balloon (variant C) with the
-reply field at his feet; LilBroBalloonLayout keeps both inside the window at
-every edge. Asked where something is, he runs to the sidebar row and then the
-Features row a person would click, punches each and opens it through the same
-SettingsWindowSelection calls the rows make (select, open, showAPIKeys) —
-never a synthetic click. While the balloon is open he stands still; he goes
-home only after it is closed. The ⋯ menu hides the little guy
-(LilBroPreferences, `lilBro.mascotVisible`); the sidebar entry then opens the
-same balloon. Answers come from LilBroLocalGuide (the feature catalog and tab
-names, on this Mac, no network; a keyword guide, not an English parser, whose
-contract is LilBroLocalGuideTests — a new phrasing answered wrongly is added
-there as its own task, see the decision's "Contract") until the person presses "Turn on answers" in
-the balloon's disclosure (LilBroOffer; ⋯ → Turn on answers only shows it;
-`lilBro.answersFromWhytap`, off by default). Then LilBroRemoteBrain posts the
-question (cut to the server's 300 Unicode scalars), the screen (`tab` or
-`tab/feature` raw ids) and up to three earlier exchanges whytap.ai itself
-answered (questions asked while answers were off never leave the Mac), with
-redirects refused, to
-`https://whytap.ai/api/ask/lilbro` (Ask in AbsoluteMode/whytap-landing,
-claude-haiku-5-5), which returns sentences, points, follow-ups and one place;
-an id the app does not have is dropped. No internet or a timeout is offline,
-429 or a spent budget is the daily limit, any other error is unavailable; each
-offers Try again (offline, unavailable) and the closest pages the local guide
-finds, and changes nothing. ⋯ turns answers off again. On a feature's screen
-the "What it needs" rows report themselves with lilBroNeed (FeatureNeedsGroup):
-their feature, spot and, while unmet, the step they offer (LilBroPressable;
-a model row showing its picker is not a button and is never pressed). After
-guiding to a feature he offers that feature's first required step — "One step
-left: Download free model. It downloads about 470 MB to this Mac. Press it?"
-(or "3 steps left. First: …") — and presses it only after "Yes, press it": he
-runs to the row, punches it, checks that the same feature's screen still
-offers the very step, and calls the row's current FeatureScreenContext.perform.
-"I'll do it", closing, a new question, leaving the feature or the step being
-done or changed meanwhile withdraw the offer or press nothing.
-Tabs and API keys never offer a press. The sprite sheet is Resources/LilBro, embedded
-into the binary by scripts/lilbro-embed-atlas.py (LilBroAtlasData). WHY:
-.project-docs/decisions/2026-11-24-lil-bro.md
 
 Island tool reorder: in the hover drawer's tool grid, a tile pressed and moved
 IslandHoverHitBridge.dragThreshold (4 pt) lifts at once, with no hold delay
@@ -1910,7 +1908,7 @@ ones for the current opening, then appear only in History. Native tooltips expos
 full truncated titles. Drafts survive closing; saved Toolbox slots remain unchanged.
 Calendar is released (2026-11-22): CalendarAvailability.shipped = true. The
 switch stays: false closes Calendar again as "Soon" (tile, search row, Toolbox
-pane and Integrations card show a Soon badge and are inert; HoverSlotRouter
+pane and the Calendars card on Settings -> Features -> Calendar show a Soon badge and are inert; HoverSlotRouter
 returns .comingSoon; CalendarConnections refuses connect/enable/refresh so macOS
 is never asked; saved shortcuts register no key; stored connections are kept).
 New surfaces, onboarding included, check CalendarAvailability.isOpen /
@@ -1933,7 +1931,8 @@ toward the hidden-calendar limit; inactive direct-connection entries make room. 
 saved or refused Apple connection when Calendar or Settings opens and when the
 app becomes active, so neither shows a stale answer.
 Since 2026-11-23 Calendar on this Mac is the only way to connect: Hover's
-Calendars page and Settings -> Integrations -> Calendars show
+Calendars page and Settings -> Features -> Calendar -> Calendars (Integrations
+until 2026-11-26) show
 CalendarConnections.macAccess (notAsked / refused / loading / noCalendars /
 ready), one Allow access button, the Mac's calendars grouped by EventKit source
 (macCalendarGroups) with a tick each (hiddenFeeds, apple: feeds only; Whytap's
@@ -1972,7 +1971,7 @@ hover bubble. WHY:
 A compact day switcher and Connect (Calendars once connected) stay in Hover; the
 Calendars page shows the access state, the Mac's calendars with ticks, and
 connection errors and Retry. Allow access starts the macOS permission prompt
-directly, using the same CalendarConnectionFlow as Settings → Integrations. No
+directly, using the same CalendarConnectionFlow as Settings → Features → Calendar. No
 intermediate form, account-name field, Advanced app setup or Whytap account is
 shown.
 Unavailability/errors stay inline; progress and Cancel remain on the Connect list. Toolbox uses the same inline entry; there are no runtime
@@ -2014,7 +2013,7 @@ does not create a settings version or full backup; subsequent backups capture th
 latest token, and restored sign-in can require reconnecting. No
 shared OAuth registrations are created by the app itself; the owner supplies
 registered native clients during packaging through configure-calendar-clients.py.
-Settings → Integrations lists Google Calendar, Outlook Calendar, Apple Calendar
+Until 2026-11-23 Settings → Integrations listed Google Calendar, Outlook Calendar, Apple Calendar
 and Zoom Calendar separately, with feature permissions and direct provider authorization.
 Shared Google and Zoom clients cannot start new browser sign-in until actual
 provider approval is recorded by the publicAccessApproved packaging string.
@@ -2115,8 +2114,29 @@ denies after a relaunch; if the seal cannot be written it is removed. Settings s
 while an answer is unsaved, and a different one when a No reached neither
 place, until that No is saved or reversed. A tool that acts on the screen
 (whytap_meeting_open) rechecks consent through HarnessConsent.stillAllowed
-with no suspension before the action. Settings -> Integrations -> Coding tools has a switch per
-tool; the gate reads the answer before a request and again before its
+with no suspension before the action. Settings -> Integrations -> Coding tools always
+lists Claude Code and Codex (CodingToolsAccess, presence read through
+CaseClientSetup.presence: installed, and CaseClientConnector.whytapEntry
+compares the `whytap` entry with what Connect writes for this app's helper:
+none, ours or custom; Whytap does not judge someone else's entry; without a
+helper that runs nothing is ours and setup refuses, so no new Yes), one switch
+each. A custom entry (another path, arguments, env, a URL, null, `{}`, Codex
+enabled = false, an unreadable file) shows as the person's own: switch off
+and not switchable without a Yes, no Yes recorded, entry left as it is. The switch is the gate's answer (decision == allow),
+so a Yes can always be turned off, also when the tool is not found or its entry
+is gone; the line under it says what is missing. Without a Yes a tool that is
+not found is grey, "Not installed on this Mac". On runs the same client setup
+as Case -> Connect and the onboarding (CaseClientSetup.connect: the `whytap`
+command and the canonical MCP entry) and, once Whytap's own entry is there and
+no answer was
+recorded meanwhile (HarnessAccessStore.revision), records Yes; Connected means
+entry plus Yes. Off records No and leaves the entry. Refresh re-reads the
+effective answer (loadIfNeeded: a Yes whose seal is gone disappears), the view
+follows every store change (objectWillChange, also a save that went through
+later), and a presence read started before a newer one was applied is
+dropped. Other apps with an answer (a live dictation
+client) keep a switch per answer below. WHY:
+.project-docs/decisions/2026-11-26-coding-tools-switches.md The gate reads the answer before a request and again before its
 response leaves. Gated today: whytap_meetings_search (every query
 word in title, note or transcript, long words matched by stem, a note snippet
 and the three best replies with speaker and time), whytap_meeting_get,
@@ -2743,18 +2763,21 @@ derive from `HotkeyConfiguration` (single source of truth for every surface).
 `HotkeyTapCombo` uses uppercase US English physical-key labels regardless of
 input layout, including live recording and previously saved non-English titles.
 
+While another app holds Secure Event Input, macOS drops event-tap keys and
+Option/Shift-only Carbon combos. `SecureInputGuard` (Hotkeys/) notices a
+blocked chord from `flagsChanged` and shakes the holder's logo in
+`SecureInputHolderPanel` to the right of the island; it reads only modifier
+state and the frontmost app's focused-element role, never keys, and never
+works around the protection. Details: `docs/hotkey.md` (Secure Input) and
+`.project-docs/decisions/2026-11-26-secure-input-holder.md`.
+
 ## Invariants
 
-1. **No Whytap-owned services, except Lil Bro's opt-in answers.** The app
-   never contacts a Whytap backend, has no account and sends no telemetry. The
-   one exception is Lil Bro in Settings: after the person presses "Turn on
-   answers" in his balloon, each question they ask him, the Settings screen
-   they are on and up to three earlier exchanges go to
-   `https://whytap.ai/api/ask/lilbro` (`LilBroRemoteBrain`, the only caller,
-   checked by `LilBroRemoteBrainTests`); nothing is sent before that or after
-   they turn answers off. WHY:
-   .project-docs/decisions/2026-11-24-lil-bro-answers-from-whytap.md
-   Other network traffic is limited to
+1. **No Whytap-owned services.** The app never contacts a Whytap backend,
+   has no account and sends no telemetry. Lil Bro, the Settings guide that
+   asked whytap.ai, was removed. WHY:
+   .project-docs/decisions/2026-11-26-lil-bro-removed.md
+   Network traffic is limited to
    the meeting detector's Silero VAD download from Hugging Face, the On this
    Mac speech model's download from Hugging Face when the user asks for it, providers
    and monitoring sources the user configured (including their credential store),
@@ -2766,7 +2789,7 @@ input layout, including live recording and previously saved non-English titles.
    a key for, OpenRouter's provider list (latency, throughput) for a model
    selected on an OpenRouter route, synthetic model probes (silence or a one-word prompt, never user
    audio or text) sent only to that provider when a model is picked or on
-   Check now, its official OpenCode native package downloads from the npm registry, `google.com` opened in the
+   Check now, its official OpenCode native package downloads from the npm registry, `google.com`, the Whytap site and Help Center (`whytap.ai`, `whytap.ai/help/`) opened in the
    browser, the Sparkle feed on GitHub Releases, and optional encrypted backups
    and settings sync to the user's own GitHub repository or selected sync folder.
    `Tests/SidekeyTests/CloudRemovalTests.swift` fails the build on any

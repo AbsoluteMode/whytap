@@ -51,7 +51,10 @@ final class SystemSoundGuardTests: XCTestCase {
     }
 
     func testKeySentToTheAppWithoutKeyWindowIsAnArtifact() throws {
-        try XCTSkipIf(NSApp.keyWindow != nil, "the test process has a key window")
+        // `NSApp` is nil until something creates the application; run alone
+        // (`--filter`, a shard) this test is the first to need it.
+        let app = NSApplication.shared
+        try XCTSkipIf(app.keyWindow != nil, "the test process has a key window")
         let window = bareWindow()
         var seenByLaterMonitor = 0
         let monitor = try XCTUnwrap(NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
@@ -60,7 +63,7 @@ final class SystemSoundGuardTests: XCTestCase {
         })
         defer { NSEvent.removeMonitor(monitor) }
         let before = SystemSoundGuard.shared.allRecords.count
-        NSApp.sendEvent(try keyDown(in: window))
+        app.sendEvent(try keyDown(in: window))
         let sounds = Array(SystemSoundGuard.shared.allRecords[before...])
         XCTAssertEqual(seenByLaterMonitor, 1, "monitors of the code under test still see the key")
         XCTAssertEqual(sounds.map(\.kind), [.noKeyWindow])

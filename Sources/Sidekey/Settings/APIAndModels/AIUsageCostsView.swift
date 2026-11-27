@@ -244,7 +244,10 @@ struct AIUsageCostsView: View {
         }
         .foregroundStyle(MacSettingsTheme.text)
         .task { await refresh() }
-        .onDisappear { modelsHover.send(.escape); modelsHover.stop() }
+        .onDisappear { modelsHover.retain(rows: []); modelsHover.stop() }
+        // Observed outside the conditionally shown table, so loading, empty
+        // and error states retire every row's hover state too.
+        .onChange(of: visibleRowIDs, initial: true) { _, ids in modelsHover.retain(rows: ids) }
         .onChange(of: model.period) { _, _ in Task { await refresh() } }
         .onChange(of: model.start) { _, _ in Task { await refresh() } }
         .onChange(of: model.end) { _, _ in Task { await refresh() } }
@@ -253,6 +256,12 @@ struct AIUsageCostsView: View {
             if model.period == .month { Task { await refresh() } }
             else { model.beginVisit() }
         }
+    }
+
+    /// The feature rows on screen now; empty whenever the table is not shown.
+    private var visibleRowIDs: [String] {
+        guard !model.failed, let interval, !model.loading, model.loadedInterval == interval else { return [] }
+        return AIUsageCostRow.grouped(model.pricedEvents).map(\.id)
     }
 
     private var table: some View {
@@ -276,7 +285,6 @@ struct AIUsageCostsView: View {
                 if row.id != rows.last?.id { divider }
             }
         }
-        .onChange(of: rows.map(\.id)) { _, ids in modelsHover.retain(rows: ids) }
     }
     private var divider: some View { Rectangle().fill(MacSettingsTheme.rowSeparator).frame(height: 0.5) }
     private func refresh() async { if let interval { await model.load(interval) } }

@@ -38,5 +38,9 @@ final class AIUsageCostsLayoutTests: XCTestCase {
         XCTAssertFalse(body.contains("@State private var shown"),
                        "no row owns its own open state; the table's one controller decides (AIUsageModelsHoverTests)")
         XCTAssertTrue(body.contains("hover.isPresented(row.id)"), "each popover shows only its own row")
+        let table = try XCTUnwrap(text.range(of: "private var table: some View"))
+        let observer = try XCTUnwrap(text.range(of: ".onChange(of: visibleRowIDs, initial: true)"))
+        XCTAssertLessThan(observer.lowerBound, table.lowerBound,
+                          "rows are retired from outside the conditionally shown table (loading, empty, error)")
     }
 }

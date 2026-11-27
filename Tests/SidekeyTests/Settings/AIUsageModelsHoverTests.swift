@@ -179,6 +179,71 @@ final class AIUsageModelsHoverTests: XCTestCase {
         XCTAssertFalse(controller.isPresented("Translation"))
     }
 
+    // MARK: - Rows leaving the table (builder finding on ticket 620)
+
+    /// The builder's probe: entering Agent, replacing the rows with
+    /// Translation and letting the delay expire presented the removed Agent.
+    func test_a_removed_row_never_opens_after_its_dwell_delay() {
+        send(.pointerEnteredRow("Agent"))
+        send(.rowsChanged(["Translation"]))
+        wait(S.openDelay * 3)
+        XCTAssertNil(state.open)
+        XCTAssertFalse(state.highlighted("Agent"))
+        XCTAssertNil(state.pointerRow); XCTAssertNil(state.pending)
+    }
+
+    /// Loading, empty and error states replace the whole table: empty row set.
+    func test_period_change_during_the_dwell_delay_opens_nothing() {
+        send(.pointerEnteredRow("Agent")); wait(S.openDelay / 2)
+        send(.rowsChanged([]))
+        wait(S.openDelay)
+        send(.rowsChanged(["Agent", "Translation"]))
+        wait(S.openDelay * 3)
+        XCTAssertNil(state.open, "the pointer must move again before the new table opens anything")
+        XCTAssertFalse(state.highlighted("Agent"))
+        // Real hover on the new table still works.
+        openFromRest("Translation")
+    }
+
+    func test_period_change_closes_a_pinned_detail_and_clears_every_owner() {
+        send(.pointerEnteredRow("Agent")); send(.focused("Agent")); send(.clicked("Agent"))
+        send(.pointerEnteredDetail)
+        send(.rowsChanged([]))
+        XCTAssertEqual(state, S(), "open, pinned, pointer, detail and focus are all retired")
+        send(.rowsChanged(["Agent"])); wait(1)
+        XCTAssertNil(state.open, "the pinned detail does not come back by itself after loading")
+    }
+
+    func test_rows_that_stay_keep_their_state() {
+        send(.pointerEnteredRow("Agent")); send(.clicked("Agent"))
+        send(.rowsChanged(["Agent", "Subtitles"]))
+        XCTAssertEqual(state.open, "Agent"); XCTAssertTrue(state.pinned)
+        XCTAssertTrue(state.highlighted("Agent"))
+        send(.escape); XCTAssertNil(state.open)
+    }
+
+    func test_removing_another_row_keeps_a_pending_open_and_warm_switching() {
+        send(.pointerEnteredRow("Agent"))
+        send(.rowsChanged(["Agent", "Translation"]))
+        wait(S.openDelay); XCTAssertEqual(state.open, "Agent")
+        send(.pointerEnteredRow("Translation")); send(.pointerExitedRow("Agent"))
+        XCTAssertEqual(state.open, "Translation")
+    }
+
+    @MainActor
+    func test_controller_retires_a_removed_row_with_the_real_timer_path() {
+        var clock = t0
+        let controller = AIUsageModelsHoverController(now: { clock }, probe: { .init(row: nil, onDetail: false) })
+        defer { controller.stop() }
+        controller.send(.pointerEnteredRow("Agent"))
+        controller.retain(rows: ["Translation"])
+        clock = clock.addingTimeInterval(S.openDelay * 2); controller.send(.tick)
+        XCTAssertFalse(controller.isPresented("Agent"))
+        controller.retain(rows: [])
+        XCTAssertFalse(controller.state.highlighted("Agent"))
+        XCTAssertEqual(controller.state, S())
+    }
+
     @MainActor
     func test_a_period_change_that_removes_the_open_row_closes_it() {
         let controller = AIUsageModelsHoverController(now: { self.t0 }, probe: { .init(row: nil, onDetail: false) })

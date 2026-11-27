@@ -63,6 +63,13 @@ Causes found:
   popover closes on the mouse-down of the click meant to close it; a click on
   the same row within 0.4 s after that dismissal stays closed. Keyboard focus
   opens, Escape closes, a period change that removes the open row closes it.
+- Rows leaving the table retire every reference to them: open, pinned,
+  pending open, pointer row, focused row and the click-after-dismissal memory
+  (`rowsChanged`). The view feeds the rows actually on screen from outside the
+  conditionally shown table, so loading, empty and error states pass an empty
+  set. A period change therefore closes a pinned detail and cancels a dwell in
+  progress; nothing reopens until the pointer moves again (builder finding on
+  queue ticket 620, 2026-11-26).
 - Trigger stays the whole row and the popover keeps its look and anchor.
 
 ## Why
@@ -80,7 +87,9 @@ both event orders never keeps A; onto the detail stays; detail over another
 row stays; detail → row switches; leaving both closes after the grace;
 returning within the grace; pin and click-to-close after system dismissal;
 focus and Escape; disabled; the controller case of a detail appearing under
-the resting pointer; a removed row. Not verified in the running app by this
+the resting pointer; a removed row during the dwell delay, an emptied table
+(loading/empty/error) during the dwell and with a pinned detail, rows that
+stay keeping their state. Not verified in the running app by this
 session (feature sessions do not launch the app).
 
 ## Rejected

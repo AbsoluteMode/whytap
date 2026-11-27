@@ -614,7 +614,8 @@ feature expenses without a permanent model-level grid or scattered period contro
   another row switches at once. Row fill follows the pointer, or the open row
   while the pointer is on its detail. Leaving both row and detail closes after
   a 0.3 s grace. While open, the pointer's real window and row are checked, so
-  a detail appearing under the pointer does not blink (2026-11-26,
+  a detail appearing under the pointer does not blink. A period change, loading,
+  empty or error state retires all detail state, pinned included (2026-11-26,
   `.project-docs/decisions/2026-11-26-costs-models-popover-hover.md`).
   The model list scrolls at 320 pt while its heading and explanation stay visible.
   Rows retain their geometry during disclosure; no new motion needs reduction.

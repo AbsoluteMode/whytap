@@ -32,6 +32,9 @@ struct AIUsageModelsHoverState: Equatable {
         case escape
         case dismissedBySystem(String)
         case disabled
+        /// The table now shows exactly these rows (empty while loading,
+        /// empty or failed). Anything that refers to another row is retired.
+        case rowsChanged([String])
         case tick
     }
 
@@ -122,6 +125,14 @@ struct AIUsageModelsHoverState: Equatable {
             // may still rest on a row, which must not reopen it by itself.
         case .disabled:
             self = Self()
+        case .rowsChanged(let ids):
+            let shown = Set(ids)
+            if let id = open, !shown.contains(id) { close() }
+            if let id = pointerRow, !shown.contains(id) { pointerRow = nil }
+            if let id = focusedRow, !shown.contains(id) { focusedRow = nil }
+            if let target = pending?.target, !shown.contains(target) { pending = nil }
+            if let last = lastDismissal, !shown.contains(last.id) { lastDismissal = nil }
+            if shown.isEmpty { pointerOnDetail = false }
         case .tick:
             guard let due = pending, now >= due.at else { return }
             pending = nil
@@ -184,9 +195,10 @@ final class AIUsageModelsHoverController: ObservableObject {
         reschedule()
     }
 
-    /// A period change can remove the open row; its detail must not linger.
+    /// A period change can remove rows or the whole table (loading, empty,
+    /// error); no open, pending, pointer or focus state may outlive its row.
     func retain(rows ids: [String]) {
-        if let open = state.open, !ids.contains(open) { send(.escape) }
+        send(.rowsChanged(ids))
         rowViews = rowViews.filter { ids.contains($0.key) }
     }
 

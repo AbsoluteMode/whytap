@@ -101,14 +101,17 @@ final class APIAndModelsPresentationTests: XCTestCase {
                        "Synchronous: the first frame shows the key added while the window was closed")
     }
 
-    func testShowingWithoutChangesDoesNotRecompute() {
+    func testShowingRecomputesOnceAndAgainOnlyAfterClosing() {
         let model = makeModel()
         model.setPresented(false)
         counter.reads = 0
 
         model.setPresented(true)
-
-        XCTAssertEqual(counter.reads, 0)
+        let readsOnShow = counter.reads
+        XCTAssertGreaterThan(readsOnShow, 0, "Keys can change without a notification: showing rereads them")
+        model.setPresented(true)
+        waitPastDebounce()
+        XCTAssertEqual(counter.reads, readsOnShow, "Already shown: no second pass")
     }
 
     func testAnOpenWindowStillFollowsChangesAndClosingStopsAgain() throws {
@@ -143,5 +146,130 @@ final class APIAndModelsPresentationTests: XCTestCase {
 
         XCTAssertGreaterThan(counter.reads, 0)
         XCTAssertEqual(model.chips.map(\.account), [.soniox, .openRouter])
+    }
+
+    // MARK: - Builder review of ticket 688
+
+    /// Opening right after a write, before the debounce, already shows the
+    /// new key and route, and the pass is not repeated afterwards.
+    func testOpeningBeforeTheDebounceShowsTheNewKeyAndRouteImmediately() throws {
+        let model = makeModel()
+        model.setPresented(false)
+        let route = FeatureRoute(account: .openRouter, model: "fixture-model")
+        routing.setRoute(route, for: .dropSmartCleanup)
+        try addOpenRouterKeyAndWriteDefaults()
+
+        model.setPresented(true)
+        let readsOnShow = counter.reads
+
+        XCTAssertEqual(model.chips.map(\.account), [.soniox, .openRouter])
+        XCTAssertEqual(model.rows.first { $0.feature == .dropSmartCleanup }?.modelSummary, route.model)
+        waitPastDebounce()
+        XCTAssertEqual(counter.reads, readsOnShow)
+        XCTAssertEqual(model.chips.map(\.account), [.soniox, .openRouter])
+    }
+
+    /// A write while shown schedules a pass; closing and reopening before it
+    /// fires takes it over instead of running it a second time.
+    func testReopeningDuringAPendingBurstDoesNotRefreshTwice() throws {
+        let model = makeModel()
+        model.setPresented(false)
+        try addOpenRouterKeyAndWriteDefaults()
+        waitPastDebounce()
+        model.setPresented(true)
+        try keys.delete(account: XCTUnwrap(ProviderAccount.openRouter.keychainAccount(in: routing)))
+        UserPreferencesCache(defaults: defaults).setMode(.smart)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
+        model.setPresented(false)
+        UserPreferencesCache(defaults: defaults).setMode(.fast)
+        NotificationCenter.default.post(name: UserDefaults.didChangeNotification, object: defaults)
+
+        counter.reads = 0
+        model.setPresented(true)
+        XCTAssertEqual(model.chips.map(\.account), [.soniox])
+        let readsOnShow = counter.reads
+        waitPastDebounce()
+        XCTAssertEqual(counter.reads, readsOnShow, "Opening consumed the pending refresh")
+    }
+
+    /// A Settings Sync round with only credentials writes no preference.
+    func testCredentialOnlySyncWhileClosedAppearsOnOpen() throws {
+        let model = makeModel()
+        model.setPresented(false)
+        let additions: [ProviderAccount] = [.deepgram, .elevenLabs, .openRouter, .openAI, .anthropic]
+        var applied = Set<String>()
+        for provider in additions {
+            let account = try XCTUnwrap(provider.keychainAccount(in: routing))
+            try keys.save("synthetic-key", account: account)
+            applied.insert(SettingsSyncItem.secret(account))
+        }
+        let soniox = try XCTUnwrap(ProviderAccount.soniox.keychainAccount(in: routing))
+        try keys.delete(account: soniox)
+        applied.insert(SettingsSyncItem.secret(soniox))
+        counter.reads = 0
+        SettingsSyncLiveReload.reload(items: applied, defaults: defaults)
+        waitPastDebounce()
+        XCTAssertEqual(counter.reads, 0)
+
+        model.setPresented(true)
+        XCTAssertEqual(Set(model.chips.map(\.account)), Set(additions))
+
+        // Removal with no preference write, while closed again.
+        model.setPresented(false)
+        try keys.delete(account: XCTUnwrap(ProviderAccount.anthropic.keychainAccount(in: routing)))
+        SettingsSyncLiveReload.reload(items: [SettingsSyncItem.secret(ProviderAccount.anthropicKeychainAccount)],
+                                      defaults: defaults)
+        model.setPresented(true)
+        XCTAssertEqual(Set(model.chips.map(\.account)), Set([.deepgram, .elevenLabs, .openRouter, .openAI]))
+    }
+
+    /// A route and its key change together while closed.
+    func testRouteAndCredentialChangeWhileClosedAppearOnOpen() throws {
+        let model = makeModel()
+        model.setPresented(false)
+        let route = FeatureRoute(account: .openAI, model: "fixture-llm")
+        routing.setRoute(route, for: .dropSmartCleanup)
+        let openAI = try XCTUnwrap(ProviderAccount.openAI.keychainAccount(in: routing))
+        try keys.save("synthetic-key", account: openAI)
+        SettingsSyncLiveReload.reload(items: [SettingsSyncItem.secret(openAI)], defaults: defaults)
+        waitPastDebounce()
+
+        model.setPresented(true)
+        XCTAssertEqual(model.chips.map(\.account), [.soniox, .openAI])
+        XCTAssertEqual(model.rows.first { $0.feature == .dropSmartCleanup }?.modelSummary, route.model)
+    }
+
+    /// Tavily's own notification (local save/delete and Settings Sync).
+    func testTavilyKeyChangesWaitWhileClosedAndApplyImmediatelyWhileOpen() throws {
+        let model = makeModel()
+        model.setPresented(false)
+        let account = TavilySearch.keychainAccount
+        func syncTavily() { SettingsSyncLiveReload.reload(items: [SettingsSyncItem.secret(account)], defaults: defaults) }
+
+        try keys.save("synthetic-key", account: account)
+        counter.reads = 0
+        syncTavily()
+        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
+        XCTAssertEqual(counter.reads, 0, "Closed: saving does no Keychain pass")
+        XCTAssertFalse(model.searchRow.tavilyConnected)
+        model.setPresented(true)
+        XCTAssertTrue(model.searchRow.tavilyConnected)
+
+        try keys.delete(account: account)
+        syncTavily()
+        XCTAssertFalse(model.searchRow.tavilyConnected, "Open: removal shows immediately")
+        try keys.save("synthetic-key", account: account)
+        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
+        XCTAssertTrue(model.searchRow.tavilyConnected, "Open: saving shows immediately")
+
+        model.setPresented(false)
+        counter.reads = 0
+        try keys.delete(account: account)
+        syncTavily()
+        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
+        XCTAssertEqual(counter.reads, 0, "Closed: removing does no Keychain pass")
+        XCTAssertTrue(model.searchRow.tavilyConnected)
+        model.setPresented(true)
+        XCTAssertFalse(model.searchRow.tavilyConnected)
     }
 }

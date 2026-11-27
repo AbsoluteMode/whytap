@@ -77,7 +77,7 @@ struct AIUsagePrice {
     }
 }
 
-struct AIUsageCostRow: Identifiable {
+struct AIUsageCostRow: Identifiable, Equatable {
     let title: String
     let events: [AIUsageEvent]
     var id: String { title }
@@ -176,9 +176,14 @@ struct AIUsageCostsView: View {
     @State private var periodHovered = false
     @FocusState private var periodFocused: Bool
     /// One open "Models used" detail for the whole table.
-    @StateObject private var modelsHover = AIUsageModelsHoverController()
+    @StateObject private var modelsHover: AIUsageModelsHoverController
+    @Environment(\.isEnabled) private var isEnabled
     let now: () -> Date
-    init(model: AIUsageCostsViewModel, now: @escaping () -> Date = Date.init) { self.model = model; self.now = now }
+    init(model: AIUsageCostsViewModel, now: @escaping () -> Date = Date.init,
+         modelsHover: AIUsageModelsHoverController? = nil) {
+        self.model = model; self.now = now
+        _modelsHover = StateObject(wrappedValue: modelsHover ?? AIUsageModelsHoverController())
+    }
     private var interval: DateInterval? { model.period.interval(now: now(), start: model.start, end: model.end) }
 
     var body: some View {
@@ -250,12 +255,19 @@ struct AIUsageCostsView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        // Rows report frames in this space; the anchor, outside the scroll
+        // content, maps it to the screen (see AIUsageModelsHoverController).
+        .coordinateSpace(.named(AIUsageModelsHoverController.coordinateSpace))
+        .background(AIUsageHoverAnchorView { modelsHover.setAnchor($0) })
+        .onContinuousHover(coordinateSpace: .local) { _ in modelsHover.checkPointer() }
         .foregroundStyle(MacSettingsTheme.text)
         .task { await refresh() }
-        .onDisappear { modelsHover.retain(rows: []); modelsHover.stop() }
+        .onAppear { modelsHover.start() }
+        .onChange(of: isEnabled, initial: true) { _, enabled in modelsHover.setEnabled(enabled) }
+        .onDisappear { modelsHover.retain(rows: [AIUsageCostRow]()); modelsHover.stop() }
         // Observed outside the conditionally shown table, so loading, empty
         // and error states retire every row's hover state too.
-        .onChange(of: visibleRowIDs, initial: true) { _, ids in modelsHover.retain(rows: ids) }
+        .onChange(of: visibleRows, initial: true) { _, rows in modelsHover.retain(rows: rows) }
         .onChange(of: model.period) { _, _ in Task { await refresh() } }
         .onChange(of: model.start) { _, _ in Task { await refresh() } }
         .onChange(of: model.end) { _, _ in Task { await refresh() } }
@@ -267,9 +279,9 @@ struct AIUsageCostsView: View {
     }
 
     /// The feature rows on screen now; empty whenever the table is not shown.
-    private var visibleRowIDs: [String] {
+    private var visibleRows: [AIUsageCostRow] {
         guard !model.failed, let interval, !model.loading, model.loadedInterval == interval else { return [] }
-        return AIUsageCostRow.grouped(model.pricedEvents).map(\.id)
+        return AIUsageCostRow.grouped(model.pricedEvents)
     }
 
     private var table: some View {
@@ -370,31 +382,23 @@ private struct AIUsageFeatureCostRow: View {
             .onChange(of: focused) { _, value in
                 hover.send(value ? .focused(row.id) : .unfocused(row.id))
             }
-            // Anchored to the name, so the detail opens beside it wherever on
-            // the row the pointer is. Its binding reads the table's one open
-            // row, so this popover only ever shows this row's models.
-            .popover(isPresented: Binding(
-                get: { hover.isPresented(row.id) },
-                set: { if !$0 { hover.send(.dismissedBySystem(row.id)) } }
-            ), arrowEdge: .trailing) {
-                AIUsageModelsPopover(row: row)
-                    .background(AIUsageHoverProbeView { hover.registerDetail($0) })
-                    .onHover { hover.send($0 ? .pointerEnteredDetail : .pointerExitedDetail) }
-                    .onExitCommand { hover.send(.escape) }
-            }
+            // The detail opens beside the name wherever on the row the
+            // pointer is; the table's controller presents it from this frame.
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .named(AIUsageModelsHoverController.coordinateSpace))
+            } action: { hover.setNameFrame($0, for: row.id) }
             Spacer(minLength: 0)
             AIUsagePriceLabel(events: row.events)
         }
         .font(.system(size: 13)).monospacedDigit().padding(.horizontal, 18).padding(.vertical, 10)
         .background(isEnabled && hover.state.highlighted(row.id) ? MacSettingsTheme.hover : .clear)
-        .background(AIUsageHoverProbeView { hover.register(row: row.id, view: $0) })
-        // The whole row is the target: its empty middle and its price open
-        // the detail too, and a click anywhere pins it.
+        // The whole row is the target: its frame, not a per-row hover flag,
+        // decides whether the pointer is on it.
+        .onGeometryChange(for: CGRect.self) {
+            $0.frame(in: .named(AIUsageModelsHoverController.coordinateSpace))
+        } action: { hover.setRowFrame($0, for: row.id) }
         .contentShape(Rectangle())
-        .onHover { inside in
-            guard isEnabled else { return }
-            hover.send(inside ? .pointerEnteredRow(row.id) : .pointerExitedRow(row.id))
-        }
+        .onHover { _ in if isEnabled { hover.checkPointer() } }
         .onTapGesture { if isEnabled { hover.send(.clicked(row.id)) } }
         .onChange(of: isEnabled) { _, enabled in if !enabled { hover.send(.disabled) } }
         .onExitCommand { hover.send(.escape) }

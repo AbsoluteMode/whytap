@@ -39,6 +39,12 @@
 #                  no notarization; a local manifest instead of a release one. Such
 #                  a bundle can never be uploaded (no archive, no release manifest).
 #                  WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+#   EXODIA_BUILD_COMPOSITION  local install only: JSON {"base": <main SHA>,
+#                  "members": [{"ticket": <id>, "head": <SHA>}]} of the unmerged
+#                  preview PRs this build carries (default: main only). It is
+#                  stored in Info.plist (ExodiaBuildComposition): the build queue
+#                  reads what the owner sees from the installed app itself.
+#                  WHY: .project-docs/decisions/2026-11-26-release-batches.md
 #
 # Community requirements: local Swift/Xcode macOS 26 SDK and build resources;
 # team signing also needs the Developer ID certificate and network access for
@@ -548,6 +554,35 @@ fi
 BUILD_SOURCE_SHA="$(/usr/bin/python3 "${PROJECT_DIR}/scripts/release-provenance.py" capture \
     --project-root "${PROJECT_DIR}")"
 
+BUILD_COMPOSITION=""
+if [ "${LOCAL_INSTALL}" = "1" ]; then
+    # The composition must describe this source: its base and every member head are
+    # in the built commit. Checked before compiling.
+    BUILD_COMPOSITION="$(cd "${PROJECT_DIR}" && /usr/bin/python3 - "${BUILD_SOURCE_SHA}" \
+            "${EXODIA_BUILD_COMPOSITION:-}" <<'PYCOMPOSITION'
+import json, re, subprocess, sys
+source, value = sys.argv[1:]
+composition = json.loads(value) if value else {"base": source, "members": []}
+sha = re.compile(r"[0-9a-f]{40}")
+members = composition.get("members")
+if not isinstance(composition, dict) or set(composition) != {"base", "members"} \
+        or not sha.fullmatch(str(composition["base"])) or not isinstance(members, list) \
+        or not all(isinstance(m, dict) and set(m) == {"ticket", "head"}
+                   and isinstance(m["ticket"], int) and sha.fullmatch(str(m["head"]))
+                   for m in members):
+    sys.exit("ERROR: EXODIA_BUILD_COMPOSITION must be {\"base\": sha, \"members\": "
+             "[{\"ticket\": id, \"head\": sha}]}")
+for commit in [composition["base"]] + [m["head"] for m in members]:
+    if subprocess.run(["git", "merge-base", "--is-ancestor", commit, source]).returncode:
+        sys.exit(f"ERROR: {commit} of EXODIA_BUILD_COMPOSITION is not in the built source")
+print(json.dumps({"base": composition["base"], "members": members}, sort_keys=True))
+PYCOMPOSITION
+)" || exit 2
+elif [ -n "${EXODIA_BUILD_COMPOSITION:-}" ]; then
+    echo "ERROR: EXODIA_BUILD_COMPOSITION applies only to EXODIA_LOCAL_INSTALL=1" >&2
+    exit 2
+fi
+
 # --- Secrets staging (private umask, mktemp, trap cleanup) ----------------
 # The notarization key is staged by notarize-submit.sh in its own process.
 
@@ -794,6 +829,15 @@ if [ "${LOCAL_INSTALL}" = "1" ]; then
     # Marks a bundle that exists only on this Mac: arm64, never in an archive.
     /usr/libexec/PlistBuddy -c "Add :ExodiaLocalBuild string arm64" \
         "${APP_BUNDLE}/Contents/Info.plist"
+    /usr/bin/python3 - "${APP_BUNDLE}/Contents/Info.plist" "${BUILD_COMPOSITION}" <<'PYPLIST'
+import plistlib, sys
+path, composition = sys.argv[1:]
+with open(path, "rb") as handle:
+    info = plistlib.load(handle)
+info["ExodiaBuildComposition"] = composition
+with open(path, "wb") as handle:
+    plistlib.dump(info, handle)
+PYPLIST
 fi
 
 if [ -f "${PROJECT_DIR}/Resources/AppIcon.icns" ]; then
@@ -1230,11 +1274,13 @@ if [ "${LOCAL_INSTALL}" = "1" ]; then
     CDHASH="$(codesign -d --verbose=4 "${APP_BUNDLE}" 2>&1 | sed -n 's/^CDHash=//p' | head -1)"
     /usr/bin/python3 - "${LOCAL_MANIFEST}" "${BUILD_SOURCE_SHA}" "${SHORT_VERSION}" \
         "${BUILD_VERSION}" "${FLAVOR}" "${BUNDLE_ID}" "${CODE_SIGNING}" "${CDHASH}" \
-        "${APP_BUNDLE}" <<'PYLOCAL'
+        "${APP_BUNDLE}" "${BUILD_COMPOSITION}" <<'PYLOCAL'
 import json, os, sys, tempfile
 from datetime import datetime, timezone
-path, source, version, build, flavor, bundle_id, code_signing, cdhash, app = sys.argv[1:]
+path, source, version, build, flavor, bundle_id, code_signing, cdhash, app, composition = \
+    sys.argv[1:]
 value = {"schema": "local-arm64-1", "local_only": True, "source_revision": source,
+         "composition": json.loads(composition),
          "version": version, "build": int(build), "flavor": flavor, "bundle_id": bundle_id,
          "architectures": ["arm64"], "code_signing": code_signing, "cdhash": cdhash,
          "app": app, "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds")}

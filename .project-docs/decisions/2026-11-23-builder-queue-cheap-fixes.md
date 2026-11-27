@@ -22,6 +22,8 @@ related: [2026-11-19-on-demand-build-queue-builder.md, 2026-11-23-builder-queue-
 
 # Cheap queue fixes: moved heads, dependencies, returns without a block
 
+> Partly superseded on 2026-11-28: the builder no longer reviews code or blocks on review findings; "block once" now applies to failing checks only. See [builder never reviews](2026-11-28-builder-never-reviews.md).
+
 ## Context
 
 Of 94 blocks from 2026-11-20 to 2026-11-23, about 20 said only that the PR

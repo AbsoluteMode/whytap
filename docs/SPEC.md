@@ -56,7 +56,7 @@ Knowledge workers — разработчики, продакт-менеджер�
 - Bundle `com.rootwise.sidekey`
 - Репозиторий: [AbsoluteMode/whytap](https://github.com/AbsoluteMode/whytap)
 - Hover: выбранные пользователем инструменты рядами по три, только иконка и название без мелких подписей состояния; у Record во время записи загорается красная иконка, индикатор записи в правом крыле сохраняется. Состояния доступны VoiceOver. Поиск по всему каталогу запускает редкий инструмент (например Output Lang), не добавляя его в постоянные кнопки.
-- Display — яркость (hover, из каталога и поиска): белый ползунок подсветки экрана с островом, свитч Extra (постоянный EDR-буст поверх текущей яркости через таблицу дисплея, как у Vivid, только на дисплеях с запасом яркости; первое ручное уменьшение ползунком Whytap или перехваченной клавишей яркости только выключает Extra, сохраняя подсветку и положение ползунка на весь жест или удержание; следующее действие уменьшает яркость; внешние изменения macOS, включая автояркость, затемнение на батарее и при бездействии, сохраняют Extra; обычные системные клавиши и регуляторы без перехвата также сохраняют Extra, поскольку чтение уровня не различает ручное и автоматическое действие; изменения отслеживаются раз в полсекунды и при закрытой панели, повышение яркости не включает Extra; выключает также свитч, перегрев, смена дисплея или потеря им EDR, другое приложение, меняющее таблицу дисплея (например Vivid), и выход) без индикатора заряда и оценки времени работы от батареи. Опциональный Hold brightness (замок рядом с ползунком, по умолчанию выключен) удерживает текущую подсветку: внешние изменения, включая системные регуляторы, восстанавливаются; ползунок Whytap и перехваченные Brightness keys меняют удерживаемый уровень. Сон и смена активного пользователя приостанавливают удержание; перегрев, смена дисплея, недоступность управления, три безуспешных восстановления или выход выключают его. После запуска удержание не восстанавливается. Свитчи Hold brightness, Extra и Brightness keys есть и в Settings → Toolbox → Display. Brightness keys (по умолчанию выключены): клавиши яркости Mac показывают полоску в острове вместо системного индикатора, два нажатия «ярче» на максимуме включают Extra. Всё локально; сохраняется только переключатель клавиш.
+- Display — яркость (hover, из каталога и поиска): белый ползунок подсветки экрана с островом, свитч Extra (постоянный EDR-буст поверх текущей яркости через таблицу дисплея, как у Vivid, только на дисплеях с запасом яркости; первое ручное уменьшение ползунком Whytap или перехваченной клавишей яркости только выключает Extra, сохраняя подсветку и положение ползунка на весь жест или удержание; следующее действие уменьшает яркость; внешние изменения macOS, включая автояркость, затемнение на батарее и при бездействии, сохраняют Extra; обычные системные клавиши и регуляторы без перехвата также сохраняют Extra, поскольку чтение уровня не различает ручное и автоматическое действие; изменения отслеживаются раз в полсекунды и при закрытой панели, повышение яркости не включает Extra; выключает также свитч, перегрев, смена дисплея или потеря им EDR, другое приложение, меняющее таблицу дисплея (например Vivid), и выход) без индикатора заряда и оценки времени работы от батареи. Опциональный Hold brightness (замок рядом с ползунком, по умолчанию выключен) удерживает текущую подсветку: внешние изменения, включая системные регуляторы, восстанавливаются; ползунок Whytap и перехваченные Brightness keys меняют удерживаемый уровень. Сон и смена активного пользователя приостанавливают удержание; перегрев, смена дисплея, недоступность управления, три безуспешных восстановления или выход выключают его. После запуска удержание не восстанавливается. Свитчи Hold brightness, Extra и Brightness keys есть и в Settings → Features → Display. Brightness keys (по умолчанию выключены): клавиши яркости Mac показывают полоску в острове вместо системного индикатора, два нажатия «ярче» на максимуме включают Extra. Всё локально; сохраняется только переключатель клавиш.
 
 ---
 
@@ -128,7 +128,7 @@ Codex и Cursor с логотипами, без выбора произволь�
 
 ## Integrations
 
-Settings → Integrations → Calendars: карточка «Calendars on this Mac» с одной
+Settings → Features → Calendar → Calendars (до 26.11.2026 — Settings → Integrations): карточка «Calendars on this Mac» с одной
 кнопкой Allow access (или Open Privacy Settings / Disconnect), календарями по
 аккаунтам с галочками и кнопкой Open Internet Accounts. Если есть аккаунты,
 подключённые напрямую прежними сборками, ниже карточка «Connected directly» с
@@ -140,6 +140,22 @@ Settings → Integrations: подключение GitHub через сущест
 access token; проверка приватного Whytap-Backup (существующий Exodia-Backup
 продолжает использоваться). Само подключение не отправляет
 пользовательские данные.
+
+Settings → Integrations → Coding tools: всегда видны Claude Code и Codex, по
+одному тумблеру. Включил — Whytap прописывает свой MCP-сервер в инструмент (как
+Case → Connect и Connect в онбординге) и даёт ему доступ; подпись «Connected».
+Выключил — доступ закрыт (тот же No, что в острове), запись MCP остаётся;
+подпись «Not connected». Тумблер показывает действующий ответ: уже данный Yes
+всегда можно выключить, даже если инструмента больше нет на Mac или его запись
+MCP пропала, и подпись говорит, чего не хватает. Connected — только с записью
+`whytap`, которую пишет сам Whytap для этого приложения. Любая другая запись
+(свой путь или аргументы, env, URL, пустая, у Codex `enabled = false`) — запись
+человека: Whytap её не оценивает и не трогает, тумблер выключен, Yes не
+записывается; подпись предлагает удалить её или ответить Yes в острове.
+Инструмента нет на Mac и Yes нет — строка
+серая, «Not installed on this Mac». No, данный в острове, пока идёт настройка,
+не перезаписывается. Ниже — другие приложения, которым уже отвечали на вопрос о
+доступе.
 
 ## Backup
 
@@ -411,7 +427,7 @@ Fast и служебный ответ Smart используют обычный 
 
 **Настройки открываются на Features (Settings → Features):** список того, что
 умеет Whytap — Drop, Agent, Meeting Notes, Google search, Translate & Subtitles,
-Screenshots, Hover, Notify, Monitor. У каждой строки название, одна фраза и статус словами: Ready,
+Screenshots, History, Display, To-do, Calendar, Case, Hover, Notify, Monitor. У каждой строки название, одна фраза и статус словами: Ready,
 Off (выключатель выключен), Needs setup (фича включена, не хватает шага — названа
 первая причина и число остальных) или Not set up (инструмент острова, которым не
 пользуются). Строка открывает экран фичи, а пока его нет — нынешнее место её
@@ -424,9 +440,24 @@ Off (выключатель выключен), Needs setup (фича включ�
 сохраняется, запись продолжается; Space остаётся только Hold); поле «Try it
 here»; «What it needs» — речевая модель (на Apple Silicon первой предлагается
 бесплатная модель на этом Mac, на Intel — ключ провайдера), Keyboard control,
-Microphone и «Your shortcut is heard»; настройки Mode, Language you speak, Lower
-other audio while speaking, Stop Drop automatically (только с Toggle); Vocab и
-Filler открывают свои редакторы в острове.
+Microphone и «Your shortcut is heard»; настройки Mode, Language you speak,
+Language Drop writes in (язык вывода Smart, как Output Lang в острове; As spoken —
+без перевода), Lower other audio while speaking, Stop Drop automatically (только с
+Toggle); Vocab и Filler открывают свои редакторы в острове.
+
+**Экраны History, Display и Calendar (Settings → Features):** раньше были только
+плитками острова. У каждого — что делает, хоткей открытия, кнопка, открывающая
+инструмент в острове. Display: настройки Hold brightness, Extra и Brightness keys
+(перенесены из Toolbox → Display; там осталась кнопка Open Display settings), в
+«What it needs» необязательный Keyboard control — только для Brightness keys.
+Calendar: карточка Calendars (перенесена из General → Integrations), статус Not
+set up, пока не показан ни один календарь. History своих настроек не имеет.
+Экран Agent показывает и хоткеи ссылок в ответе (Paste the chosen link, Open the
+chosen link, Next link, Previous link), раньше они были только в Hotkeys. В
+Integrations остались GitHub и Coding tools (доступ Claude Code и Codex к MCP
+Whytap). В Hover стрелка строки ведёт на экран фичи инструмента (Display, History,
+Calendar, To-do, Case; Vocab, Filler и языки — на Drop; Record и Notes — на
+Meeting Notes).
 
 **Экран Hover (Settings → Features → Hover):** инструменты острова списком в
 том же порядке, что в острове (слева направо, по рядам), Settings всегда
@@ -469,7 +500,8 @@ order across model ID/provider, ignoring case and separators (`qwen 27` and
 closes. Opening the picker automatically refreshes stale or failed catalogs;
 cached results remain available offline. There are no Refresh models or Other
 model ID actions. Search and refresh keep the current route until an explicit
-verified pick. API keys shows all providers as square tiles; clicking a tile
+verified pick. API keys shows all providers as compact tiles (icon, name, use, key status) that
+fit the default Settings window without scrolling; clicking a tile
 opens its inline form with only Save and Remove. Validation stays automatic;
 the only result message is a brief Key accepted / Key not accepted notice. Failed or unreachable checks preserve the
 previous key and keep the form open. OpenAI and Anthropic are available to all

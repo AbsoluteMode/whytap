@@ -394,9 +394,9 @@ final class WhatsNewTests: XCTestCase {
             host.layoutSubtreeIfNeeded()
             return cursorViews(in: host)
         }
-        XCTAssertEqual(links(nil), 2, "the Whytap and GitHub links")
-        XCTAssertEqual(links(WhatsNewPresenter(catalog: .empty, currentVersion: "2.2.28")), 2, "no notes: plain text")
-        XCTAssertEqual(links(WhatsNewPresenter(catalog: catalog, currentVersion: "2.2.28")), 3, "the version opens the list")
+        XCTAssertEqual(links(nil), 3, "the Whytap, Help and GitHub links")
+        XCTAssertEqual(links(WhatsNewPresenter(catalog: .empty, currentVersion: "2.2.28")), 3, "no notes: plain text")
+        XCTAssertEqual(links(WhatsNewPresenter(catalog: catalog, currentVersion: "2.2.28")), 4, "the version opens the list")
     }
 
     private func useRepositoryResources() throws {

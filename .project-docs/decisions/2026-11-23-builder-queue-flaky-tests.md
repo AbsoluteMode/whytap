@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Planner/PlannerExternalChangesTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-23-builder-queue-watchdog.md, 2026-11-22-builder-blocks-once.md, 2026-11-04-todo-locked-screen.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md]
+related: [2026-11-23-builder-queue-watchdog.md, 2026-11-22-builder-blocks-once.md, 2026-11-04-todo-locked-screen.md, ../processes/shared-app-development.md, 2026-11-23-builder-queue-cheap-fixes.md, 2026-11-26-builder-quick-wins.md, 2026-11-26-test-suite-speed.md, 2026-11-26-builder-test-shards.md]
 ---
 
 # Flaky and locked-screen tests in the build queue
@@ -78,5 +78,9 @@ merge, on an unlocked Mac, where its premise holds.
   list.
 - Reproducing the failures before fixing: 28 busy threads on 14 cores did not
   reproduce them here; the fixes follow the failure messages.
+
+Update 2026-11-26: the skipped tests now run before the install instead of
+before the merge, recorded on the ticket (see the
+[builder quick wins decision](2026-11-26-builder-quick-wins.md)).
 
 2026-11-23

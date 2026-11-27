@@ -64,7 +64,15 @@ DEFAULTS = {
     "install_alert_minutes": 120,  # a deferred install still waiting
     "undelivered_minutes": 20,     # an author event still unacknowledged
     "alerts_mirror": "",           # optional second JSONL path, e.g. the orchestrator's folder
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    "validate_while_locked": True,  # review, tests and merge go on behind a locked screen;
+                                    # protected-data tests, packaging and installs wait
+    "stale_dependency_minutes": 120,  # return a ticket whose dependency stays blocked
+    "notes_max_bytes": 32768,      # builder notes above this keep only their tail
 }
+NOTES = "whytap-builder-notes"
+NOTES_KEPT_LINES = 120
+NOTES_ARCHIVE_MAX_BYTES = 1 << 20  # the .old archive keeps its newest megabyte
 BACKOFF_SECONDS = (300, 900, 3600)
 KEPT_LOGS = 40
 SOURCES = Path(__file__).resolve().parent
@@ -251,12 +259,17 @@ def environment(config):
         per_cpu = DEFAULTS["load_limit_per_cpu"]
     limit = per_cpu * cpus
     reason = ""
+    overloaded = load is not None and load > limit
     if locked:
         reason = "screen locked"
-    elif load is not None and load > limit:
+    elif overloaded:
         reason = f"load {load:.0f} on {cpus} CPUs (limit {limit:.0f})"
+    # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+    # Only the protected-data tests, signing and the install need an unlocked screen:
+    # review, the suite and the merge may run behind a lock when the load allows.
     return {"clear": not reason, "reason": reason, "screen_locked": locked,
-            "load": load, "cpus": cpus, "load_limit": limit}
+            "load": load, "cpus": cpus, "load_limit": limit,
+            "clear_for_validation": not overloaded}
 
 
 def waiting_kind(reason):
@@ -291,9 +304,13 @@ def decide(work, state, config, now, gate, ready=lambda _config: {"clear": True}
                 return False, f"backoff: {failures} session(s) changed nothing, next try in " \
                               f"{int(wait - (now - state.get('last_exit', 0)))}s"
         check = ready(config)
-        if not check["clear"]:
+        if not check["clear"] and not (config.get("validate_while_locked", True)
+                                       and check.get("clear_for_validation")):
             return False, "waiting: " + check["reason"]
-        return True, "recover_in_progress" if work["in_progress"] else "queued"
+        reason = "recover_in_progress" if work["in_progress"] else "queued"
+        if not check["clear"]:
+            reason += " (screen locked: validation and merge only, installs wait)"
+        return True, reason
     if work["retry_install"]:
         return install(work, state, config, now, gate, ready)
     return False, "idle"
@@ -831,10 +848,12 @@ def watch(root):
         if not reap_orphan(root, read_json(root / STATE, {})):
             return 0
         state = read_json(root / STATE, {})
+        if open_work(root)["waiting_dependency"]:
+            returned_stale_dependencies(root, config)
         work = open_work(root)
         before = json.dumps(state, sort_keys=True)
         start, reason = decide(work, state, config, time.time(), meeting_gate_clear, environment)
-        if start and reason == "queued" and returned_moved_heads(root):
+        if start and reason.startswith("queued") and returned_moved_heads(root):
             work = open_work(root)  # a returned ticket needs no builder
             start, reason = decide(work, state, config, time.time(), meeting_gate_clear,
                                    environment)
@@ -850,6 +869,7 @@ def watch(root):
             return 0
         state.update(last_reason=reason, last_start=time.time())
         write_json(root / STATE, state)
+        trim_notes(root, config)  # under the session lock: no session writes them now
         code = run_session(root, config, reason, work)
         after = open_work(root)
         state = read_json(root / STATE, {})
@@ -895,6 +915,96 @@ def returned_moved_heads(root):
         log("returned to their authors, PR head moved: "
             + ", ".join(f"#{ticket}" for ticket in returned))
     return returned
+
+
+def returned_stale_dependencies(root, config):
+    """Model-free: queued tickets whose dependency has stayed blocked go back to their
+    authors (as the builder, like check-heads). Failures only log."""
+    try:
+        result = helper(root, ACTOR, "return-stale-dependencies", "--minutes",
+                        str(int(config.get("stale_dependency_minutes", 120))), check=False) or {}
+    except (OSError, ValueError) as error:
+        log(f"stale dependency check failed: {error}")
+        return []
+    returned = result.get("returned", [])
+    if returned:
+        log("returned to their authors, dependency still blocked: "
+            + ", ".join(f"#{ticket}" for ticket in returned))
+    return returned
+
+
+def utf8_tail(data, limit):
+    """At most `limit` newest bytes of `data`, starting at a character boundary:
+    a cut never splits a multi-byte UTF-8 character."""
+    if len(data) <= limit:
+        return data
+    tail = data[len(data) - limit:] if limit > 0 else b""
+    start = 0
+    while start < len(tail) and tail[start] & 0xC0 == 0x80:
+        start += 1
+    return tail[start:]
+
+
+def tail_lines(data, limit):
+    """The newest complete lines of `data` (bytes) within `limit` bytes; when even
+    the newest line is longer, its newest characters. Every byte bound of the notes
+    and their archive goes through here."""
+    if len(data) <= limit:
+        return data
+    tail = data[len(data) - limit:] if limit > 0 else b""
+    start = tail.find(b"\n") + 1
+    return tail[start:] if 0 < start < len(tail) else utf8_tail(data, limit)
+
+
+TRUNCATED = b"[...] "  # the line continues from the archive
+
+
+def replace_bytes(path, data):
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_bytes(data)
+    temporary.replace(path)
+
+
+def trim_notes(root, config):
+    """Builder notes are read at every session start: above `notes_max_bytes` (UTF-8
+    bytes on disk) the file keeps its newest lines (at most NOTES_KEPT_LINES and half
+    the limit) and the older lines are appended to `.old`, which keeps its newest
+    NOTES_ARCHIVE_MAX_BYTES. The archive is written first, so an interruption
+    duplicates lines instead of losing them. Runs only under the session lock, so no
+    builder session writes the notes meanwhile."""
+    path = root / NOTES
+    try:
+        limit = int(config.get("notes_max_bytes") or 0)
+        if limit <= 0 or not path.is_file() or path.stat().st_size <= limit:
+            return False
+        lines = path.read_bytes().splitlines(keepends=True)
+        budget = limit // 2
+        kept, size = [], 0
+        for line in reversed(lines):
+            if kept and (len(kept) >= NOTES_KEPT_LINES or size + len(line) > budget):
+                break
+            kept.insert(0, line)
+            size += len(line)
+        moved = lines[:len(lines) - len(kept)]
+        if size > budget:
+            # Only the newest line is left and it alone is over the budget: the whole
+            # line goes to the archive and the notes keep its newest characters.
+            moved.append(kept[0])
+            marker = TRUNCATED if budget > len(TRUNCATED) else b""
+            kept = [marker + utf8_tail(kept[0], budget - len(marker))]
+        if not moved:
+            return False
+        archive = root / (NOTES + ".old")
+        older = archive.read_bytes() if archive.is_file() else b""
+        if older and not older.endswith(b"\n"):
+            older += b"\n"
+        replace_bytes(archive, tail_lines(older + b"".join(moved), NOTES_ARCHIVE_MAX_BYTES))
+        replace_bytes(path, b"".join(kept))
+        log(f"builder notes trimmed to their last {len(kept)} lines")
+        return True
+    except (OSError, ValueError) as error:
+        log(f"builder notes could not be trimmed: {error}")
+        return False
 
 
 def helper(root, actor, *arguments, check=True):
@@ -1032,8 +1142,12 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("run", help="What launchd calls: start a session if work is open")
     commands.add_parser("status", help="Show the decision without starting anything")
-    commands.add_parser("environment", help="Can a build run now (screen and load)? "
-                        "Exit 0 when clear, 3 when not")
+    environment_command = commands.add_parser(
+        "environment", help="Can a build run now (screen and load)? Exit 0 when clear, 3 when not")
+    environment_command.add_argument(
+        "--for", dest="purpose", choices=("install", "suite"), default="install",
+        help="suite: a locked screen does not stop the review, the full suite or the merge "
+             "(protected-data tests skip and run before the install); install: it does")
     activate = commands.add_parser("activate", help="Install and load the LaunchAgent")
     activate.add_argument("--allow-local", action="store_true",
                           help="Install this checkout's scripts even if they differ from main")
@@ -1046,7 +1160,10 @@ def main():
         if arguments.command == "run":
             return command_run(root)
         if arguments.command == "environment":
-            result = environment(load_config(root))
+            settings = load_config(root)
+            result = environment(settings)
+            if arguments.purpose == "suite" and settings.get("validate_while_locked", True):
+                result["clear"] = result["clear_for_validation"]
             print(json.dumps(result, ensure_ascii=False, indent=2))
             return 0 if result["clear"] else 3
         if arguments.command == "status":

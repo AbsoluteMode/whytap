@@ -187,6 +187,11 @@ if [ "$BUILD_STEP" -eq 1 ] && [ "$UPLOAD_STEP" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] &
     die "EXODIA_COMMUNITY_SIGNING and EXODIA_COMMUNITY_SIGNING_CERTIFICATE_FILE are for local builds; unset them to publish"
 fi
 
+# WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
+if [ "${EXODIA_LOCAL_INSTALL:-0}" != "0" ] && [ "$UPLOAD_STEP" -eq 1 ]; then
+    die "EXODIA_LOCAL_INSTALL makes an arm64 app for this Mac only; public releases stay universal with a DMG"
+fi
+
 [ -x /usr/bin/python3 ] || die "missing /usr/bin/python3"
 if [ "$DRY_RUN" -eq 0 ] && [ "$UPLOAD_STEP" -eq 1 ]; then
     need_cmd gh

@@ -48,7 +48,7 @@ struct SettingsOtherView: View {
     /// Tabs that left the sidebar and open from General.
     static let moreRows: [(title: String, subtitle: String, tab: SettingsWindowTab)] = [
         ("Backup", "Encrypted backups of your keys and settings, to restore or move to another Mac.", .backup),
-        ("Integrations", "Connect GitHub, where your encrypted backups are kept.", .integrations),
+        ("Integrations", "Connect GitHub for encrypted backups, and choose which coding tools may use Whytap.", .integrations),
     ]
 
     /// The clip shows an example combo; the popover names the user's own.

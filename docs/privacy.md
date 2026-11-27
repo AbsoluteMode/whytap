@@ -1,9 +1,8 @@
 # Privacy
 
-Whytap has no accounts and no telemetry. It uses one Whytap-operated server,
-whytap.ai, and only for Lil Bro's answers in Settings after you turn them on.
-This document lists every way data can leave the Mac, so that these claims
-are verifiable rather than slogans.
+Whytap has no accounts, no Whytap-operated servers and no telemetry. This
+document lists every way data can leave the Mac, so that "no Whytap servers"
+is a verifiable claim rather than a slogan.
 
 ## What stays on the device
 
@@ -39,8 +38,9 @@ are verifiable rather than slogans.
 - A coding tool with the Whytap plugin (Claude Code, Codex) reads your meeting
   notes and transcripts only after you answer Yes to Whytap's question for
   that tool, once per Mac. What it reads goes to that tool's model provider
-  under its own policy. Change the answer in Settings -> Integrations ->
-  Coding tools. The files themselves are ordinary files in your user account.
+  under its own policy. Turning the tool's switch on in Settings ->
+  Integrations -> Coding tools is the same Yes (it also adds Whytap's MCP
+  server to the tool); off is No. The files themselves are ordinary files in your user account.
 - Whycode (only a build signed with its Developer ID) can read the words of a
   Drop take while you dictate into Whycode itself, to show them in its own
   field, after you answer Yes to Whytap's question once. It never gets words
@@ -134,7 +134,7 @@ source controls are in Notify. [Script contract](customization/notifications.md)
 | Tavily search | the tool’s search query goes to Tavily; returned excerpts and URLs go to the selected agent model | only when the agent calls web_search with Tavily; a free /usage check runs when saving the Tavily key |
 | Monitor | the SSH targets configured locally by the user; optionally Doppler to resolve credential references | while Monitor is open; custom collectors run separately under the user’s control |
 | Google search hotkey | a `google.com/search` URL opened in your browser | when you press Right Option |
-| Lil Bro answers (off by default) | whytap.ai (`/api/ask/lilbro`), which answers with Claude Sonnet 5.5 through Anthropic: the question you type to Lil Bro (up to 300 characters), the Settings screen you are on (for example `features/drop`) and up to three earlier questions that went to whytap.ai with its answers. Questions asked while answers were off never leave this Mac, also not later, with one exception you choose: Turn on and ask sends the one question this Mac did not understand, and only that one; it is never part of later history unless whytap.ai answered it. No keys, dictated text, notes, settings or identifier of this Mac; the request follows no redirect away from that address. whytap.ai keeps each question, the earlier exchanges sent with it and its answer for 90 days to improve answers, without your address; it limits questions per address using a keyed hash | only after you press Turn on answers (or Turn on and ask, which also sends the question this Mac did not understand) under the one-line disclosure in Lil Bro's balloon, whose full text is under Details (⋯ → Turn on answers shows that disclosure, it does not turn anything on); ⋯ → Turn off answers from whytap.ai stops it, and he goes back to finding settings by name on this Mac |
+| Help links (Settings footer, Help window, Help tool) | `whytap.ai` and the Help Center `whytap.ai/help/` open in your browser; Whytap sends nothing itself | only when you click a link |
 | Sparkle updates | GitHub Releases (`appcast.xml` and the DMG) | hourly check, download only on your click |
 
 OpenAI speech uses the same OpenAI key as its language models. A dictation on
@@ -164,7 +164,7 @@ Data-use policies depend on the selected provider and its account settings.
 - Post Event (part of Accessibility on current macOS): the synthetic
   Command-V used to paste.
 - Calendars: only after **Allow access to calendars** in Calendar or Settings ->
-  Integrations (the published 2.2.26 build shows Calendar as Soon and asks for
+  Features -> Calendar (the published 2.2.26 build shows Calendar as Soon and asks for
   nothing). macOS requires full event access to read the Mac's calendars;
   Whytap only reads events. Google, Outlook and other accounts come from System
   Settings -> Internet Accounts; Whytap no longer offers direct provider sign-in.

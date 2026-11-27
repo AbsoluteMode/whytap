@@ -41,8 +41,11 @@ struct SettingsProjectFooter: View {
                 .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding)
                 .accessibilityHidden(true)
 
-            HStack(spacing: 4) {
-                SettingsFooterLink(title: "Whytap", destination: URL(string: "https://whytap.ai")!)
+            // One link per row: three in a row truncated their labels in the
+            // narrow sidebar. WHY: .project-docs/decisions/2026-11-27-footer-links-vertical.md
+            VStack(alignment: .leading, spacing: 0) {
+                SettingsFooterLink(title: "Whytap", destination: BuildConfig.websiteURL)
+                SettingsFooterLink(title: "Help", destination: BuildConfig.helpCenterURL, symbol: "questionmark.circle")
                 SettingsFooterLink(title: "GitHub", destination: BuildConfig.landingURL, brand: "github")
             }
             .padding(.horizontal, SettingsSidebarStyle.buttonHorizontalPadding - 6)
@@ -109,6 +112,8 @@ private struct SettingsFooterLink: View {
     let title: String
     let destination: URL
     var brand: String?
+    /// SF Symbol used instead of the brand mark / circle.
+    var symbol: String?
 
     var body: some View {
         Link(destination: destination) {
@@ -118,7 +123,10 @@ private struct SettingsFooterLink: View {
                     .accessibilityHidden(true)
                 Text(title)
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+                Spacer(minLength: 0)
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .buttonStyle(SettingsFooterLinkStyle())
         .help(destination.absoluteString)
@@ -128,7 +136,11 @@ private struct SettingsFooterLink: View {
 
     @ViewBuilder
     private var icon: some View {
-        if let brand, let image = UsefulLinkIconAsset.image(named: brand) {
+        if let symbol {
+            Image(systemName: symbol)
+                .resizable()
+                .scaledToFit()
+        } else if let brand, let image = UsefulLinkIconAsset.image(named: brand) {
             Image(nsImage: image)
                 .resizable()
                 .renderingMode(.template)

@@ -380,7 +380,7 @@ slots); both converge on `MeetingsCoordinator.toggleManualRecording()`.
 
 The Mac's own brightness keys are not a Whytap hotkey: they have no
 `HotkeyConfiguration` binding, recorder row, `HotkeyHintView` or Help window
-row. Settings → Toolbox → Display → Brightness keys (off by default) lets
+row. Settings → Features → Display → Brightness keys (off by default) lets
 Whytap take them from macOS (`BrightnessKeys`, `BrightnessKeyEventTap`).
 
 - A head-insert session tap for system-defined events (needs Accessibility)

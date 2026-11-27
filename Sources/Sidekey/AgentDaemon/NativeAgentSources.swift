@@ -32,6 +32,14 @@ enum NativeAgentSources {
     static let toolName = "source_call"
     /// Set by the app; nil (tests, `swift run`) means no sources are offered.
     @MainActor static var installed: (@MainActor () -> AgentSourceCatalog?)?
+
+    /// What the Agent is offered by default: nothing while the feature is
+    /// gated off, even if a catalog was installed.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+    @MainActor static func offered(enabled: Bool = AgentSourcesGate.isEnabled) -> AgentSourceCatalog? {
+        guard enabled else { return nil }
+        return installed?()
+    }
     static let promptBudget = 10_000
 
     static let taintRefusal = "Refused: this request has read content from a connected source, so files, commands, the web, the screen, other sources and Whytap tools are off for the rest of it. Tell the user to ask for that in a new request."

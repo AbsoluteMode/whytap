@@ -107,9 +107,12 @@ enum SourcePreset: String, CaseIterable, Identifiable, Sendable {
 
 /// The GitHub CLI's existing sign-in, offered as one click when present.
 enum GitHubCLISignIn {
-    /// `gh auth token` through the login shell; nil when gh is missing or signed out.
-    static func token() async -> String? {
-        await Task.detached(priority: .utility) {
+    /// `gh auth token` through the login shell; nil when gh is missing or
+    /// signed out, and without running anything while the feature is gated off.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+    static func token(enabled: Bool = AgentSourcesGate.isEnabled) async -> String? {
+        guard enabled else { return nil }
+        return await Task.detached(priority: .utility) {
             guard let gh = LoginShellWhich.resolve("gh"), gh.hasPrefix("/") else { return nil }
             let process = Process()
             process.executableURL = URL(fileURLWithPath: gh)

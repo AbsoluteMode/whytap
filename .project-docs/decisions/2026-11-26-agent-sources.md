@@ -32,10 +32,14 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Assistant/SourcesControllerTests.swift
     confirmed_at: 2026-11-26
-related: [2026-10-22-native-agent.md]
+related: [2026-10-22-native-agent.md, 2026-11-27-agent-sources-gated.md]
 ---
 
 # The Agent searches connected sources, read tools only
+
+> Gated off since 2026-11-27: `AgentSourcesGate.isEnabled` is false until
+> the owner decides whether the feature stays. See
+> `2026-11-27-agent-sources-gated.md`.
 
 ## Context
 

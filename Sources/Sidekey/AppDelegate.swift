@@ -4019,9 +4019,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // need no harness prompt. WHY:
         // .project-docs/decisions/2026-11-22-native-agent-app-control.md
         NativeAgentAppControl.installed = { [controls] request in await controls.handle(request) }
-        // Connected sources' read tools for the Agent. WHY:
-        // .project-docs/decisions/2026-11-26-agent-sources.md
-        NativeAgentSources.installed = { SourcesController.shared.agentCatalog() }
+        // Connected sources' read tools for the Agent, gated off until the
+        // owner decides. WHY: .project-docs/decisions/2026-11-26-agent-sources.md,
+        // .project-docs/decisions/2026-11-27-agent-sources-gated.md
+        if AgentSourcesGate.isEnabled {
+            NativeAgentSources.installed = { SourcesController.shared.agentCatalog() }
+        }
         let approvals = CaseApprovalController()
         caseApprovalController = approvals
         caseApprovalPanel = CaseApprovalPanel(controller: approvals)

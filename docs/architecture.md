@@ -217,7 +217,8 @@ Voice flow (Drop / dictation):
             target that is not in front (lost focus or refused activation)
             or a clipboard change stops the take as a retryable refusal:
             "Couldn't paste — app not in front / clipboard changed" with
-            Retry pasting the kept text (DropPasteRetry); only a missing or
+            Retry pasting the kept text to the take's own target
+            (DropPasteRetry, also for a refused Fast raw partial); only a missing or
             quit target pastes where focus is. Quit stops
             every Drop paste that began before it. The clipboard comes back
             asynchronously 150 ms after the last read of the dictation after

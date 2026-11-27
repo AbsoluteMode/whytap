@@ -138,6 +138,10 @@ final class AutoPasteEngine {
         case clipboardChanged
     }
     private(set) var lastPasteRefusal: PasteRefusal?
+    /// The target the last `paste` was bound to. A refused take keeps it,
+    /// so its Retry goes to the same app even if another capture (a new
+    /// History open) changed the remembered target meanwhile.
+    private(set) var lastPasteTarget: RememberedTarget?
 
     /// When the user's clipboard comes back after a Drop paste.
     struct RestoreTiming: Equatable {
@@ -375,6 +379,13 @@ final class AutoPasteEngine {
     /// returns `false`. Other failures before Cmd+V give the clipboard
     /// back at once.
     func paste(_ text: String, formatting: SmartFormattingProfile = .plain) async -> Bool {
+        await paste(text, formatting: formatting, to: remembered)
+    }
+
+    /// `paste(_:formatting:)` bound to an explicit target instead of the
+    /// currently remembered one. Retry of a refused take uses the target
+    /// that take was bound to (`lastPasteTarget`).
+    func paste(_ text: String, formatting: SmartFormattingProfile = .plain, to boundTarget: RememberedTarget?) async -> Bool {
         guard !text.isEmpty else {
             return false
         }
@@ -398,7 +409,8 @@ final class AutoPasteEngine {
 
         // The take's target is fixed for this paste: a newer take that
         // captures another app while this one waits must not redirect it.
-        let target = remembered
+        let target = boundTarget
+        lastPasteTarget = target
         let generation = flushGeneration
 
         // One Drop paste at a time: the claim below must not be shared.
@@ -607,11 +619,14 @@ final class AutoPasteEngine {
         // pasteboard), so both are sampled twice, interleaved: a clipboard
         // change during a foreground lookup, or a focus change during an
         // ownership check, is seen by the next check of the other kind.
+        // The last check before V-down is the cheap change-count compare:
+        // a copy during either foreground lookup is caught right at the
+        // boundary.
         let ownedFirst = self.claim === claim && clipboardIsOwned(by: claim)
         let frontFirst = frontmostAppInfo()?.pid
-        let owned = ownedFirst && self.claim === claim && currentChangeCount() == claim.ownedChangeCount
         let frontLast = frontmostAppInfo()?.pid
         let recipientReady = recipient.map { frontFirst == $0.pid && frontLast == $0.pid } ?? true
+        let owned = ownedFirst && self.claim === claim && currentChangeCount() == claim.ownedChangeCount
         guard recipientReady, owned else {
             postEvent(Self.commandKeyCode, false, [])
             if self.claim !== claim {

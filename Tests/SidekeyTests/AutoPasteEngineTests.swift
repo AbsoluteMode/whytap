@@ -2222,3 +2222,84 @@ extension AutoPasteEngineTests {
         XCTAssertEqual(engine.lastPasteRefusal, .clipboardChanged)
     }
 }
+
+// MARK: - Build-queue review of ticket 706
+
+
+extension AutoPasteEngineTests {
+    private func assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: Bool, terminated: Bool = false) async {
+        let original = PasteboardSnapshot(items: [["fixture": Data("old".utf8)]])
+        let external = PasteboardSnapshot(items: [["fixture": Data("new copy".utf8)]])
+        var board = original
+        var generation = 10
+        var commandWasPosted = false
+        var didPostV = false
+        var sendForegroundQueries = 0
+        var vDownGeneration: Int?
+        let engine = AutoPasteEngine(
+            flagsState: { [] },
+            frontmostAppInfo: {
+                if commandWasPosted && !didPostV {
+                    sendForegroundQueries += 1
+                    if sendForegroundQueries == 2 {
+                        board = external
+                        generation = 12
+                    }
+                }
+                return Self.targetA
+            },
+            activate: { _ in true }, isTerminated: { _ in terminated },
+            permissionGranted: { _ in true },
+            pasteboardWrite: { text in
+                board = PasteboardSnapshot(items: [["public.utf8-plain-text": Data(text.utf8)]])
+                generation = 11
+                return (before: 10, after: 11)
+            },
+            postEvent: { key, down, _ in
+                if key == Self.cmd && down { commandWasPosted = true }
+                if key == Self.v && down { didPostV = true; vDownGeneration = generation }
+            },
+            sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
+            pasteboardSnapshot: { board },
+            pasteboardRestore: { board = $0; generation += 1 },
+            currentChangeCount: { generation }
+        )
+        if hasTarget { engine.rememberDropTarget() }
+        let result = await engine.paste("fixture")
+        await engine.waitForPendingRestore()
+        XCTAssertEqual(sendForegroundQueries, 2)
+        XCTAssertNil(vDownGeneration, "Generation 12 is the user’s new copy")
+        XCTAssertFalse(result)
+        XCTAssertFalse(didPostV, "The final foreground query must not create an unchecked clipboard window")
+        XCTAssertEqual(board, external)
+    }
+    func testBuilder706CopyAtActualLastSampleWithLiveTarget() async {
+        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: true)
+    }
+
+    func testBuilder706CopyAtActualLastSampleWithNoTarget() async {
+        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: false)
+    }
+
+    func testBuilder706CopyAtActualLastSampleWithQuitTarget() async {
+        await assertCopyAtSecondForegroundQueryIsNeverPasted(hasTarget: true, terminated: true)
+    }
+
+    func testBuilder706OpeningHistoryMustNotRedirectParkedDictation() async {
+        let env = makeRestoreEnv()
+        let engine = env.makeEngine()
+        engine.rememberDropTarget() // Drop starts in A.
+        env.frontmost = Self.targetB
+        let initial = await engine.paste("retained fixture")
+        XCTAssertFalse(initial)
+        XCTAssertEqual(engine.lastPasteRefusal, .targetNotInFront)
+        let parked = engine.lastPasteTarget // DropPasteRetry keeps the take's own target.
+        engine.rememberTargetBeforeRecording() // The History open path captures B.
+        XCTAssertEqual(parked, Self.targetA)
+        // AppDelegate's Retry pastes the kept text to the kept target.
+        let retry = await engine.paste("retained fixture", to: parked)
+        await engine.waitForPendingRestore()
+        XCTAssertFalse(retry)
+        XCTAssertFalse(env.postedEvents.contains { $0.keyCode == Self.v && $0.down })
+    }
+}

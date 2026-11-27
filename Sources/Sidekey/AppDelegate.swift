@@ -1394,16 +1394,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !pasted && autoPasteEngine.hasLocalDropTarget {
             _ = saveUndeliveredLocalDrop(raw: rawTranscript, formatted: cleaned, targetApp: targetApp)
             failDropTurnTelemetry(reason: "local_editor_unavailable")
-        } else if !pasted, let refusal = autoPasteEngine.lastPasteRefusal {
+        } else if !pasted, let refused = DropPasteRetry.make(
+            after: autoPasteEngine, text: cleaned, rawTranscript: rawTranscript, formatting: formatting
+        ) {
             // The target was not in front, or the clipboard changed under the
             // paste: nothing was pasted elsewhere. Keep the text for Retry.
             // WHY: .project-docs/decisions/2026-11-27-drop-paste-restore-on-read.md
             dropHistoryRecorder?.record(rawTranscript: rawTranscript, formattedText: cleaned, targetApp: targetApp)
             failDropTurnTelemetry(reason: "paste_refused")
-            parkRefusedPaste(
-                DropPasteRetry(text: cleaned, rawTranscript: rawTranscript, formatting: formatting),
-                refusal: refusal
-            )
+            parkRefusedPaste(refused.retry, refusal: refused.refusal)
             return
         } else {
             if !pasted {
@@ -3434,6 +3433,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 return pasted
             },
+            parkRefusedPartial: { [weak self] raw in
+                // The raw partial's paste was refused (target not in front,
+                // clipboard changed): keep this text for Retry instead of
+                // re-transcribing audio or dropping it.
+                guard let self, generation == self.streamingSetupGeneration,
+                      self.autoPasteEngine.lastPasteRefusal != nil,
+                      let refused = DropPasteRetry.make(
+                        after: self.autoPasteEngine, text: raw, rawTranscript: raw, formatting: .plain
+                      ) else { return false }
+                self.dropHistoryRecorder?.record(rawTranscript: raw, formattedText: raw, targetApp: targetApp)
+                self.parkRefusedPaste(refused.retry, refusal: refused.refusal)
+                return true
+            },
             saveUndeliveredPartial: { [weak self] raw in
                 guard let self, generation == self.streamingSetupGeneration,
                       self.autoPasteEngine.hasLocalDropTarget else { return false }
@@ -3565,7 +3577,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppState.shared.phase = .inserting
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let pasted = await self.deliverDropTranscript(pending.text, formatting: pending.formatting)
+            // Bound to the refused take's own target, never to whatever was
+            // captured since (a History open, for example).
+            let pasted = await self.autoPasteEngine.paste(pending.text, formatting: pending.formatting, to: pending.target)
             self.retryInFlight = false
             if !pasted, let refusal = self.autoPasteEngine.lastPasteRefusal {
                 self.parkRefusedPaste(pending, refusal: refusal)
@@ -3663,6 +3677,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// through to `.deliveryFailed` (retain for retry) instead of silently
         /// losing the dictation.
         var pasteRaw: (String) async -> Bool = { _ in true }
+        /// After a refused raw-partial paste (`AutoPasteEngine.PasteRefusal`):
+        /// park that text for a paste-only Retry. Returns whether it did;
+        /// the parked take owns the phase (`.deliveryFailed` with its reason).
+        var parkRefusedPartial: (String) -> Bool = { _ in false }
         /// A closed native field can park a raw partial in History without
         /// retaining audio for a retry into an editor that no longer exists.
         var saveUndeliveredPartial: (String) -> Bool = { _ in false }
@@ -3866,6 +3884,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 let pasted = await sink.pasteRaw(lastPartial)          // rung 3
                 if pasted {
                     sink.failTelemetry("salvaged_partial")
+                } else if sink.parkRefusedPartial(lastPartial) {
+                    // Retry pastes the kept partial; no audio retry needed.
+                    sink.clearPendingRetry()
+                    sink.failTelemetry("salvaged_partial_paste_refused")
                 } else if sink.saveUndeliveredPartial(lastPartial) {
                     sink.clearPendingRetry()
                     sink.failTelemetry("local_editor_unavailable")

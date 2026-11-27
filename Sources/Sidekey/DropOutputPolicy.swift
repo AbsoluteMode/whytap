@@ -73,6 +73,25 @@ struct DropPasteRetry {
     let text: String
     let rawTranscript: String
     let formatting: SmartFormattingProfile
+    /// The app the refused take was bound to; Retry pastes only there.
+    let target: AutoPasteEngine.RememberedTarget?
+
+    /// The kept take after `engine` refused its paste in a retryable way,
+    /// or nil when the last paste was not a retryable refusal (it pasted,
+    /// or stopped for quit, held modifiers or a failed write).
+    @MainActor
+    static func make(
+        after engine: AutoPasteEngine,
+        text: String,
+        rawTranscript: String,
+        formatting: SmartFormattingProfile
+    ) -> (retry: DropPasteRetry, refusal: AutoPasteEngine.PasteRefusal)? {
+        guard let refusal = engine.lastPasteRefusal else { return nil }
+        let retry = DropPasteRetry(
+            text: text, rawTranscript: rawTranscript, formatting: formatting, target: engine.lastPasteTarget
+        )
+        return (retry, refusal)
+    }
 
     /// The short reason shown next to Retry.
     static func message(for refusal: AutoPasteEngine.PasteRefusal) -> String {

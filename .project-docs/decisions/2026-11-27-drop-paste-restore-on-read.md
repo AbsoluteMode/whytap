@@ -65,9 +65,11 @@ clipboard png/tiff only. The target pasted the old screenshot.
   as foreign: not restored over and not hidden from clipboard history.
 - One foreground sample after the settle decides both the focus check and
   the Cmd+V recipient. Between Command-down and V-down the ownership check
-  (which may read the pasteboard) and the foreground lookup are each sampled
-  twice, interleaved, so a clipboard change during a foreground lookup or a
-  focus change during an ownership check is caught by the next check.
+  (which may read the pasteboard) and two foreground lookups run in that
+  order, and the last thing before V-down is a change-count compare: a copy
+  during either foreground lookup, or a focus change during the ownership
+  check, stops the paste. This holds with a live, a missing and a quit
+  target.
 - A failed write re-checks, right before restoring, the generation that
   justified the restore (its own clear or the previous take's dictation):
   the checks themselves read the pasteboard, and anything that arrived
@@ -80,6 +82,13 @@ clipboard png/tiff only. The target pasted the old screenshot.
   island shows "Couldn't paste — app not in front" with Retry, which pastes
   the same text again without new processing. A clipboard change under the
   paste is the same kind of refusal ("Couldn't paste — clipboard changed").
+  The kept take is bound to the target it was refused for
+  (`DropPasteRetry.target`, `paste(_:formatting:to:)`), so a later capture
+  (for example a History open) cannot redirect its Retry. The Fast
+  raw-partial salvage (batch failed, batch empty, no retained audio) parks a
+  refused partial the same way (`parkRefusedPartial`): one History entry,
+  the refusal pill, and Retry pastes that partial without another provider
+  call instead of re-running batch or going idle.
   Only a take without a target, or whose target quit, still pastes where
   focus is. Quit, held modifiers and a failed write keep their earlier
   handling. Decided by the maintainer's orchestrator on 2026-11-27: pasting
@@ -151,7 +160,11 @@ pastes once it is in front; a quit target still pastes where focus is; only
 focus and clipboard stops are retryable refusals. After the review of
 ticket 704: a failed successor write does not restore over a copy that
 arrives while it inspects the previous take, and a copy during the last
-foreground lookup (with and without a target) posts no V. On a named pasteboard: promise read counting
+foreground lookup (with and without a target) posts no V. After the review
+of ticket 706: a copy during only the second foreground lookup posts no V
+(live, missing and quit target); a refused Fast partial is kept for Retry
+in all three batch outcomes for both refusals, a History capture of another
+app does not redirect it, and Retry makes no provider call. On a named pasteboard: promise read counting
 and cache, `ClipboardWatcher` skipping the item unread, and an end-to-end
 run where a separate `osascript` process reads 300 ms after Cmd+V from an
 image-only pasteboard. With the timing forced back to 120 ms that process

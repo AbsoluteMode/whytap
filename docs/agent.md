@@ -6,7 +6,7 @@ appears in the island. The Agent runs on the coding tool you already use,
 and skills. Whytap starts it on your Mac for each request and shows its answer.
 
 > The sections below "Connect" still describe the earlier built-in agent and
-> its web search, sources and costs. They are being removed together with that
+> its web search and costs. They are being removed together with that
 > agent; Right Command no longer uses them.
 
 ## Connect

@@ -2702,7 +2702,7 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
    a key for, OpenRouter's provider list (latency, throughput) for a model
    selected on an OpenRouter route, synthetic model probes (silence or a one-word prompt, never user
    audio or text) sent only to that provider when a model is picked or on
-   Check now, its official OpenCode native package downloads from the npm registry, `google.com` opened in the
+   Check now, its official OpenCode native package downloads from the npm registry, `google.com`, the Whytap site and Help Center (`whytap.ai`, `whytap.ai/help/`) opened in the
    browser, the Sparkle feed on GitHub Releases, and optional encrypted backups
    and settings sync to the user's own GitHub repository or selected sync folder.
    `Tests/SidekeyTests/CloudRemovalTests.swift` fails the build on any

@@ -40,21 +40,21 @@ final class SettingsProjectFooterTests: XCTestCase {
         }
 
         layout()
-        XCTAssertEqual(cursorViews(in: host), 2, "no update: only the Whytap and GitHub links")
+        XCTAssertEqual(cursorViews(in: host), 3, "no update: only the Whytap, Help and GitHub links")
 
         controller.handleDiscovered(version: "2.2.27", build: "2000")
         layout()
-        XCTAssertEqual(cursorViews(in: host), 3, "the two links and enabled Update")
+        XCTAssertEqual(cursorViews(in: host), 4, "the three links and enabled Update")
 
         controller.updateFromSettings()
         layout()
         XCTAssertEqual(controller.settingsOffer?.action, .downloading)
-        XCTAssertEqual(cursorViews(in: host), 2, "disabled Updating… has no pointing hand")
+        XCTAssertEqual(cursorViews(in: host), 3, "disabled Updating… has no pointing hand")
 
         AppState.shared.screenshotActive = true
         controller.applyDriverStage(.readyToInstall)
         layout()
         XCTAssertEqual(controller.settingsOffer?.action, .restart)
-        XCTAssertEqual(cursorViews(in: host), 3, "enabled Restart has the pointing hand again")
+        XCTAssertEqual(cursorViews(in: host), 4, "enabled Restart has the pointing hand again")
     }
 }

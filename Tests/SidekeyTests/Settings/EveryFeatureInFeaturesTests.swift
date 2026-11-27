@@ -37,7 +37,7 @@ final class EveryFeatureInFeaturesTests: XCTestCase {
     /// or Meeting Notes, not navigation) has a feature row.
     func testEveryIslandToolThatIsAFeatureIsListed() {
         let partsOfOtherFeatures: Set<HoverTool> = [.dropMode, .vocab, .filler, .inputLang, .outputLang,
-                                                     .notes, .meetingRecord, .hotkeys, .quit, .settings]
+                                                     .notes, .meetingRecord, .hotkeys, .quit, .settings, .help]
         for tool in HoverTool.allCases where !partsOfOtherFeatures.contains(tool) {
             XCTAssertNotNil(HoverFeatureView.feature(for: tool), "\(tool) has a feature in Features")
         }

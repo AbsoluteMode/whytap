@@ -23,12 +23,15 @@ struct MCPToolInfo: Codable, Hashable, Sendable {
         self.readOnlyHint = readOnlyHint; self.destructiveHint = destructiveHint
     }
 
-    init?(_ value: MCPValue) {
-        guard let name = value["name"]?.string, !name.isEmpty, name.count <= 128 else { return nil }
+    /// The entry's fields are read as sent; its data (title, description,
+    /// schema) is redacted with `mask` before the description is clipped, and
+    /// a tool whose name carries a known value is dropped.
+    init?(_ value: MCPValue, mask: SourceSecretMask = SourceSecretMask([])) {
+        guard let name = value["name"]?.string, !name.isEmpty, name.count <= 128, !mask.contains(name) else { return nil }
         self.name = name
-        title = value["title"]?.string ?? value["annotations"]?["title"]?.string
-        description = String((value["description"]?.string ?? "").prefix(2000))
-        inputSchema = value["inputSchema"] ?? .object(["type": .string("object")])
+        title = (value["title"]?.string ?? value["annotations"]?["title"]?.string).map { mask.text($0) }
+        description = String(mask.text(value["description"]?.string ?? "").prefix(2000))
+        inputSchema = mask.value(value["inputSchema"] ?? .object(["type": .string("object")]))
         readOnlyHint = value["annotations"]?["readOnlyHint"]?.bool
         destructiveHint = value["annotations"]?["destructiveHint"]?.bool
     }
@@ -67,9 +70,12 @@ struct MCPToolResult: Equatable, Sendable {
 /// list and an ended session move the epoch, so nothing approved on an older
 /// list is sent or returned.
 ///
-/// Every server text is masked with the source's known values when it is
-/// decoded, before anything derived from it is clipped (descriptions, results,
-/// error messages), so a clip can never leave a fragment of a value.
+/// Protocol control data (the envelope, ids, methods, negotiation, cursors and
+/// notices) is parsed and routed unmodified. Server data is redacted with the
+/// source's known values only where it becomes text or metadata: each tool
+/// entry before it is parsed and clipped, a result after it is rendered and
+/// before it is clipped, error messages, codes and the server's name. Strings,
+/// keys and numbers are all covered, so a clip never leaves a fragment.
 /// WHY: .project-docs/decisions/2026-11-26-agent-sources.md
 actor MCPClient {
     static let requestedVersion = "2025-06-18"
@@ -127,9 +133,21 @@ actor MCPClient {
             }
         } catch {
             let failure = error as? MCPError ?? .notConnected
+            // The caller is answered at once; the transport is retired and
+            // closed on its own, however long closing takes.
             end(failure)
-            await transport.close()
+            retire()
             throw failure
+        }
+    }
+
+    /// Closes the transport without anyone waiting for it.
+    private func retire() {
+        let transport = transport
+        let consumer = consumer
+        Task.detached {
+            await transport.close()
+            consumer?.cancel()
         }
     }
 
@@ -146,7 +164,7 @@ actor MCPClient {
         }
         // Started late: the caller already gave up (deadline or cancellation).
         guard !Task.isCancelled, deadline.timeIntervalSinceNow > 0, closedError == nil else {
-            await transport.close()
+            retire()
             throw closedError ?? MCPError.cancelled
         }
         let result = try await request("initialize", params: .object([
@@ -155,9 +173,10 @@ actor MCPClient {
             "clientInfo": .object(["name": .string("Whytap"), "version": .string(AppBuildIdentity.current.version)]),
         ]), deadline: deadline)
         guard let version = result["protocolVersion"]?.string else { throw MCPError.invalidResponse }
-        guard Self.supportedVersions.contains(version) else { throw MCPError.unsupportedProtocol(version) }
+        // Negotiation reads the unmodified value; only the error shown is redacted.
+        guard Self.supportedVersions.contains(version) else { throw MCPError.unsupportedProtocol(mask.text(version)) }
         protocolVersion = version
-        serverName = result["serverInfo"]?["name"]?.string
+        serverName = result["serverInfo"]?["name"]?.string.map { mask.text($0) }
         transport.setProtocolVersion(version)
         try await notify("notifications/initialized", deadline: deadline)
     }
@@ -174,8 +193,9 @@ actor MCPClient {
         for _ in 0..<20 {
             let params: MCPValue? = cursor.map { .object(["cursor": .string($0)]) }
             let result = try await request("tools/list", params: params, deadline: deadline)
-            // Already masked when decoded; descriptions are clipped only now.
-            tools += (result["tools"]?.array ?? []).compactMap(MCPToolInfo.init).compactMap(transform)
+            // Each entry is redacted (strings, keys, numbers) before it is
+            // parsed and its description clipped; the cursor stays opaque.
+            tools += (result["tools"]?.array ?? []).compactMap { MCPToolInfo($0, mask: mask) }.compactMap(transform)
             cursor = result["nextCursor"]?.string
             if cursor == nil || tools.count >= Self.maxTools { break }
         }
@@ -210,7 +230,7 @@ actor MCPClient {
         guard lease.isValid, isOpen, listEpoch == epoch, pinsEpoch == epoch, pins[name] == expectedPin else {
             throw MCPError.notAllowed
         }
-        return Self.toolResult(result, maxCharacters: maxCharacters)
+        return Self.toolResult(result, maxCharacters: maxCharacters, mask: mask)
     }
 
     func ping(timeout: TimeInterval) async throws {
@@ -233,7 +253,13 @@ actor MCPClient {
         sends.removeAll()
     }
 
-    static func toolResult(_ result: MCPValue, maxCharacters: Int) -> MCPToolResult {
+    /// The whole rendering is redacted before the clip, so a value split by
+    /// the clip (a string, a key or a number in structured content) is gone.
+    static func toolResult(_ raw: MCPValue, maxCharacters: Int, mask: SourceSecretMask = SourceSecretMask([])) -> MCPToolResult {
+        // The result's structure is read as sent. Its data is redacted twice:
+        // structured content as a tree before it is rendered (strings, keys,
+        // numbers), then the whole rendering before it is clipped.
+        let result = raw
         var parts: [String] = []
         for item in result["content"]?.array ?? [] {
             switch item["type"]?.string {
@@ -248,9 +274,9 @@ actor MCPClient {
             }
         }
         if parts.allSatisfy({ $0.isEmpty }), let structured = result["structuredContent"] {
-            parts = [structured.canonicalJSON]
+            parts = [mask.value(structured).canonicalJSON]
         }
-        let text = parts.joined(separator: "\n")
+        let text = mask.text(parts.joined(separator: "\n"))
         let shortened = text.count > maxCharacters
         return MCPToolResult(text: shortened ? String(text.prefix(maxCharacters)) : text,
                              isError: result["isError"]?.bool == true, shortened: shortened)
@@ -351,9 +377,8 @@ actor MCPClient {
             failAll(closedError ?? error)
         case .message(let data):
             // Servers sometimes print logs to stdout; a non-JSON line is skipped.
-            guard let decoded = try? MCPValue.decode(data) else { return }
-            // Masked whole, before any clip derived from it.
-            let value = mask.value(decoded)
+            // The envelope is routed as sent; data is redacted where it becomes text.
+            guard let value = try? MCPValue.decode(data) else { return }
             for message in value.array ?? [value] { await handleMessage(message) }
         }
     }
@@ -363,8 +388,9 @@ actor MCPClient {
         if method == nil, let id = message["id"]?.int {
             guard let continuation = pending.removeValue(forKey: id) else { return }
             if let error = message["error"] {
-                continuation.resume(throwing: MCPError.server(code: error["code"]?.int ?? 0,
-                                                              message: error["message"]?.string ?? ""))
+                let code = error["code"]?.int ?? 0
+                continuation.resume(throwing: MCPError.server(code: mask.text(String(code)) == String(code) ? code : 0,
+                                                              message: mask.text(error["message"]?.string ?? "")))
             } else {
                 continuation.resume(returning: message["result"] ?? .null)
             }

@@ -596,12 +596,13 @@ final class SourcesController: ObservableObject {
         if connecting[id] == task { connecting[id] = nil }
         if let live = clients[id] {
             // Another caller of the same connection stored it first.
-            if live !== client { await client.close() }
+            if live !== client { Task.detached { await client.close() } }
             guard isCurrent(id, generation) else { throw MCPError.notAllowed }
             return live
         }
         // Revoked while connecting: never keep it.
-        guard isCurrent(id, generation) else { await client.close(); throw MCPError.notAllowed }
+        // Revoked while connecting: answered at once, closed on its own.
+        guard isCurrent(id, generation) else { Task.detached { await client.close() }; throw MCPError.notAllowed }
         clients[id] = client
         validated[id] = nil
         lastUsed[id] = Date()
@@ -667,8 +668,8 @@ final class SourcesController: ObservableObject {
         try stillCurrent()
         // Server text is masked with this source's values when decoded.
         let client = MCPClient(transport: transport, mask: mask(record.id))
-        do { try await client.connect(timeout: timeout) }
-        catch { await client.close(); throw error }
+        // A failed connect retires its own transport; nobody waits for it to close.
+        try await client.connect(timeout: timeout)
         return client
     }
 

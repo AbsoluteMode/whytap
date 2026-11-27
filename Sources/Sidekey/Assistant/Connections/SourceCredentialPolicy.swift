@@ -189,9 +189,11 @@ struct SourceSecretMask: Sendable {
             if let space = value.firstIndex(of: " ") { forms.append(String(value[value.index(after: space)...])) }
             for form in forms where form.count >= Self.minimumLength {
                 found.insert(form)
+                // Every JSON escaping a rendering may use (with and without `\/`).
                 if let data = try? JSONEncoder().encode(form), let json = String(data: data, encoding: .utf8) {
                     found.insert(String(json.dropFirst().dropLast()))
                 }
+                found.insert(String(MCPValue.string(form).canonicalJSON.dropFirst().dropLast()))
                 if let encoded = form.addingPercentEncoding(withAllowedCharacters: .alphanumerics) { found.insert(encoded) }
             }
         }
@@ -207,11 +209,19 @@ struct SourceSecretMask: Sendable {
 
     func contains(_ text: String) -> Bool { needles.contains { text.contains($0) } }
 
-    /// Every string and key of a decoded message, masked.
+    func text(_ text: String) -> String { self(text) }
+
+    /// Server data with every string, key and number that renders a known
+    /// value replaced by the mask (a number becomes the masked string). For
+    /// data only: protocol control fields are never passed through it.
     func value(_ value: MCPValue) -> MCPValue {
         guard !isEmpty else { return value }
         switch value {
         case .string(let text): return .string(self(text))
+        case .number:
+            let rendered = value.canonicalJSON
+            // As wide as the number was, so limits apply to the data as sent.
+            return contains(rendered) ? .string(String(repeating: "•", count: max(4, rendered.count))) : value
         case .array(let items): return .array(items.map(self.value))
         case .object(let object):
             var masked: [String: MCPValue] = [:]

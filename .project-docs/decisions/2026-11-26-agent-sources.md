@@ -61,7 +61,9 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   (HTTP) or 90 s (stdio, since a first `npx`/`uvx` run downloads). Each is
   one deadline for the whole operation (starting the transport, initialize
   and its notice; every page of a list); a transport start that finishes after
-  the deadline or a cancellation is closed at once. Every stdin write checks
+  the deadline or a cancellation is closed at once. A failed connect answers
+  its caller at the deadline and retires its transport separately: closing
+  (however slow) is never awaited by the caller. Every stdin write checks
   the deadline before each write (even when the pipe has room) and HTTP before
   the request. Cancellation and deadlines stop the actual I/O: stdin writes
   poll every 50 ms and check cancellation (a write stopped part-way stops the
@@ -91,10 +93,16 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
 - **Known values** (`SourceSecretMask`): each source's secret values
   (6 characters or longer, raw, JSON-escaped and percent-encoded, and the
   token part of an authorization header value) are masked out of everything a server wrote,
-  at the point it is decoded (`MCPClient` masks every string and key of every
-  message; the stdio transport masks the exit line) and before any clip
-  derived from it, so a description, result or error clipped later can never
-  keep a fragment of a value. An stderr line whose start fell outside the 4 KB
+  where server data becomes text or metadata and before any clip derived from
+  it. Protocol control data (the JSON-RPC envelope, ids, methods, negotiated
+  version, pagination cursors, notices and the structural fields of results
+  and tool entries) is parsed and routed unmodified, so a value that happens
+  to equal a protocol token never changes negotiation, routing, paging or
+  revocation. Data is redacted as a tree (strings, keys and numbers; a
+  number becomes a mask as wide as its rendering) and then as rendered text
+  (every JSON escaping included), so a description, result or error clipped
+  later can never keep a fragment of a value. JSON-RPC error codes that render
+  a value become 0; the stdio exit line is masked whole, then clipped. An stderr line whose start fell outside the 4 KB
   tail is dropped rather than shown;
   before it reaches Settings, the manifest or a model: tool results
   (including structured content), error results, JSON-RPC error and
@@ -297,6 +305,15 @@ OpenCode's MCP support does not help: Whytap needs its own MCP client.
   250 ms transport start returns at its deadline and the late start is closed;
   an expired or unauthorized write reaches neither a writable pipe nor an HTTP
   request. Mutating the decode mask and the answer check makes these fail.
+- Fourth builder review (ticket 685), as classes, plus the builder's own
+  fixture (`AgentSourceQueueReviewTests`): three values (numeric, escaped
+  text, plain) in every result placement (text, structured string, key,
+  number, nested number, resource text, resource link) at every offset across
+  the clip; tool descriptions, schema defaults and JSON-RPC error messages and
+  codes; 23 protocol tokens used as masks across connect, paged listing,
+  calls and change-notice revocation; five connect failures (no answer, start
+  error, invalid response, unsupported protocol, cancellation) with a slow
+  transport close. Re-masking the envelope or awaiting close fails them.
 - The Agent loop: a source search answered; an injected instruction in a
   source result followed by `run_command`, `write_file` and `fetch_url`
   calls runs nothing and the next request's catalog lacks those tools and

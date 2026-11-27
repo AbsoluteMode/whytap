@@ -41,8 +41,9 @@ user-visible toggle. While it is off:
   Agent's default `NativeAgentSources.offered()` returns nothing even if one
   were installed: no `source_call` tool and no source text in the prompt.
 - `SourcesController` (its `isEnabled` comes from the gate) does not read or
-  write `sources.json`, register its sleep observer, store or replace
-  Keychain values, resolve or start server commands, connect, or serve
+  write `sources.json`, register its sleep observer, touch Keychain at all
+  (every read, write, delete and presence check goes through one accessor
+  that is nil while off), resolve or start server commands, connect, or serve
   `callRead`; `agentCatalog()` is nil.
 - `MCPConfigImporter.scan()` reads no Claude Code, Claude Desktop, Cursor,
   Codex or VS Code configuration; `GitHubCLISignIn.token()` does not run `gh`.
@@ -88,6 +89,10 @@ stays untouched and is used again if the gate is turned on.
 - The importer finds candidates and problems in populated configuration
   files with the gate on (control) and returns an empty scan with it off.
 - `GitHubCLISignIn.token()` returns nil.
+- Every Keychain path of an off controller (single and bulk presence,
+  the secret mask, writes, deletes, connects) never reaches the store; an
+  existing item stays unchanged and is not reported present (builder
+  reproducer `testBuilder700DisabledControllerNeverQueriesSourceCredentialPresence`).
 - A `NativeAgentProvider` built with the production default, while a
   catalog is installed, never consults that catalog and sends no
   `source_call` and no source text to the model (control: the request

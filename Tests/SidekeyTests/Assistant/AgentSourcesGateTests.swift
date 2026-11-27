@@ -270,3 +270,75 @@ final class AgentSourcesGateTests: XCTestCase {
         XCTAssertEqual(offenders, [], "A new path into connected sources must check AgentSourcesGate")
     }
 }
+
+extension AgentSourcesGateTests {
+    func testBuilder700DisabledControllerNeverQueriesSourceCredentialPresence() throws {
+        let lookedUp = LockedCount()
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: {
+            lookedUp.increment()
+            return InMemoryTokenStore(account: $0, box: box)
+        })
+        let record = SourceRecord(
+            id: "fixture", name: "Fixture", kind: .custom, importedFrom: nil,
+            transport: .http(url: "https://example.invalid/mcp"),
+            environment: [SourceValue(name: "ENV_FIXTURE", secret: true, value: nil)],
+            headers: [SourceValue(name: "X-Fixture", secret: true, value: nil)]
+        )
+        try keys.save("fixture-value", account: SourceRecord.keychainAccount(
+            source: record.id, name: "ENV_FIXTURE"))
+        let before = lookedUp.value
+        let off = SourcesController(enabled: false, keys: keys)
+        XCTAssertFalse(off.hasSecret("ENV_FIXTURE", id: record.id),
+                       "A disabled controller must not expose whether an existing item is present")
+        XCTAssertEqual(lookedUp.value, before, "Individual presence must never reach the store")
+        _ = off.missingSecrets(record)
+        XCTAssertEqual(lookedUp.value, before, "Bulk presence must not query environment or header items")
+
+        let on = SourcesController(enabled: true, keys: keys)
+        XCTAssertTrue(on.hasSecret("ENV_FIXTURE", id: record.id))
+        XCTAssertEqual(on.missingSecrets(record), ["header.X-Fixture"])
+    }
+}
+
+extension AgentSourcesGateTests {
+    /// The whole class of Keychain-reaching calls on an off controller:
+    /// presence (single and bulk), the secret mask, writes, deletes and the
+    /// paths that would read a secret to connect. None reaches the store.
+    func testEveryKeychainPathOfAnOffControllerSkipsTheStore() async throws {
+        let lookedUp = LockedCount()
+        let box = InMemoryTokenStore.Box()
+        let keys = ProviderKeyStore(makeStore: {
+            lookedUp.increment()
+            return InMemoryTokenStore(account: $0, box: box)
+        })
+        let record = SourceRecord(
+            id: "fixture", name: "Fixture", kind: .custom, importedFrom: nil,
+            transport: .http(url: "https://example.invalid/mcp"),
+            environment: [SourceValue(name: "ENV_FIXTURE", secret: true, value: nil)],
+            headers: [SourceValue(name: "X-Fixture", secret: true, value: nil)])
+        let account = SourceRecord.keychainAccount(source: record.id, name: "ENV_FIXTURE")
+        try keys.save("fixture-value", account: account)
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("gate-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let before = lookedUp.value
+
+        let off = SourcesController(enabled: false, directory: directory, keys: keys, classifier: nil,
+                                    environment: SourceProcessEnvironment(resolve: { _ in nil }, base: { [:] }))
+        XCTAssertFalse(off.hasSecret("ENV_FIXTURE", id: record.id))
+        XCTAssertEqual(off.missingSecrets(record), record.secretNames, "Nothing is reported present")
+        _ = off.mask(record.id)
+        await off.setSecret("replacement", name: "ENV_FIXTURE", id: record.id)
+        await off.remove(record.id)
+        var draft = SourceDraft(name: "Fixture", kind: .custom, transport: .http(url: "https://example.invalid/mcp"))
+        draft.headers = [SourceValue(name: "X-Fixture", secret: true, value: nil)]
+        draft.secrets["header.X-Fixture"] = "fixture-header"
+        _ = await off.add(draft)
+        await off.check(record.id)
+        XCTAssertNil(off.agentCatalog())
+        _ = try? await off.callRead(sourceID: record.id, tool: "search", arguments: .object([:]))
+        XCTAssertEqual(lookedUp.value, before, "An off controller never reaches the Keychain store")
+        XCTAssertEqual(box.with { $0.count }, 1, "The existing item is neither replaced nor deleted, and nothing is added")
+        XCTAssertEqual(keys.read(account: account), "fixture-value")
+    }
+}

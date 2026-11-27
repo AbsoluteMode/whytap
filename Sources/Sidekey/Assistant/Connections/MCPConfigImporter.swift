@@ -59,7 +59,15 @@ struct SourceImportScan: Equatable, Sendable {
 /// env, url, headers); writes nothing back. Runs only when the user opens Add
 /// source. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
 struct MCPConfigImporter {
-    var home: URL = FileManager.default.homeDirectoryForCurrentUser
+    var home: URL
+    /// False while the feature is gated off: `scan()` reads no configuration.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md
+    var isEnabled: Bool
+
+    init(enabled: Bool = AgentSourcesGate.isEnabled, home: URL = FileManager.default.homeDirectoryForCurrentUser) {
+        isEnabled = enabled
+        self.home = home
+    }
     static let maxFileBytes = 32 * 1_048_576
 
     struct Location { let app: String; let path: String; let format: Format }
@@ -75,6 +83,7 @@ struct MCPConfigImporter {
 
     func scan() -> SourceImportScan {
         var scan = SourceImportScan()
+        guard isEnabled else { return scan }
         for location in Self.locations {
             let url = home.appendingPathComponent(location.path)
             let shown = "~/" + location.path

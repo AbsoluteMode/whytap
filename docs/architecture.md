@@ -428,7 +428,12 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are not written into this new history. The system prompt is one
   app-owned source, supplied once per request; this is not an empty context on
   every question. Old project catalogs/indexes/workspaces remain unused on disk.
-  Sources (iteration 1 of docs/plans/2026-11-26-assistant.md): Settings ->
+  Sources (iteration 1 of docs/plans/2026-11-26-assistant.md) are built and
+  tested but gated off: AgentSourcesGate.isEnabled is false until the owner
+  decides whether the feature stays, so nothing below runs in shipped builds
+  (no Settings section, no source_call, no server processes, no config
+  scanning, no manifest or Keychain access). Tests enable it per instance.
+  WHY: .project-docs/decisions/2026-11-27-agent-sources-gated.md. Settings ->
   Features -> Agent -> Sources (AgentSourcesSection, AddSourceSheet) adds MCP
   servers imported from Claude Code, Claude Desktop, Cursor, Codex and VS Code
   (MCPConfigImporter, MiniTOML; read only on opening the sheet, nothing written
@@ -475,7 +480,8 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   source_call(tool, arguments), whose tool enum lists only approved Read tools
   of enabled sources (signatures in the system prompt, 10,000 characters);
   SourcesController.callRead rechecks class, approval and enablement at every
-  call. NativeAgentSources.installed is set by AppDelegate (nil in tests).
+  call. NativeAgentSources.installed is set by AppDelegate only when the gate
+  is on, and NativeAgentSources.offered() ignores it while the gate is off.
   Taint: after a request receives text from a source, write_file, run_command,
   fetch_url, Tavily and the provider's search, read_file/list_directory/
   search_files, capture_screen, case_list_keys, show_actions and app control
@@ -2905,7 +2911,8 @@ works around the protection. Details: `docs/hotkey.md` (Secure Input) and
    data goes (provider routes/endpoints, notification scripts, Monitor,
    backup destination). WHY: .project-docs/decisions/2026-10-20-whytap-links.md,
    .project-docs/decisions/2026-10-21-whytap-link-hotkeys.md
-8. **No model output executes an outward action.** Connected sources offer
+8. **No model output executes an outward action.** Connected sources (gated
+   off in shipped builds, see `AgentSourcesGate`) offer
    the Agent only tools classified Read in app code (`source_call`'s enum and
    `SourcesController.callRead`); tools that change or delete things are never
    called by a model. An outward action will run only after a confirmation in

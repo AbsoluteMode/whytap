@@ -18,7 +18,7 @@ final class SourcesControllerTests: XCTestCase {
         let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
         let environment = SourceProcessEnvironment(resolve: { $0.hasPrefix("/") ? $0 : nil },
                                                    base: { ["PATH": "/usr/bin:/bin"] })
-        let controller = SourcesController(directory: directory, keys: keys, classifier: classifier, environment: environment)
+        let controller = SourcesController(enabled: true, directory: directory, keys: keys, classifier: classifier, environment: environment)
         addTeardownBlock { @MainActor in
             await controller.stopAll()
             try? FileManager.default.removeItem(at: fake.directory)

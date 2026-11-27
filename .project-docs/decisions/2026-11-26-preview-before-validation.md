@@ -84,7 +84,12 @@ parent; and boundaries checked at claim time but not at the handoff.
   longer the preview to build or a newer head was submitted, when the
   members are not the current train, when the installed app's main is not in
   this base, when a member is already in main, or when the installed build is
-  not lower than the candidate's. `preview-claim` checks the
+  not lower than the candidate's. It also refuses whatever it cannot prove
+  (ticket 655 item 3): an installed app whose build, base or composition
+  cannot be read (composition members are unique positive integer tickets
+  with full SHAs), and a base that does not contain the current fetched
+  `origin/main`, so an install never puts older code over data a newer
+  build migrated. `preview-claim` checks the
   same local-install condition before it returns an active preview; a
   recovered preview then goes back to the queue with its place.
 - A declined Quit or a permission prompt blocks the preview for a person. A

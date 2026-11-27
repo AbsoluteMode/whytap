@@ -145,7 +145,9 @@ final class CodingToolsAccess: ObservableObject {
         let reported = await probe.connect(tool)
         await readPresence(tool)
         busy.remove(tool)
-        guard presence[tool] == .installed(configured: true) else {
+        // Setup refused (no helper in this app): no new Yes, whatever is there.
+        guard !reported.contains(CaseClientSetup.helperMissingMessage),
+              presence[tool] == .installed(configured: true) else {
             problems[tool] = reported.isEmpty ? Self.notAddedProblem : reported.joined(separator: "\n")
             return
         }

@@ -48,6 +48,10 @@ until the tool had already connected.
   no Yes is recorded and the entry is left as it is
   (2026-11-21-one-whytap-mcp-server). The person can remove it to connect
   here or answer Yes when the tool asks in the island.
+- **No helper, no new Yes.** Without a `whytap` helper that runs in this app,
+  no entry is Whytap's working one (a blank command or one naming a helper
+  that is gone is just an entry), setup refuses and On records nothing; an
+  earlier Yes can still be turned off.
 - **Off** records No at once. The MCP entry stays: without a Yes the gate
   refuses the tool, exactly as after a No in the island, and turning it back
   on needs no rewrite.
@@ -102,7 +106,11 @@ holds the builder's seven reproducers and one for the new row lines. Tickets
 per tool, `CodingToolsEntryTests` checks that only Whytap's own entry is ours
 for Claude Code, Codex and Cursor, that every shape the builder reported is
 custom, that On then records no Yes, writes nothing and leaves the file as it
-was, and that a Yes given with a custom entry can be taken back.
+was, and that a Yes given with a custom entry can be taken back. Ticket 676
+found a Yes recorded with the helper missing (a blank command matched the
+missing path, an entry named a helper that was gone);
+`CodingToolsHelperAvailabilityTests` holds the builder's fixture for both
+tools and Off for an earlier Yes.
 
 Not checked in a running app: Connect against the real `claude` and `codex`
 CLIs from this switch (the same `CaseClientSetup.connect` the onboarding uses).

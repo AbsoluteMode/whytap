@@ -2053,7 +2053,8 @@ with no suspension before the action. Settings -> Integrations -> Coding tools a
 lists Claude Code and Codex (CodingToolsAccess, presence read through
 CaseClientSetup.presence: installed, and CaseClientConnector.whytapEntry
 compares the `whytap` entry with what Connect writes for this app's helper:
-none, ours or custom; Whytap does not judge someone else's entry), one switch
+none, ours or custom; Whytap does not judge someone else's entry; without a
+helper that runs nothing is ours and setup refuses, so no new Yes), one switch
 each. A custom entry (another path, arguments, env, a URL, null, `{}`, Codex
 enabled = false, an unreadable file) shows as the person's own: switch off
 and not switchable without a Yes, no Yes recorded, entry left as it is. The switch is the gate's answer (decision == allow),

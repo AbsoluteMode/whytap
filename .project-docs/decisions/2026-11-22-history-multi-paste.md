@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md, 2026-11-22-history-hint-keycaps.md]
+related: [2026-11-28-history-multi-paste-every-image.md, 2026-11-21-clipboard-no-entry-delete.md, 2026-11-21-history-backdrop-always.md, 2026-11-22-history-multi-copy.md, 2026-11-22-history-hint-keycaps.md]
 ---
 
 # Context
@@ -112,6 +112,14 @@ consult `canPaste`, so it pasted. `canPaste` now follows the target name
 (`onChange(of:initial:)`). `HistoryHoverTargetArrivalTests` host the panel,
 change the name after it appeared and failed before the fix. Not verified in
 the installed app.
+
+# Correction 2026-11-28: the last image was lost
+
+Marked text, image, image pasted the text and one image. Neighbouring images
+shared one paste with two image items, and Chromium, Electron and most apps
+take a single image from a paste. Every image is now its own paste, the series
+waits for the target to read each paste, and the user's clipboard comes back
+after the last one: `2026-11-28-history-multi-paste-every-image.md`.
 
 # Rejected
 

@@ -28,29 +28,119 @@ final class HistoryMultiPasteTests: XCTestCase {
         .clipboard(.init(
             id: id,
             createdAt: Date(timeIntervalSince1970: TimeInterval(id)),
-            payload: .image(.init(uuid: UUID(), fileExtension: "png", thumbnailData: Data()))
+            payload: .image(.init(uuid: Self.imageUUID(id), fileExtension: "png", thumbnailData: Data()))
         ))
     }
 
-    /// Records what the paster did, in order.
+    private static func imageUUID(_ id: Int64) -> UUID {
+        UUID(uuidString: String(format: "00000000-0000-0000-0000-%012lld", id))!
+    }
+
+    /// A simulated pasteboard and paste target on a virtual clock. The
+    /// target reads the pasteboard `readDelayMs` after each Cmd+V, the way
+    /// Chromium reads only when the page handles the paste event, and takes
+    /// whatever is on the pasteboard at that moment: if the series replaced
+    /// it already, the target pastes the wrong thing.
     private final class Recorder {
         var events: [String] = []
         var pasteResults: [Bool] = []
+        /// Zero-based writes the pasteboard refuses, or that have nothing to paste.
+        var failingWrites: Set<Int> = []
+        var emptyWrites: Set<Int> = []
+        private var writeIndex = 0
+        var timing = HistoryPasteReadWaiter.Timing.standard
+
+        private(set) var now: UInt64 = 0
+        private(set) var changeCount = 0
+        /// Label of what is on the pasteboard now.
+        private(set) var content = "original"
+        private var contentSignalsReads = false
+        /// Target read delay after Cmd+V; nil = the target never reads.
+        var readDelayMs: UInt64? = 30
+        private var pendingReads: [UInt64] = []
+        private(set) var reads = 0
+        /// What the target pasted, in order.
+        private(set) var received: [String] = []
+        /// `received.count` when the user's clipboard came back.
+        private(set) var receivedAtRestore: Int?
+        /// A copy by the user at this virtual time.
+        var userCopyAtMs: UInt64?
+
+        static func label(_ group: HistoryPasteGroup) -> String {
+            switch group {
+            case .text(let t): return "text \(t.debugDescription)"
+            case .attachments(let items):
+                if items.count == 1, case .image(let image) = items[0] {
+                    return "image \(Int(image.uuid.uuidString.suffix(12))!)"
+                }
+                return "\(items.count) attachments"
+            }
+        }
+
+        private func advance(_ ms: UInt64) {
+            now += ms
+            if let at = userCopyAtMs, at <= now {
+                userCopyAtMs = nil
+                changeCount += 1
+                content = "user copy"
+                contentSignalsReads = false
+            }
+            while let next = pendingReads.first, next <= now {
+                pendingReads.removeFirst()
+                received.append(content)
+                if contentSignalsReads { reads += 1 }
+            }
+        }
 
         func paster() -> HistoryMultiPaster {
-            HistoryMultiPaster(
+            let waiter = HistoryPasteReadWaiter(
+                readCount: { [unowned self] in reads },
+                changeCount: { [unowned self] in changeCount },
+                nowMs: { [unowned self] in now },
+                sleepMs: { [unowned self] ms in advance(ms) },
+                timing: timing
+            )
+            return HistoryMultiPaster(
                 targetIsCurrent: { _ in true },
                 write: { [unowned self] group in
-                    switch group {
-                    case .text(let t): events.append("write text \(t.debugDescription)")
-                    case .attachments(let items): events.append("write \(items.count) attachments")
+                    events.append("write \(Self.label(group))")
+                    defer { writeIndex += 1 }
+                    if emptyWrites.contains(writeIndex) { return .nothing }
+                    if failingWrites.contains(writeIndex) {
+                        changeCount += 1   // the refused write cleared the pasteboard
+                        content = ""
+                        return .failed
                     }
+                    changeCount += 1
+                    content = Self.label(group)
+                    let signals: Bool
+                    if case .attachments(let items) = group, items.contains(where: {
+                        if case .file = $0 { return true } else { return false }
+                    }) {
+                        signals = false
+                    } else {
+                        signals = true
+                    }
+                    contentSignalsReads = signals
+                    return .written(.init(changeCount: changeCount, readsBefore: signals ? reads : nil))
                 },
                 paste: { [unowned self] _ in
                     events.append("cmd-v")
-                    return pasteResults.isEmpty ? true : pasteResults.removeFirst()
+                    let ok = pasteResults.isEmpty ? true : pasteResults.removeFirst()
+                    if ok, let delay = readDelayMs { pendingReads.append(now + delay) }
+                    return ok
                 },
-                sleep: { [unowned self] ns in events.append("wait \(ns / 1_000_000)ms") }
+                awaitConsumed: { [unowned self] receipt in
+                    events.append("waited \(await waiter.wait(for: receipt))")
+                },
+                changeCount: { [unowned self] in changeCount },
+                restore: { [unowned self] in
+                    events.append("restore")
+                    receivedAtRestore = received.count
+                    changeCount += 1
+                    content = "original"
+                    contentSignalsReads = false
+                }
             )
         }
     }
@@ -76,7 +166,7 @@ final class HistoryMultiPasteTests: XCTestCase {
         XCTAssertEqual(groups, [.attachments([.file(URL(fileURLWithPath: "/tmp/a.pdf"))])])
         let posted = await recorder.paster().run(groups)
         XCTAssertEqual(posted, 1)
-        XCTAssertEqual(recorder.events, ["write 1 attachments", "cmd-v"])
+        XCTAssertEqual(recorder.events, ["write 1 attachments", "cmd-v", "waited gap", "restore"])
     }
 
     func testSingleRowPasteboardContentIsUnchanged() {
@@ -119,7 +209,7 @@ final class HistoryMultiPasteTests: XCTestCase {
 
         let recorder = Recorder()
         await recorder.paster().run(groups)
-        XCTAssertEqual(recorder.events, ["write 3 attachments", "cmd-v"])
+        XCTAssertEqual(recorder.events, ["write 3 attachments", "cmd-v", "waited gap", "restore"])
 
         let pasteboard = NSPasteboard(name: NSPasteboard.Name("HistoryMultiPasteTests.files.\(UUID())"))
         defer { pasteboard.releaseGlobally() }
@@ -138,11 +228,15 @@ final class HistoryMultiPasteTests: XCTestCase {
         ])])
     }
 
-    func testImagesJoinFilesAsAttachments() {
-        let groups = HistoryPastePlan.groups(for: [fileCard(1, "/tmp/a"), imageCard(2)])
-        guard case .attachments(let items) = groups.first else { return XCTFail() }
-        XCTAssertEqual(groups.count, 1)
-        XCTAssertEqual(items.count, 2)
+    func testImagesNeverShareAPasteWithFilesOrOtherImages() {
+        // A pasteboard that holds file URLs and an image gives Chromium the
+        // files only; two image items give it the first image only.
+        let groups = HistoryPastePlan.groups(for: [
+            fileCard(1, "/tmp/a"), imageCard(2), imageCard(3), fileCard(4, "/tmp/b"), fileCard(5, "/tmp/c"),
+        ])
+        XCTAssertEqual(groups.map(Recorder.label), [
+            "1 attachments", "image 2", "image 3", "2 attachments",
+        ])
     }
 
     // MARK: - Text rows
@@ -152,7 +246,7 @@ final class HistoryMultiPasteTests: XCTestCase {
         XCTAssertEqual(groups, [.text("first\nsecond")])
         let recorder = Recorder()
         await recorder.paster().run(groups)
-        XCTAssertEqual(recorder.events, ["write text \"first\\nsecond\"", "cmd-v"])
+        XCTAssertEqual(recorder.events, ["write text \"first\\nsecond\"", "cmd-v", "waited read", "restore"])
     }
 
     // MARK: - Mixed text and files
@@ -176,12 +270,13 @@ final class HistoryMultiPasteTests: XCTestCase {
         let recorder = Recorder()
         let posted = await recorder.paster().run(groups)
         XCTAssertEqual(posted, 3)
-        let gap = "wait \(HistoryMultiPaster.gapBetweenPastesNs / 1_000_000)ms"
         XCTAssertEqual(recorder.events, [
-            "write text \"Invoice:\"", "cmd-v",
-            gap, "write 2 attachments", "cmd-v",
-            gap, "write text \"Thanks\"", "cmd-v",
+            "write text \"Invoice:\"", "cmd-v", "waited read",
+            "write 2 attachments", "cmd-v", "waited gap",
+            "write text \"Thanks\"", "cmd-v", "waited read",
+            "restore",
         ])
+        XCTAssertEqual(recorder.received, ["text \"Invoice:\"", "2 attachments", "text \"Thanks\""])
     }
 
     func testFailedPasteStopsTheRestSoNothingLandsOutOfOrder() async {
@@ -192,6 +287,285 @@ final class HistoryMultiPasteTests: XCTestCase {
         ]))
         XCTAssertEqual(posted, 1)
         XCTAssertFalse(recorder.events.contains("write text \"c\""))
+    }
+
+    func testFailedPasteGivesTheClipboardBackWithoutWaiting() async {
+        let recorder = Recorder()
+        recorder.pasteResults = [true, false]
+        await recorder.paster().run(HistoryPastePlan.groups(for: [textCard(1, "a"), imageCard(2), imageCard(3)]))
+        XCTAssertEqual(recorder.events, [
+            "write text \"a\"", "cmd-v", "waited read",
+            "write image 2", "cmd-v", "restore",
+        ], "The unposted image is not waited for; the user's clipboard comes back at once")
+        XCTAssertEqual(recorder.content, "original")
+    }
+
+    // MARK: - Every marked item arrives (2026-11-28: the last image was lost)
+
+    /// The maintainer's report: text, image, image marked 1, 2, 3, Enter;
+    /// the target got the text and one image. The two images were one
+    /// pasteboard with two image items, and the target read only the first.
+    func testTextThenTwoImagesPastesAllThreeInBadgeOrder() async {
+        let text = textCard(1, "Dictation, meeting notes and more for your Mac")
+        let second = imageCard(2), third = imageCard(3)
+        let selection = HistoryPasteSelection()
+        [text, second, third].forEach(selection.toggle)
+        guard case .paste(let cards) = HistoryKeyDecision.action(
+            keyCode: 36, hovered: nil, selection: selection.cards
+        ) else { return XCTFail("Enter must paste the marked rows") }
+
+        let groups = HistoryPastePlan.groups(for: cards)
+        XCTAssertEqual(groups.count, 3, "One Cmd+V per image")
+        let recorder = Recorder()
+        let posted = await recorder.paster().run(groups)
+
+        XCTAssertEqual(posted, 3)
+        XCTAssertEqual(recorder.received, [
+            "text \"Dictation, meeting notes and more for your Mac\"", "image 2", "image 3",
+        ])
+        XCTAssertEqual(recorder.events.last, "restore")
+        XCTAssertEqual(recorder.receivedAtRestore, 3, "The clipboard comes back only after the last image was read")
+        XCTAssertEqual(recorder.content, "original")
+    }
+
+    func testImagesThenTextEndingWithTextPastesEverything() async {
+        let recorder = Recorder()
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            imageCard(1), imageCard(2), textCard(3, "caption"),
+        ]))
+        XCTAssertEqual(posted, 3)
+        XCTAssertEqual(recorder.received, ["image 1", "image 2", "text \"caption\""])
+        XCTAssertEqual(recorder.receivedAtRestore, 3)
+    }
+
+    func testTenMarkedItemsArriveInOrder() async {
+        // Alternating kinds: no neighbours merge, ten pastes.
+        let cards: [HistoryStripCard] = (1...10).map { id in
+            id.isMultiple(of: 2) ? imageCard(Int64(id)) : textCard(Int64(id), "line \(id)")
+        }
+        let recorder = Recorder()
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: cards))
+        XCTAssertEqual(posted, 10)
+        XCTAssertEqual(recorder.received, (1...10).map { id in
+            id.isMultiple(of: 2) ? "image \(id)" : "text \"line \(id)\""
+        })
+        XCTAssertEqual(recorder.receivedAtRestore, 10)
+    }
+
+    func testTenMarkedImagesAreTenPastes() async {
+        let recorder = Recorder()
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: (1...10).map { imageCard(Int64($0)) }))
+        XCTAssertEqual(posted, 10)
+        XCTAssertEqual(recorder.received, (1...10).map { "image \($0)" })
+    }
+
+    func testSlowTargetGetsEveryItemAndTheClipboardWaitsForIt() async {
+        // A busy Electron renderer reads 900 ms after Cmd+V, far later than
+        // the former fixed 400 ms gap.
+        let recorder = Recorder()
+        recorder.readDelayMs = 900
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 3)
+        XCTAssertEqual(recorder.received, ["text \"a\"", "image 2", "image 3"])
+        XCTAssertEqual(recorder.events.filter { $0.hasPrefix("waited") }, Array(repeating: "waited read", count: 3))
+        XCTAssertEqual(recorder.receivedAtRestore, 3)
+        XCTAssertEqual(recorder.content, "original")
+    }
+
+    func testTargetThatNeverReadsStillGetsTheClipboardBackAfterTheFallback() async {
+        let recorder = Recorder()
+        recorder.readDelayMs = nil
+        await recorder.paster().run(HistoryPastePlan.groups(for: [imageCard(1), imageCard(2)]))
+        XCTAssertEqual(recorder.events.filter { $0.hasPrefix("waited") }, ["waited timeout", "waited timeout"])
+        XCTAssertGreaterThanOrEqual(recorder.now, 2 * HistoryPasteReadWaiter.Timing.standard.fallbackMs)
+        XCTAssertEqual(recorder.events.last, "restore")
+        XCTAssertEqual(recorder.content, "original")
+    }
+
+    func testUserCopyDuringTheSeriesStaysAndStopsTheRest() async {
+        let recorder = Recorder()
+        recorder.readDelayMs = 300
+        recorder.userCopyAtMs = 100   // before the target read the first image
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            imageCard(1), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 1)
+        XCTAssertEqual(recorder.events, ["write image 1", "cmd-v", "waited replaced"])
+        XCTAssertEqual(recorder.content, "user copy", "The user's newer copy is never overwritten")
+    }
+
+    func testRefusedWriteGivesTheClipboardBackAtOnce() async {
+        let recorder = Recorder()
+        recorder.failingWrites = [1]
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 1)
+        XCTAssertEqual(recorder.events, ["write text \"a\"", "cmd-v", "waited read", "write image 2", "restore"])
+        XCTAssertEqual(recorder.content, "original")
+    }
+
+    func testImageWithNothingPastableIsSkippedAndTheRestContinues() async {
+        let recorder = Recorder()
+        recorder.emptyWrites = [1]
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 2)
+        XCTAssertEqual(recorder.received, ["text \"a\"", "image 3"])
+    }
+
+    func testReadBurstEndsTheWaitOnlyAfterItsLastRead() async {
+        // A reader that takes PNG and then TIFF reads twice: the wait ends
+        // only `afterReadMs` after the newest read of the burst.
+        var reads = 0
+        var now: UInt64 = 0
+        let waiter = HistoryPasteReadWaiter(
+            readCount: { reads },
+            changeCount: { 7 },
+            nowMs: { now },
+            sleepMs: { ms in
+                now += ms
+                if now == 50 || now == 120 { reads += 1 }   // PNG, then TIFF
+            }
+        )
+        let outcome = await waiter.wait(for: .init(changeCount: 7, readsBefore: 0))
+        XCTAssertEqual(outcome, .read)
+        XCTAssertEqual(now, 120 + HistoryPasteReadWaiter.Timing.standard.afterReadMs,
+                       "Quiet time counts from the last read of the burst")
+    }
+
+    // MARK: - Real pasteboard
+
+    private func makeImageAssets(sizes: [Int64: Int]) throws -> URL {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("HistoryMultiPasteTests.\(UUID())")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: dir) }
+        for (id, side) in sizes {
+            let rep = try XCTUnwrap(NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: side, pixelsHigh: side, bitsPerSample: 8,
+                samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                bytesPerRow: 0, bitsPerPixel: 0
+            ))
+            let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
+            let payload = ClipboardImagePayload(uuid: Self.imageUUID(id), fileExtension: "png", thumbnailData: Data())
+            try png.write(to: payload.sidecarURL(in: dir))
+        }
+        return dir
+    }
+
+    /// How Chromium/Electron take an image from a paste: one image, from the
+    /// pasteboard's first item that has one.
+    private func chromiumStyleRead(_ pasteboard: NSPasteboard) -> String? {
+        if let data = pasteboard.data(forType: .png) ?? pasteboard.data(forType: .tiff),
+           let rep = NSBitmapImageRep(data: data) {
+            return "image \(rep.pixelsWide)px"
+        }
+        return pasteboard.string(forType: .string).map { "text \($0.debugDescription)" }
+    }
+
+    func testOneMultiImagePasteboardGivesAChromiumStyleReaderOnlyTheFirstImage() throws {
+        // The former single paste of both images: why the third row was lost.
+        let assets = try makeImageAssets(sizes: [2: 20, 3: 30])
+        let pasteboard = scratchPasteboard()
+        HistoryPasteboardWriter.write(.attachments([
+            .image(.init(uuid: Self.imageUUID(2), fileExtension: "png", thumbnailData: Data())),
+            .image(.init(uuid: Self.imageUUID(3), fileExtension: "png", thumbnailData: Data())),
+        ]), to: pasteboard, assetsDirectory: assets)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 2)
+        XCTAssertEqual(chromiumStyleRead(pasteboard), "image 20px", "Only the first image is read")
+    }
+
+    func testPasteWriteOfAnImageIsOneItemWithPNGAndTIFFAndCountsTheRead() throws {
+        let assets = try makeImageAssets(sizes: [2: 20])
+        let pasteboard = scratchPasteboard()
+        let reads = PasteboardReadMonitor()
+        let result = HistoryPasteboardWriter.writeForPaste(
+            .attachments([.image(.init(uuid: Self.imageUUID(2), fileExtension: "png", thumbnailData: Data()))]),
+            to: pasteboard, assetsDirectory: assets, reads: reads
+        )
+        guard case .written(let receipt) = result else { return XCTFail("\(result)") }
+        XCTAssertEqual(receipt.changeCount, pasteboard.changeCount)
+        XCTAssertEqual(receipt.readsBefore, 0)
+        XCTAssertEqual(pasteboard.pasteboardItems?.count, 1)
+        let types = pasteboard.pasteboardItems?.first?.types ?? []
+        XCTAssertTrue(types.contains(.png) && types.contains(.tiff))
+        XCTAssertEqual(reads.readCount, 0, "Nothing is read before the target asks")
+        XCTAssertEqual(chromiumStyleRead(pasteboard), "image 20px")
+        XCTAssertEqual(reads.readCount, 1)
+    }
+
+    func testPasteWriteOfFilesGivesNoReadSignal() {
+        let pasteboard = scratchPasteboard()
+        let result = HistoryPasteboardWriter.writeForPaste(
+            .attachments([.file(URL(fileURLWithPath: "/tmp/a.pdf")), .file(URL(fileURLWithPath: "/tmp/b.pdf"))]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory, reads: PasteboardReadMonitor()
+        )
+        XCTAssertEqual(result, .written(.init(changeCount: pasteboard.changeCount, readsBefore: nil)))
+        XCTAssertEqual((pasteboard.readObjects(forClasses: [NSURL.self]) as? [URL])?.map(\.path),
+                       ["/tmp/a.pdf", "/tmp/b.pdf"])
+    }
+
+    func testImageWithoutSidecarOrThumbnailHasNothingToPaste() {
+        let pasteboard = scratchPasteboard()
+        pasteboard.setString("keep", forType: .string)
+        let result = HistoryPasteboardWriter.writeForPaste(
+            .attachments([.image(.init(uuid: UUID(), fileExtension: "png", thumbnailData: Data()))]),
+            to: pasteboard, assetsDirectory: FileManager.default.temporaryDirectory, reads: PasteboardReadMonitor()
+        )
+        XCTAssertEqual(result, .nothing)
+        XCTAssertEqual(pasteboard.string(forType: .string), "keep")
+    }
+
+    /// End to end on a named pasteboard with real waits: a Chromium-style
+    /// target that reads each paste 450 ms after Cmd+V (later than the
+    /// former fixed gap) gets the text and both images in badge order, and
+    /// the user's clipboard comes back after the last read.
+    func testRealPasteboardSlowTargetReceivesTextAndBothImagesThenTheClipboardReturns() async throws {
+        let assets = try makeImageAssets(sizes: [2: 20, 3: 30])
+        let pasteboard = scratchPasteboard()
+        pasteboard.setString("user's clipboard", forType: .string)
+        let original = Pasteboard.snapshot(of: pasteboard)
+        let reads = PasteboardReadMonitor()
+        var timing = HistoryPasteReadWaiter.Timing.standard
+        timing.afterReadMs = 60
+        let waiter = HistoryPasteReadWaiter(
+            readCount: { reads.readCount },
+            changeCount: { pasteboard.changeCount },
+            nowMs: { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
+            sleepMs: { ms in try? await Task.sleep(nanoseconds: ms * 1_000_000) },
+            timing: timing
+        )
+        var received: [String] = []
+        var readers: [Task<Void, Never>] = []
+        var receivedAtRestore: Int?
+        let paster = HistoryMultiPaster(
+            targetIsCurrent: { _ in true },
+            write: { HistoryPasteboardWriter.writeForPaste($0, to: pasteboard, assetsDirectory: assets, reads: reads) },
+            paste: { _ in
+                readers.append(Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    received.append(self.chromiumStyleRead(pasteboard) ?? "nothing")
+                })
+                return true
+            },
+            awaitConsumed: { _ = await waiter.wait(for: $0) },
+            changeCount: { pasteboard.changeCount },
+            restore: {
+                receivedAtRestore = received.count
+                Pasteboard.restore(original, into: pasteboard)
+            }
+        )
+
+        let posted = await paster.run(HistoryPastePlan.groups(for: [textCard(1, "caption"), imageCard(2), imageCard(3)]))
+        for reader in readers { await reader.value }
+
+        XCTAssertEqual(posted, 3)
+        XCTAssertEqual(received, ["text \"caption\"", "image 20px", "image 30px"])
+        XCTAssertEqual(receivedAtRestore, 3)
+        XCTAssertEqual(pasteboard.string(forType: .string), "user's clipboard")
     }
 
     // MARK: - Empty selection

@@ -36,9 +36,9 @@ final class HistoryInteractionState {
 
     /// Copies a history card for the island and Toolbox. Callers own clipboard suppression.
     func writeCardToPasteboard(_ card: HistoryStripCard, assetsDirectory: URL) {
-        for group in HistoryPastePlan.groups(for: [card]) {
-            writeGroupToPasteboard(group, assetsDirectory: assetsDirectory)
-        }
+        HistoryPasteboardWriter.writeAll(
+            HistoryPastePlan.groups(for: [card]), to: .general, assetsDirectory: assetsDirectory
+        )
     }
 
     /// Copies several marked rows at once, in mark order, as one pasteboard
@@ -47,10 +47,5 @@ final class HistoryInteractionState {
         HistoryPasteboardWriter.writeAll(
             HistoryPastePlan.groups(for: cards), to: .general, assetsDirectory: assetsDirectory
         )
-    }
-
-    /// Puts one paste of marked History rows on the general pasteboard.
-    func writeGroupToPasteboard(_ group: HistoryPasteGroup, assetsDirectory: URL) {
-        HistoryPasteboardWriter.write(group, to: .general, assetsDirectory: assetsDirectory)
     }
 }

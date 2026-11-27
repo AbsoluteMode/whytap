@@ -1957,22 +1957,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let engine = autoPasteEngine
         guard let target = engine.currentTarget() else { return }
         let groups = HistoryPastePlan.groups(for: cards)
-        let paster = HistoryMultiPaster(
-            targetIsCurrent: { isFirst in
-                engine.isSeriesTargetCurrent(target, requireFrontmost: !isFirst)
-            },
-            write: { group in
-                historyInteraction.writeGroupToPasteboard(group, assetsDirectory: assets)
-            },
-            paste: { isFirst in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: isFirst) },
-            sleep: { ns in try? await Task.sleep(nanoseconds: ns) }
+        // Each paste waits until the target read it, and the user's own
+        // clipboard comes back after the last one was read.
+        // WHY: .project-docs/decisions/2026-11-28-history-multi-paste-every-image.md
+        let reads = PasteboardReadMonitor()
+        let pasteboard = NSPasteboard.general
+        let waiter = HistoryPasteReadWaiter(
+            readCount: { reads.readCount },
+            changeCount: { pasteboard.changeCount },
+            nowMs: { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
+            sleepMs: { ms in try? await Task.sleep(nanoseconds: ms * 1_000_000) }
         )
         ClipboardSuppression.shared.setSuppressed(true)
         Task { @MainActor in
-            await paster.run(groups)
-            // Let the last target read its paste before copies count again.
-            try? await Task.sleep(nanoseconds: HistoryMultiPaster.gapBetweenPastesNs)
-            ClipboardSuppression.shared.suppressThrough(changeCount: NSPasteboard.general.changeCount)
+            // A Drop paste still waiting to give the clipboard back would
+            // otherwise leave its dictation in our snapshot.
+            await engine.waitForPendingRestore()
+            let original = Pasteboard.snapshot()
+            var waits: [HistoryPasteWaitOutcome] = []
+            let paster = HistoryMultiPaster(
+                targetIsCurrent: { isFirst in
+                    engine.isSeriesTargetCurrent(target, requireFrontmost: !isFirst)
+                },
+                write: { group in
+                    HistoryPasteboardWriter.writeForPaste(
+                        group, to: pasteboard, assetsDirectory: assets, reads: reads
+                    )
+                },
+                paste: { isFirst in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: isFirst) },
+                awaitConsumed: { receipt in waits.append(await waiter.wait(for: receipt)) },
+                changeCount: { pasteboard.changeCount },
+                restore: { Pasteboard.restore(original) }
+            )
+            let posted = await paster.run(groups)
+            os_log(
+                "history_multi_paste_done groups=%{public}d posted=%{public}d read=%{public}d timeout=%{public}d gap=%{public}d replaced=%{public}d",
+                log: Self.log, type: .info,
+                groups.count, posted,
+                waits.filter { $0 == .read }.count, waits.filter { $0 == .timeout }.count,
+                waits.filter { $0 == .gap }.count, waits.filter { $0 == .replaced }.count
+            )
+            ClipboardSuppression.shared.suppressThrough(changeCount: pasteboard.changeCount)
             ClipboardSuppression.shared.setSuppressed(false)
         }
     }

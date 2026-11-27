@@ -2383,9 +2383,15 @@ unmarks), Enter pastes the marked rows instead of the hovered one and closes
 History, and Escape clears the marks. Plain click (copy) and plain Enter on
 one row are unchanged; the footer teaches ⌘-click (Select), then with marks
 Paste N to <app> and Esc Clear. HistoryPastePlan keeps mark order and merges
-neighbouring rows of a kind: files and images go out as one multi-item paste
-(one Cmd+V), texts as one paste a line each; text, files, text is three pastes
-400 ms apart, stopping at the first that fails. The whole series is bound to
+neighbouring rows of a kind: files go out as one multi-item paste (one Cmd+V),
+texts as one paste a line each, and every image is a paste of its own (a
+pasteboard with several images gives Chromium/Electron only the first); text,
+image, image is three pastes, stopping at the first that fails. Text and image
+pastes are promised data (PromisedPasteboardPayload): HistoryPasteReadWaiter
+replaces the pasteboard only 150 ms after the target's last read of it (2 s
+fallback; files, without a read signal, wait 400 ms). After the last paste
+was read the user's clipboard from before the series comes back, unless a
+newer copy replaced the series' content, which also stops the rest. The whole series is bound to
 the app Enter was pressed for: before each pasteboard write the target must
 still run, be the remembered target and (after the first paste, which alone
 may restore focus) still be frontmost. Its Cmd+V
@@ -2409,6 +2415,7 @@ to clear" (Toolbox: "⌘-click to unmark", it has no key monitor). The row steps
 from 9.5 pt to 8 pt (ViewThatFits); only then the app name truncates. Multi-row pastes and copies
 stay out of clipboard history. WHY:
 .project-docs/decisions/2026-11-22-history-multi-paste.md,
+.project-docs/decisions/2026-11-28-history-multi-paste-every-image.md,
 .project-docs/decisions/2026-11-22-history-multi-copy.md,
 .project-docs/decisions/2026-11-22-history-hint-keycaps.md
 The History connection sets secure_delete=ON, so cap evictions and agent

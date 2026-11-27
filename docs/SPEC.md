@@ -525,8 +525,9 @@ unknown dates last, preserving provider groups and stable ties. Empty search
 keeps catalog order.
 Подписей real-time, recorded и LLM with tools в списке нет. Функции: Drop Fast,
 Drop Smart (распознавание + очистка текста), Meetings (расшифровка + заметки),
-Agent (модель голоса + модель ответа, одна карточка), Voice search, Translation и Subtitles (в 2.2.26 — Speech + отдельная LLM;
-в следующей версии — Soniox · stt-rt-v6 с ключом Soniox, без него OpenAI · gpt-realtime-translate). Ошибки и
+Agent voice (модель голоса агента; ответы агента идут через Harness), Voice search, Translation и Subtitles (в 2.2.26 — Speech + отдельная LLM;
+затем Soniox · stt-rt-v6 с ключом Soniox, без него OpenAI · gpt-realtime-translate; с 2026-11-27 строка Subtitles
+раскрывается в меню Engine: Soniox или OpenAI, выбранный движок работает только со своим ключом, без выбора — прежнее правило). Ошибки и
 действия для их исправления видны и в свёрнутом состоянии. Над карточкой — тихая пометка «N features have no model ·
 Show»: Show раскрывает первую нужную функцию, прокручивает к ней и на пару секунд
 подсвечивает нужные строки. Переходы из ошибок функций тоже раскрывают нужную
@@ -921,6 +922,24 @@ Quit. Незнакомый id (ссылка на функцию из более 
 обязана содержать ⌃ или ⌥; Quit по ссылке не назначается; занятая комбинация
 показывает, кому она принадлежит, и ничего не меняет. Ссылки никогда не читают
 данные и не меняют, куда они уходят.
+
+### Agent harness: Claude Code or Codex (2026-11-27)
+
+Right Command работает через Claude Code или Codex пользователя, с его входом,
+планом, MCP-серверами, хуками и скиллами. Выбор — в Keys & models → Models →
+Harness: строка закрыта как остальные (harness · модель · reasoning · Fast) и
+раскрывается на месте: меню Claude Code / Codex, модель и reasoning из списка
+самого CLI, Fast mode для Codex, если у модели есть fast-тир, строка статуса
+(не установлен, не выполнен вход, проблема с планом, готов) и Check again.
+Выбор становится активным только после проверки входа. Без выбранной модели —
+модель по умолчанию из настроек CLI. «Allow file edits and commands»
+переводится в собственные флаги разрешений CLI, без полного обхода. Строка
+Search ушла из Models; маршрут модели Agent больше не используется, но хранится.
+Тем, у кого раньше был подключён агент, Harness один раз предлагает выбрать
+Claude Code или Codex; ничего не подключается само, ключи и маршруты остаются.
+Разделы ниже про встроенного агента, Tavily и источники описывают прежнюю
+реализацию, которая удаляется. WHY:
+.project-docs/decisions/2026-11-27-agent-harness-cli.md
 
 ### Native agent and Tavily (2026-10-22)
 

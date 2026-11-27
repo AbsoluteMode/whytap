@@ -431,7 +431,7 @@ final class AgentControllerTests: XCTestCase {
             if case .stateError(let b) = block, b.code == "not_connected" { return b.message }
             return nil
         }.first
-        XCTAssertEqual(notConnectedMessage, "Turn on Agent in Settings → Features → Agent. Its model is set there too.")
+        XCTAssertEqual(notConnectedMessage, "The Agent runs on your own Claude Code or Codex. Choose one in Settings → Keys & models → Harness.")
         XCTAssertEqual(controller.state, .idle)
         // The "connect first" prompt surfaces as a transient wing notice — the
         // turn never dispatched, so no answer panel opens.

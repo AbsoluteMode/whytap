@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/AgentHarnessIntegrationTests.swift
     confirmed_at: 2026-11-27
-related: [2026-10-22-native-agent.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md]
+related: [2026-10-22-native-agent.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-27-subtitle-engine-choice.md]
 ---
 
 # The Agent runs on the user's own Claude Code or Codex
@@ -174,5 +174,19 @@ Not measured: answer latency against the native agent.
 1. Runtime hardening (this record's first PR): permission flags, stdin prompt,
    Claude catalog, per-model reasoning, Whytap MCP, logging, English messages.
    The native agent still runs Right Command until the next step.
+2. Settings and dispatch (second PR): Models shows Speech · LLM · Harness
+   (Search and the Agent route leave Models; the `.agent` route is inactive
+   but stays stored). The Harness row expands in place: harness menu, model,
+   reasoning, Codex Fast mode when the model has a fast tier, status line and
+   "Check again". A pick becomes active only after its sign-in check passes.
+   The choice is stored under `agent.harness.active`; the earlier
+   `agent.activeProvider` is read only to show the one-time "choose a harness"
+   ask (`agent.harness.chosen` stops it from returning) and is never written
+   or removed, so a rollback build finds its native connection as it was.
+   Right Command dispatches only to Claude Code or Codex; without a harness the
+   island says "Choose a harness" and opens Models. The onboarding language
+   model step uses the shared LLM row's features instead of the Agent route.
+   Same PR, owner request: Subtitles engine choice
+   (2026-11-27-subtitle-engine-choice.md).
 
 2026-11-27 · task 106

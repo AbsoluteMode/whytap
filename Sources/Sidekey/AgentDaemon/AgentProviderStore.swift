@@ -1,74 +1,70 @@
 import Foundation
 
+/// Which harness runs the Agent: the user's Claude Code or Codex.
+///
+/// Stored under `agent.harness.active`. The key earlier builds used,
+/// `agent.activeProvider` (`"opencode"` for the native agent), is read only to
+/// know that this Mac had a connected Agent before, and is never written or
+/// removed: a rollback build then finds its native connection, route and key
+/// exactly as they were. Nothing connects by itself; a harness becomes active
+/// only after the user picks it and its sign-in check passes.
+// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 @MainActor
 final class AgentProviderStore: ObservableObject {
     /// The singleton instance shared between SettingsWindowController and
-    /// AppDelegate so provider selection and turn dispatch see the same state.
+    /// AppDelegate so harness selection and turn dispatch see the same state.
     static let shared = AgentProviderStore()
 
-    /// The agent every turn dispatches to. Written only by an explicit,
-    /// probe-backed Connect — never by a setup checklist going green on its
-    /// own. WHY: docs/decisions/2026-08-02-onboarding-connect-is-probe-backed.md
+    static let harnesses: [CLIProviderID] = [.claude, .codex]
+
+    /// The harness every turn dispatches to. Written only by an explicit,
+    /// probe-backed pick. WHY: docs/decisions/2026-08-02-onboarding-connect-is-probe-backed.md
     @Published private(set) var activeProvider: CLIProviderID?
-    /// The provider the user last picked in a chooser, even when Connect has
-    /// not succeeded yet (CLI still installing, sign-in pending). A UI-restore
-    /// hint only: reopening the onboarding pane lands on the user's pick
-    /// instead of snapping back to the Claude default. Turn dispatch never
-    /// reads this — `activeProvider` is the only thing that runs a CLI.
-    @Published private(set) var preferredProvider: CLIProviderID?
-    @Published private(set) var legacyConnectionNeedsSetup: Bool
+    /// The Agent was connected before this Mac moved to harnesses (the native
+    /// agent or an earlier Claude Code / Codex connection) and no harness is
+    /// chosen yet: Settings and the island ask once to choose one.
+    @Published private(set) var needsHarnessChoice: Bool
+
     private let defaults: UserDefaults
-    private static let key = "agent.activeProvider"
-    private static let preferredKey = "agent.preferredProvider"
-    private static let migrationKey = "agent.opencode.needsSetup"
+    nonisolated static let key = "agent.harness.active"
+    /// Earlier builds' key; read-only here.
+    static let legacyKey = "agent.activeProvider"
+    private static let legacyNeedsSetupKey = "agent.opencode.needsSetup"
+    /// Set at the first harness pick: the one-time ask never returns.
+    private static let chosenKey = "agent.harness.chosen"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-        let previous = defaults.string(forKey: Self.key).flatMap(CLIProviderID.init)
-        self.legacyConnectionNeedsSetup = (previous != nil && previous != .opencode && previous != .native)
-            || defaults.bool(forKey: Self.migrationKey)
-        // Preserve the explicit connected state and exact model/key route. This
-        // migration replaces only the harness; a disconnected agent stays off.
-        self.activeProvider = previous == .opencode || previous == .native ? .native : nil
-        if let activeProvider { defaults.set(Self.persistedID(activeProvider), forKey: Self.key) }
-        else if previous != nil { defaults.removeObject(forKey: Self.key) }
-        if activeProvider == .native {
-            self.legacyConnectionNeedsSetup = false
-            defaults.removeObject(forKey: Self.migrationKey)
-        }
-        let preferred = defaults.string(forKey: Self.preferredKey).flatMap(CLIProviderID.init)
-        self.preferredProvider = preferred == .opencode || preferred == .native ? .native : preferred
-        if preferred == .native { defaults.set(Self.persistedID(.native), forKey: Self.preferredKey) }
+        let active = Self.storedHarness(defaults)
+        if active == nil, defaults.object(forKey: Self.key) != nil { defaults.removeObject(forKey: Self.key) }
+        self.activeProvider = active
+        let hadAgent = defaults.string(forKey: Self.legacyKey).flatMap(CLIProviderID.init) != nil
+            || defaults.bool(forKey: Self.legacyNeedsSetupKey)
+        self.needsHarnessChoice = active == nil && hadAgent && !defaults.bool(forKey: Self.chosenKey)
     }
 
-    /// Preserve the on-disk identifier understood by the retained rollback app.
-    /// The in-memory provider is native; keys/routes and the old bundle stay compatible.
-    private static func persistedID(_ id: CLIProviderID) -> String {
-        id == .native ? CLIProviderID.opencode.rawValue : id.rawValue
+    private static func storedHarness(_ defaults: UserDefaults) -> CLIProviderID? {
+        defaults.string(forKey: key).flatMap(CLIProviderID.init).flatMap { harnesses.contains($0) ? $0 : nil }
     }
 
     func markConnected(_ id: CLIProviderID) {
+        guard Self.harnesses.contains(id) else { return }
         activeProvider = id                            // radio: replaces any previous
-        defaults.set(Self.persistedID(id), forKey: Self.key)
-        selectPreferred(id)
-        if id == .opencode || id == .native {
-            legacyConnectionNeedsSetup = false
-            defaults.removeObject(forKey: Self.migrationKey)
-        }
+        defaults.set(id.rawValue, forKey: Self.key)
+        defaults.set(true, forKey: Self.chosenKey)
+        needsHarnessChoice = false
     }
 
-    /// Remember a chooser pick without connecting. Keeps the onboarding pane
-    /// on the provider the user selected across re-entry, so a half-finished
-    /// setup (CLI installed, sign-in still pending) is not silently reverted.
-    func selectPreferred(_ id: CLIProviderID) {
-        preferredProvider = id
-        defaults.set(Self.persistedID(id), forKey: Self.preferredKey)
-    }
-
+    /// No harness: the Agent cannot run until one is chosen again.
     func disconnect() {
         activeProvider = nil
         defaults.removeObject(forKey: Self.key)
-        // The pick survives a disconnect: the user turned the agent off, they
-        // did not change their mind about which CLI is theirs.
+    }
+
+    /// A choice that arrived by settings sync or a restored backup.
+    func reload() {
+        let active = Self.storedHarness(defaults)
+        if active != activeProvider { activeProvider = active }
+        if active != nil { needsHarnessChoice = false }
     }
 }

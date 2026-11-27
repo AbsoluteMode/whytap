@@ -1,17 +1,17 @@
 import Foundation
 
-/// Subtitles' one engine: a live speech-translation session that hears the
-/// system audio and returns the translation and the heard original. Soniox
-/// real-time translation runs whenever the Soniox key (the one Drop uses)
-/// can be read: it is about five times faster and twenty times cheaper than
-/// OpenAI `gpt-realtime-translate`, which remains the fallback with the
-/// OpenAI key. There is no engine choice in Keys & models: the Subtitles row
-/// shows the engine the keys give. Without either key Start says what is
-/// missing and opens Keys & models.
+/// Subtitles' engine: a live speech-translation session that hears the system
+/// audio and returns the translation and the heard original. Keys & models →
+/// Models → Subtitles chooses Soniox real-time translation or OpenAI
+/// `gpt-realtime-translate`. Without a choice Soniox runs when its key (the
+/// one Drop uses) can be read, otherwise OpenAI with the OpenAI key. A chosen
+/// engine never falls back to the other: without its key Start names that key
+/// and opens Keys & models.
+// WHY: .project-docs/decisions/2026-11-27-subtitle-engine-choice.md
 // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
 // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
 enum SubtitleAudioTranslate {
-    enum Engine: Equatable, Sendable {
+    enum Engine: String, Equatable, CaseIterable, Sendable {
         case soniox, openAI
 
         var account: ProviderAccount { self == .soniox ? .soniox : .openAI }
@@ -19,6 +19,13 @@ enum SubtitleAudioTranslate {
         var providerName: String { self == .soniox ? "Soniox" : "OpenAI" }
         /// The Models row's label.
         var label: String { "\(providerName) · \(model)" }
+    }
+
+    /// The user's engine in Keys & models; absent means "by the keys".
+    static let engineChoiceKey = "subtitles.engine"
+
+    static func storedChoice(_ defaults: UserDefaults = .standard) -> Engine? {
+        defaults.string(forKey: engineChoiceKey).flatMap(Engine.init(rawValue:))
     }
 
     /// The OpenAI fallback's model, kept for Costs and older callers.
@@ -39,9 +46,10 @@ enum SubtitleAudioTranslate {
         }
     }
 
-    /// Why Subtitles cannot start.
+    /// Why Subtitles cannot start; the engine is the chosen one, nil when
+    /// none is chosen and neither key works.
     enum Unavailable: Error, Equatable {
-        case missingKey, unreadableKey
+        case missingKey(Engine?), unreadableKey(Engine?)
     }
 
     /// A session that failed to open, with the provider its message names.
@@ -52,8 +60,9 @@ enum SubtitleAudioTranslate {
 
     /// Opens the engine the keys give, metered for Costs.
     static func open(source: String?, target: String,
-                     keys: ProviderKeyStore = ProviderKeyStore()) async throws -> SpeechTranslationSession {
-        let (engine, key) = try engineAndKey(from: keys)
+                     keys: ProviderKeyStore = ProviderKeyStore(),
+                     choice: Engine? = storedChoice()) async throws -> SpeechTranslationSession {
+        let (engine, key) = try engineAndKey(from: keys, choice: choice)
         let session: SpeechTranslationSession
         do {
             switch engine {
@@ -69,34 +78,42 @@ enum SubtitleAudioTranslate {
         return AIUsageMeteredSpeechTranslation(session: session, context: context)
     }
 
-    /// The engine the keys give: Soniox with its key, otherwise OpenAI with
-    /// its key; nil with neither.
-    static func engine(soniox: KeyState, openAI: KeyState) -> Engine? {
+    /// The engine that runs: the chosen one when its key can be read; without
+    /// a choice Soniox with its key, otherwise OpenAI with its key; else nil.
+    static func engine(choice: Engine? = nil, soniox: KeyState, openAI: KeyState) -> Engine? {
+        if let choice { return (choice == .soniox ? soniox : openAI) == .present ? choice : nil }
         if soniox == .present { return .soniox }
         if openAI == .present { return .openAI }
         return nil
     }
 
-    /// Without an engine: unreadable when a key exists but cannot be read.
-    static func unavailable(soniox: KeyState, openAI: KeyState) -> Unavailable {
-        soniox == .unreadable || openAI == .unreadable ? .unreadableKey : .missingKey
+    /// Without an engine: unreadable when the relevant key exists but cannot be read.
+    static func unavailable(choice: Engine? = nil, soniox: KeyState, openAI: KeyState) -> Unavailable {
+        if let choice {
+            return (choice == .soniox ? soniox : openAI) == .unreadable ? .unreadableKey(choice) : .missingKey(choice)
+        }
+        return soniox == .unreadable || openAI == .unreadable ? .unreadableKey(nil) : .missingKey(nil)
     }
 
     /// The engine and its key for a Subtitles start, or why there is none.
-    static func engineAndKey(from keys: ProviderKeyStore = ProviderKeyStore()) throws -> (Engine, String) {
+    static func engineAndKey(from keys: ProviderKeyStore = ProviderKeyStore(),
+                             choice: Engine? = nil) throws -> (Engine, String) {
         let soniox = keys.lookup(account: BYOKKeyStore.account(for: .soniox))
-        if case .key(let key) = soniox { return (.soniox, key) }
         let openAI = keys.lookup(account: keychainAccount)
-        if case .key(let key) = openAI { return (.openAI, key) }
-        throw unavailable(soniox: KeyState(soniox), openAI: KeyState(openAI))
+        let candidates: [(Engine, ProviderKeyStore.KeyLookup)] = choice.map { [($0, $0 == .soniox ? soniox : openAI)] }
+            ?? [(.soniox, soniox), (.openAI, openAI)]
+        for (engine, lookup) in candidates {
+            if case .key(let key) = lookup { return (engine, key) }
+        }
+        throw unavailable(choice: choice, soniox: KeyState(soniox), openAI: KeyState(openAI))
     }
 
     /// The OpenAI key (the fallback engine's), or why there is none.
     static func key(from keys: ProviderKeyStore = ProviderKeyStore()) throws -> String {
         switch keys.lookup(account: keychainAccount) {
         case .key(let key): return key
-        case .absent: throw Unavailable.missingKey
-        case .unreadable: throw Unavailable.unreadableKey
+        case .absent: throw Unavailable.missingKey(.openAI)
+        case .unreadable: throw Unavailable.unreadableKey(.openAI)
         }
     }
 }

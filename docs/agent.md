@@ -1,23 +1,36 @@
 # Whytap Agent
 
 Tap **Right Command** to ask by text, hold it to ask by voice. The answer
-appears in the island. The agent is built into Whytap: tools and memory stay
-on your Mac, and inference runs at the provider you choose, with your key.
+appears in the island. The Agent runs on the coding tool you already use,
+**Claude Code** or **Codex**, with your own sign-in, plan, MCP servers, hooks
+and skills. Whytap starts it on your Mac for each request and shows its answer.
+
+> The sections below "Connect" still describe the earlier built-in agent and
+> its web search, sources and costs. They are being removed together with that
+> agent; Right Command no longer uses them.
 
 ## Connect
 
-1. In **Settings → Keys & models → API keys**, add an OpenRouter, OpenAI or
-   Anthropic key.
-2. Under **Models**, choose an **LLM** (and a **Speech** model for spoken
-   requests). To give the Agent its own models, open **Advanced**: the
-   **Agent** card holds both, Speech for your voice and Text for the answer.
-3. In **Settings → Features → Agent**, turn on **Agent**. The same screen
-   shows what is still missing, with the button that adds it.
+1. Install Claude Code or Codex and sign in once in Terminal (`claude`, or
+   `codex login`).
+2. In **Settings → Keys & models → Models**, open **Harness** and choose
+   Claude Code or Codex. Whytap checks that it is installed and signed in;
+   a pick that fails the check changes nothing and says what to do. The row
+   also sets the model and reasoning from the tool's own list, and Codex's
+   **Fast mode** when the model offers it. No model chosen means the tool's
+   own default.
+3. In **Settings → Features → Agent**, turn on **Agent**. For spoken
+   requests, choose a Speech model (Advanced → **Agent voice** gives the Agent
+   its own).
 
-Turning it on connects: it prepares the local workspace and checks that a key and a model are
-present; it does not prove that the provider accepts the key. Requests are
-billed by your provider. Whytap never switches to another provider or model on
-its own.
+**Allow file edits and commands** (Settings → Agent) is passed to the tool as
+its own permission settings: On lets it edit and run commands under its own
+review, Off limits it to reading, searching and answering. Whytap never turns
+on a blanket bypass.
+
+If this Mac used the earlier built-in agent, Harness asks once to choose
+Claude Code or Codex. Nothing connects by itself; your keys, routes and data
+stay as they were.
 
 ## Speed
 

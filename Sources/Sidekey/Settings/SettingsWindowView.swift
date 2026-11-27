@@ -89,9 +89,8 @@ struct SettingsWindowView: View {
                                               activeProvider: AgentProviderStore.shared.activeProvider) },
             meetingsOn: otherMeetingsEnabled,
             googleOn: otherGoogleEnabled,
-            setAgent: { [agentModeViewModel, onAgentToggle] on in
-                await AgentOtherSection.turn(on, viewModel: agentModeViewModel, settings: .shared,
-                                             store: .shared, onAgentToggle: onAgentToggle)?.message
+            setAgent: { [onAgentToggle] on in
+                AgentOtherSection.turn(on, store: .shared, onAgentToggle: onAgentToggle)?.message
             },
             setMeetings: otherOnMeetingsToggle,
             setGoogle: otherOnGoogleToggle,

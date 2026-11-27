@@ -969,8 +969,9 @@ final class OnboardingTests: XCTestCase {
     func testFeatureRowsOfferAModelWhenNoneRuns() throws {
         let env = try makeEnv()
         XCTAssertEqual(OnboardingFeatureAction.meetings(env.speech), .addModel(.meetings))
-        XCTAssertEqual(OnboardingFeatureAction.agent(selectedModel: nil), .addModel(.agent))
-        XCTAssertEqual(OnboardingFeatureAction.agent(selectedModel: "anthropic/claude"), .toggle)
+        XCTAssertEqual(OnboardingFeatureAction.agent(harness: nil), .addModel(.agent),
+                       "no harness: the step opens Keys & models on Harness")
+        XCTAssertEqual(OnboardingFeatureAction.agent(harness: .claude), .toggle)
 
         try env.keys.save("sx", account: BYOKKeyStore.account(for: .soniox))
         env.routing.setRoute(FeatureRoute(account: .soniox, model: ModelRegistry.sonioxRecordedModel), for: .meetings)

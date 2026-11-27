@@ -26,7 +26,7 @@ one downloaded speech model; there is no on-device LLM). The product is named
 compatibility contracts that must not change.
 
 Main features: **Drop** (hold Space in a text field, speak, release: the text
-is pasted), the built-in **Agent** (Right Command; off by default), **Meeting
+is pasted), the **Agent** (Right Command, runs on the user's Claude Code or Codex; off by default), **Meeting
 Notes**, **Case** (a local secrets vault for coding agents), a Whytap **MCP
 server** for Claude Code / Codex, and island tools (Shot, History, Translate,
 Subtitles, To-do, Notify, Monitor, Display). Calendar opens in the current source. The published
@@ -74,7 +74,7 @@ the installed app before testing a dev build. Release and fork details:
   section for the area you change before changing it.
 - [`docs/SPEC.md`](docs/SPEC.md) product spec; [`docs/privacy.md`](docs/privacy.md)
   what leaves the Mac; [`docs/install.md`](docs/install.md);
-  [`docs/agent.md`](docs/agent.md) the built-in Agent and its limits;
+  [`docs/agent.md`](docs/agent.md) the Agent, its harness and limits;
   [`docs/customization/`](docs/customization/README.md) changing Whytap with a
   coding agent, the MCP server and its clients
   ([app control](docs/customization/app-control.md)).

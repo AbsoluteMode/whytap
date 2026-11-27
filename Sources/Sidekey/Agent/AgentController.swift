@@ -1059,10 +1059,11 @@ final class AgentController: ObservableObject {
     /// running a CLI when nothing is connected (activeProvider == nil after a
     /// full Disconnect). Mirrors showTranscriptionError's panel + idle reset.
     private func showNotConnected() {
+        // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
         responseStore.markErrorBlock(StateErrorBlock(
-            title: "No agent connected",
-            subtitle: "Connect in Settings",
-            message: "Turn on Agent in Settings → Features → Agent. Its model is set there too.",
+            title: "Choose a harness",
+            subtitle: "Claude Code or Codex",
+            message: "The Agent runs on your own Claude Code or Codex. Choose one in Settings → Keys & models → Harness.",
             code: "not_connected",
             retryable: false
         ))
@@ -1070,7 +1071,7 @@ final class AgentController: ObservableObject {
         // wing notice. The turn never dispatched, so there is no answer body
         // to open. No-op when no island flow is wired (island is the only
         // answer surface).
-        islandAgentFlow?.sttFailed(message: "Connect an agent in Settings")
+        islandAgentFlow?.sttFailed(message: "Choose Claude Code or Codex in Settings")
         // M9: the "connect an agent" prompt is now visible — fire-and-forget
         // a PII-free user_error classified as a not-connected error (not STT).
         currentSnapshot = nil

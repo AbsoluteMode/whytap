@@ -384,8 +384,6 @@ final class OnboardingModel: ObservableObject {
 
     // MARK: - Features
 
-    private(set) lazy var agentMode = AgentModeViewModel(
-        store: .shared, probe: { _ in await NativeAgentProvider().probe() }, notify: { _ in })
     @Published private(set) var agentProblem: String?
     @Published private(set) var agentConnecting = false
 
@@ -397,7 +395,7 @@ final class OnboardingModel: ObservableObject {
     }
     var meetingsAction: OnboardingFeatureAction { OnboardingFeatureAction.meetings(speech) }
     var agentAction: OnboardingFeatureAction {
-        OnboardingFeatureAction.agent(selectedModel: AgentSettingsStore.shared.selectedOpenCodeModel)
+        OnboardingFeatureAction.agent(harness: AgentProviderStore.shared.activeProvider)
     }
 
     func setGoogle(_ on: Bool) {
@@ -410,30 +408,13 @@ final class OnboardingModel: ObservableObject {
         revision &+= 1
     }
 
-    /// The same two steps as Settings -> Other -> Agent: connect the native
-    /// Agent, then turn its shortcuts on.
+    /// The same rule as the Agent's switch in Features: on needs a harness
+    /// chosen in Keys & models; off keeps it.
     func setAgent(_ on: Bool) {
-        agentProblem = nil
-        guard on else {
-            UserPreferencesCache.shared.setAgentEnabled(false)
-            agentMode.disconnect()
-            revision &+= 1
-            return
-        }
-        guard AgentSettingsStore.shared.selectedOpenCodeModel != nil else {
-            agentProblem = AgentOtherSection.Problem.noModel.message
-            return
-        }
-        agentConnecting = true
-        Task { @MainActor in
-            defer { agentConnecting = false; revision &+= 1 }
-            if AgentProviderStore.shared.activeProvider != .native { await agentMode.connect(.native) }
-            guard AgentProviderStore.shared.activeProvider == .native else {
-                agentProblem = AgentOtherSection.Problem.connectFailed.message
-                return
-            }
-            UserPreferencesCache.shared.setAgentEnabled(true)
-        }
+        agentProblem = AgentOtherSection.turn(on, store: .shared) { enabled in
+            UserPreferencesCache.shared.setAgentEnabled(enabled)
+        }?.message
+        revision &+= 1
     }
 
     func addModel(_ feature: AIFeature) {

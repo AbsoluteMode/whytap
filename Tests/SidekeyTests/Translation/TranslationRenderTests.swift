@@ -192,7 +192,7 @@ final class SubtitlePairRenderTests: XCTestCase {
         await all.model.cancel().value
         // No Soniox or OpenAI key: Start names the fix instead of refusing quietly.
         let noKey = LiveSubtitleModel(makeAudio: { FixtureSubtitleAudio() },
-                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey })
+                                      openTranslator: { _, _ in throw SubtitleAudioTranslate.Unavailable.missingKey(nil) })
         await noKey.start()?.value
         try renderOverlay(Session(model: noKey), name: "subtitles-no-key.png")
         try renderToolbox(Session(model: noKey), name: "toolbox-subtitles-no-key.png")

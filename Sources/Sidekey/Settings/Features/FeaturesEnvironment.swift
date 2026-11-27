@@ -158,12 +158,18 @@ extension FeatureSetupSnapshot {
                      environment: FeaturesEnvironment) -> FeatureSetupSnapshot {
         var statuses: [AIFeature: ModelRowStatus] = [:]
         for row in models.rows { statuses[row.feature] = row.status }
+        // Every feature's sections once, in one Keychain pass: this runs on
+        // each redraw of Settings -> Features, also while the island switches
+        // Drop Mode. WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+        let sections = models.withKeyLookupPass {
+            Dictionary(uniqueKeysWithValues: AIFeature.activeCases.map { ($0, models.sections(for: $0)) })
+        }
         // "Choose a model" only where the list would not be empty.
         let selectable = Set(AIFeature.activeCases.filter { feature in
             statuses[feature, default: .notSet] != .notSet
-                || models.sections(for: feature).contains { !$0.options.isEmpty || $0.acceptsModelName }
+                || sections[feature, default: []].contains { !$0.options.isEmpty || $0.acceptsModelName }
         })
-        let alternatives = Set(AIFeature.activeCases.filter { hasAlternative(in: models.sections(for: $0)) })
+        let alternatives = Set(AIFeature.activeCases.filter { hasAlternative(in: sections[$0, default: []]) })
         return FeatureSetupSnapshot(
             dropMode: environment.dropMode(),
             models: statuses,

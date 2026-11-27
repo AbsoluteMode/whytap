@@ -103,9 +103,10 @@ final class IslandHoverUnpinTests: XCTestCase {
 
     func testAfterAnEditLeavingWithoutComingBackDoesNotCloseTheDrawer() {
         var hold = IslandHoverEditHold()
-        hold.edited()
+        hold.edited(pointerInside: true)
         // The tile vanished and the drawer shrank: the pointer is now outside.
         hold.pointer(inside: false)
+        XCTAssertEqual(hold.phase, .away)
         XCTAssertTrue(drawerStaysOpen(hold, pointerInside: false))
         hold.pointer(inside: false)
         XCTAssertTrue(drawerStaysOpen(hold, pointerInside: false), "Repeated leave signals never release it")
@@ -113,21 +114,42 @@ final class IslandHoverUnpinTests: XCTestCase {
 
     func testAfterAnEditAClickOutsideClosesTheDrawer() {
         var hold = IslandHoverEditHold()
-        hold.edited()
+        hold.edited(pointerInside: true)
         hold.pointer(inside: false)
         hold.release()
         XCTAssertFalse(drawerStaysOpen(hold, pointerInside: false))
     }
 
+    /// REV 4: a pointer still inside at the edit (the menu closing over it,
+    /// a tile vanishing under it) has to leave and come back first.
+    func testAnInsideSignalRightAfterTheEditIsNotAReturn() {
+        var hold = IslandHoverEditHold()
+        hold.edited(pointerInside: true)
+        hold.pointer(inside: true)
+        XCTAssertEqual(hold.phase, .held)
+        hold.pointer(inside: false)
+        XCTAssertTrue(drawerStaysOpen(hold, pointerInside: false), "The first leave is not the release")
+    }
+
     func testAfterAnEditComingBackAndLeavingClosesTheDrawer() {
         var hold = IslandHoverEditHold()
-        hold.edited()
+        hold.edited(pointerInside: true)
+        hold.pointer(inside: false)
         hold.pointer(inside: true)
         XCTAssertEqual(hold.phase, .reentered)
         XCTAssertTrue(drawerStaysOpen(hold, pointerInside: true))
         hold.pointer(inside: false)
         XCTAssertEqual(hold.phase, .free)
         XCTAssertFalse(drawerStaysOpen(hold, pointerInside: false), "The normal hover exit applies again")
+    }
+
+    func testAnEditWithThePointerOutsideWaitsOnlyForItsReturnAndLeave() {
+        var hold = IslandHoverEditHold()
+        hold.edited(pointerInside: false)
+        XCTAssertEqual(hold.phase, .away)
+        hold.pointer(inside: true)
+        hold.pointer(inside: false)
+        XCTAssertFalse(drawerStaysOpen(hold, pointerInside: false))
     }
 
     func testWithoutAnEditTheNormalHoverExitApplies() {
@@ -139,9 +161,10 @@ final class IslandHoverUnpinTests: XCTestCase {
 
     func testASecondEditAfterComingBackHoldsAgain() {
         var hold = IslandHoverEditHold()
-        hold.edited()
+        hold.edited(pointerInside: true)
+        hold.pointer(inside: false)
         hold.pointer(inside: true)
-        hold.edited()
+        hold.edited(pointerInside: true)
         hold.pointer(inside: false)
         XCTAssertTrue(drawerStaysOpen(hold, pointerInside: false))
     }
@@ -243,6 +266,35 @@ final class IslandHoverUnpinTests: XCTestCase {
         XCTAssertTrue(bridge.holdsDrawer)
         bridge.notePointer(inside: false)
         XCTAssertFalse(bridge.holdsDrawer)
+    }
+
+    /// The owner's case (REV 4): remove with the pointer over the drawer;
+    /// the hover edges the removal itself causes never close it.
+    func testRemovingUnderThePointerClosesOnlyAfterItLeavesAndComesBack() {
+        bridge.notePointer(inside: true)
+        XCTAssertTrue(bridge.unpin(.notes))
+        bridge.notePointer(inside: true)   // the menu closed over the drawer
+        bridge.notePointer(inside: false)  // the drawer shrank under the pointer
+        XCTAssertTrue(bridge.holdsDrawer, "Still open: the pointer has not come back yet")
+        bridge.notePointer(inside: true)
+        XCTAssertTrue(bridge.holdsDrawer)
+        bridge.notePointer(inside: false)
+        XCTAssertFalse(bridge.holdsDrawer, "Came back and left: the normal hover exit applies")
+    }
+
+    func testTheGridPlacesCellsInReadingOrderAtFixedSteps() {
+        let width = IslandHoverControlsLayout.tileWidth(panelWidth: 312) * 3 + IslandHoverControlsLayout.columnSpacing * 2
+        let first = IslandHoverTileGridLayout.cellCenter(index: 0, width: width)
+        let fourth = IslandHoverTileGridLayout.cellCenter(index: 3, width: width)
+        let third = IslandHoverTileGridLayout.cellCenter(index: 2, width: width)
+        XCTAssertEqual(first.y, IslandHoverControlsLayout.rowHeight / 2, accuracy: 0.001)
+        XCTAssertEqual(fourth.x, first.x, accuracy: 0.001)
+        XCTAssertEqual(fourth.y - first.y, IslandHoverControlsLayout.rowStride, accuracy: 0.001)
+        XCTAssertEqual(third.x - first.x,
+                       2 * (IslandHoverControlsLayout.tileWidth(panelWidth: 312) + IslandHoverControlsLayout.columnSpacing),
+                       accuracy: 0.001)
+        XCTAssertEqual(IslandHoverTileGridLayout.rows(count: 7, columns: 3), 3)
+        XCTAssertEqual(IslandHoverTileGridLayout.rows(count: 0, columns: 3), 0)
     }
 
     func testClosingTheDrawerEndsTheHold() {

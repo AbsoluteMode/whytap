@@ -4,19 +4,24 @@ import SwiftUI
 // Unpinning a tool from the drawer and adding one back from More.
 // WHY: .project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md
 
-/// Keeps the drawer open after its tools changed. Removing a tile, adding one
-/// from More or opening a tool's menu changes the drawer's size or takes the
-/// pointer to another window, so the pointer can end up outside the new hover
-/// zone without the person meaning to leave. After such an edit the drawer is
-/// held until a click outside it (or Escape), or until the pointer is seen
-/// over the island again and then leaves: only then the normal hover exit
-/// applies. A leave alone, before the pointer came back, closes nothing.
+/// Keeps the drawer open after its tools changed. Removing a tile (by
+/// throwing it out or from its menu), adding one from More or opening a
+/// tool's menu changes the drawer's size or takes the pointer elsewhere, so
+/// the pointer can end up outside the new hover zone without the person
+/// meaning to leave. After such an edit the drawer closes only on a click
+/// outside it (or Escape), or once the pointer has been outside, come back
+/// in and left again. A pointer that was inside at the edit has to leave and
+/// re-enter first: a hover edge the edit itself caused (a tile vanishing
+/// under it, the menu closing over it) never counts as the return.
+// WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
 struct IslandHoverEditHold: Equatable {
     enum Phase: Equatable {
         /// No edit to protect; the normal hover rules apply.
         case free
-        /// Edited; waiting for the pointer to be seen over the island.
+        /// Edited with the pointer over the hover; waiting for it to leave.
         case held
+        /// The pointer is outside after the edit; waiting for it to return.
+        case away
         /// The pointer came back after the edit; the next leave releases.
         case reentered
     }
@@ -25,14 +30,16 @@ struct IslandHoverEditHold: Equatable {
 
     var holdsDrawer: Bool { phase != .free }
 
-    /// The tools changed (or a tool's menu opened or closed).
-    mutating func edited() { phase = .held }
+    /// The tools changed (or a tool's menu opened or closed), with the
+    /// pointer over the hover or not.
+    mutating func edited(pointerInside: Bool) { phase = pointerInside ? .held : .away }
 
     /// The pointer is, or is not, over the island and its drawer.
     mutating func pointer(inside: Bool) {
         switch phase {
         case .free: break
-        case .held: if inside { phase = .reentered }
+        case .held: if !inside { phase = .away }
+        case .away: if inside { phase = .reentered }
         case .reentered: if !inside { phase = .free }
         }
     }
@@ -147,13 +154,16 @@ enum IslandHoverMoreToolsLayout {
     }
 }
 
-/// The footer chevron. With nothing hovered it reads "More tools"; over a tile
-/// the description takes the footer and only the chevron stays, so the click
-/// target never jumps while the pointer crosses the grid.
+/// The drawer's bottom strip as one button: the whole strip shows and hides
+/// More tools. It reads the hovered tool's description while the pointer is
+/// on a tile (the strip itself is then not under the pointer), otherwise
+/// "More tools", with the chevron at the right.
+// WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
 @MainActor
-struct IslandHoverMoreToolsToggle: View {
+struct IslandHoverMoreToolsStrip: View {
     let expanded: Bool
-    let showsTitle: Bool
+    /// The hovered tool's description, or nil.
+    let description: String?
     @ObservedObject var bridge: IslandHoverHitBridge
     let hitContext: String
     let action: () -> Void
@@ -165,25 +175,33 @@ struct IslandHoverMoreToolsToggle: View {
     var body: some View {
         let pressed = bridge.pressedID == .moreToolsToggle
         Button(action: action) {
-            HStack(spacing: 5) {
-                if showsTitle {
-                    Text(Self.title)
-                        .font(.system(size: 11, weight: .medium))
-                        .transition(.opacity)
-                }
+            HStack(spacing: 6) {
+                Text(description ?? Self.title)
+                    .font(.system(size: description == nil ? 11 : 12, weight: description == nil ? .medium : .regular))
+                    .foregroundStyle(.white.opacity(description == nil ? (hovering || pressed ? 0.92 : 0.66) : 0.55))
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .animation(.easeInOut(duration: 0.15), value: description)
                 Image(systemName: "chevron.down")
                     .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.white.opacity(hovering || pressed ? 0.9 : 0.6))
                     .rotationEffect(.degrees(expanded ? 180 : 0))
             }
-            .foregroundStyle(.white.opacity(hovering || pressed ? 0.9 : 0.6))
-            .padding(.horizontal, 9)
-            .frame(height: 22)
-            .background(Capsule().fill(.white.opacity(pressed ? 0.2 : (hovering ? 0.12 : 0))))
-            .contentShape(Capsule())
+            .padding(.leading, 16)
+            .padding(.trailing, 14)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                    .fill(.white.opacity(pressed ? 0.16 : (hovering ? 0.08 : 0)))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
+            )
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.18), value: expanded)
-        .animation(.easeInOut(duration: 0.15), value: showsTitle)
+        .animation(.easeOut(duration: 0.12), value: hovering)
         .onHover { hovering = $0 }
         .islandHoverHitTarget(bridge: bridge, id: .moreToolsToggle, context: hitContext, action: action)
         .accessibilityLabel(Self.title)
@@ -216,32 +234,38 @@ struct IslandHoverMoreToolsSection: View {
                         .foregroundStyle(.white.opacity(0.5))
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView(.vertical) {
-                        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: IslandHoverControlsLayout.columnSpacing),
-                                                 count: HoverLayoutStore.columns),
-                                  spacing: IslandHoverMoreToolsLayout.rowSpacing) {
-                            ForEach(tools, id: \.self) { tool in
-                                IslandHoverMoreToolRow(
-                                    tool: tool,
-                                    width: IslandHoverControlsLayout.tileWidth(panelWidth: panelWidth),
-                                    bridge: bridge,
-                                    hitContext: hitContext,
-                                    onHover: { onHover(tool, $0) }
-                                )
-                            }
+                    let rows = IslandHoverTileGridLayout(columnSpacing: IslandHoverControlsLayout.columnSpacing,
+                                                         rowSpacing: IslandHoverMoreToolsLayout.rowSpacing,
+                                                         rowHeight: IslandHoverMoreToolsLayout.rowHeight) {
+                        ForEach(tools, id: \.self) { tool in
+                            IslandHoverMoreToolRow(
+                                tool: tool,
+                                width: IslandHoverControlsLayout.tileWidth(panelWidth: panelWidth),
+                                bridge: bridge,
+                                hitContext: hitContext,
+                                onHover: { onHover(tool, $0) }
+                            )
+                            .transition(IslandDropModeHoverPanel.tileTransition)
                         }
-                        .padding(.horizontal, IslandHoverControlsLayout.horizontalInset)
-                        .padding(.vertical, IslandHoverMoreToolsLayout.verticalInset)
                     }
-                    .scrollDisabled(!IslandHoverMoreToolsLayout.requiresScrolling(toolCount: tools.count))
+                    .padding(.horizontal, IslandHoverControlsLayout.horizontalInset)
+                    .padding(.vertical, IslandHoverMoreToolsLayout.verticalInset)
+                    // A scroll container only when the rows overflow; laid out
+                    // directly it costs nothing extra per animation frame.
+                    if IslandHoverMoreToolsLayout.requiresScrolling(toolCount: tools.count) {
+                        ScrollView(.vertical) { rows }
+                    } else {
+                        rows.frame(maxHeight: .infinity, alignment: .top)
+                    }
                 }
             }
             .frame(height: IslandHoverMoreToolsLayout.listHeight(toolCount: tools.count))
+            .clipped()
             // Measure the clipped viewport, never the whole scrolling list.
             .islandHoverHitRegion(bridge: bridge, surface: .moreTools)
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(IslandHoverMoreToolsToggle.title)
+        .accessibilityLabel(IslandHoverMoreToolsStrip.title)
     }
 }
 

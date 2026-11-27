@@ -8,6 +8,9 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
     /// False: Escape typed into another Whytap window (Settings) is passed
     /// on to it after dismissing; only Escape aimed at the island is consumed.
     var consumesEscapeElsewhere = true
+    /// Events another owner handles (Escape during a hover drag): neither
+    /// dismissed nor consumed, so that owner still receives them.
+    var ignores: (NSEvent) -> Bool = { _ in false }
     var onDismiss: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -17,6 +20,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
         context.coordinator.view = view
         context.coordinator.onDismiss = onDismiss
         context.coordinator.consumesEscapeElsewhere = consumesEscapeElsewhere
+        context.coordinator.ignores = ignores
         context.coordinator.setEnabled(enabled)
     }
 
@@ -29,6 +33,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
         weak var view: NSView?
         var onDismiss: () -> Void = {}
         var consumesEscapeElsewhere = true
+        var ignores: (NSEvent) -> Bool = { _ in false }
         private var local: Any?
         private var global: Any?
         private var menuObservers: [NSObjectProtocol] = []
@@ -79,7 +84,7 @@ struct IslandHoverMenuDismissObserver: NSViewRepresentable {
         }
 
         func shouldDismiss(_ event: NSEvent, at screenPoint: NSPoint? = nil) -> Bool {
-            guard trackingMenus == 0, NSApp.modalWindow == nil,
+            guard !ignores(event), trackingMenus == 0, NSApp.modalWindow == nil,
                   !NSApp.windows.contains(where: { $0.isVisible && ($0 is NSSavePanel || $0.attachedSheet != nil) }),
                   let view, let window = view.window else { return false }
             if event.type == .keyDown {

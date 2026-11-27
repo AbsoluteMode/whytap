@@ -26,7 +26,7 @@ struct HoverFeatureView: View {
 
     static let about = "Small tools that open when you hover the notch. The island shows them in this order, "
         + "left to right, row by row. To change the order, hold a tool in the island and drag it; "
-        + "switch off the ones you don’t need here, or right-click one in the island. "
+        + "switch off the ones you don’t need here, or drag one out of the island. "
         + "Search all tools in the island still finds a tool that is off, and its shortcut keeps working."
 
     var body: some View {

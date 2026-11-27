@@ -26,7 +26,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHoverReorderTests.swift
     confirmed_at: 2026-11-25
-related: [2026-11-26-hover-unpin-and-more-tools.md]
+related: [2026-11-26-hover-unpin-and-more-tools.md, 2026-11-27-hover-drag-out-and-smooth-edits.md]
 ---
 
 ## Context
@@ -212,3 +212,5 @@ drag.
   scroll height; a tool beyond it is moved with Move actions in Settings.
 
 2026-11-25, ORCH-TASK 103 REV 1; builder review (queue #557) added the sync and cancel cases; REV 2 made the motion smooth; REV 3 removed the hold delay; builder review (queue #562) fixed edge, permission, sync, cancel-flight, landing-hold and clip cases.
+
+2026-11-27: a release outside the drawer now removes the tool and Escape cancels; see 2026-11-27-hover-drag-out-and-smooth-edits.md.

@@ -268,14 +268,15 @@ struct HotkeyInterceptionDetector {
         return reversed
     }
 
-    /// The key stopped being a shortcut: its presses, held or awaiting a
-    /// verdict, are retired, and a press still held starts nothing new.
-    mutating func retire(keysOutside watched: Set<HotkeyModifierKey>) {
-        for (id, press) in presses where !watched.contains(press.key) && press.verdict == nil {
+    /// Retires every press, held or awaiting a verdict, that `keep` rejects;
+    /// a retired press still held starts nothing new until it is released.
+    mutating func retire(unless keep: (Press) -> Bool) {
+        for (id, press) in presses where press.verdict == nil && press.eligible && !keep(press) {
             presses[id]?.eligible = false
-        }
-        for key in HotkeyModifierKey.allCases where !watched.contains(key) {
-            if heldPress.removeValue(forKey: key) != nil { heldIneligible.insert(key) }
+            if heldPress[press.key] == id {
+                heldPress[press.key] = nil
+                heldIneligible.insert(press.key)
+            }
         }
     }
 
@@ -319,5 +320,73 @@ struct HotkeyInterceptionDetector {
             presses[id] = nil
             if heldPress[press.key] == id { heldPress[press.key] = nil }
         }
+    }
+}
+
+/// When each modifier key's current binding began, so a press is judged
+/// only by its own event time against that moment, whatever order its
+/// probe callback, the preference writes and the syncs that read them run
+/// in.
+///
+/// Whytap learns binding state only when it reads the preferences (an
+/// observation), while writes are announced as they happen without saying
+/// which key they touch (`HotkeyPreferences.apply` publishes many fields in
+/// one turn, capability switches publish nothing to it). The timeline is the
+/// ordered log of writes since the last observation, folded at the next
+/// observation into one start time per key:
+/// - the first observation: watched keys are bound since forever;
+/// - a key watched now that was not before: since the latest write in
+///   between, or since the observation itself when no write was announced;
+/// - a key watched before and now, with writes in between: since the latest
+///   of them, because it may have been switched off and on again;
+/// - a key not watched now: not bound.
+/// A press is eligible only if its key is bound and its event time is not
+/// before that start. Choosing the latest write can retire a valid press
+/// made between two writes; that only costs one badge, never a false one.
+// WHY: .project-docs/decisions/2026-11-26-hotkey-interceptor-taps.md
+struct HotkeyBindingTimeline {
+    private(set) var boundSince: [HotkeyModifierKey: TimeInterval] = [:]
+    private var observed: Set<HotkeyModifierKey>?
+    private var writes: [TimeInterval] = []
+
+    var watched: Set<HotkeyModifierKey> { Set(boundSince.keys) }
+
+    /// A preference that may change a binding was written at `time`.
+    mutating func noteWrite(at time: TimeInterval) {
+        writes.append(time)
+    }
+
+    /// The bindings read at `time`. Returns the keys whose start moved.
+    @discardableResult
+    mutating func observe(_ watched: Set<HotkeyModifierKey>, at time: TimeInterval) -> Set<HotkeyModifierKey> {
+        defer { observed = watched; writes = [] }
+        guard let previous = observed else {
+            boundSince = Dictionary(uniqueKeysWithValues: watched.map { ($0, -TimeInterval.infinity) })
+            return []
+        }
+        let latestWrite = writes.max()
+        var moved = Set<HotkeyModifierKey>()
+        for key in HotkeyModifierKey.allCases {
+            let old = boundSince[key]
+            let new: TimeInterval?
+            if !watched.contains(key) {
+                new = nil
+            } else if !previous.contains(key) {
+                new = latestWrite ?? time
+            } else if let latestWrite {
+                new = max(old ?? latestWrite, latestWrite)
+            } else {
+                new = old
+            }
+            boundSince[key] = new
+            if new != old { moved.insert(key) }
+        }
+        return moved
+    }
+
+    /// The key's current binding covers a press with this event time.
+    func isEligible(_ key: HotkeyModifierKey, eventTime: TimeInterval) -> Bool {
+        guard let since = boundSince[key] else { return false }
+        return eventTime >= since
     }
 }

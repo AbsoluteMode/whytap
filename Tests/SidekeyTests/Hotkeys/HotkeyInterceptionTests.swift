@@ -1053,6 +1053,12 @@ extension HotkeyInterceptionTests {
         let changeTime = world.uptime + 0.010
         world.advance(to: changeTime)
         world.watched = [.rightCommand, .rightOption] // The preference value has changed.
+        // As in the app: HotkeyPreferences' objectWillChange announces the
+        // write synchronously on the main thread; only the read is deferred.
+        // (Without any announcement the moment is unknowable, and the
+        // capability case below requires an unannounced change to be
+        // judged conservatively.)
+        guardUnderTest.bindingsWillChange(at: changeTime)
         let observedUnderNewBinding = changeTime + 0.005 // The HID probe runs off main.
 
         world.advance(to: changeTime + 0.012)
@@ -1123,9 +1129,9 @@ extension HotkeyInterceptionTests {
         defer { withExtendedLifetime(guard_) {} }
         world.advance(to: world.uptime + 0.01)
         world.watched = [.rightCommand, .rightOption]
-        let pressTime = world.uptime
+        let pressTime = world.uptime - 0.001 // the event precedes its callback
         probe.deliver?(rightOptionDown, pressTime, pressTime)
-        world.advance(to: pressTime + 0.01)
+        world.advance(to: world.uptime + 0.01)
         guard_.bindingsOrSessionChanged()
         world.advance(to: pressTime + 0.1)
         probeSees(probe, world, noModifiers)
@@ -1164,5 +1170,171 @@ extension HotkeyInterceptionTests {
     func testBuilder705PressBeforeWriteCannotBecomeEligibleWhenCallbackPrecedesSync() {
         XCTAssertEqual(enableRightOptionWithDeferredSync(pressAt: -0.005, callbackAfterSync: false), 0,
                        "A pre-write press was queued before the preference handler; its callback running first must not classify it under the new binding")
+    }
+}
+
+/// Regressions from the builder's review of queue ticket 709.
+
+extension HotkeyInterceptionTests {
+    func testBuilder709UnrelatedWriteCannotStartRightOptionEligibility() {
+        for callbackBeforeSync in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.watched = [.rightCommand]
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            defer { withExtendedLifetime(guard_) {} }
+            let t = world.uptime
+
+            world.advance(to: t + 0.005)
+            guard_.bindingsWillChange(at: world.uptime) // Unrelated HotkeyPreferences write.
+            let preBindingPress = t + 0.010
+
+            world.advance(to: t + 0.015)
+            guard_.bindingsWillChange(at: world.uptime) // Right Option is enabled now.
+            world.watched.insert(.rightOption)
+            world.advance(to: t + 0.020)
+            if callbackBeforeSync {
+                probe.deliver?(rightOptionDown, preBindingPress, preBindingPress)
+            }
+            guard_.bindingsOrSessionChanged()
+            if !callbackBeforeSync {
+                probe.deliver?(rightOptionDown, preBindingPress, preBindingPress)
+            }
+            world.advance(to: t + 0.1)
+            probeSees(probe, world, noModifiers)
+            world.advance(to: t + 1)
+            XCTAssertTrue(presenter.presented.isEmpty,
+                          "An unrelated write must not make the intervening press eligible (callback before sync: \(callbackBeforeSync))")
+            tapRightOption(guard_, probe, world, delivered: false)
+            XCTAssertEqual(presenter.presented.count, 1, "A subsequent lost press under the real binding is reported")
+        }
+    }
+
+    func testBuilder709DisableThenEnableBeforeSyncRetiresOldAndUnboundPresses() {
+        for beforeDisable in [true, false] {
+            let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+            world.watched = [.rightCommand, .rightOption]
+            world.taps = ordinaryTaps + [puntoTap]
+            let guard_ = started(world, probe, presenter)
+            defer { withExtendedLifetime(guard_) {} }
+            let t = world.uptime
+            let pressTime = t + (beforeDisable ? 0.005 : 0.015)
+
+            world.advance(to: t + 0.010)
+            guard_.bindingsWillChange(at: world.uptime)
+            world.watched.remove(.rightOption)
+            world.advance(to: t + 0.020)
+            guard_.bindingsWillChange(at: world.uptime)
+            world.watched.insert(.rightOption)
+            world.advance(to: t + 0.025)
+            guard_.bindingsOrSessionChanged()
+            probe.deliver?(rightOptionDown, pressTime, pressTime)
+            world.advance(to: t + 0.1)
+            probeSees(probe, world, noModifiers)
+            world.advance(to: t + 1)
+            XCTAssertTrue(presenter.presented.isEmpty,
+                          "A reenabled binding cannot inherit a press from before it (press before disable: \(beforeDisable))")
+        }
+    }
+
+    func testBuilder709CapabilityEnableRejectsPreEnableHardwareEventAfterSync() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.watched = [.rightCommand]
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        let t = world.uptime
+
+        let beforeEnable = t + 0.005
+        world.advance(to: t + 0.010)
+        // The Google capability flag changed. Its notification syncs directly,
+        // without a HotkeyPreferences objectWillChange.
+        world.watched.insert(.rightOption)
+        guard_.bindingsOrSessionChanged()
+        probe.deliver?(rightOptionDown, beforeEnable, beforeEnable)
+        world.advance(to: t + 0.1)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: t + 1)
+
+        XCTAssertTrue(presenter.presented.isEmpty, "A globally observed press predating the capability was never bound")
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "The first actual press under the enabled capability is reported")
+    }
+}
+
+
+/// The binding timeline itself: every order of writes, reads and presses.
+extension HotkeyInterceptionTests {
+    func testTimelineFoldsTheWriteLogAtEachRead() {
+        var timeline = HotkeyBindingTimeline()
+        timeline.observe([.rightCommand], at: 0)
+        XCTAssertTrue(timeline.isEligible(.rightCommand, eventTime: -100), "bound since the first read")
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 1))
+
+        timeline.noteWrite(at: 1) // unrelated
+        timeline.noteWrite(at: 2) // enables Right Option
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 3), "not read yet")
+        timeline.observe([.rightCommand, .rightOption], at: 4)
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 1.5))
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 2.5))
+        XCTAssertFalse(timeline.isEligible(.rightCommand, eventTime: 1.5),
+                       "a key bound throughout may have been switched off and on by those writes")
+
+        timeline.observe([.rightCommand, .rightOption], at: 5) // nothing written
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 2.5), "a read without writes moves nothing")
+
+        timeline.observe([.rightCommand], at: 6)
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 5.5), "unbound")
+        timeline.observe([.rightCommand, .rightOption], at: 7) // enabled with no announced write
+        XCTAssertFalse(timeline.isEligible(.rightOption, eventTime: 6.5))
+        XCTAssertTrue(timeline.isEligible(.rightOption, eventTime: 7))
+    }
+
+    func testEveryOrderOfWritesCallbacksAndReadsAgreesWithEventTime() {
+        // Right Option enabled by a write at +0.015 after an unrelated write at
+        // +0.005; a press at `offset` is judged iff it is after the enabling
+        // write, whichever runs first: the callback or the deferred read.
+        for (offset, expected) in [(0.010, 0), (0.017, 1)] {
+            for callbackFirst in [true, false] {
+                let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+                world.watched = [.rightCommand]
+                world.taps = ordinaryTaps + [puntoTap]
+                let guard_ = started(world, probe, presenter)
+                defer { withExtendedLifetime(guard_) {} }
+                let t = world.uptime
+                world.advance(to: t + 0.005)
+                guard_.bindingsWillChange(at: world.uptime)
+                world.advance(to: t + 0.015)
+                guard_.bindingsWillChange(at: world.uptime)
+                world.watched.insert(.rightOption)
+                world.advance(to: t + 0.020)
+                let press = t + offset
+                if callbackFirst { probe.deliver?(rightOptionDown, press, press) }
+                guard_.bindingsOrSessionChanged()
+                if !callbackFirst { probe.deliver?(rightOptionDown, press, press) }
+                world.advance(to: t + 0.1)
+                probeSees(probe, world, noModifiers)
+                world.advance(to: t + 1)
+                XCTAssertEqual(presenter.presented.count, expected,
+                               "press at +\(offset), callback first: \(callbackFirst)")
+            }
+        }
+    }
+
+    func testAPreferenceWriteDuringAHoldRetiresItWithoutAFalseBadge() {
+        let world = World(), probe = FakeProbe(), presenter = FakePresenter()
+        world.taps = ordinaryTaps + [puntoTap]
+        let guard_ = started(world, probe, presenter)
+        defer { withExtendedLifetime(guard_) {} }
+        probeSees(probe, world, rightOptionDown)
+        world.advance(to: world.uptime + 0.1)
+        guard_.bindingsWillChange(at: world.uptime) // e.g. Settings resets hotkeys
+        guard_.bindingsOrSessionChanged()
+        world.advance(to: world.uptime + 2)
+        probeSees(probe, world, noModifiers)
+        world.advance(to: world.uptime + 1)
+        XCTAssertTrue(presenter.presented.isEmpty)
+        tapRightOption(guard_, probe, world, delivered: false)
+        XCTAssertEqual(presenter.presented.count, 1, "the next press after the release is judged")
     }
 }

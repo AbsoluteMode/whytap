@@ -117,27 +117,27 @@ catch it: secure input was off, and the key never reached Whytap at all.
    its key goes down alone (`HotkeyFlags.isOnly`, the rule of
    `ModifierOnlyHotkeyMonitor` and the gesture state machine): Shift+Right ⌥
    or both Options start nothing, and a press that gains another modifier
-   while held is retired unjudged, as the gesture monitors cancel it. A key
-   that stops being a shortcut retires its held and pending presses at once,
-   even while another watched key keeps the tap installed; a press still held
-   then starts nothing new until it is released. The time each key's binding
-   last changed is kept, so a press the probe saw before that moment, whose
-   callback only reaches the main thread afterwards, belongs to the former
-   binding and is never judged; another key's binding change does not touch
-   it. The shortcut preferences are read on the main thread's next turn
-   after a write, while the probe runs on its own thread, so for a key that
-   becomes a shortcut the boundary is not the sync's time but the moment
-   the preference was written (`bindingsWillChange`): the first press after
-   enabling Right Option is judged whether its callback runs before or after
-   that deferred sync, and a press before the write is not. A key that
-   stops being a shortcut keeps the sync's time, so a press seen while the
-   removal was still queued is retired. The write time is recorded by the
-   preference observer as the write happens, before any probe callback that
-   was already queued runs, and every press is judged by its own event time
-   against that boundary, never by callback order: a press 5 ms before the
-   write is retired even when its callback runs after the write and before
-   the deferred sync. A key that became watched with no recorded write is
-   not judged until the sync.
+   while held is retired unjudged, as the gesture monitors cancel it.
+   **Binding transitions are judged by event time, never by callback
+   order** (`HotkeyBindingTimeline`). Whytap learns which keys are bound
+   only when it reads the preferences, while writes are announced as they
+   happen (the `HotkeyPreferences` observer synchronously on the main
+   thread, the capability notification synchronously with its write)
+   without saying which key they touch. The timeline keeps the ordered log
+   of writes since the last read and folds it at each read into one start
+   time per key: the first read binds watched keys since forever; a key
+   newly watched is bound since the latest write in between (or the read
+   itself if none was announced); a key watched before and after, with
+   writes in between, is rebased to the latest write, because it may have
+   been switched off and on; a key not watched is unbound. A press is
+   eligible only if its key is bound and its event time is not before that
+   start. Every probe callback reads the preferences first, so announced
+   writes are folded before its press is judged, and every read retires the
+   held and pending presses the new starts exclude, even while another key
+   keeps the tap installed (a retired press still held starts nothing new
+   until it is released). Choosing the latest write can retire a valid press
+   made between two writes or during a hold that spans a write: that costs
+   at most one badge, never a false one.
 4. **Name possible interceptors only on that signal, in the press's own
    context.** When a press begins, the frontmost app and the exact filters
    (tap ids) that could act on it are recorded. Both are read when the
@@ -201,7 +201,7 @@ flag.
 
 ## Tested
 
-`HotkeyInterceptionTests` (60) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
+`HotkeyInterceptionTests` (66) and `HotkeyBlockerBadgeStackTests` (7), with fake tap
 lists, probe, clock and presenter: tap-list parsing and classification (own,
 Apple, listen-only, disabled, keyDown-only, per-process taps, HID first, one
 entry per app, the measured tap list of this Mac stays silent); detector
@@ -261,7 +261,17 @@ retires a press seen while its sync was queued. Its fifth review (ticket
 before the preference handler, ran after the write but before the sync was
 still judged. Its regression (`testBuilder705...`) is in the suite; the
 timing matrix now covers both callback orders before and after the write,
-and a newly watched key with no recorded write. Removing the eligibility or frontmost-context checks fails
+and a newly watched key with no recorded write. Its sixth review (ticket 709)
+found three more orderings of the same class: an unrelated write before
+the enabling one (`HotkeyPreferences.apply` publishes many fields in one
+turn), a disable and re-enable folded into one read, and a capability
+switch that publishes no preference write. Rather than another ordering
+rule, transitions were remodelled as the timeline above; its three
+regressions (`testBuilder709...`) and a matrix of writes, reads and
+callbacks in every order are in the suite. The builder's ticket 699 test
+changed a preference without announcing the write; it now announces it,
+as the app's observer does, because an unannounced change must be judged
+conservatively for the capability case. Removing the eligibility or frontmost-context checks fails
 those scenarios (checked by mutation).
 
 Not verified live: a real Punto Switcher press and the HID tap's added

@@ -256,10 +256,14 @@ final class AgentSettingsStore: ObservableObject {
 
     /// The `--effort` a turn sends. With the catalog: the user's pick when the
     /// model takes it, else Low when it takes Low, else none (a model without
-    /// reasoning levels gets no flag). Before the catalog loads: the user's
-    /// pick among Claude Code's levels, else Low.
+    /// reasoning levels, or a saved model the catalog does not list, gets no
+    /// flag). Before the catalog loads: the user's pick among Claude Code's
+    /// levels, else Low.
     var claudeRunEffort: String? {
         guard let option = selectedClaudeOption else {
+            // A loaded list without the saved model gives no evidence that
+            // the model takes the flag.
+            guard claudeCatalog.isEmpty else { return nil }
             return Self.resolvedEffort(stored: claudeEffort, allowed: Self.claudeEffortLevels)
         }
         return Self.resolvedEffort(stored: claudeEffort, levels: option.efforts)
@@ -292,6 +296,8 @@ final class AgentSettingsStore: ObservableObject {
             // Closing Settings cancels discovery; keep the previous catalog.
         } catch ClaudeModelCatalogError.notInstalled {
             claudeCatalogError = "Claude Code isn’t installed on this Mac."
+        } catch ClaudeModelCatalogError.workspaceUnavailable {
+            claudeCatalogError = AgentHarnessMessages.workspaceUnavailable
         } catch {
             claudeCatalogError = "Couldn’t load models from Claude Code. Check that it is installed and signed in, then retry."
         }

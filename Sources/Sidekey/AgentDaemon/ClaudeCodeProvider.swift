@@ -295,7 +295,10 @@ final class ClaudeCodeProvider: CLIProvider {
                     }
                     if case .result = event {
                         resultSeen = true
-                        ownHandle.handle?.closeStdin()
+                        // May arrive while the child is still being started,
+                        // before its writer is registered: the box keeps the
+                        // close for that writer.
+                        ownHandle.closeStdin()
                     }
                     registry.observe(event)
                     for mapped in ClaudeEventMapper.map(event, registry: registry) {
@@ -304,7 +307,7 @@ final class ClaudeCodeProvider: CLIProvider {
                 }
             }, { [weak self] exitCode in
                 watchdog?.cancel()
-                self?.clearActiveHandle(ifItIs: ownHandle.handle)
+                self?.clearActiveHandle(ifItIs: ownHandle.markExited())
                 if exitCode != 0 && !resultSeen {
                     continuation.yield(.error(
                         code: "process_exit_\(exitCode)",
@@ -338,10 +341,13 @@ final class ClaudeCodeProvider: CLIProvider {
                     handle.terminate()
                 })
             watchdog = wd
-            ownHandle.handle = handle
+            let exitedDuringStart = ownHandle.register(handle)
             wd.start()
 
+            // Both on the serial session queue, in this order: a child that
+            // already exited is registered and cleared at once.
             sessionQueue.async { self.activeHandle = handle }
+            if exitedDuringStart { clearActiveHandle(ifItIs: handle) }
 
             // Terminate the child whenever the consumer goes away — cancelled
             // (Esc / panel dismiss / new turn / app quit -> AgentController.stop()
@@ -476,8 +482,41 @@ final class ClaudeCodeProvider: CLIProvider {
     }
 }
 
-/// The stdin writer of one turn, set once its child starts. Read on the
-/// provider's buffer queue after the assignment on the starting thread.
-private final class TurnHandleBox: @unchecked Sendable {
-    var handle: ClaudeStdinWriting?
+/// The stdin writer of one turn. The child's output and exit callbacks can
+/// run before `runStreaming` returns the writer (a result during spawn), so a
+/// close or exit that arrives first is kept and applied to this turn's own
+/// writer when it is registered, never to another turn's.
+final class TurnHandleBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: ClaudeStdinWriting?
+    private var closeRequested = false
+    private var exited = false
+
+    /// Registers this turn's writer; applies a close requested before it.
+    /// Returns true when the child already exited.
+    func register(_ writer: ClaudeStdinWriting) -> Bool {
+        lock.lock()
+        handle = writer
+        let close = closeRequested
+        let alreadyExited = exited
+        lock.unlock()
+        if close { writer.closeStdin() }
+        return alreadyExited
+    }
+
+    func closeStdin() {
+        lock.lock()
+        closeRequested = true
+        let writer = handle
+        lock.unlock()
+        writer?.closeStdin()
+    }
+
+    /// Records the exit; returns the writer if it is already registered.
+    func markExited() -> ClaudeStdinWriting? {
+        lock.lock()
+        defer { lock.unlock() }
+        exited = true
+        return handle
+    }
 }

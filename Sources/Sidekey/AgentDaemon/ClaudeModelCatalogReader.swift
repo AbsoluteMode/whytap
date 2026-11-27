@@ -27,6 +27,8 @@ enum ClaudeModelCatalogError: Error, Equatable {
     case notInstalled
     case timedOut
     case unreadable
+    /// The Agent's folder in Application Support could not be prepared.
+    case workspaceUnavailable
 }
 
 /// Reads the model list from the user's Claude Code: one `initialize` control
@@ -45,7 +47,7 @@ struct ClaudeModelCatalogReader {
     var locate: () -> URL? = { ClaudeBinaryLocator().locate() }
     var timeout: TimeInterval = 15
     /// Runs the handshake and returns the matching control_response line.
-    var handshake: @Sendable (URL, TimeInterval) throws -> String = ClaudeModelCatalogReader.defaultHandshake
+    var handshake: @Sendable (URL, TimeInterval) throws -> String = { try ClaudeModelCatalogReader.defaultHandshake(binary: $0, timeout: $1) }
 
     func read() async throws -> ClaudeModelCatalog {
         guard let binary = locate() else { throw ClaudeModelCatalogError.notInstalled }
@@ -93,12 +95,18 @@ struct ClaudeModelCatalogReader {
     /// settings a turn loads), sends `initialize` and stops the child as soon
     /// as the answer arrives. No user message is ever written.
     @Sendable
-    static func defaultHandshake(binary: URL, timeout: TimeInterval) throws -> String {
+    static func defaultHandshake(binary: URL, timeout: TimeInterval,
+                                 workspace: () throws -> URL = { try AgentDaemonWorkingDirectory.ensure() }) throws -> String {
+        // Fail closed like a turn: Claude Code loads the folder's settings and
+        // runs SessionStart hooks, so it never starts in whatever folder
+        // Whytap happens to have.
+        // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+        guard let folder = try? workspace() else { throw ClaudeModelCatalogError.workspaceUnavailable }
         let process = Process()
         process.executableURL = binary
         process.arguments = ["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]
         process.environment = ClaudeCodeProvider.childEnvironment()
-        if let folder = try? AgentDaemonWorkingDirectory.ensure() { process.currentDirectoryURL = folder }
+        process.currentDirectoryURL = folder
         let input = Pipe()
         let output = Pipe()
         process.standardInput = input

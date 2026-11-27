@@ -583,8 +583,10 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   (ClaudeModelCatalogReader: no model request, no user message, account fields
   not decoded); a saved model is sent verbatim, none means the CLI default, and
   --effort follows the model's own levels (Low by default, none for a model
-  without levels). Turns run in Application Support/whytap/agent and fail if it
-  cannot be created. Logs carry exit codes and byte counts only. Codex
+  without levels or a saved model the loaded list lacks). Turns and model
+  discovery run in Application Support/whytap/agent and neither starts the CLI
+  if it cannot be created. Sign-in checks (ProcessOneShot) have one deadline
+  for the whole call; a timed-out check is a failure. Logs carry exit codes and byte counts only. Codex
   item-level error events are notices; top-level error and turn.failed end the
   turn. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 

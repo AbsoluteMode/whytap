@@ -43,6 +43,13 @@ struct AppControlDropLists {
         // Check the whole batch first: one invalid term adds nothing.
         for item in items {
             guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
+            // The advertised schema limit applies to the submitted string as
+            // JSON Schema counts it: code points, before trimming. Checked
+            // for the whole batch before anything changes.
+            let limit = vocab ? VocabularyCache.maxTermLength : FillerTermsStore.maxTermLength
+            guard text.unicodeScalars.count <= limit else {
+                return Self.rejected(text, "is longer than \(limit) characters; use a shorter form")
+            }
             let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard Self.oneLine(term) else { return Self.rejected(term, "is not one line") }
             let reason: VocabularyRejectionReason?

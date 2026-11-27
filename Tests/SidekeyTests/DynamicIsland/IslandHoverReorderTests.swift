@@ -263,10 +263,91 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertTrue(bridge.editHold.holdsDrawer)
     }
 
-    private func escapeKey(at timestamp: TimeInterval) throws -> NSEvent {
+    private func escapeKey(at timestamp: TimeInterval, repeat isARepeat: Bool = false) throws -> NSEvent {
         try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: timestamp,
                                        windowNumber: window.windowNumber, context: nil, characters: "\u{1b}",
-                                       charactersIgnoringModifiers: "\u{1b}", isARepeat: false, keyCode: 53))
+                                       charactersIgnoringModifiers: "\u{1b}", isARepeat: isARepeat, keyCode: 53))
+    }
+
+    // Builder ticket 698: holding Escape after it cancelled a drag sends
+    // auto-repeats with later timestamps. They are still the drag's key and
+    // never close the drawer an earlier edit holds; a separate press does.
+    func testBuilder698OneHeldEscapeCancelsOnlyDragAcrossAutoRepeat() throws {
+        for dragMonitorFirst in [false, true] {
+            bridge.notePointer(inside: true)
+            if !store.slots.contains(.monitor) { XCTAssertTrue(bridge.pin(.monitor)) }
+            XCTAssertTrue(bridge.unpin(.monitor))
+            let editedOrder = store.slots
+            var dismissals = 0
+            let observer = IslandHoverMenuDismissObserver.Coordinator()
+            observer.view = window.contentView
+            observer.ignores = { [bridge] in bridge!.escapeBelongsToDrag($0) }
+            let subscribed = bridge.dismissals.sink { dismissals += 1 }
+            defer { subscribed.cancel() }
+
+            XCTAssertTrue(down(0))
+            drag(to: point(1))
+            XCTAssertTrue(bridge.isReordering)
+            let first = try escapeKey(at: 10)
+            if dragMonitorFirst { bridge.handleDragKey(first) }
+            if observer.shouldDismiss(first) { bridge.dismissAfterEdit() }
+            if !dragMonitorFirst { bridge.handleDragKey(first) }
+            XCTAssertEqual(store.slots, editedOrder)
+            XCTAssertFalse(bridge.isReordering)
+            XCTAssertTrue(bridge.editHold.holdsDrawer)
+
+            let repeated = try escapeKey(at: 10.5, repeat: true)
+            if observer.shouldDismiss(repeated) { bridge.dismissAfterEdit() }
+            XCTAssertEqual(dismissals, 0, "A repeat from the same held Escape is still the drag's key")
+            XCTAssertTrue(bridge.editHold.holdsDrawer, "A held key is not a second dismissal")
+
+            bridge.mouseUp(at: point(1), in: window, allowed: true)
+            let laterPress = try escapeKey(at: 20)
+            if observer.shouldDismiss(laterPress) { bridge.dismissAfterEdit() }
+            XCTAssertFalse(bridge.editHold.holdsDrawer, "A separate Escape dismisses normally")
+            XCTAssertEqual(dismissals, 1)
+        }
+    }
+
+    /// A held Escape keeps repeating after the cancel, in either monitor
+    /// order and for many repeats; the next real press, and only its own
+    /// repeats after the hold ended, are the edit hold's again.
+    func testRepeatsOfTheDragsEscapeNeverCloseTheHeldDrawerButANewPressDoes() throws {
+        for dragMonitorFirst in [false, true] {
+            bridge.notePointer(inside: true)
+            if !store.slots.contains(.monitor) { XCTAssertTrue(bridge.pin(.monitor)) }
+            XCTAssertTrue(bridge.unpin(.monitor))
+            var dismissals = 0
+            let subscribed = bridge.dismissals.sink { dismissals += 1 }
+            defer { subscribed.cancel() }
+            let observer = IslandHoverMenuDismissObserver.Coordinator()
+            observer.view = window.contentView
+            observer.consumesEscapeElsewhere = false
+            observer.ignores = { [bridge] in bridge!.escapeBelongsToDrag($0) }
+            func deliver(_ event: NSEvent) {
+                if dragMonitorFirst { bridge.handleDragKey(event) }
+                if observer.shouldDismiss(event) { bridge.dismissAfterEdit() }
+                if !dragMonitorFirst { bridge.handleDragKey(event) }
+            }
+
+            XCTAssertTrue(down(0))
+            drag(to: point(1))
+            deliver(try escapeKey(at: 100))
+            XCTAssertFalse(bridge.isReordering)
+            // Repeats arrive before and after the pointer is released.
+            for step in 1...5 { deliver(try escapeKey(at: 100 + Double(step) * 0.05, repeat: true)) }
+            bridge.mouseUp(at: point(1), in: window, allowed: true)
+            for step in 6...10 { deliver(try escapeKey(at: 100 + Double(step) * 0.05, repeat: true)) }
+            XCTAssertEqual(dismissals, 0)
+            XCTAssertTrue(bridge.editHold.holdsDrawer)
+
+            // A separate press closes the drawer; its own repeats change nothing more.
+            deliver(try escapeKey(at: 200))
+            XCTAssertEqual(dismissals, 1)
+            XCTAssertFalse(bridge.editHold.holdsDrawer)
+            deliver(try escapeKey(at: 200.05, repeat: true))
+            XCTAssertEqual(dismissals, 1)
+        }
     }
 
     /// The real wiring: the edit-dismiss observer and the drag's Escape

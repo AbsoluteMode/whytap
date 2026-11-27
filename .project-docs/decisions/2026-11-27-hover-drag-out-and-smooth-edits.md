@@ -45,7 +45,9 @@ of the hover, and that More should be the whole bottom strip.
   the edit-dismiss observer ignores it (`escapeBelongsToDrag`, also for the
   same key after the drag's monitor handled it) and `dismissAfterEdit` does
   nothing while a tile is lifted, so cancelling a later drag never closes a
-  drawer held by an earlier edit (builder ticket 695). Settings and Soon tools do
+  drawer held by an earlier edit (builder ticket 695). Auto-repeats of that
+  held Escape belong to the drag as well; only a new press (not a repeat)
+  is the edit hold's again (builder ticket 698). Settings and Soon tools do
   not lift; the context menu stays for them, for VoiceOver users and as a
   secondary path.
 - **Edit hold.** `IslandHoverEditHold` has four phases: `held` (edited with the

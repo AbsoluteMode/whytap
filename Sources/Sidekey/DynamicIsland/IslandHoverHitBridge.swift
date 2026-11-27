@@ -499,20 +499,29 @@ final class IslandHoverHitBridge: ObservableObject {
     /// The Escape that cancelled the last drag. The edit-dismiss observer can
     /// see the same key before or after the drag's monitor does.
     private var lastDragEscape: TimeInterval?
+    /// That Escape may still be held: its auto-repeats belong to the drag
+    /// too, until a new press (not a repeat) arrives.
+    private var dragEscapeHeld = false
 
     /// Escape while a tool is lifted belongs to the drag alone: it puts the
     /// tools back and never also closes a drawer held by an earlier edit.
     func handleDragKey(_ event: NSEvent) {
         guard event.type == .keyDown, event.keyCode == 53, isReordering else { return }
         lastDragEscape = event.timestamp
+        dragEscapeHeld = true
         cancelReorder()
     }
 
     /// True for an Escape the drag owns, whether the drag's monitor has
-    /// already handled it or not; other observers must leave it alone.
+    /// already handled it or not, including auto-repeats of the same held
+    /// key; other observers must leave it alone. A new press is not the
+    /// drag's once no tile is lifted.
     func escapeBelongsToDrag(_ event: NSEvent) -> Bool {
         guard event.type == .keyDown, event.keyCode == 53 else { return false }
-        return isReordering || event.timestamp == lastDragEscape
+        if isReordering || event.timestamp == lastDragEscape { return true }
+        if event.isARepeat { return dragEscapeHeld }
+        dragEscapeHeld = false
+        return false
     }
 
     private func stopEscapeWatch() {

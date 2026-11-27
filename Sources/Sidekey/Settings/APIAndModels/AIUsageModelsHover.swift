@@ -29,7 +29,12 @@ struct AIUsageModelsHoverState: Equatable {
     }
 
     enum Event: Equatable {
+        /// The pointer's resolved location, re-read without the pointer
+        /// moving (a poll, content scrolling under it).
         case pointer(Pointer)
+        /// The pointer itself moved, even within the same row. Motion takes
+        /// the detail back from keyboard focus.
+        case pointerMoved(Pointer)
         case focused(String)
         case unfocused(String)
         /// Click on a row or Return/Space on its focused name: open it now.
@@ -61,6 +66,10 @@ struct AIUsageModelsHoverState: Equatable {
     /// Escape or a click outside closed this row's detail while the pointer
     /// stayed on it; it reopens after the pointer leaves the row, or on click.
     private(set) var dismissed: Dismissal?
+    /// A detail closed by us (not by AppKit) may still deliver its native
+    /// dismissal shortly afterwards; that late callback belongs to the old
+    /// presentation and is consumed once, never closing a newer one.
+    private(set) var staleDismissal: Dismissal?
 
     var pointerRow: String? { if case .row(let id) = pointer { return id } else { return nil } }
 
@@ -103,15 +112,31 @@ struct AIUsageModelsHoverState: Equatable {
                 // Off the open row and off its detail: close now.
                 dismissed = nil; pending = nil; keyboardRow = nil; open = nil
             }
+        case .pointerMoved(let location):
+            guard keyboardRow != nil else { return send(.pointer(location), now: now) }
+            // Hand the detail back to the pointer wherever it now is.
+            keyboardRow = nil; dismissed = nil; pending = nil
+            pointer = location
+            switch location {
+            case .row(let id): open = id
+            case .outside: close(now: now)
+            case .detail: if open == nil { pointer = .outside }
+            }
         case .focused(let id):
             // Focus shows its row's detail even while the pointer rests on
             // another row; the next pointer move hands it back to the pointer.
             keyboardRow = id; open = id; pending = nil; dismissed = nil
             if pointer == .detail { pointer = .outside }
         case .unfocused(let id):
-            if keyboardRow == id {
-                keyboardRow = nil
-                if open == id, pointer == .outside { open = nil }
+            guard keyboardRow == id else { return }
+            // Focus left for something that is not a model row: the detail
+            // goes back to the row under the pointer, or closes.
+            keyboardRow = nil
+            guard open == id else { return }
+            switch pointer {
+            case .row(let row) where dismissed?.row != row: open = row
+            case .detail: break
+            default: close(now: now)
             }
         case .clicked(let id):
             pending = nil
@@ -124,31 +149,38 @@ struct AIUsageModelsHoverState: Equatable {
             if open == id {
                 // Activating the open row closes it, whether or not the host
                 // reports a dismissal (keyboard activation, repeated click).
-                // A dismissal that arrives afterwards is ignored: open is nil.
-                close()
+                // A dismissal that arrives afterwards is stale (see close).
+                close(now: now)
                 dismissed = Dismissal(row: pointerRow ?? id, at: .distantPast)
                 return
             }
             dismissed = nil
             open = id
-            if pointer == .outside { keyboardRow = id }
+            // A click on the row under the pointer belongs to the pointer;
+            // activation elsewhere (Return on a focused row) to the keyboard.
+            keyboardRow = pointerRow == id ? nil : id
         case .escape:
             dismissed = pointerRow.map { Dismissal(row: $0, at: .distantPast) }
-            close()
+            close(now: now)
         case .dismissedBySystem(let id):
             guard open == id else { return }
+            if let stale = staleDismissal, stale.row == id, now.timeIntervalSince(stale.at) < Self.reopenSuppression {
+                staleDismissal = nil
+                return
+            }
             dismissed = Dismissal(row: pointerRow ?? id, at: now)
-            close()
+            close(now: now, closedByAppKit: true)
         case .disabled:
             self = Self()
         case .rowsChanged(let ids):
             let shown = Set(ids)
-            if let id = open, !shown.contains(id) { close() }
+            if let id = open, !shown.contains(id) { close(now: now) }
             if let id = pointerRow, !shown.contains(id) { pointer = .outside }
             if open == nil, pointer == .detail { pointer = .outside }
             if let id = keyboardRow, !shown.contains(id) { keyboardRow = nil }
             if let target = pending?.target, !shown.contains(target) { pending = nil }
             if let gone = dismissed, !shown.contains(gone.row) { dismissed = nil }
+            if let stale = staleDismissal, !shown.contains(stale.row) { staleDismissal = nil }
         case .tick:
             guard let due = pending, now >= due.at else { return }
             pending = nil
@@ -156,7 +188,8 @@ struct AIUsageModelsHoverState: Equatable {
         }
     }
 
-    private mutating func close() {
+    private mutating func close(now: Date, closedByAppKit: Bool = false) {
+        if let id = open, !closedByAppKit { staleDismissal = Dismissal(row: id, at: now) }
         open = nil; pending = nil; keyboardRow = nil
         if pointer == .detail { pointer = .outside }
     }
@@ -258,9 +291,16 @@ final class AIUsageModelsHoverController: ObservableObject {
         return .outside
     }
 
-    /// Re-reads the pointer and applies any change.
+    private var lastPoint: NSPoint?
+
+    /// Re-reads the pointer and applies any change. A changed screen point is
+    /// motion; the same point again (poll, scroll) is only a re-read.
     func checkPointer(at point: NSPoint? = nil) {
-        send(.pointer(resolve(point ?? mouseLocation())))
+        let point = point ?? mouseLocation()
+        let moved = lastPoint.map { hypot($0.x - point.x, $0.y - point.y) > 0.5 } ?? true
+        lastPoint = point
+        let location = resolve(point)
+        send(moved ? .pointerMoved(location) : .pointer(location))
     }
 
     private func detailScreenFrame() -> NSRect? {

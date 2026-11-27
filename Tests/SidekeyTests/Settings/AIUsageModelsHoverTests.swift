@@ -146,6 +146,58 @@ final class AIUsageModelsHoverTests: XCTestCase {
         assertShows("Agent", "leaving and returning opens it again")
     }
 
+    // Ticket 701: motion versus re-reading a resting pointer, and ownership.
+
+    func test_motion_hands_the_detail_back_but_a_resting_reread_does_not() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        send(.pointer(.row("Meetings"))); wait(1)
+        assertShows("Agent", "a poll at the resting point keeps Tab's detail")
+        XCTAssertTrue(state.highlighted("Agent")); XCTAssertFalse(state.highlighted("Meetings"))
+        send(.pointerMoved(.row("Meetings")))
+        assertShows("Meetings"); XCTAssertTrue(state.highlighted("Meetings"))
+        XCTAssertNil(state.keyboardRow)
+    }
+
+    func test_motion_onto_the_keyboard_detail_keeps_it_with_its_fill() {
+        send(.focused("Agent"))
+        send(.pointerMoved(.detail))
+        assertShows("Agent"); XCTAssertTrue(state.highlighted("Agent")); XCTAssertNil(state.keyboardRow)
+        send(.pointerMoved(.outside)); assertShows(nil)
+    }
+
+    func test_focus_leaving_with_the_pointer_outside_closes() {
+        send(.focused("Agent"))
+        send(.unfocused("Agent"))
+        assertShows(nil)
+    }
+
+    func test_tab_between_rows_in_either_event_order_ends_on_the_new_row() {
+        send(.focused("Agent")); send(.focused("Translation")); send(.unfocused("Agent"))
+        XCTAssertEqual(state.open, "Translation"); XCTAssertTrue(state.highlighted("Translation"))
+        send(.unfocused("Translation")); send(.focused("Agent"))
+        XCTAssertEqual(state.open, "Agent"); XCTAssertTrue(state.highlighted("Agent"))
+    }
+
+    func test_return_on_a_focused_row_while_the_pointer_rests_elsewhere_stays_with_the_keyboard() {
+        openFromOutside("Meetings")
+        send(.clicked("Agent")) // activation not under the pointer
+        assertShows("Agent"); XCTAssertEqual(state.keyboardRow, "Agent")
+        XCTAssertTrue(state.highlighted("Agent"))
+    }
+
+    func test_a_stale_dismissal_is_consumed_once_and_expires() {
+        openFromOutside("Agent")
+        send(.escape); send(.clicked("Agent"))
+        send(.dismissedBySystem("Agent")); assertShows("Agent", "late callback of the Escape-closed presentation")
+        send(.dismissedBySystem("Agent")); assertShows(nil, "a second dismissal is genuine")
+
+        send(.clicked("Agent")); send(.clicked("Agent")); send(.clicked("Agent"))
+        now = now.addingTimeInterval(S.reopenSuppression + 0.1)
+        send(.dismissedBySystem("Agent"))
+        assertShows(nil, "after the window a dismissal is genuine again")
+    }
+
     func test_a_detail_alone_is_never_under_the_pointer_when_nothing_is_open() {
         move(.detail)
         XCTAssertEqual(state.pointer, .outside)
@@ -457,5 +509,75 @@ extension AIUsageModelsHoverHostingTests {
             let png = try XCTUnwrap(rep.representation(using: .png, properties: [:]))
             try png.write(to: dir.appendingPathComponent("Costs-700-\(state).png"))
         }
+    }
+}
+
+// Builder findings on queue ticket 701 (2026-11-27), kept under the names the
+// builder used for its probes.
+extension AIUsageModelsHoverHostingTests {
+    func testBuilder701PointerMotionWithinItsRowReclaimsTheDetailFromKeyboardFocus() async throws {
+        let start = try center("Meetings", x: 60)
+        let across = try center("Meetings", x: 410)
+        XCTAssertNotEqual(start, across)
+        moveMouse(to: start)
+        try await wait(AIUsageModelsHoverState.openDelay)
+        XCTAssertTrue(controller.isPresented("Meetings"))
+
+        controller.send(.focused("Agent"))
+        try await settle()
+        XCTAssertTrue(controller.isPresented("Agent"), "A resting pointer must not override Tab")
+        try assertFilled("Agent")
+        XCTAssertEqual(controller.resolve(across), .row("Meetings"))
+
+        moveMouse(to: across)
+        XCTAssertTrue(controller.isPresented("Meetings"), "A new pointer position within the same row hands back ownership")
+        try assertFilled("Meetings")
+    }
+}
+
+extension AIUsageModelsHoverTests {
+    func testBuilder701LeavingAKeyboardRowDoesNotKeepItsDetailUnderAnotherRowsFill() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        assertShows("Agent")
+        send(.unfocused("Agent")) // Focus moves to the period control, not a different model row.
+        XCTAssertNotEqual(state.open, "Agent")
+        XCTAssertTrue(state.highlighted("Meetings"))
+    }
+
+    func testBuilder701ClickOnThePointerRowKeepsDetailAndFillOnThatRow() {
+        openFromOutside("Meetings")
+        send(.focused("Agent"))
+        send(.clicked("Meetings"))
+        assertShows("Meetings")
+        XCTAssertTrue(state.highlighted("Meetings"))
+        XCTAssertFalse(state.highlighted("Agent"))
+    }
+
+    func testBuilder701DelayedDismissalDoesNotCloseANewerPresentationOfTheSameRow() {
+        openFromOutside("Agent")
+        send(.clicked("Agent"))
+        assertShows(nil)
+        send(.clicked("Agent"))
+        assertShows("Agent")
+        send(.dismissedBySystem("Agent")) // Delayed callback from the first presentation.
+        assertShows("Agent", "A delayed close belongs to the old presentation, even when the row ID is the same")
+    }
+}
+
+extension AIUsageModelsHoverHostingTests {
+    func testBuilder701PointerMotionOutsideClosesKeyboardDetail() async throws {
+        let start = screenPoint(x: 75, yFromTop: 20)
+        let across = screenPoint(x: 350, yFromTop: 20)
+        XCTAssertEqual(controller.resolve(start), .outside)
+        XCTAssertEqual(controller.resolve(across), .outside)
+        moveMouse(to: start)
+        controller.send(.focused("Agent"))
+        try await settle()
+        XCTAssertTrue(controller.isPresented("Agent"))
+
+        moveMouse(to: across)
+        XCTAssertNil(controller.state.open, "A new pointer position outside both the detail and its row closes it")
+        try assertFilled(nil)
     }
 }

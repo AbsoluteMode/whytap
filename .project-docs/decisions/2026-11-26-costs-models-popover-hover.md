@@ -86,6 +86,18 @@ which the maintainer does not want.
   on another row; the next pointer move hands the detail back to the
   pointer. Escape closes until the pointer leaves that row. No pinning
   against hover.
+- Pointer motion is told apart from re-reading a resting pointer: the
+  controller compares screen points, so a poll or scroll keeps a detail that
+  keyboard focus opened, while any real move (even within the same row, or
+  between two points off the table) hands the detail back to the pointer.
+  Focus leaving for a non-row control gives the detail back to the row under
+  the pointer or closes it; a click on the row under the pointer belongs to
+  the pointer, Return on a focused row elsewhere to the keyboard (builder
+  findings on queue ticket 701).
+- A detail we close ourselves (click, Escape, row switch) records a stale
+  dismissal: a native dismissal arriving within 0.4 s belongs to that old
+  presentation and is consumed once, so it never closes a newer presentation
+  of the same row (ticket 701).
 - A disabled Costs view (its real `isEnabled`) resolves nothing: the
   app-wide mouse monitor, hover callbacks and focus cannot open a detail.
 - Rows leaving the table retire every reference to them (`rowsChanged`), fed
@@ -117,7 +129,17 @@ row fill is checked in the pixels: every row (name, empty middle, price)
 resolves to itself; from the open Meetings detail covering Drop Smart, up to
 Drop Fast shows Drop Fast; from a detail down onto Agent, then back up past
 every row; leaving the table closes; content scrolled under a resting
-pointer follows the pointer. The real popover window cannot be shown in
+pointer follows the pointer; a disabled table opens nothing. The hosting
+tests drive the controller with an injected clock and apply due timers
+explicitly, so a loaded machine cannot reorder a real timer against the test
+(the builder saw the upward case fail once in three runs on ticket 693;
+after the change it passed every repeated run with six busy CPU loops).
+
+The builder's probes are kept as regressions: `testBuilder693…` (focus with
+a resting pointer, repeated activation, disabled table) and
+`testBuilder701…` (motion within a row and outside, focus leaving, click
+ownership, a delayed dismissal of an older presentation), with state-level
+variants beside them. The real popover window cannot be shown in
 tests, so its frame is a stand-in rectangle. Not verified in the running app
 by this session (feature sessions do not launch the app).
 

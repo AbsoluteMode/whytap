@@ -63,8 +63,8 @@ holds it, leave the tickets queued and end your turn.
    Two lanes share this queue once the maintainer enables the preview lane
    (WHY: `.project-docs/decisions/2026-11-26-preview-before-validation.md`).
    Preview tickets (`lane: preview`, `previewing`, `awaiting_approval`) belong
-   to the preview lane, which installs them for the owner's check before any
-   review; `claim` never gives you one. Features the owner approved
+   to the preview lane, which installs them for the owner's check before the
+   full suite; `claim` never gives you one. Features the owner approved
    (`approved`) reach you only through a release batch (see "Release batch"):
    do not re-litigate how an approved feature looks or feels; every
    correctness, data, permission and test gate below still applies. Without
@@ -279,12 +279,10 @@ under the integration lock:
 1. Compose `origin/main` + every member head, in that order, in the
    integration worktree. Conflicts are yours as in step 3 of "Each ticket";
    one that needs a product choice blocks only the member involved.
-2. One review of the combined diff and of each member's contracts, cheapest
-   checks first (probes, documentation checks, `swift test --filter` of the
-   touched classes). Attribute each finding to the member that introduced the
-   lines (its own diff against the composition before it), block only that
-   member with a reproducing check for the whole class of the problem, drop
-   it from the composition and go on with the rest.
+2. No code review ("You never review code"). Run the documentation checks
+   and build the composition. A member whose own diff breaks them (its
+   addition to the composition before it) is blocked with the failing
+   command and output, dropped, and the rest goes on.
 3. One full suite on the final composition (`environment --for suite` first;
    the flaky-test and protected-data rules are unchanged). A real failure:
    bisect the ordered members with only the failing tests (`swift test

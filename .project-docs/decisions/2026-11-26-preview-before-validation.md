@@ -1,8 +1,8 @@
 ---
 id: whytap-preview-before-validation-2026-11-26
 type: decision
-title: The owner checks a preview of the feature first; review, full suite and merge follow his approval
-summary: A preview lane builds main plus the unmerged PRs the owner is checking as a local arm64 app, with no review or full suite, and installs it under the usual safety gates beside validation work. Only PRs whose every changed input is of a preview-safe kind and that build on nothing unmerged are previewed; everything else goes to normal validation. The installed app records its own composition, which is the queue's source of truth for what the owner sees.
+title: The owner checks a preview of the feature first; the full suite and merge follow the approval
+summary: A preview lane builds main plus the unmerged PRs the owner is checking as a local arm64 app, with no full suite, and installs it under the usual safety gates beside validation work. Only PRs whose every changed input is of a preview-safe kind and that build on nothing unmerged are previewed; everything else goes to normal validation. The installed app records its own composition, which is the queue's source of truth for what the owner sees.
 status: confirmed
 tags: [agents, queue, builder, watcher, preview, approval, packaging]
 canonical_for: [builder-preview-lane]

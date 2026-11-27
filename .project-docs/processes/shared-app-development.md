@@ -314,8 +314,8 @@ process and the builder prompt, never queue contents.
 ### Preview lane and release batches
 
 On 2026-11-26 the owner set the order: he checks the feature itself in his
-running app first; code review, the full suite and the merge follow his
-approval, once for everything he approved (see the
+running app first; the full suite and the merge follow the owner's
+approval, once for everything approved (see the
 [preview decision](../decisions/2026-11-26-preview-before-validation.md) and
 the [release batches decision](../decisions/2026-11-26-release-batches.md)).
 The maintainer enables it with `activate --preview-lane --orchestrator <id>
@@ -325,11 +325,15 @@ until then `--preview` submissions go through normal validation.
 **Policy by lane and stage** (the single policy; the builder prompt and the
 preview prompt follow it):
 
-| Lane, stage | Review | Full suite | Merge | Install |
+| Lane, stage | Checks before the suite | Full suite | Merge | Install |
 |---|---|---|---|---|
-| Normal (`enqueue` without `--preview`) | per PR, cheapest checks first | per PR candidate | per PR | grouped, at most four runtime PRs |
-| Preview (`--preview`, admitted) | none | none; the worker's targeted tests | none | main + train + this PR, safety checks, admission of the whole composition, handoff gate |
-| Release batch (approved previews) | one, findings attributed per member | one on the batch, failures bisected by failing tests | member by member, each merge a checkpoint (`pending_install --install-first`) | one, main + remaining train |
+| Normal (`enqueue` without `--preview`) | per PR: documentation checks, build, `swift test --filter` | per PR candidate | per PR | grouped, at most four runtime PRs |
+| Preview (`--preview`, admitted) | build and safety checks only | none; the worker's targeted tests | none | main + train + this PR, safety checks, admission of the whole composition, handoff gate |
+| Release batch (approved previews) | documentation checks, build | one on the batch, failures bisected by failing tests | member by member, each merge a checkpoint (`pending_install --install-first`) | one, main + remaining train |
+
+No lane or stage has a builder code review: the only review is the
+orchestrator's one inquisition on the release candidate before a public
+release ("The builder never reviews").
 
 Every install, in either lane, uses the local arm64 build, records its
 composition in the app (`ExodiaBuildComposition`), checks signature,
@@ -614,8 +618,8 @@ Under the lock:
    Fetch and verify the merged source/tree before packaging. Do not force-push
    shared main or bypass existing review/release gates.
 4. In the normal lane, group the install, never the review or the tests: each
-   PR is still checked, tested and merged alone (a release batch is reviewed
-   and tested as one composition, see "Policy by lane and stage"). The helper marks each ticket `runtime` at
+   PR is still checked, tested and merged alone (a release batch is tested
+   as one composition, see "Policy by lane and stage"). The helper marks each ticket `runtime` at
    submission (any changed path outside documentation, tests, `.github/` and
    the queue's own scripts). After merging a runtime PR, count the merged
    runtime tickets waiting for an automatic install, including this one. While

@@ -59,8 +59,9 @@ configured as the owner's relay, and activation changed files before refusing.
   is pending; work that changes nothing in the app is claimed meanwhile. An
   open batch is returned in its persisted order after any restart. A member
   whose head moved goes back to its author; the others go on.
-- The builder composes main plus the batch, runs one review and attributes
-  each finding to its member, runs one full suite, bisects a real failure over
+- The builder composes main plus the batch, runs the documentation checks
+  and one full suite (no code review: since 2026-11-28 the only review is the
+  orchestrator's inquisition on the release candidate), bisects a real failure over
   the ordered members with only the failing tests, blocks the culprit and
   tests the rest once more, then merges member by member. Each merge is set
   `pending_install --install-first` at once: that status is the checkpoint a

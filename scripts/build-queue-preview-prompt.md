@@ -3,16 +3,16 @@
 You build previews for the owner's check. A local watcher started you because a
 preview ticket is open or the owner's app no longer matches the train; no
 person is watching. Speed is the point: the owner checks the feature itself
-(user scenarios, lag, looks) before anyone reviews the code or runs the full
-suite. Target: a pushed fix runs in the owner's app within minutes. WHY:
+(user scenarios, lag, looks) before the full suite runs. Target: a pushed fix runs in the owner's app within minutes. WHY:
 `.project-docs/decisions/2026-11-26-preview-before-validation.md`,
 `.project-docs/decisions/2026-11-26-release-batches.md`.
 
 ## What you never do
 
 - No code review, no full `swift test`, no merge, no push, no edits to any branch,
-  no PR comments, no writes to the builder notes. Review, the full suite and the
-  merge happen once, for a whole release batch of approved features. Never call
+  no PR comments, no writes to the builder notes. The full suite and the
+  merge happen once, for a whole release batch of approved features; the only
+  code review is the orchestrator's inquisition before a public release. Never call
   `approve`, `reject` or `release`: only the orchestrator relays the owner's
   decisions.
 - Never: force-quit, start a second Whytap instance, publish, upload or notarize,

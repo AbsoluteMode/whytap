@@ -417,4 +417,142 @@ final class DropDeliveryResolverTests: XCTestCase {
         XCTAssertEqual(rec.delivered, ["recovered full text"])
         XCTAssertTrue(rec.pastedRaw.isEmpty)
     }
+
+    // MARK: - Refused raw-partial paste (queue ticket 706)
+
+    /// A real AutoPasteEngine bound to target A on a simulated clipboard.
+    /// Only `frontmost` decides focus; activating A has no effect.
+    @MainActor
+    private final class RefusingPasteFixture {
+        static let targetA = AutoPasteEngine.RememberedTarget(pid: 100, name: "TextEdit")
+        static let targetB = AutoPasteEngine.RememberedTarget(pid: 200, name: "Notes")
+        var frontmost = targetA
+        var generation = 1
+        var vDowns = 0
+        var copyDuringSettle = false
+        /// Advanced by every engine sleep, so focus and modifier budgets end.
+        var clockMs: UInt64 = 0
+        lazy var engine: AutoPasteEngine = AutoPasteEngine(
+            flagsState: { [] }, frontmostAppInfo: { [unowned self] in self.frontmost },
+            activate: { _ in true }, isTerminated: { _ in false }, permissionGranted: { _ in true },
+            pasteboardWrite: { [unowned self] _ in
+                self.generation += 1
+                return (self.generation - 1, self.generation)
+            },
+            postEvent: { [unowned self] key, down, _ in if key == 0x09 && down { self.vDowns += 1 } },
+            sleepUs: { [unowned self] us in self.clockMs += UInt64(us) / 1000 },
+            asyncSleepMs: { [unowned self] ms in
+                self.clockMs += ms
+                if self.copyDuringSettle { self.copyDuringSettle = false; self.generation += 1 }
+                await Task.yield()
+            },
+            nowMs: { [unowned self] in self.clockMs }, logEmit: { _, _ in },
+            pasteboardRestore: { [unowned self] _ in self.generation += 1 },
+            currentChangeCount: { [unowned self] in self.generation }
+        )
+    }
+
+    /// Mirrors AppDelegate's sink: the raw partial goes through the real
+    /// engine, and a refusal parks it with `DropPasteRetry.make`.
+    private func refusingSink(_ rec: Recorder, _ fixture: RefusingPasteFixture,
+                              parked: @escaping (DropPasteRetry, AutoPasteEngine.PasteRefusal) -> Void,
+                              history: @escaping (String) -> Void) -> AppDelegate.DropBatchRecoverySink {
+        var sink = rec.sink()
+        sink.pasteRaw = { [weak rec] text in
+            rec?.pastedRaw.append(text)
+            let pasted = await fixture.engine.paste(text)
+            if pasted { rec?.phases.append(.idle) }
+            return pasted
+        }
+        sink.parkRefusedPartial = { [weak rec] raw in
+            guard let refused = DropPasteRetry.make(after: fixture.engine, text: raw, rawTranscript: raw, formatting: .plain)
+            else { return false }
+            history(raw)
+            parked(refused.retry, refused.refusal)
+            rec?.phases.append(.deliveryFailed)
+            return true
+        }
+        return sink
+    }
+
+    private enum BatchCase: CaseIterable { case failed, empty, noAudio }
+
+    func testFastRefusedPartialIsKeptForRetryIntoItsOwnTargetWithoutAnotherProviderCall() async {
+        for batch in BatchCase.allCases {
+            for refusal in [AutoPasteEngine.PasteRefusal.targetNotInFront, .clipboardChanged] {
+                let label = "\(batch) \(refusal)"
+                let rec = Recorder()
+                let fixture = RefusingPasteFixture()
+                fixture.engine.rememberTargetBeforeRecording()          // the take starts in A
+                if refusal == .targetNotInFront {
+                    fixture.frontmost = RefusingPasteFixture.targetB     // A cannot be brought back
+                } else {
+                    fixture.copyDuringSettle = true                      // another copy under the paste
+                }
+                var transcribeCalls = 0
+                var parked: (DropPasteRetry, AutoPasteEngine.PasteRefusal)?
+                var historyEntries: [String] = []
+                let sink = refusingSink(rec, fixture, parked: { parked = ($0, $1) }, history: { historyEntries.append($0) })
+
+                await AppDelegate.resolveDelivery(
+                    result: .degraded, capturedPCM: batch == .noAudio ? Data() : pcm, lastPartial: "partial speech",
+                    hasBatchTranscriber: true,
+                    transcribe: { _ in
+                        transcribeCalls += 1
+                        if batch == .failed { throw URLError(.notConnectedToInternet) }
+                        return ""
+                    },
+                    sink: sink
+                )
+
+                XCTAssertEqual(rec.pastedRaw, ["partial speech"], label)
+                XCTAssertEqual(fixture.vDowns, 0, "\(label): nothing is pasted")
+                XCTAssertEqual(parked?.1, refusal, label)
+                XCTAssertEqual(parked?.0.text, "partial speech", label)
+                XCTAssertEqual(parked?.0.target, RefusingPasteFixture.targetA, label)
+                XCTAssertEqual(parked.map { DropPasteRetry.message(for: $0.1) },
+                               refusal == .targetNotInFront ? "Couldn't paste — app not in front" : "Couldn't paste — clipboard changed",
+                               label)
+                XCTAssertEqual(historyEntries, ["partial speech"], "\(label): one History entry")
+                XCTAssertEqual(rec.phases.last, .deliveryFailed, label)
+                XCTAssertFalse(rec.phases.contains(.idle), "\(label): the partial is not dropped")
+                XCTAssertNil(rec.retainedAudio, "\(label): Retry does not re-run batch")
+                XCTAssertEqual(rec.failureReasons.last, "salvaged_partial_paste_refused", label)
+                let callsBeforeRetry = transcribeCalls
+                XCTAssertEqual(callsBeforeRetry, batch == .noAudio ? 0 : 1, label)
+
+                // A History open captures B meanwhile; Retry still targets A.
+                fixture.frontmost = RefusingPasteFixture.targetB
+                fixture.engine.rememberTargetBeforeRecording()
+                guard let retry = parked?.0 else { continue }
+                let intoB = await fixture.engine.paste(retry.text, formatting: retry.formatting, to: retry.target)
+                XCTAssertFalse(intoB, "\(label): Retry never pastes into B")
+                XCTAssertEqual(fixture.vDowns, 0, label)
+
+                fixture.frontmost = RefusingPasteFixture.targetA          // the user returns to A
+                let retried = await fixture.engine.paste(retry.text, formatting: retry.formatting, to: retry.target)
+                await fixture.engine.waitForPendingRestore()
+                XCTAssertTrue(retried, label)
+                XCTAssertEqual(fixture.vDowns, 1, label)
+                XCTAssertEqual(transcribeCalls, callsBeforeRetry, "\(label): no other provider call")
+            }
+        }
+    }
+
+    /// Non-retryable stops keep the earlier ladder: the parking hook is
+    /// consulted but declines, so retained audio or idle follow as before.
+    func testNonRetryablePartialPasteFailureKeepsTheAudioRetry() async {
+        let rec = Recorder()
+        rec.pasteRawSucceeds = false
+        var sink = rec.sink()
+        var consulted = 0
+        sink.parkRefusedPartial = { _ in consulted += 1; return false }
+        await AppDelegate.resolveDelivery(
+            result: .degraded, capturedPCM: pcm, lastPartial: "partial",
+            hasBatchTranscriber: false, transcribe: { _ in "unused" }, sink: sink
+        )
+        XCTAssertEqual(consulted, 1)
+        XCTAssertEqual(rec.retainedAudio, pcm)
+        XCTAssertEqual(rec.phases.last, .deliveryFailed)
+    }
 }

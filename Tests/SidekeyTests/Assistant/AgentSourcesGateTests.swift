@@ -342,3 +342,21 @@ extension AgentSourcesGateTests {
         XCTAssertEqual(keys.read(account: account), "fixture-value")
     }
 }
+
+extension AgentSourcesGateTests {
+    /// The manifest write must work while the screen is locked: complete
+    /// (class A) protection fails there with EPERM, which made every test that
+    /// saves a source fail on a locked Mac.
+    func testTheManifestIsWrittenWithAProtectionClassThatWorksWhileLocked() throws {
+        let options = SourcesController.manifestWriteOptions
+        XCTAssertTrue(options.contains(.atomic))
+        XCTAssertTrue(options.contains(.completeFileProtectionUntilFirstUserAuthentication))
+        XCTAssertFalse(options.contains(.completeFileProtection), "Class A cannot be created while the screen is locked")
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("gate-" + UUID().uuidString)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let url = directory.appendingPathComponent("sources.json")
+        try Data("[]".utf8).write(to: url, options: options)
+        XCTAssertEqual(try Data(contentsOf: url), Data("[]".utf8))
+    }
+}

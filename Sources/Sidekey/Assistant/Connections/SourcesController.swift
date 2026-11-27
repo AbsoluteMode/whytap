@@ -120,6 +120,12 @@ final class SourcesController: ObservableObject {
     private var sleepObserver: NSObjectProtocol?
     private var loaded = false
 
+    /// Complete protection (class A) refuses to create files while the
+    /// screen is locked, so the manifest (names only, never secrets; 0600 in a
+    /// 0700 folder) uses the protection the rest of the app uses.
+    nonisolated static let manifestWriteOptions: Data.WritingOptions =
+        [.atomic, .completeFileProtectionUntilFirstUserAuthentication]
+
     nonisolated static var defaultDirectory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             .appendingPathComponent("whytap", isDirectory: true)
@@ -166,7 +172,7 @@ final class SourcesController: ObservableObject {
                                                     attributes: [.posixPermissions: 0o700])
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(sources).write(to: fileURL, options: [.atomic, .completeFileProtection])
+            try encoder.encode(sources).write(to: fileURL, options: Self.manifestWriteOptions)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: fileURL.path)
             if error != nil { error = nil }
         } catch { self.error = "Couldn’t save the list of sources." }

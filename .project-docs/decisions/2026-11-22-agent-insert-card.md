@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Agent/UI/Renderers/RendererSupport.swift
     confirmed_at: 2026-11-22
-related: [2026-11-21-structured-agent-answers.md]
+related: [2026-11-21-structured-agent-answers.md, 2026-11-27-agent-plain-text-cards.md]
 ---
 
 # Agent answers lead with an Insert card

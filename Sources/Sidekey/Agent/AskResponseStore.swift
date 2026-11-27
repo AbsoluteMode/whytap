@@ -189,6 +189,10 @@ final class AskResponseStore: ObservableObject {
                         streamingText = localFinal
                         summary = localFinal
                     }
+                    if addAnswerCards(from: streamingText), !didCallFirstBlock {
+                        didCallFirstBlock = true
+                        onFirstBlock()
+                    }
                     errorCode = nil
                     errorMessage = nil
                     isErrorRetryable = false
@@ -371,6 +375,25 @@ final class AskResponseStore: ObservableObject {
     ///
     /// `internal` (not `private`) so the unit tests can pin the exact
     /// stripping behaviour without driving a full `consume(_:)` round.
+    /// Links, paths and a single command the final answer's text names
+    /// become cards too, merged into one actions block with what its
+    /// `useful.actions` fence listed (fence metadata wins). Only the final
+    /// answer is read, never an intermediate message.
+    // WHY: .project-docs/decisions/2026-11-27-agent-plain-text-cards.md
+    /// Returns whether the actions block changed.
+    private func addAnswerCards(from answer: String) -> Bool {
+        let listed = blocks.compactMap { block -> UsefulActionsBlock? in
+            if case .usefulActions(let actions) = block { return actions }
+            return nil
+        }
+        let existing = listed.isEmpty ? nil : UsefulActionsBlock(items: listed.flatMap(\.items))
+        guard let merged = AgentAnswerArtifacts.collect(from: answer, existing: existing),
+              merged != existing else { return false }
+        blocks.removeAll { if case .usefulActions = $0 { return true }; return false }
+        blocks.append(.usefulActions(merged))
+        return true
+    }
+
     static func strippingTrailingJSONFence(from text: String) -> String {
         let patterns = ["```json", "```\n{", "```{"]
         for pattern in patterns {

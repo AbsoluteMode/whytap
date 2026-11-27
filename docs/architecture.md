@@ -345,8 +345,9 @@ Agent flow (the user's Claude Code or Codex):
   a non-marker line such as "3–4." continues at 5, not 1.
   WHY: .project-docs/decisions/2026-11-21-structured-agent-answers.md
   Cards (Insert, links, paths) come from one final `useful.actions` JSON fence
-  the prompt asks for (AgentUsefulLinksExtractor), plus links and paths in the
-  answer text; nothing opens or is inserted until the user acts.
+  the prompt asks for (AgentUsefulLinksExtractor), plus links, paths and a
+  single shell command in the final answer's text (AgentAnswerArtifacts);
+  nothing opens or is inserted until the user acts.
   Optional selection fallback sends Cmd+C only when the target app exposes an
   enabled bare Command-C menu item. Unknown/disabled Copy, focus drift or a
   Whytap key window skips it; text/voice submission continues without selection.
@@ -2050,6 +2051,14 @@ Agent answers: the harness's final text is the answer. A trailing
 `useful.actions` JSON fence (AgentUsefulLinksExtractor, also the legacy
 `useful.links` forms) becomes typed link, path and copy cards and is removed
 from the shown text; nothing opens or inserts before user interaction.
+At `done`, AskResponseStore reads the final answer's text only (never a Codex
+intermediate message) with AgentAnswerArtifacts: http(s) links, Markdown
+links, absolute or tilde paths (code spans, quotes, path-only fences,
+conservative unquoted roots) and the one command line of a closed shell fence
+become cards, merged into one actions block with the fence's items (fence
+metadata wins; commands first so Insert is preselected; deduplicated, 20 at
+most; 32,000 characters scanned, no network or file I/O). A failed turn gets
+none. WHY: .project-docs/decisions/2026-11-27-agent-plain-text-cards.md
 History persists visible text together with cards in both blocks and
 Markdown. Screen capture reaches the Agent as the `whytap_capture_screen`
 operation of the per-turn `whytap` MCP server (AppControlController ->

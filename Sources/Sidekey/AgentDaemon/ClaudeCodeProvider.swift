@@ -83,6 +83,8 @@ final class ClaudeCodeProvider: CLIProvider {
     let installURL = URL(string: "https://docs.claude.com/en/docs/claude-code/setup")!
 
     private let locate: () -> URL?
+    /// The Agent's own folder, used when a turn names none; nil fails closed.
+    private let agentWorkspace: () -> URL?
     private let runOneShot: (_ binary: URL, _ args: [String]) -> ProcessResult?
     private let runStreaming: (
         _ binary: URL,
@@ -117,6 +119,13 @@ final class ClaudeCodeProvider: CLIProvider {
     /// The writable stdin handle for the currently-running process.
     /// Guarded by `sessionQueue`, like `lastSessionID`.
     private var activeHandle: ClaudeStdinWriting?
+    /// The latest turn. Only it may publish or clear `activeHandle`: a new
+    /// turn takes ownership on entry, before the CLI lookup, the workspace or
+    /// its child, so an earlier turn's writer never stays active, even when
+    /// the new turn cannot start or its child exits before its writer is
+    /// registered. Cleared when that turn ends, so an idle provider retains
+    /// no writer. Guarded by `sessionQueue`.
+    private var currentTurn: TurnHandleBox?
 
     init(
         locate: @escaping () -> URL? = { ClaudeBinaryLocator().locate() },
@@ -129,8 +138,10 @@ final class ClaudeCodeProvider: CLIProvider {
             _ onExit: @escaping (Int32) -> Void
         ) -> ClaudeStdinWriting = ClaudeCodeProvider.defaultRunStreaming,
         idleSoftTimeout: TimeInterval = 45,
-        idleHardTimeout: TimeInterval = 120
+        idleHardTimeout: TimeInterval = 120,
+        agentWorkspace: @escaping () -> URL? = { try? AgentDaemonWorkingDirectory.ensure() }
     ) {
+        self.agentWorkspace = agentWorkspace
         self.locate = locate
         self.runOneShot = runOneShot
         self.runStreaming = runStreaming
@@ -153,7 +164,7 @@ final class ClaudeCodeProvider: CLIProvider {
         // that env token and fails when it is a stale/inherited one.) `--json` is
         // the default but we pass it explicitly to pin the output contract.
         let args = ["auth", "status", "--json"]
-        os_log("claude probe: spawning %{public}@ auth status", log: Self.log, type: .default, binary.path)
+        os_log("claude probe: spawning auth status", log: Self.log, type: .default)
         guard let result = runOneShot(binary, args) else {
             os_log("claude probe: runOneShot returned nil", log: Self.log, type: .error)
             return .notInstalled
@@ -164,12 +175,11 @@ final class ClaudeCodeProvider: CLIProvider {
         if let outcome = Self.parseAuthStatus(result.stdout) {
             return outcome
         }
-        // Output wasn't the expected JSON -> fall back to the exit code.
-        if result.exitCode == 0 { return .connected(sessionID: nil) }
-        return .failed(
-            code: "exit_\(result.exitCode)",
-            message: result.stderr.isEmpty ? "Probe failed" : result.stderr
-        )
+        // Output wasn't the expected JSON. An exit code alone does not show
+        // a sign-in, and stderr can carry paths or account details, so it is
+        // neither shown nor logged.
+        return .failed(code: "exit_\(result.exitCode)",
+                       message: "Claude Code didn't report its sign-in status. Update Claude Code, then check again.")
     }
 
     /// Parse `claude auth status --json`:
@@ -223,7 +233,17 @@ final class ClaudeCodeProvider: CLIProvider {
 
     func run(prompt: String, resumeSessionID: String?, options: AgentRunOptions) -> AsyncStream<AgentSSEEvent> {
         AsyncStream { continuation in
+            // This turn's own child. A cancelled turn's late result or exit
+            // must not close or clear the next turn's stdin.
+            let ownHandle = TurnHandleBox()
+            // Ownership first, before the lookup, the workspace or the child:
+            // even a turn that cannot start retires the previous writer.
+            sessionQueue.async {
+                self.currentTurn = ownHandle
+                self.activeHandle = nil
+            }
             guard let binary = locate() else {
+                releaseTurn(ownHandle)
                 continuation.yield(.error(
                     code: "not_installed",
                     message: "Claude Code is not installed",
@@ -240,15 +260,15 @@ final class ClaudeCodeProvider: CLIProvider {
                 "--output-format", "stream-json",
                 "--verbose",
                 "--include-partial-messages",
-                // Skip-permission mode (testing phase): bypass every permission
-                // check so the agent auto-runs all actions without prompting.
-                // The stdio permission-prompt protocol is intentionally NOT
-                // registered — there is no UI to answer it yet (the in-island
-                // approval bar is a deferred follow-up). The parser +
-                // respondToPermission machinery stays for that future bar.
-                // Users are told about this at connect time (AgentModeView).
-                "--permission-mode", "bypassPermissions",
             ]
+            // The user's "Allow file edits and commands", never a blanket
+            // bypass. Nothing is left to ask: the island has no approval bar,
+            // and the parser + respondToPermission stay for one later.
+            // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+            args += AgentHarnessFlags.claude(allowActions: options.allowActions)
+            if let command = options.whytapMCPCommand {
+                args += AgentHarnessFlags.claudeMCPConfig(command: command)
+            }
             if let sid = resumeSessionID {
                 args += ["--resume", sid]
             }
@@ -261,7 +281,17 @@ final class ClaudeCodeProvider: CLIProvider {
                 sessionId: resumeSessionID ?? ""
             ))
 
-            let workingDir = try? AgentDaemonWorkingDirectory.ensure()
+            // Fail closed: without the Agent's own folder the CLI would run
+            // (and, with actions on, write) in whatever folder Whytap has.
+            guard let workingDir = options.workingDirectory ?? agentWorkspace() else {
+                releaseTurn(ownHandle)
+                continuation.yield(.error(code: "workspace_unavailable",
+                                          message: AgentHarnessMessages.workspaceUnavailable,
+                                          retryable: true))
+                continuation.yield(.done(sources: []))
+                continuation.finish()
+                return
+            }
             var resultSeen = false
             let registry = ClaudeTaskRegistry()
 
@@ -284,7 +314,10 @@ final class ClaudeCodeProvider: CLIProvider {
                     }
                     if case .result = event {
                         resultSeen = true
-                        self?.sessionQueue.async { self?.activeHandle?.closeStdin() }
+                        // May arrive while the child is still being started,
+                        // before its writer is registered: the box keeps the
+                        // close for that writer.
+                        ownHandle.closeStdin()
                     }
                     registry.observe(event)
                     for mapped in ClaudeEventMapper.map(event, registry: registry) {
@@ -293,7 +326,8 @@ final class ClaudeCodeProvider: CLIProvider {
                 }
             }, { [weak self] exitCode in
                 watchdog?.cancel()
-                self?.sessionQueue.async { self?.activeHandle = nil }
+                ownHandle.markExited()
+                self?.releaseTurn(ownHandle)
                 if exitCode != 0 && !resultSeen {
                     continuation.yield(.error(
                         code: "process_exit_\(exitCode)",
@@ -321,15 +355,22 @@ final class ClaudeCodeProvider: CLIProvider {
                     // resultSeen from this (watchdog) queue.
                     continuation.yield(.error(
                         code: "agent_timeout",
-                        message: "Агент завис и был остановлен — нет ответа. Повторить?",
+                        message: AgentHarnessMessages.stalled,
                         retryable: true))
                     continuation.finish()
                     handle.terminate()
                 })
             watchdog = wd
+            ownHandle.register(handle)
             wd.start()
 
-            sessionQueue.async { self.activeHandle = handle }
+            // Publication and the exit's release both run on the serial
+            // session queue, and only for the latest turn. The exit is
+            // recorded in the box before its release is queued, so whichever
+            // runs first, an exited writer never stays active.
+            sessionQueue.async {
+                if self.currentTurn === ownHandle, !ownHandle.hasExited { self.activeHandle = handle }
+            }
 
             // Terminate the child whenever the consumer goes away — cancelled
             // (Esc / panel dismiss / new turn / app quit -> AgentController.stop()
@@ -342,10 +383,21 @@ final class ClaudeCodeProvider: CLIProvider {
             continuation.onTermination = { [weak self] _ in
                 wd.cancel()
                 handle.terminate()
-                self?.sessionQueue.async { self?.activeHandle = nil }
+                self?.releaseTurn(ownHandle)
             }
 
             handle.writeLine(ControlProtocol.userMessage(prompt))
+        }
+    }
+
+    /// A turn ended (exit, cancel, finish or a failed start): its writer
+    /// stops receiving answers and is no longer retained, unless a newer turn
+    /// already owns the provider.
+    private func releaseTurn(_ turn: TurnHandleBox) {
+        sessionQueue.async {
+            guard self.currentTurn === turn else { return }
+            self.currentTurn = nil
+            self.activeHandle = nil
         }
     }
 
@@ -359,21 +411,7 @@ final class ClaudeCodeProvider: CLIProvider {
     }
 
     static func defaultRunOneShot(binary: URL, args: [String]) -> ProcessResult? {
-        let process = Process()
-        process.executableURL = binary
-        process.arguments = args
-        process.environment = Self.childEnvironment()
-        let out = Pipe()
-        let err = Pipe()
-        process.standardOutput = out
-        process.standardError = err
-        do { try process.run() } catch { return nil }
-        process.waitUntilExit()
-        return ProcessResult(
-            stdout: String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-            stderr: String(decoding: err.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self),
-            exitCode: process.terminationStatus
-        )
+        ProcessOneShot.run(binary: binary, args: args, environment: childEnvironment())
     }
 
     static func defaultRunStreaming(
@@ -408,15 +446,13 @@ final class ClaudeCodeProvider: CLIProvider {
             label: "com.sidekey.claudeprovider.buffer",
             qos: .userInitiated
         )
-        var buffer = Data()
+        var lines = ProcessLineBuffer()
 
         // Continuously drain stderr so its pipe buffer can never fill and wedge
         // claude mid-turn. (Same hazard CodexProvider guards against: a chatty
         // child fills the ~64KB pipe buffer, blocks on its next stderr write,
-        // and the turn hangs forever on the "Thinking" spinner.) Chunks are
-        // accumulated in a bounded buffer (last 16 KB) and logged on nonzero
-        // exit for diagnostics; funnelled through bufferQueue to avoid
-        // cross-queue mutation of stderrTail.
+        // and the turn hangs forever on the "Thinking" spinner.) Only its size
+        // is logged: it can carry paths, prompts or account details.
         var stderrTail = BoundedStderrBuffer()
         stderrPipe.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
@@ -430,14 +466,7 @@ final class ClaudeCodeProvider: CLIProvider {
             // Serialise: both readabilityHandler and terminationHandler funnel
             // through bufferQueue so `buffer` is never touched from two queues.
             bufferQueue.async {
-                buffer.append(chunk)
-                // Split on newlines, emit complete lines.
-                while let newlineRange = buffer.range(of: Data("\n".utf8)) {
-                    let lineData = buffer.subdata(in: buffer.startIndex..<newlineRange.lowerBound)
-                    buffer.removeSubrange(buffer.startIndex...newlineRange.lowerBound)
-                    let line = String(decoding: lineData, as: UTF8.self)
-                    onLine(line)
-                }
+                for line in lines.append(chunk) { onLine(line) }
             }
         }
 
@@ -450,24 +479,15 @@ final class ClaudeCodeProvider: CLIProvider {
                 stdoutPipe.fileHandleForReading.readabilityHandler = nil
                 stderrPipe.fileHandleForReading.readabilityHandler = nil
                 let remaining = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-                if !remaining.isEmpty {
-                    buffer.append(remaining)
-                }
-                if !buffer.isEmpty {
-                    onLine(String(decoding: buffer, as: UTF8.self))
-                    buffer = Data()
-                }
+                for line in lines.finish(with: remaining) { onLine(line) }
                 // Drain any final stderr bytes so the captured tail is complete
                 // (the readabilityHandler was niled above, so nothing else appends).
                 let remainingErr = stderrPipe.fileHandleForReading.readDataToEndOfFile()
                 if !remainingErr.isEmpty { stderrTail.append(remainingErr) }
                 if proc.terminationStatus != 0 {
-                    let tail = stderrTail.tail
-                    if !tail.isEmpty {
-                        os_log("agent claude stderr (exit=%{public}d): %{public}@",
-                               log: ClaudeCodeProvider.log, type: .error,
-                               proc.terminationStatus, String(tail.suffix(2000)))
-                    }
+                    os_log("agent claude exit=%{public}d stderr_bytes=%{public}d",
+                           log: ClaudeCodeProvider.log, type: .error,
+                           proc.terminationStatus, stderrTail.byteCount)
                 }
                 onExit(proc.terminationStatus)
             }
@@ -480,9 +500,52 @@ final class ClaudeCodeProvider: CLIProvider {
             return StdinPipeWriter(stdinPipe.fileHandleForWriting)
         }
 
+        // A child that exits mid-write must not SIGPIPE the app.
+        _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         // Hand the live process to the writer so `terminate()` can SIGTERM it
         // when the stream's onTermination fires (cancel / dismiss / new turn /
         // quit).
         return StdinPipeWriter(stdinPipe.fileHandleForWriting, process: process)
+    }
+}
+
+/// The stdin writer of one turn. The child's output and exit callbacks can
+/// run before `runStreaming` returns the writer (a result during spawn), so a
+/// close or exit that arrives first is kept and applied to this turn's own
+/// writer when it is registered, never to another turn's.
+final class TurnHandleBox: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handle: ClaudeStdinWriting?
+    private var closeRequested = false
+    private var exited = false
+
+    /// Registers this turn's writer; applies a close requested before it.
+    func register(_ writer: ClaudeStdinWriting) {
+        lock.lock()
+        handle = writer
+        let close = closeRequested
+        lock.unlock()
+        if close { writer.closeStdin() }
+    }
+
+    var hasExited: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return exited
+    }
+
+    func closeStdin() {
+        lock.lock()
+        closeRequested = true
+        let writer = handle
+        lock.unlock()
+        writer?.closeStdin()
+    }
+
+    /// Records the exit.
+    func markExited() {
+        lock.lock()
+        exited = true
+        lock.unlock()
     }
 }

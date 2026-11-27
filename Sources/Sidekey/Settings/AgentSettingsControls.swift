@@ -21,56 +21,52 @@ struct ConcreteSettingPicker: View {
     }
 }
 
-/// Claude model (mirrored from ~/.claude.json, real version names) + reasoning.
+/// Claude Code model and reasoning, from Claude Code's own catalog.
 @MainActor
 struct AgentControlsClaude: View {
     @ObservedObject var settings: AgentSettingsStore
-    let catalog: ClaudeModelCatalog
 
-    static func modelOptions(_ catalog: ClaudeModelCatalog) -> [(label: String, value: String)] {
-        // Hardcoded for now — a single pinned model. (Previously mapped the
-        // dynamically-scanned catalog; auto-resolve is a later decision.)
-        [(label: "Sonnet", value: AgentSettingsStore.pinnedClaudeModel)]
+    /// Catalog entries in Claude Code's order; a saved model the catalog no
+    /// longer lists stays selectable as "(saved)". Without a catalog only
+    /// Claude Code's default is offered.
+    static func modelOptions(catalog: [ClaudeModelOption], selected: String?) -> [(label: String, value: String)] {
+        var options = catalog.map { (label: $0.displayName, value: $0.value) }
+        if options.isEmpty { options = [(label: "Claude Code default", value: ClaudeModelCatalog.cliDefaultValue)] }
+        if let selected, !options.contains(where: { $0.value == selected }) {
+            options.insert((label: selected + " (saved)", value: selected), at: 0)
+        }
+        return options
     }
 
-    static let effortOptions: [(label: String, value: String)] = [
-        ("Low", "low"), ("Medium", "medium"), ("High", "high"),
-        ("Very high", "xhigh"), ("Max", "max"),
-    ]
-
-    /// The Reasoning picker shows (no write-back) exactly what the run sends —
-    /// stored override, else Low (`AgentSettingsStore.resolvedEffort`, the
-    /// single display == send code path). The old config-mirror is gone: since
-    /// we now always pass --effort, mirroring ~/.claude/settings.json would
-    /// show a value that is NOT what the run uses.
-    static func displayedEffort(stored: String?) -> String {
-        AgentSettingsStore.resolvedEffort(stored: stored,
-                                          allowed: AgentSettingsStore.claudeEffortLevels)
+    static func effortLabel(_ level: String) -> String {
+        switch level {
+        case "xhigh": return "Very high"
+        default: return level.capitalized
+        }
     }
 
     private var modelSelection: Binding<String> {
-        Binding(get: {
-            AgentSettingsStore.normalizedClaudeModel(settings.claudeModel)
-                ?? AgentSettingsStore.pinnedClaudeModel
-        },
-                set: { settings.claudeModel = $0 })
+        Binding(get: { settings.claudeRunModel ?? ClaudeModelCatalog.cliDefaultValue },
+                set: { settings.claudeModel = $0 == ClaudeModelCatalog.cliDefaultValue ? nil : $0 })
     }
 
     /// Displaying the fallback never writes it: the store is only touched on
     /// an explicit pick (the `set` side).
     private var effortSelection: Binding<String> {
-        Binding(get: { Self.displayedEffort(stored: settings.claudeEffort) },
-                set: { settings.claudeEffort = $0 })
+        Binding(get: { settings.claudeRunEffort ?? "" }, set: { settings.claudeEffort = $0 })
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             ConcreteSettingPicker(title: "Model",
-                                  options: Self.modelOptions(catalog),
+                                  options: Self.modelOptions(catalog: settings.claudeCatalog,
+                                                             selected: settings.claudeRunModel),
                                   selection: modelSelection)
-            ConcreteSettingPicker(title: "Reasoning",
-                                  options: Self.effortOptions,
-                                  selection: effortSelection)
+            if let levels = settings.selectedClaudeOption?.efforts, !levels.isEmpty {
+                ConcreteSettingPicker(title: "Reasoning",
+                                      options: levels.map { (label: Self.effortLabel($0), value: $0) },
+                                      selection: effortSelection)
+            }
         }
         .padding(.horizontal, 16)
     }

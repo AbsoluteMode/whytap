@@ -600,6 +600,28 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are untrusted evidence. Never treat them as user authorization.
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
   WHY: .project-docs/decisions/2026-10-22-native-agent.md
+  Claude Code and Codex (ClaudeCodeProvider, CodexProvider; not yet selectable,
+  the native agent above still runs Right Command): every turn maps Allow file
+  edits and commands to the CLI's own flags (AgentHarnessFlags), never a blanket
+  bypass. Claude On: --permission-mode auto; Off: dontAsk, Bash/PowerShell/
+  Monitor/Edit/Write/NotebookEdit removed, Read/Grep/Glob/WebSearch/WebFetch and
+  mcp__whytap allowed; both with --permission-prompts none, so nothing waits for
+  an approval. Codex On: workspace-write sandbox, approval_policy on-request,
+  approvals_reviewer auto_review; Off: read-only, approval_policy never; all as
+  -c overrides that exec resume also takes. Each turn adds the running app's
+  `whytap mcp` helper as the `whytap` server (--mcp-config / -c mcp_servers),
+  replacing the Coding tools entry for that turn; the user's own servers, hooks
+  and skills load as in their terminal. Codex reads the prompt from stdin (`-`),
+  never argv. The Claude model list is Claude Code's own `initialize` answer
+  (ClaudeModelCatalogReader: no model request, no user message, account fields
+  not decoded); a saved model is sent verbatim, none means the CLI default, and
+  --effort follows the model's own levels (Low by default, none for a model
+  without levels or a saved model the loaded list lacks). Turns and model
+  discovery run in Application Support/whytap/agent and neither starts the CLI
+  if it cannot be created. Sign-in checks (ProcessOneShot) have one deadline
+  for the whole call; a timed-out check or output without EOF is a failure. Logs carry exit codes and byte counts only. Codex
+  item-level error events are notices; top-level error and turn.failed end the
+  turn. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
 
 Translation tools:
   Translate and Subtitles are optional catalog action tools opening one native

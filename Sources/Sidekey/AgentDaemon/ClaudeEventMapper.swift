@@ -56,7 +56,7 @@ enum ClaudeEventMapper {
         case "authentication_failed":
             return "Claude Code isn't logged in. Open a terminal, run claude, log in, then try again."
         case "billing_error":
-            return "Your Claude Agent SDK credit is exhausted. Top up or connect your own API key."
+            return "Your Claude plan can't run this request right now. Check your plan's usage in Claude Code, then try again."
         case "oauth_org_not_allowed":
             return "This Claude account can't use the organization. Reconnect with org access."
         default:

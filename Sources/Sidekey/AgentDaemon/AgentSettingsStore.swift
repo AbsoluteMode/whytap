@@ -14,11 +14,11 @@ enum AgentWebSearchChoice: String, Sendable {
 @MainActor
 final class AgentSettingsStore: ObservableObject {
     static let shared = AgentSettingsStore()
-    static let pinnedClaudeModel = "sonnet"
     static let webSearchChoiceKey = "agent.native.webSearch"
-    /// Claude retains its existing low-effort default.
+    /// Claude's reasoning when the user has not picked one and the model takes it.
     static let defaultEffort = "low"
-    /// Claude options; Codex capabilities come from model/list.
+    /// Claude Code's levels, used only until its catalog has loaded; then the
+    /// selected model's own levels apply. Codex capabilities come from model/list.
     static let claudeEffortLevels: Set<String> = ["low", "medium", "high", "xhigh", "max"]
 
     @Published var claudeModel: String?       { didSet { write(Keys.claudeModel, claudeModel) } }
@@ -26,7 +26,10 @@ final class AgentSettingsStore: ObservableObject {
     @Published var codexModel: String?        { didSet { write(Keys.codexModel, codexModel) } }
     @Published var codexEffort: String?       { didSet { write(Keys.codexEffort, codexEffort) } }
     @Published var codexServiceTier: String?  { didSet { write(Keys.codexServiceTier, codexServiceTier) } }
-    @Published var openCodeAllowActions: Bool { didSet { defaults.set(openCodeAllowActions, forKey: Keys.openCodeAllowActions) } }
+    /// "Allow file edits and commands". Stored under the key the earlier
+    /// agents used, so the user's choice carries over unchanged.
+    /// WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+    @Published var allowActions: Bool { didSet { defaults.set(allowActions, forKey: Keys.allowActions) } }
     /// Keys & models → Models → Search. `.auto` (default): the Agent model's
     /// built-in search, else Tavily. WHY: .project-docs/decisions/2026-11-22-agent-provider-web-search.md
     @Published var webSearchChoice: AgentWebSearchChoice { didSet { defaults.set(webSearchChoice.rawValue, forKey: Keys.webSearchChoice) } }
@@ -37,10 +40,15 @@ final class AgentSettingsStore: ObservableObject {
         static let codexModel = "agent.codex.model"
         static let codexEffort = "agent.codex.effort"
         static let codexServiceTier = "agent.codex.serviceTier"
-        static let openCodeAllowActions = "agent.opencode.allowActions"
+        static let allowActions = "agent.opencode.allowActions"
         static let webSearchChoice = AgentSettingsStore.webSearchChoiceKey
     }
 
+    @Published private(set) var claudeCatalog: [ClaudeModelOption] = []
+    @Published private(set) var claudeVersion: String?
+    @Published private(set) var claudeCatalogLoading = false
+    @Published private(set) var claudeCatalogError: String?
+    private var claudeCatalogUpdatedAt: Date?
     @Published private(set) var codexCatalog: [CodexModelOption] = []
     @Published private(set) var codexCatalogLoading = false
     @Published private(set) var codexCatalogError: String?
@@ -52,22 +60,22 @@ final class AgentSettingsStore: ObservableObject {
     private var routing: AIRoutingStore { injectedRouting ?? .shared }
     private let injectedCatalogs: ModelCatalogStore?
     private var catalogs: ModelCatalogStore { injectedCatalogs ?? .shared }
+    /// The running app's `whytap mcp` helper for Claude Code and Codex turns.
+    private let whytapMCPCommand: () -> [String]?
 
     init(defaults: UserDefaults = .standard, codexConfig: CodexConfigSnapshot = CodexConfigReader().read(), routing: AIRoutingStore? = nil,
-         catalogs: ModelCatalogStore? = nil) {
+         catalogs: ModelCatalogStore? = nil,
+         whytapMCPCommand: @escaping () -> [String]? = { AgentHarnessFlags.bundledWhytapMCPCommand }) {
         self.codexConfig = codexConfig
         self.defaults = defaults
         self.injectedRouting = routing
         self.injectedCatalogs = catalogs
-        self.openCodeAllowActions = defaults.object(forKey: Keys.openCodeAllowActions) as? Bool ?? true
+        self.whytapMCPCommand = whytapMCPCommand
+        self.allowActions = defaults.object(forKey: Keys.allowActions) as? Bool ?? true
         self.webSearchChoice = defaults.string(forKey: Keys.webSearchChoice).flatMap(AgentWebSearchChoice.init) ?? .auto
         // Property observers do not fire on initial assignment in init, so this
-        // load does not write back.
+        // load does not write back. A stored model is kept exactly as saved.
         self.claudeModel = defaults.string(forKey: Keys.claudeModel)
-        if let normalized = Self.normalizedClaudeModel(claudeModel), normalized != claudeModel {
-            self.claudeModel = normalized
-            defaults.set(normalized, forKey: Keys.claudeModel)
-        }
         self.claudeEffort = defaults.string(forKey: Keys.claudeEffort)
         self.codexModel = defaults.string(forKey: Keys.codexModel)
         self.codexEffort = defaults.string(forKey: Keys.codexEffort)
@@ -87,18 +95,21 @@ final class AgentSettingsStore: ObservableObject {
         switch id {
         case .claude:
             return AgentRunOptions(
-                model: Self.normalizedClaudeModel(claudeModel) ?? Self.pinnedClaudeModel,
-                effort: Self.resolvedEffort(stored: claudeEffort,
-                                            allowed: Self.claudeEffortLevels)
+                model: claudeRunModel,
+                effort: claudeRunEffort,
+                allowActions: allowActions,
+                whytapMCPCommand: whytapMCPCommand()
             )
         case .codex:
             return AgentRunOptions(
                 model: selectedCodexModel,
                 effort: selectedCodexOption?.resolvedEffort(codexEffort),
-                serviceTier: selectedCodexOption?.resolvedTier(codexServiceTier ?? codexConfig.serviceTier)
+                serviceTier: selectedCodexOption?.resolvedTier(codexServiceTier ?? codexConfig.serviceTier),
+                allowActions: allowActions,
+                whytapMCPCommand: whytapMCPCommand()
             )
         case .native:
-            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
+            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: allowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
                                    openRouterProvider: selectedOpenCodeProvider == .openRouter
@@ -111,7 +122,7 @@ final class AgentSettingsStore: ObservableObject {
                                        ? selectedCatalogEntry?.reasoning : nil,
                                    outputTokenLimit: selectedCatalogEntry?.maxOutputTokens.flatMap { $0 > 0 ? $0 : nil })
         case .opencode:
-            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: openCodeAllowActions,
+            return AgentRunOptions(model: selectedOpenCodeModel, allowActions: allowActions,
                                    openCodeModelSpec: selectedOpenCodeModelSpec,
                                    openCodeProvider: selectedOpenCodeProvider ?? .openRouter,
                                    caseMCPCommand: CaseBuiltInAgentAccess.currentMCPCommand(),
@@ -222,9 +233,74 @@ final class AgentSettingsStore: ObservableObject {
         }
     }
 
+    // MARK: Claude Code
+
+    /// The saved Claude model, exactly as picked; nil for Claude Code's own default.
     static func normalizedClaudeModel(_ model: String?) -> String? {
-        guard let model else { return nil }
-        return model == pinnedClaudeModel ? model : pinnedClaudeModel
+        guard let value = model?.trimmingCharacters(in: .whitespacesAndNewlines), !value.isEmpty,
+              value != ClaudeModelCatalog.cliDefaultValue else { return nil }
+        return value
+    }
+
+    /// The `--model` a turn sends: the user's pick, verbatim, or none, so
+    /// Claude Code uses its own default. Never a model Whytap chose.
+    var claudeRunModel: String? { Self.normalizedClaudeModel(claudeModel) }
+
+    /// The catalog entry of the selected model (Claude Code's default entry
+    /// when nothing is picked); nil before the catalog loads or for a saved
+    /// model the catalog no longer lists.
+    var selectedClaudeOption: ClaudeModelOption? {
+        let value = claudeRunModel ?? ClaudeModelCatalog.cliDefaultValue
+        return claudeCatalog.first { $0.value == value }
+    }
+
+    /// The `--effort` a turn sends. With the catalog: the user's pick when the
+    /// model takes it, else Low when it takes Low, else none (a model without
+    /// reasoning levels, or a saved model the catalog does not list, gets no
+    /// flag). Before the catalog loads: the user's pick among Claude Code's
+    /// levels, else Low.
+    var claudeRunEffort: String? {
+        guard let option = selectedClaudeOption else {
+            // A loaded list without the saved model gives no evidence that
+            // the model takes the flag.
+            guard claudeCatalog.isEmpty else { return nil }
+            return Self.resolvedEffort(stored: claudeEffort, allowed: Self.claudeEffortLevels)
+        }
+        return Self.resolvedEffort(stored: claudeEffort, levels: option.efforts)
+    }
+
+    static func resolvedEffort(stored: String?, levels: [String]) -> String? {
+        if let value = stored?.lowercased(), levels.contains(value) { return value }
+        return levels.contains(defaultEffort) ? defaultEffort : nil
+    }
+
+    func updateClaudeCatalog(_ catalog: ClaudeModelCatalog) {
+        claudeCatalog = catalog.models
+        claudeVersion = catalog.cliVersion
+        claudeCatalogUpdatedAt = Date()
+        claudeCatalogError = nil
+    }
+
+    func refreshClaudeCatalog(force: Bool = false,
+        load: () async throws -> ClaudeModelCatalog = { try await ClaudeModelCatalogReader().read() }
+    ) async {
+        guard !claudeCatalogLoading else { return }
+        if !force, let date = claudeCatalogUpdatedAt, Date().timeIntervalSince(date) < 60 { return }
+        claudeCatalogLoading = true
+        defer { claudeCatalogLoading = false }
+        do {
+            let catalog = try await load()
+            try Task.checkCancellation()
+            updateClaudeCatalog(catalog)
+        } catch is CancellationError {
+            // Closing Settings cancels discovery; keep the previous catalog.
+        } catch ClaudeModelCatalogError.notInstalled {
+            claudeCatalogError = "Claude Code isn’t installed on this Mac."
+        } catch ClaudeModelCatalogError.workspaceUnavailable {
+            claudeCatalogError = AgentHarnessMessages.workspaceUnavailable
+        } catch {
+            claudeCatalogError = "Couldn’t load models from Claude Code. Check that it is installed and signed in, then retry."
+        }
     }
 
     private func write(_ key: String, _ value: String?) {

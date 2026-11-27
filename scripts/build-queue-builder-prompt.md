@@ -63,7 +63,8 @@ shared workflow and `.project-docs/decisions/2026-11-28-builder-never-reviews.md
   preview ticket becomes `superseded`.
 - Builder tooling and documentation-only PRs: their own tests and the
   documentation checks, then the merge.
-- Once the preview lane is enabled (`status` shows `preview_lane` on),
+- Once the maintainer has enabled the preview lane (`activate --preview-lane`;
+  `preview_lane` is true in the watcher configuration),
   previews belong to that lane and the orchestrator's `approve`/`reject`;
   the manual `PREVIEW AWAITING OWNER` rule above applies only until then.
 

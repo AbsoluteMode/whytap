@@ -9,7 +9,9 @@ directory; queue metadata stays local and survives build/ cleanup.
 import argparse
 from contextlib import contextmanager
 from datetime import datetime, timezone
+import hashlib
 import json
+import plistlib
 import os
 from pathlib import Path
 import re
@@ -21,9 +23,21 @@ import tempfile
 
 
 STATES = ("queued", "in_progress", "pending_install", "done", "blocked",
-          "cancelled", "superseded")
+          "cancelled", "superseded", "previewing", "awaiting_approval", "approved",
+          "releasing")
 TRANSITIONS = {
     "queued": {"cancelled"},
+    # WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md
+    # previewing -> queued: the environment stopped the preview (keeps its place).
+    "previewing": {"awaiting_approval", "blocked", "queued", "superseded"},
+    # A preview the owner is checking that no longer composes with main.
+    "awaiting_approval": {"blocked"},
+    # WHY: .project-docs/decisions/2026-11-26-release-batches.md
+    # approved: waits for the next release batch and stays in the owner's app.
+    # releasing -> pending_install: this member is merged (the batch's checkpoint);
+    # -> approved: the environment stopped the batch before its merge, without blame.
+    "approved": {"cancelled"},
+    "releasing": {"pending_install", "done", "blocked", "approved"},
     # in_progress -> queued returns a ticket without blaming the PR (the environment
     # stopped it, an undeclared dependency is not merged yet); it keeps its place.
     "in_progress": {"pending_install", "done", "blocked", "queued"},
@@ -177,7 +191,8 @@ def check_dependencies(db, pr, depends_on):
     already waits on this PR, directly or through other open tickets."""
     open_graph = {}
     for t in db.execute("SELECT pr, depends_on FROM tickets WHERE status IN "
-                        "('queued', 'blocked', 'in_progress') AND pr != ?", (pr,)):
+                        "('queued', 'blocked', 'in_progress', 'previewing', 'awaiting_approval', "
+                        "'approved', 'releasing') AND pr != ?", (pr,)):
         open_graph.setdefault(t["pr"], set()).update(json.loads(t["depends_on"] or "[]"))
     for dependency in depends_on:
         seen, stack = set(), [dependency]
@@ -191,7 +206,7 @@ def check_dependencies(db, pr, depends_on):
                 stack.extend(open_graph.get(current, ()))
 
 
-def reenter_review(db, ticket_id, keep_place, note):
+def reenter_review(db, ticket_id, keep_place, note, deliver=False):
     """The one way an existing ticket's head re-enters review (`set --status queued`,
     or the author resubmitting a head returned without review). Its FIFO place
     (queued_at) is kept or moved to the end; its head-observation stamp
@@ -202,12 +217,425 @@ def reenter_review(db, ticket_id, keep_place, note):
                "auto_returned=0, protected_pending='[]', submitted_at=?, "
                "queued_at=CASE WHEN ? THEN queued_at ELSE ? END WHERE id=?",
                (note, stamp, stamp, int(keep_place), stamp, ticket_id))
-    event(db, ticket_id, "queued", note)
+    event(db, ticket_id, "queued", note, deliver=deliver)
+
+
+# ---------------------------------------------------------------------------
+# Preview lane and release batches.
+# WHY: .project-docs/decisions/2026-11-26-preview-before-validation.md,
+#      .project-docs/decisions/2026-11-26-release-batches.md
+# Simplicity first: a rule that cannot be enforced here sends the PR to normal
+# validation instead. No stacked previews; the installed app is the record of what
+# the owner sees (its Info.plist names its build, main base and preview members).
+
+# Changed lines (and any line of a changed Swift file) that can reach stored data,
+# credentials, permissions, signing, updates, files, processes or code loaded at
+# run time, directly or through a type that names a state gateway.
+PREVIEW_UNSAFE_CONTENT = re.compile(
+    r"(?i:SecItem|kSecAttr|keychain|UserDefaults|@AppStorage|@SceneStorage|Codable|"
+    r"Decodable|Encodable|NSKeyedArchiver|NSKeyedUnarchiver|PropertyListEncoder|"
+    r"PropertyListDecoder|JSONEncoder|JSONDecoder|sqlite|CREATE\s+TABLE|ALTER\s+TABLE|"
+    r"migrat|schemaVersion|applicationSupportDirectory|Application Support|FileManager|"
+    r"FileHandle|\.write\(|\bwrite\(to|contentsOfFile|fileURLWithPath|NSHomeDirectory|"
+    r"removeItem|AVCaptureDevice|requestAccess|AXIsProcessTrusted|CGRequest|CGPreflight|"
+    r"SMAppService|\bTCC\b|entitlement|SPUUpdater|SUUpdater|Sparkle|codesign|LaunchAgent|"
+    r"\bBundle\s*\(|Bundle\.main\.(url|path)|principalClass|dlopen|dlsym|"
+    r"NSClassFromString|NSSelectorFromString|\bProcess\s*\(|NSTask|posix_spawn|"
+    r"(?<![.\w])system\s*\(|environment\[|setenv|unsetenv)"
+    # A state gateway named by its type: settings, stores, defaults, preferences,
+    # databases, repositories, credentials, archives, backups, ledgers, manifests.
+    r"|\b\w*(Settings|Store|Storage|Defaults|Preferences|Persist\w*|Database|Repository|"
+    r"Credential\w*|Secret\w*|Vault|Backup\w*|Archive\w*|Ledger|Manifest|Migration\w*)\b")
+PREVIEW_IMAGE_MAGIC = {".png": (b"\x89PNG\r\n\x1a\n",), ".jpg": (b"\xff\xd8\xff",),
+                       ".jpeg": (b"\xff\xd8\xff",), ".pdf": (b"%PDF-",)}
+PREVIEW_TEXT_RESOURCES = (".strings", ".stringsdict", ".xcstrings", ".svg")
+
+
+def preview_input_kind(path):
+    """The preview-safe kind of a changed path, or None (unknown: normal validation)."""
+    suffix = Path(path).suffix.lower()
+    if path.startswith("Sources/") and suffix == ".swift":
+        return "swift"
+    if path.startswith("Tests/") and suffix == ".swift":
+        return "test"
+    if path.startswith(("docs/", ".project-docs/")) and suffix == ".md" or \
+            re.fullmatch(r"[^/]+\.md", path):
+        return "documentation"
+    if path.startswith("Resources/") and suffix in PREVIEW_IMAGE_MAGIC:
+        return "image"
+    if path.startswith("Resources/") and suffix in PREVIEW_TEXT_RESOURCES:
+        return "text resource"
+    return None
+
+
+def preview_admission(base, head):
+    """Why base..head may not be installed before validation: a list of reasons, empty
+    when every changed input is of a preview-safe kind (regular file, allowed path and
+    type, verified content) and no Swift file it changes can reach state. Unknown is
+    never admissible."""
+    try:
+        raw = git("diff", "--raw", "--no-renames", "-z", "--no-abbrev", base, head)
+        fields = raw.split("\0")
+        reasons = []
+        for index in range(0, len(fields) - 1, 2):
+            meta, path = fields[index], fields[index + 1]
+            if not meta.startswith(":") or not path:
+                continue
+            old_mode, new_mode, _old, new_blob, _status = meta[1:].split(" ", 4)
+            kind = preview_input_kind(path)
+            if kind is None:
+                reasons.append(path + " (not a preview-safe kind of input)")
+                continue
+            if {old_mode, new_mode} - {"100644", "000000"}:
+                reasons.append(path + " (mode %s -> %s: only regular files)" % (old_mode,
+                                                                                 new_mode))
+                continue
+            if new_mode == "000000":
+                content = b""
+            else:
+                content = subprocess.check_output(["git", "cat-file", "blob", new_blob])
+            if kind == "image":
+                if not content.startswith(PREVIEW_IMAGE_MAGIC[Path(path).suffix.lower()]) \
+                        and new_mode != "000000":
+                    reasons.append(path + " (not the image its name says)")
+                continue
+            if b"\0" in content:
+                reasons.append(path + " (binary content)")
+                continue
+            if kind in ("swift", "text resource"):
+                text = content.decode("utf-8")
+                diff = git("diff", "--no-renames", "-U0", base, head, "--", path)
+                changed = [line[1:] for line in diff.splitlines()
+                           if line[:1] in "+-" and not line.startswith(("+++", "---"))]
+                # A changed Swift file is judged whole: a changed line may call
+                # anything else in it.
+                lines = changed + (text.splitlines() if kind == "swift" else [])
+                hits = sorted({m.group(0) for line in lines
+                               for m in [PREVIEW_UNSAFE_CONTENT.search(line)] if m})
+                if hits:
+                    reasons.append(path + " (reaches " + ", ".join(hits[:4]) + ")")
+        return reasons
+    except (subprocess.CalledProcessError, OSError, UnicodeDecodeError, ValueError):
+        return ["the change could not be read"]
+
+
+def installed_app_path():
+    return Path(os.environ.get("WHYTAP_INSTALLED_APP") or "/Applications/Whytap.app")
+
+
+def installed_app():
+    """What the owner's app is, read from the installed bundle itself (never from queue
+    state): {"build", "base", "members": [{"ticket", "head"}]}. An app without a
+    composition record carries no preview. None when the bundle cannot be read."""
+    try:
+        with open(installed_app_path() / "Contents" / "Info.plist", "rb") as handle:
+            info = plistlib.load(handle)
+    except (OSError, ValueError, plistlib.InvalidFileException):
+        return None
+    members, base = [], str(info.get("ExodiaSourceRevision", ""))
+    try:
+        composition = json.loads(info.get("ExodiaBuildComposition") or "{}")
+        base = str(composition.get("base") or base)
+        members = strict_members(composition.get("members", []))
+    except (ValueError, TypeError, KeyError, AttributeError):
+        members = None  # unreadable: never a basis for a decision
+    return {"build": str(info.get("CFBundleVersion", "")), "base": base, "members": members}
+
+
+SHA = re.compile(r"[0-9a-f]{40}")
+
+
+def strict_members(members):
+    """A composition's members exactly: a list of {ticket, head} with unique positive
+    integer tickets (never a Boolean) and full commit SHAs. Anything else raises."""
+    if not isinstance(members, list):
+        raise ValueError("members")
+    result, seen = [], set()
+    for member in members:
+        if not isinstance(member, dict) or set(member) != {"ticket", "head"}:
+            raise ValueError("member")
+        ticket, head = member["ticket"], member["head"]
+        if type(ticket) is not int or ticket <= 0 or ticket in seen \
+                or not isinstance(head, str) or not SHA.fullmatch(head):
+            raise ValueError("member")
+        seen.add(ticket)
+        result.append({"ticket": ticket, "head": head})
+    return result
+
+
+def ancestor(older, newer):
+    """True / False when git can tell; None when it cannot (a missing object, no repo)."""
+    try:
+        code = subprocess.run(["git", "merge-base", "--is-ancestor", older, newer],
+                              capture_output=True).returncode
+    except OSError:
+        return None
+    return {0: True, 1: False}.get(code)
+
+
+TRAIN = "(status IN ('awaiting_approval', 'approved', 'releasing') OR " \
+        "(status='queued' AND lane='release'))"
+
+
+def preview_train(db):
+    """PRs the owner's app must carry that main does not contain yet, in order:
+    previews he is checking, approved features waiting for a release and a release in
+    progress (its members leave the train once merged)."""
+    return [{"ticket": t["id"], "pr": t["pr"], "head": t["head"], "title": t["title"],
+             "status": t["status"]}
+            for t in db.execute("SELECT * FROM tickets WHERE " + TRAIN +
+                                " ORDER BY queued_at, id").fetchall()]
+
+
+def pairs(members):
+    return {(int(m["ticket"]), str(m["head"])) for m in members}
+
+
+def preview_rebuild_needed(db, app=None):
+    """The owner's app differs from the train: it carries a member that left the train
+    unmerged (rejected, blocked, superseded, moved to the normal lane) or lacks one.
+    Derived from the installed bundle, so an interrupted swap or a decision taken
+    while a build ran is never lost. Unknown never triggers a rebuild."""
+    app = installed_app() if app is None else app
+    if not app or app["members"] is None:
+        return False
+    merged = {t["id"] for t in db.execute("SELECT id FROM tickets WHERE status IN "
+                                          "('done', 'pending_install')")}
+    carried = {pair for pair in pairs(app["members"]) if pair[0] not in merged}
+    return carried != pairs(preview_train(db))
+
+
+def local_install_blockers(db):
+    """Merged work that still waits for a local install, or protected-data tests that
+    must pass first: previews and release batches wait for it. A pending_install
+    ticket without a retry flag (a historical public-release receipt, an install a
+    person resolves) needs no local handoff from the queue."""
+    return [t["id"] for t in db.execute(
+        "SELECT id, retry, protected_pending FROM tickets WHERE status='pending_install' "
+        "ORDER BY id").fetchall()
+        if t["retry"] in ("meeting", "first", "hold") or json.loads(t["protected_pending"]
+                                                                    or "[]")]
+
+
+def stacked_on(db, item):
+    """Open PRs this preview needs that main does not contain: declared dependencies
+    not merged yet, or another open ticket's head in its history."""
+    needs = list(unmet_dependencies(db, item))
+    for other in db.execute("SELECT pr, head FROM tickets WHERE pr != ? AND status IN "
+                            "('queued', 'in_progress', 'previewing', 'awaiting_approval', "
+                            "'approved', 'releasing', 'blocked')", (item["pr"],)):
+        try:
+            inside = subprocess.run(["git", "merge-base", "--is-ancestor", other["head"],
+                                     item["head"]], capture_output=True).returncode == 0
+            merged = subprocess.run(["git", "merge-base", "--is-ancestor", other["head"],
+                                     "origin/main"], capture_output=True).returncode == 0
+        except OSError:
+            return ["its history could not be read"]
+        if inside and not merged and other["pr"] not in needs:
+            needs.append(other["pr"])
+    return needs
+
+
+def to_normal_lane(db, item, reason):
+    note = ("No preview before validation: " + reason + ". It stays queued for the normal "
+            "review, full suite and merge before any install.")
+    db.execute("UPDATE tickets SET lane='', note=?, updated_at=? WHERE id=?",
+               (note, now(), item["id"]))
+    event(db, item["id"], "queued", note, deliver=item["source"] in ("codex", "claude"))
+
+
+def watcher_settings():
+    try:
+        settings = json.loads((common_dir() / "whytap-build-queue-builder.json").read_text())
+    except (OSError, ValueError, subprocess.CalledProcessError):
+        return {}
+    return settings if isinstance(settings, dict) else {}
+
+
+def preview_lane_enabled():
+    return watcher_settings().get("preview_lane") is True
+
+
+def orchestrator_token(args):
+    """The relay's secret: WHYTAP_ORCHESTRATOR_TOKEN or the file named by --token-file."""
+    if getattr(args, "token_file", None):
+        return Path(args.token_file).expanduser().read_text().strip()
+    return os.environ.get("WHYTAP_ORCHESTRATOR_TOKEN", "").strip()
+
+
+def require_orchestrator(db, actor, token):
+    """The owner's decisions reach the queue only through the configured orchestrator,
+    never the builder, proved with the token whose SHA-256 the maintainer configured.
+    Local, same-user protection against other sessions, not remote authentication."""
+    settings = config(db)
+    expected = settings.get("orchestrator")
+    digest = settings.get("orchestrator_token_sha256")
+    if not expected or not digest:
+        raise ValueError("No orchestrator is configured: the maintainer runs "
+                         "`build-queue-watcher.py activate --orchestrator <id> "
+                         "--orchestrator-token-file <path>`")
+    if actor == settings.get("builder_thread"):
+        raise ValueError("The builder never relays the owner's decisions")
+    if actor != expected or not token or hashlib.sha256(token.encode()).hexdigest() != digest:
+        raise ValueError("The owner's decisions are relayed only by the configured "
+                         "orchestrator with its token")
+
+
+def start_release(db, by, note, actor):
+    """Every approved feature into one release batch, merge order = FIFO (previews are
+    never stacked, so members need nothing of each other)."""
+    members = db.execute("SELECT * FROM tickets WHERE status='approved' "
+                         "ORDER BY queued_at, id").fetchall()
+    if not members:
+        return None
+    batch = int(config(db).get("last_batch", "0")) + 1
+    db.execute("INSERT OR REPLACE INTO config VALUES ('last_batch', ?)", (str(batch),))
+    for order, item in enumerate(members, 1):
+        db.execute("UPDATE tickets SET lane='release', batch=?, batch_order=? WHERE id=?",
+                   (batch, order, item["id"]))
+        reenter_review(db, item["id"], True,
+                       f"In release batch {batch} ({by}; relayed by {actor}). One review, one "
+                       f"full suite, merge and one install follow. {note}".strip(),
+                       deliver=True)
+    return {"batch": batch, "tickets": [t["id"] for t in members]}
+
+
+def claim_release(db, args):
+    """The open release batch, claimed whole in its persisted merge order: members
+    become `releasing`. A member whose PR head moved goes back to its author; the
+    others go on."""
+    first = db.execute("SELECT batch FROM tickets WHERE status='queued' AND lane='release' "
+                       "ORDER BY batch LIMIT 1").fetchone()
+    if not first:
+        return None
+    members = db.execute("SELECT * FROM tickets WHERE status='queued' AND lane='release' AND "
+                         "batch=? ORDER BY batch_order, id", (first["batch"],)).fetchall()
+    returned, claimed = [], []
+    for item in members:
+        if block_moved_head(db, item, args.remote_heads):
+            returned.append(item["id"])
+        else:
+            claimed.append(item["id"])
+    for ticket in claimed:
+        db.execute("UPDATE tickets SET status='releasing', owner=?, updated_at=? WHERE id=?",
+                   (args.actor, now(), ticket))
+        event(db, ticket, "releasing", "Release batch %d started: one review, one full suite, "
+              "merge and one install for all its features" % first["batch"])
+    return {"claimed": bool(claimed), "batch": first["batch"],
+            "tickets": [ticket_json(db, t) for t in claimed], "returned_moved_heads": returned}
+
+
+def active_batch(db):
+    releasing = [t[0] for t in db.execute(
+        "SELECT id FROM tickets WHERE status='releasing' ORDER BY batch_order, id")]
+    if not releasing:
+        return None
+    return {"batch": row(db, releasing[0])["batch"],
+            "tickets": [ticket_json(db, t) for t in releasing]}
+
+
+def preview_claim(db, args):
+    """The preview lane's next step, model-free. Merged work waiting for its local
+    install goes first, also before a recovered preview. Otherwise the active preview,
+    or the oldest admissible queued preview, or a rebuild when the app differs from
+    the train."""
+    held = local_install_blockers(db)
+    active = db.execute("SELECT * FROM tickets WHERE status='previewing'").fetchone()
+    if held:
+        if active:  # recovered later from the start; it keeps its place
+            reenter_review(db, active["id"], True, "Preview paused: merged work waits for "
+                           "its install first")
+        return {"claimed": False, "active": None, "held_for_install": held,
+                "rebuild": False, "train": preview_train(db)}
+    if active:
+        return {"claimed": False, "active": ticket_json(db, active["id"]),
+                "train": preview_train(db)}
+    returned, normal_lane = [], []
+    for item in db.execute("SELECT * FROM tickets WHERE status='queued' AND lane='preview' "
+                           "ORDER BY queued_at, id").fetchall():
+        if block_moved_head(db, item, args.remote_heads):
+            returned.append(item["id"])
+            continue
+        needs = stacked_on(db, item)
+        if needs:
+            to_normal_lane(db, item, "it builds on open PRs (" + ", ".join(needs) + ")")
+            normal_lane.append(item["id"])
+            continue
+        try:
+            base = git("merge-base", "origin/main", item["head"])
+            unsafe = preview_admission(base, item["head"])
+        except (subprocess.CalledProcessError, OSError):
+            unsafe = ["the merge base with origin/main could not be read"]
+        if unsafe:
+            to_normal_lane(db, item, "it changes inputs outside the preview scope ("
+                           + "; ".join(unsafe[:8]) + ")")
+            normal_lane.append(item["id"])
+            continue
+        db.execute("UPDATE tickets SET status='previewing', owner=?, updated_at=? WHERE id=?",
+                   (args.actor, now(), item["id"]))
+        event(db, item["id"], "previewing", "Preview build started (no review or full suite "
+              "before the owner's check)")
+        return {"claimed": True, "ticket": ticket_json(db, item["id"]),
+                "train": preview_train(db), "returned_moved_heads": returned,
+                "moved_to_normal_lane": normal_lane}
+    return {"claimed": False, "active": None, "rebuild": preview_rebuild_needed(db),
+            "train": preview_train(db), "returned_moved_heads": returned,
+            "moved_to_normal_lane": normal_lane}
+
+
+def handoff_problems(db, base, members, ticket=None, build=None):
+    """Right before the Quit, under the app lock: why this composition must not replace
+    the owner's app now. Empty when it may."""
+    problems = []
+    held = local_install_blockers(db)
+    if held:
+        problems.append("merged work waits for its install first: " +
+                        ", ".join("#%d" % t for t in held))
+    expected = pairs(preview_train(db))
+    if ticket is not None:
+        item = row(db, ticket)
+        newer = db.execute("SELECT id FROM tickets WHERE pr=? AND id>?",
+                           (item["pr"], item["id"])).fetchone()
+        if item["status"] != "previewing" or newer:
+            problems.append("#%d is no longer the preview to build (%s%s)" % (
+                item["id"], item["status"], ", a newer head was submitted" if newer else ""))
+        expected.add((item["id"], item["head"]))
+    if pairs(members) != expected:
+        problems.append("the composition is not the current train: expected " +
+                        json.dumps(sorted(expected)))
+    # What the owner's app is now, and what main is now. Anything unknown stops the
+    # Quit: an install must never put older code over data a newer build migrated.
+    app = installed_app()
+    if not app or app["members"] is None or not app["build"].isdigit() \
+            or not SHA.fullmatch(app["base"] or ""):
+        problems.append("the installed app's build, base or composition cannot be read: "
+                        "check the app before replacing it")
+    elif build is not None and int(app["build"]) >= build:
+        problems.append("the installed app is already build %s: rebuild with a higher number"
+                        % app["build"])
+    if app and SHA.fullmatch(app["base"] or "") and ancestor(app["base"], base) is not True:
+        problems.append("the installed app's main %s is not in this base %s: recompose"
+                        % (app["base"][:12], base[:12]))
+    try:
+        main = subprocess.run(["git", "rev-parse", "--verify", "-q", "refs/remotes/origin/main"],
+                              capture_output=True, text=True).stdout.strip()
+    except OSError:
+        main = ""
+    if not SHA.fullmatch(main) or ancestor(main, base) is not True:
+        problems.append("this base %s does not contain the current main %s: fetch and recompose"
+                        % (base[:12], main[:12] or "unknown"))
+    for member in members:
+        state = ancestor(member["head"], base)
+        if state is None:
+            problems.append("the composition could not be read")
+        elif state:
+            problems.append("#%d is already in main: recompose" % member["ticket"])
+    return problems
 
 
 def block_moved_head(db, ticket, snapshot):
     """A queued ticket whose PR head moved after submission goes back to its author
-    before any builder reviews the old commit. True when it was returned. Only a
+    before any builder builds the old commit. True when it was returned. Only a
     ticket queued before the remote read started is judged: one submitted (or
     requeued) while the read was in flight may be newer than the snapshot."""
     submitted = ticket["submitted_at"] or ticket["queued_at"]
@@ -377,11 +805,21 @@ def database():
                 ("auto_returned", "INTEGER NOT NULL DEFAULT 0"),
                 # JSON list: tests skipped behind a locked screen that must pass on
                 # main before this ticket's install (and before it is done).
-                ("protected_pending", "TEXT NOT NULL DEFAULT '[]'")):
+                ("protected_pending", "TEXT NOT NULL DEFAULT '[]'"),
+                # '' normal validation; 'preview' built for the owner's check first;
+                # 'approved' accepted by the owner; 'release' in a release batch.
+                ("lane", "TEXT NOT NULL DEFAULT ''"),
+                # JSON: who relayed the owner's approval, when, and the quoted words.
+                ("approval", "TEXT NOT NULL DEFAULT ''"),
+                ("preview_build", "TEXT NOT NULL DEFAULT ''"),  # the build the owner saw
+                ("batch", "INTEGER NOT NULL DEFAULT 0"),        # release batch (0: none)
+                ("batch_order", "INTEGER NOT NULL DEFAULT 0")):  # merge order inside it
             if column not in columns:
                 db.execute(f"ALTER TABLE tickets ADD COLUMN {column} {sql}")
                 if column == "submitted_at":
                     db.execute("UPDATE tickets SET submitted_at=queued_at")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS one_preview "
+                   "ON tickets(status) WHERE status = 'previewing'")
         yield db
         db.commit()
     finally:
@@ -500,7 +938,7 @@ def run(args):
                     # WHY: .project-docs/decisions/2026-11-26-builder-quick-wins.md
                     # Returned without review (a stale dependency, a moved head): the
                     # untouched head goes back to its place without spending the PR's
-                    # resubmission priority. A head a builder reviewed and blocked stays
+                    # resubmission priority. A head a builder checked and blocked stays
                     # blocked: its fix is a new head.
                     check_dependencies(db, args.pr, args.depends_on)
                     db.execute("UPDATE tickets SET depends_on=?, dependencies=? WHERE id=?",
@@ -514,9 +952,9 @@ def run(args):
                 return {"created": False, "builder": config(db),
                         "ticket": ticket_json(db, existing["id"])}
             old = db.execute("SELECT * FROM tickets WHERE pr=? AND "
-                             "status IN ('queued', 'blocked', 'in_progress', 'pending_install')",
-                             (args.pr,)).fetchall()
-            if any(t["status"] in ("in_progress", "pending_install") for t in old):
+                             "status IN ('queued', 'blocked', 'in_progress', 'pending_install', "
+                             "'awaiting_approval', 'approved', 'releasing')", (args.pr,)).fetchall()
+            if any(t["status"] in ("in_progress", "pending_install", "releasing") for t in old):
                 raise ValueError("Builder must reconcile the active/candidate head before resubmission")
             for t in old:
                 if (t["source"], t["session"], t["host"]) != (args.source, args.session, args.host):
@@ -535,7 +973,15 @@ def run(args):
             # RESUBMIT_PRIORITY_LIMIT times; a return without a model (moved head,
             # blocked dependency) keeps it without spending that priority.
             queued_at, resubmits, place = stamp, 0, ""
-            if previous and previous["status"] == "blocked" and previous["queued_at"] < stamp:
+            preview_fix = previous is not None and (
+                previous["status"] in ("previewing", "awaiting_approval", "approved") or (
+                    previous["status"] == "blocked" and previous["lane"] == "preview"))
+            if preview_fix:
+                # A fix to a preview the owner is checking keeps its place: that loop
+                # is the owner's own.
+                queued_at, resubmits = previous["queued_at"], previous["resubmits"]
+                place = "; keeps the place of preview #%d" % previous["id"]
+            elif previous and previous["status"] == "blocked" and previous["queued_at"] < stamp:
                 if previous["auto_returned"]:
                     queued_at, resubmits = previous["queued_at"], previous["resubmits"]
                     place = "; keeps the place of #%d (returned without review)" % previous["id"]
@@ -547,16 +993,22 @@ def run(args):
                     resubmits = previous["resubmits"]
                     place = ("; goes to the end: the PR already used %d priority resubmissions"
                              % RESUBMIT_PRIORITY_LIMIT)
+            lane, routed = ("preview" if args.preview else ""), ""
+            if lane and not args.preview_lane:
+                lane, routed = "", ("; the preview lane is off, so it goes through normal "
+                                    "validation (review, full suite, merge, install)")
             cursor = db.execute(
                 "INSERT INTO tickets(pr,head,title,source,session,host,checks,acceptance,"
-                "dependencies,depends_on,runtime,resubmits,queued_at,submitted_at,updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "dependencies,depends_on,runtime,resubmits,lane,queued_at,submitted_at,"
+                "updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (args.pr, args.head, args.title, args.source, args.session, args.host,
                  args.checks, json.dumps(args.acceptance), args.dependencies,
-                 json.dumps(args.depends_on), int(args.runtime), resubmits, queued_at,
+                 json.dumps(args.depends_on), int(args.runtime), resubmits, lane, queued_at,
                  stamp, stamp))
-            event(db, cursor.lastrowid, "queued", "Accepted into the build queue; documentation "
-                  "checks at submission: " + args.documentation_checks + place)
+            event(db, cursor.lastrowid, "queued", ("Accepted for a preview build before "
+                  "validation" if lane else "Accepted into the build queue") +
+                  "; documentation checks at submission: " + args.documentation_checks + place
+                  + routed)
             return {"created": True, "builder": config(db),
                     "documentation_checks": args.documentation_checks,
                     "delivery": "inbox_only" if args.source == "other" else "harness_link",
@@ -572,7 +1024,8 @@ def run(args):
                 # Open work, plus every earlier ticket of the same PRs (the history a
                 # re-block needs), instead of the whole archive.
                 query += (" WHERE pr IN (SELECT pr FROM tickets WHERE status IN "
-                          "('queued', 'in_progress', 'pending_install'))")
+                          "('queued', 'in_progress', 'pending_install', 'previewing', "
+                          "'awaiting_approval', 'approved', 'releasing'))")
             query += " ORDER BY queued_at, id"
             tickets = [ticket_json(db, t[0]) for t in db.execute(query, params).fetchall()]
             if args.open and not args.ticket:
@@ -580,7 +1033,13 @@ def run(args):
                     if t["status"] in ("done", "superseded", "cancelled", "blocked") \
                             and len(t["note"]) > 600:
                         t["note"] = t["note"][:600] + " [...] (status --ticket %d)" % t["id"]
-            return {"builder": config(db), "install_boundary": install_boundary(db),
+            app = installed_app()
+            return {"builder": {k: v for k, v in config(db).items()
+                                if k != "orchestrator_token_sha256"},
+                    "install_boundary": install_boundary(db),
+                    "local_install_blockers": local_install_blockers(db),
+                    "preview_train": preview_train(db), "installed_app": app,
+                    "preview_rebuild": preview_rebuild_needed(db, app),
                     "protected_pending": sorted({
                         name for t in db.execute(
                             "SELECT protected_pending FROM tickets WHERE status IN "
@@ -593,12 +1052,23 @@ def run(args):
             active = db.execute("SELECT id FROM tickets WHERE status='in_progress'").fetchone()
             if active:
                 return {"claimed": False, "active": ticket_json(db, active[0])}
+            batch = active_batch(db)
+            if batch:
+                return {"claimed": False, "active": None, "active_batch": batch}
+            boundary = install_boundary(db)
+            if not boundary and not local_install_blockers(db):
+                # A release batch changes the app: it respects the install boundary
+                # like any runtime ticket; work that changes nothing still goes first.
+                batch = claim_release(db, args)
+                if batch and batch["claimed"]:
+                    return batch
             # FIFO among tickets that can be built now: one waiting for a dependency
             # or, while merged runtime work must be installed first, a runtime ticket
             # keeps its place; one whose PR head moved goes back to its author.
             returned, waiting, held = [], [], []
             boundary = install_boundary(db)
-            for item in db.execute("SELECT * FROM tickets WHERE status='queued' "
+            for item in db.execute("SELECT * FROM tickets WHERE status='queued' AND "
+                                   "lane NOT IN ('preview', 'release') "
                                    "ORDER BY queued_at, id").fetchall():
                 if unmet_dependencies(db, item):
                     waiting.append(item["id"])
@@ -616,6 +1086,107 @@ def run(args):
                             "held_for_install": held}
             return {"claimed": False, "active": None, "returned_moved_heads": returned,
                     "waiting_for_dependencies": waiting, "held_for_install": held}
+
+        if args.command == "preview-claim":
+            require_builder(db, args.actor)
+            return preview_claim(db, args)
+
+        if args.command == "configure-orchestrator":
+            require_builder(db, args.actor)
+            if not args.orchestrator or args.orchestrator == config(db).get("builder_thread"):
+                raise ValueError("The orchestrator must be an actor other than the builder")
+            token = Path(args.token_file).expanduser().read_text().strip()
+            if len(token) < 32:
+                raise ValueError("The orchestrator token must be at least 32 characters")
+            db.execute("INSERT OR REPLACE INTO config VALUES ('orchestrator', ?)",
+                       (args.orchestrator,))
+            db.execute("INSERT OR REPLACE INTO config VALUES ('orchestrator_token_sha256', ?)",
+                       (hashlib.sha256(token.encode()).hexdigest(),))
+            return {"orchestrator": args.orchestrator, "token": "configured"}
+
+        if args.command == "preview-admit":
+            reasons = preview_admission(args.base, args.commit)
+            return {"admissible": not reasons, "reasons": reasons}
+
+        if args.command == "preview-handoff":
+            # WHY: .project-docs/decisions/2026-11-26-release-batches.md
+            # Under the app lock, right before the Quit, for every install that carries
+            # the train (previews, rebuilds, the builder's installs).
+            try:
+                members = strict_members(json.loads(args.members))
+            except (ValueError, TypeError, KeyError):
+                raise ValueError("--members is a JSON list of {\"ticket\": id, \"head\": sha}")
+            problems = handoff_problems(db, args.base, members, args.ticket, args.build)
+            return {"clear": not problems, "problems": problems}
+
+        if args.command == "preview-lane-off":
+            require_builder(db, args.actor)
+            moved = []
+            for item in db.execute("SELECT * FROM tickets WHERE lane='preview' AND "
+                                   "status IN ('queued', 'previewing')").fetchall():
+                to_normal_lane(db, item, "the preview lane was switched off")
+                if item["status"] == "previewing":
+                    reenter_review(db, item["id"], True, "The preview lane was switched off: "
+                                   "normal validation")
+                moved.append(item["id"])
+            return {"moved_to_normal_lane": moved}
+
+        if args.command == "release":
+            # WHY: .project-docs/decisions/2026-11-26-release-batches.md
+            approved = db.execute("SELECT COUNT(*) FROM tickets WHERE "
+                                  "status='approved'").fetchone()[0]
+            if args.auto:
+                require_builder(db, args.actor)  # the watcher's count trigger
+                threshold = args.release_after_approved
+                if not isinstance(threshold, int) or isinstance(threshold, bool) \
+                        or threshold <= 0:
+                    raise ValueError("The count trigger is off (release_after_approved)")
+                if approved < threshold:
+                    raise ValueError("%d approved features, the trigger needs %d"
+                                     % (approved, threshold))
+            else:
+                require_orchestrator(db, args.actor, orchestrator_token(args))
+            if db.execute("SELECT 1 FROM tickets WHERE status='releasing' OR "
+                          "(status='queued' AND lane='release')").fetchone():
+                raise ValueError("A release batch is already open; the next one starts after it")
+            started = start_release(db, args.by, args.note, args.actor)
+            return started or {"batch": None, "tickets": [], "note": "nothing is approved"}
+
+        if args.command in ("approve", "reject"):
+            require_orchestrator(db, args.actor, orchestrator_token(args))
+            item = row(db, args.ticket)
+            if item["status"] != "awaiting_approval":
+                raise ValueError("Only a preview awaiting the owner's check can be "
+                                 + args.command + "d; #%d is %s" % (item["id"], item["status"]))
+            if args.actor == item["session"]:
+                raise ValueError("A PR's own session cannot relay the owner's decision on it")
+            # The decision is about what the owner sees: this head in the build the
+            # installed app is now, which must carry it.
+            app = installed_app()
+            if not app or app["members"] is None:
+                raise ValueError("The installed app could not be read; decide after it is")
+            if args.head != item["head"] or (item["id"], item["head"]) not in pairs(
+                    app["members"]) or str(args.build) != app["build"]:
+                raise ValueError("The owner's app is build %s carrying %s; this decision "
+                                 "names head %s in build %s" % (
+                                     app["build"], json.dumps(sorted(pairs(app["members"]))),
+                                     args.head, args.build))
+            stamp = now()
+            if args.command == "approve":
+                approval = json.dumps({"by": args.by, "relayed_by": args.actor, "at": stamp,
+                                       "build": app["build"], "note": args.note})
+                db.execute("UPDATE tickets SET status='approved', lane='approved', approval=?, "
+                           "note=?, updated_at=? WHERE id=?",
+                           (approval, "Owner approved the preview: " + args.by, stamp, item["id"]))
+                event(db, item["id"], "approved", "The owner approved the feature (" + args.by +
+                      "). It stays in his app and goes out with the next release batch: one "
+                      "review, one full suite, merge and one install.", deliver=True)
+            else:
+                db.execute("UPDATE tickets SET status='blocked', note=?, updated_at=? WHERE id=?",
+                           ("Owner's changes to the preview: " + args.note, stamp, item["id"]))
+                event(db, item["id"], "blocked", "The owner sent the preview back: " + args.note +
+                      " Push the fix and enqueue it again with --preview.", deliver=True)
+            return ticket_json(db, item["id"])
 
         if args.command == "return-stale-dependencies":
             require_builder(db, args.actor)
@@ -679,6 +1250,24 @@ def run(args):
                 # deferral never lets other runtime work pass it. Automatic stays
                 # first; anything else waits for a person.
                 retry = "first" if retry == "meeting" else "hold"
+            newer = db.execute("SELECT id FROM tickets WHERE pr=? AND id>? LIMIT 1",
+                               (item["pr"], item["id"])).fetchone()
+            if item["status"] == "previewing" and newer:
+                # A fix arrived while this preview was built: whatever this build's
+                # outcome, the newer ticket replaces it (the app is reconciled from
+                # what is installed, not from this record).
+                args.status = "superseded"
+            elif args.status == "awaiting_approval":
+                # The installed app must carry exactly the train plus this ticket.
+                app = installed_app()
+                expected = pairs(preview_train(db)) | {(item["id"], item["head"])}
+                if not app or app["members"] is None or pairs(app["members"]) != expected:
+                    raise ValueError("The installed app does not carry the current train "
+                                     "plus this preview (expected %s): rebuild it"
+                                     % json.dumps(sorted(expected)))
+                for member in app["members"]:
+                    db.execute("UPDATE tickets SET preview_build=? WHERE id=?",
+                               (app["build"], member["ticket"]))
             pending = json.loads(item["protected_pending"] or "[]")
             if args.status == "done" and pending:
                 raise ValueError("#%d still has protected-data tests pending (%s): run them on "
@@ -686,8 +1275,8 @@ def run(args):
                                  "--passed` first" % (item["id"], ", ".join(pending)))
             if args.status == "queued":
                 # A ticket requeued after a block goes to the end; one returned from
-                # in_progress without a block keeps its place (its queued_at).
-                reenter_review(db, args.ticket, item["status"] == "in_progress", args.note)
+                # in_progress or previewing without a block keeps its place (its queued_at).
+                reenter_review(db, args.ticket, item["status"] in ("in_progress", "previewing"), args.note)
                 return ticket_json(db, args.ticket)
             # Recover/retry explicitly; no lease expiry silently starts a duplicate build.
             db.execute("UPDATE tickets SET status=?, note=?, updated_at=?, retry=? WHERE id=?",
@@ -737,11 +1326,48 @@ def main():
     enqueue.add_argument("--session", default="",
                          help="default: that harness's session ID from the environment")
     enqueue.add_argument("--host", default="local")
+    enqueue.add_argument("--preview", action="store_true",
+                         help="build and install it for the owner's check first; review, "
+                              "full suite and merge follow in a release batch after `approve`")
     status = commands.add_parser("status")
     status.add_argument("--ticket", type=int)
     status.add_argument("--open", action="store_true",
                         help="only open work and the earlier tickets of the same PRs")
     commands.add_parser("claim")
+    commands.add_parser("preview-claim", help="Next preview to build (preview lane)")
+    orchestrator = commands.add_parser("configure-orchestrator",
+                                       help="The one actor that relays the owner's decisions")
+    orchestrator.add_argument("--orchestrator", required=True)
+    orchestrator.add_argument("--token-file", required=True,
+                              help="a private file holding the orchestrator's secret token")
+    admit = commands.add_parser("preview-admit", help="May base..commit be previewed?")
+    admit.add_argument("--base", required=True)
+    admit.add_argument("--commit", required=True)
+    handoff = commands.add_parser("preview-handoff",
+                                  help="May this composition replace the owner's app now?")
+    handoff.add_argument("--base", required=True, help="the main SHA it was composed on")
+    handoff.add_argument("--members", required=True,
+                         help="JSON [{ticket, head}] of the unmerged PRs it carries")
+    handoff.add_argument("--ticket", type=int, help="the preview being built, if any")
+    handoff.add_argument("--build", type=int, required=True, help="the candidate's build")
+    commands.add_parser("preview-lane-off", help="Send previews to normal validation")
+    release = commands.add_parser("release", help="Start one release batch of every "
+                                                  "approved feature")
+    release.add_argument("--by", required=True, help="the owner's words, or the trigger")
+    release.add_argument("--note", default="")
+    release.add_argument("--auto", action="store_true",
+                         help="the watcher's count trigger (as the builder)")
+    release.add_argument("--token-file")
+    for name in ("approve", "reject"):
+        decision = commands.add_parser(name, help="Relay the owner's decision on a preview")
+        decision.add_argument("--ticket", type=int, required=True)
+        decision.add_argument("--note", required=True)
+        decision.add_argument("--head", required=True, help="the head the owner saw")
+        decision.add_argument("--build", required=True, help="the build he saw it in")
+        decision.add_argument("--token-file")
+        if name == "approve":
+            decision.add_argument("--by", required=True,
+                                  help="who approved and their words, e.g. 'owner: feature OK'")
     stale = commands.add_parser("return-stale-dependencies",
                                 help="Return queued tickets whose dependency stays blocked")
     stale.add_argument("--minutes", type=int, default=STALE_DEPENDENCY_MINUTES)
@@ -791,8 +1417,12 @@ def main():
                                              else documentation_preflight(args.head))
                 args.runtime = changes_runtime(args.head)
             # Outside the queue transaction too: one network read, before any lock.
-            args.remote_heads = (remote_heads() if args.command in ("claim", "check-heads")
-                                 else None)
+            args.remote_heads = (remote_heads() if args.command in (
+                "claim", "check-heads", "preview-claim") else None)
+            # The watcher's configuration, read outside the queue transaction.
+            settings = watcher_settings()
+            args.preview_lane = settings.get("preview_lane") is True
+            args.release_after_approved = settings.get("release_after_approved", 0)
             result = run(args)
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, sqlite3.Error, subprocess.CalledProcessError, OSError) as error:

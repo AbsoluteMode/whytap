@@ -2,7 +2,7 @@
 id: footer-links-vertical-2026-11-27
 type: decision
 title: Settings footer links are stacked one per row
-summary: The Whytap, Help and GitHub links in the Settings sidebar footer sit in a vertical list, each with its icon and full label, left-aligned with the version line, instead of one horizontal row that truncated the labels.
+summary: The Whytap, GitHub and Help links in the Settings sidebar footer sit in a vertical list, each with its icon and full label, left-aligned with the version line, instead of one horizontal row that truncated the labels.
 status: confirmed
 tags: [settings, footer, links, layout]
 canonical_for: [settings-footer-link-layout]
@@ -31,6 +31,9 @@ extra gap, the same left edge as the version line above. Each row is one
 button-like target spanning the sidebar width (hover highlight, pointing
 hand, keyboard focus and the accessibility label and hint are unchanged).
 
+Order, top to bottom: Whytap, GitHub, Help. Amended 2026-11-27 on the
+owner's request: Help is usually the last item (it was second).
+
 ## Why
 
 The sidebar width is fixed by the window; a label that must never truncate
@@ -39,7 +42,8 @@ needs its own row. Full-width rows are also an easier target.
 ## What was tested
 
 An offscreen layout test checks three rows, one left edge, no overlap and
-room for a whole label; the existing pointing-hand and What's New footer
+room for a whole label; a source-order test keeps Whytap, GitHub, Help;
+the existing pointing-hand and What's New footer
 tests keep counting three links.
 
 ## Rejected

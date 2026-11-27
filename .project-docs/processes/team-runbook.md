@@ -6,7 +6,7 @@ summary: Scope and mandatory reading for sessions working in AbsoluteMode/whytap
 status: confirmed
 tags: [team, agents, worktrees, builder, queue, shared-app, guidance]
 canonical_for: [team-session-scope, team-guidance-entry]
-verified_at: 2026-11-22
+verified_at: 2026-11-28
 sources:
   - type: user-confirmed
     reference: On 2026-11-22 the maintainer agreed to rework the documentation for people who receive the repository; the task asked for a short AGENTS.md for outside users and contributors and a separate, explicitly scoped runbook for the team process, losing no rule.
@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-builder-prompt.md
     confirmed_at: 2026-11-22
-related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md]
+related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-28-builder-never-reviews.md]
 ---
 
 # Whytap team runbook
@@ -97,9 +97,11 @@ feature sessions with regular checked integration and one working application.
   `enqueue` rejects a head whose guidance sync or documentation validation
   fails. The configured builder processes FIFO, sends queue/start/result
   messages to the originating sessions and alone integrates/packages/promotes;
-  it resolves routine merge conflicts itself and blocks a PR once, listing
-  every finding; a re-block is only for a problem the fix introduced or a
-  listed item still unfixed. It is an on-demand headless
+  it resolves routine merge conflicts itself. It never reviews code: it
+  builds, tests, merges, installs and rolls back behind mechanical gates,
+  installs an app-changing PR as an owner preview first, and blocks a PR once
+  with every failing check; a re-block is only for a check the fix broke or
+  one still failing. It is an on-demand headless
   session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
   starts only while the queue has open work, the screen is unlocked and the
   load is below its limit; only the maintainer activates or deactivates it.
@@ -113,7 +115,11 @@ feature sessions with regular checked integration and one working application.
   `git rev-parse --git-common-dir` for protected operations. Queue claims never
   replace that lock or any validation gate. Preserve all other sessions' WIP;
   use a clean integration worktree when the primary checkout is occupied.
-- Review overlaps, validate the final combined candidate and merge through a
+- Review happens once per release, not per PR: the orchestrator has the
+  release candidate built and fully tested, runs one inquisition (council
+  review) on the whole release diff, gets its confirmed bugs fixed, then the
+  release ships. WHY: .project-docs/decisions/2026-11-28-builder-never-reviews.md
+- Validate the final combined candidate (build and tests) and merge through a
   PR with exact head/base checks. Routine checked integration/local refresh
   needs no repeated approval. Public publishing remains a separate action.
 - After a PR merges, verify that GitHub removed its remote feature branch.

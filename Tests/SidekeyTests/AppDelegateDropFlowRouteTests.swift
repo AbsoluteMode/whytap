@@ -730,7 +730,8 @@ final class AppDelegateDropFlowRouteTests: XCTestCase {
             XCTFail("retryPendingDelivery() must exist.")
             return
         }
-        let body = String(source[fnRange.lowerBound...].prefix(900))
+        // The window also spans the refused-paste dispatch at the top.
+        let body = String(source[fnRange.lowerBound...].prefix(1200))
         // The fragile "consume PCM up front" line is gone: the PCM is retained
         // until the recovery OUTCOME decides (success → clearPendingRetry,
         // failure → retainForRetry), so a hung recovery can't strand Retry.

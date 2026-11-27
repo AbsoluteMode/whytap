@@ -103,6 +103,7 @@ final class DropLocalEditorTests: XCTestCase {
 
         engine.rememberDropTarget()
         let delivered = await engine.paste("dictated text")
+        await engine.waitForPendingRestore()
 
         XCTAssertTrue(delivered)
         XCTAssertEqual(engine.currentDropTarget().pid, 4242)
@@ -312,6 +313,7 @@ final class DropLocalEditorTests: XCTestCase {
         private(set) var writes = 0
         private(set) var restores = 0
         private(set) var postedKeys: [CGKeyCode] = []
+        private(set) var changeCount = 0
         private let original: String
 
         init(holding value: String) {
@@ -327,7 +329,8 @@ final class DropLocalEditorTests: XCTestCase {
                 pasteboardWrite: { [unowned self] text in
                     self.writes += 1
                     self.contents = text
-                    return (before: 0, after: 1)
+                    self.changeCount += 1
+                    return (before: self.changeCount - 1, after: self.changeCount)
                 },
                 postEvent: { [unowned self] code, _, _ in self.postedKeys.append(code) },
                 sleepUs: { _ in }, nowMs: { 0 }, logEmit: { _, _ in },
@@ -338,7 +341,9 @@ final class DropLocalEditorTests: XCTestCase {
                 pasteboardRestore: { [unowned self] _ in
                     self.restores += 1
                     self.contents = self.original
+                    self.changeCount += 1
                 },
+                currentChangeCount: { [unowned self] in self.changeCount },
                 localEditor: { [weak window] in
                     guard let editor = DropLocalEditor(focusedIn: window, isPresented: isPresented) else { return nil }
                     return AutoPasteEngine.LocalEditorTarget(name: "Whytap", insert: { editor.insert($0) })

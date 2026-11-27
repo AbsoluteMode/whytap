@@ -71,8 +71,29 @@ a receipt per id, deduplication across restarts and rate caps.
 - The undelivered alert stays as the backstop, now for state changes (and any
   event of a closed ticket) with the reason in its detail: rejected, Whycode
   unavailable, not answered yet, or outside the notice scope.
-- The builder no longer messages authors or runs `ack`; it writes every note
-  as the complete message.
+- The builder writes every note as the complete message. The watcher puts
+  `author_notices: "whycode_inbox"` into each run's context; with it the builder
+  sends no author messages and never runs `ack`. Without it, which is the case
+  for a watcher installed before this change that reads the merged prompt from
+  origin/main, the builder keeps the earlier Harness Link delivery, so merging
+  never leaves authors without any delivery path before `activate`.
+- A notice follows the ticket's newest event. If that event is acknowledged
+  (the author's own command moved the ticket on: a new head, a resubmitted
+  return), the earlier undelivered events are history and are acknowledged
+  without a notice; if it is a start or requeue, they ride along with the next
+  result. A return without review (the ticket's `auto_returned`) asks only to
+  wait for the dependency and resubmit the same head, or to enqueue the newer
+  head, never to change code.
+- One notice's failure stops no other: an invalid receipt (wrong shape, id or
+  status) is ignored for that notice, and each ticket's batch is handled on its
+  own.
+- A notice published while its record failed (a crash, a full disk) is
+  recovered from its file or receipt: the id names the batch's newest event, so
+  the batch is that ticket's unacknowledged events up to it. It is never sent
+  again under another id.
+- Title (200) and text (20,000) are counted in UTF-16 units like Whycode's
+  JavaScript check, without cutting a character, and the file in bytes
+  (128 KB).
 - Notices cover events from the watcher's activation of this version on.
   Older unacknowledged events are not sent: days-old results would wake
   sessions that the orchestrator has already continued.
@@ -87,3 +108,9 @@ a receipt per id, deduplication across restarts and rate caps.
   so a stored message is never read.
 - One notice per event: a block after a start would cost two turns of the
   hourly cap and repeat context.
+- Forbidding Harness Link in the prompt outright: the installed watcher reads
+  the prompt from origin/main before `activate`, so the first review (ticket
+  694) found merging alone would leave authors with no delivery at all.
+- Recording each notice before publishing it as the only guard: the record
+  write is the step that can fail, so the published file or receipt is the
+  evidence used instead.

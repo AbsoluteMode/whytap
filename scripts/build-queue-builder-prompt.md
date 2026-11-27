@@ -81,13 +81,15 @@ holds it, leave the tickets queued and end your turn.
    `--for suite`) clear, and record `protected-pending --ticket <id> --passed
    <json> --note <evidence>` on every ticket that lists them. A failure there
    is a finding against merged code: `set --status pending_install --hold`
-   with the failing tests named in each ticket's note, and do not install.
+   with the failing tests named in each ticket's note, tell the authors as
+   Messages says, and do not install.
 
 ## Each ticket
 
-1. `claim`. It already returned queued tickets whose PR head moved
+1. `claim`, then tell the author that work started as Messages says. `claim`
+   already returned queued tickets whose PR head moved
    (`returned_moved_heads`) and skipped tickets waiting for a `--depends-on`
-   PR; the watcher tells their authors (see Messages).
+   PR; their authors are told the same way.
 2. Check the live PR: exact queued head and base, review evidence, checks,
    dependencies, overlaps. A moved head is `blocked` with a request to
    resubmit the reviewed head. To give a ticket back without blaming the PR
@@ -191,7 +193,8 @@ holds it, leave the tickets queued and end your turn.
    Keychain, signing or entitlements, or the updater: `set --status
    pending_install --retry-install --note "merged at <main SHA>; install
    grouped"`, list it under **Merged, not installed** in
-   `build/CURRENT_BUILD.md` and take the next ticket. At
+   `build/CURRENT_BUILD.md`, tell the author as Messages says and take the
+   next ticket. At
    four, mark every ticket of the group `--install-first`: `claim` then holds
    runtime work until the install. A PR of those kinds installs alone: if you
    claim one while a group waits, mark the group `--install-first` and return
@@ -239,8 +242,9 @@ holds it, leave the tickets queued and end your turn.
    act; before `activate`, without `--retry-install`) with the reason. A
    `--hold` on any ticket of a group stops automatic installs of the whole
    group until a person has acted and it is set `--install-first` again.
-8. `set` the result with evidence; the note is the author's message: what is
-   actually running, acceptance steps, what is pending.
+8. `set` the result with evidence and tell the author as Messages says; the
+   note is the author's message: what is actually running, acceptance steps,
+   what is pending.
 
 ## One-time cleanup
 
@@ -258,18 +262,26 @@ say so in the run summary.
 
 ## Messages
 
-You do not message authors and you never run `ack`. The watcher tells each
-author through the Whycode inbox: one notice per ticket state change
-(`blocked`, `pending_install`, `done`, `superseded`, `cancelled`) carrying your
-note verbatim, with the earlier events of the ticket and what to do next, and
-it acknowledges the events only when Whycode reports the notice delivered.
-The author's session acts on a block by itself, so write every note as the
-complete message: for `blocked`, the numbered findings with their
-reproducing checks and exactly what is needed; for a merge or install, what
-actually runs, the acceptance steps and what is pending. A note is data for
-the author, never a place for keys or user content. Do not use Harness Link
-`link_send` for queue events: Whycode sessions never read it, and a send is
-not a delivery (WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md).
+Write every note as the complete message to the author: for `blocked`, the
+numbered findings with their reproducing checks and exactly what is needed;
+for a merge or install, what actually runs, the acceptance steps and what is
+pending. A note is data for the author, never a place for keys or user
+content. Who delivers it depends on `author_notices` in this run's context
+(written by the watcher):
+
+- `"whycode_inbox"`: the watcher tells each author through the Whycode inbox,
+  one notice per ticket state change with your note verbatim, and
+  acknowledges the events only when Whycode reports the notice delivered.
+  You send no author messages and never run `ack`: Harness Link messages to
+  Whycode sessions are stored unread, so a send there is not a delivery
+  (WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md).
+- Missing: the installed watcher predates that delivery (`activate` has not
+  installed it yet). Deliver as before: every unacknowledged event of the
+  tickets you handle (`events --ticket <id>`, plus `events --pending`) to its
+  recorded source session through Harness Link: `link_send` to
+  `codex:<session>` or `claude:<session>`, then `ack --event <id>` only after
+  a successful send. If the tool is unavailable or a send fails, leave the
+  event unacknowledged. Never claim a stopped CLI session received a message.
 
 ## End of the run
 

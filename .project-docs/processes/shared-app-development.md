@@ -305,21 +305,30 @@ acknowledged.
 The same tick tells authors through the Whycode session inbox (the `inbox`
 folder in Whycode's application data, specified by the Whycode project; see
 the [Whycode inbox decision](../decisions/2026-11-27-build-queue-whycode-inbox.md)).
-For each ticket with an unacknowledged state change (`blocked`,
-`pending_install`, `done`, `superseded`, `cancelled`) it writes one notice
-holding all of that ticket's unacknowledged events: the builder's note
-verbatim and what to do next (for a block: fix every finding by class, update
-onto `origin/main`, validate, push and resubmit). The ticket's `session` is the
-conversation Whycode continues; an unknown one goes to the project's
-orchestrator. A start or a requeue rides along with the next notice, and an
-open ticket's newest event first settles for `inbox_settle_seconds` (90).
-Events are acknowledged only when the receipt says `delivered`; a `rejected`
-notice raises the alert and is sent again under a new id after
-`inbox_retry_minutes` (30), `inbox_max_attempts` (6) times at most. Events the
-author's own `enqueue` writes (its receipt, the supersede of its older head)
-are acknowledged by that command's response. Notices cover events from the
-watcher's activation of this version on; `whytap-build-queue-inbox.json` in
-the Git common directory records each notice and its receipt.
+For each ticket whose newest event is an unacknowledged state change
+(`blocked`, `pending_install`, `done`, `superseded`, `cancelled`) it writes one
+notice holding all of that ticket's unacknowledged events: the builder's note
+verbatim and what to do next. A block with findings asks to fix every finding
+by class, update onto `origin/main`, validate, push and resubmit; a return
+without review asks only to wait for the dependency and resubmit the same head,
+or to enqueue the newer head. The ticket's `session` is the conversation
+Whycode continues; an unknown one goes to the project's orchestrator. A start
+or a requeue rides along with the next notice, and an open ticket's newest
+event first settles for `inbox_settle_seconds` (90). Events are acknowledged
+only when the receipt says `delivered`, or when the author's own later command
+replaced them (events the author's `enqueue` writes, such as its receipt, the
+supersede of its older head or a resubmitted return, are acknowledged by that
+command's response, and earlier undelivered events of that ticket are then
+history). A `rejected` notice raises the alert and is sent again under a new id
+after `inbox_retry_minutes` (30), `inbox_max_attempts` (6) times at most; an
+invalid receipt is ignored for that notice only. A published notice whose
+record was lost is recovered from its file or receipt and never resent under
+another id. Title and text are bounded in Whycode's units (UTF-16) and the file
+in bytes. Notices cover events from the watcher's activation of this version
+on; `whytap-build-queue-inbox.json` in the Git common directory records each
+notice and its receipt. Until `activate` installs this version, the installed
+watcher does not deliver and its run context lacks `author_notices`, so the
+builder prompt keeps the earlier Harness Link delivery for that run.
 `whytap-build-queue-watchdog.json` beside it is the watchdog's heartbeat,
 current episodes and outbox. `scripts/build-queue-metrics.py --since <date>
 [--until <date>]` measures returns, waits, builder time, deferred installs and
@@ -396,9 +405,13 @@ queue survives downtime.
 
 ### Builder turn
 
-1. Read `status`. The builder does not message authors and never runs `ack`:
-   the watcher delivers every state change through the Whycode inbox (see
-   On-demand watcher), so each note is the complete message to the author.
+1. Read `status`. Each note is the complete message to the author. When the
+   run context has `author_notices: "whycode_inbox"`, the watcher delivers
+   every state change through the Whycode inbox (see On-demand watcher) and the
+   builder sends no author messages and never runs `ack`. Without it (a watcher
+   installed before that change), the builder delivers unacknowledged events
+   through Harness Link `link_send` and acknowledges each after a successful
+   send.
 2. Fetch origin and read the latest shared workflow before any integration/app
    action. Acquire the existing integration lock using its live-owner protocol.
    If busy, leave work queued; never steal a live lock or repeatedly message
@@ -416,7 +429,7 @@ queue survives downtime.
    of the submitted commit is GitHub lagging, not a move. The watcher runs the
    same `check-heads` before it starts a session for queued work, so a moved
    head costs no session. An unreachable remote checks nothing. Such a return
-   is told by the watcher's inbox notice like any other block. The start event
+   is told to its author like any other block; with the inbox, the start event
    rides along with the ticket's next notice. The worker may inspect,
    diagnose and report problems;
    it must not merge, package, install or acquire a competing integration lock.
@@ -510,7 +523,8 @@ queue survives downtime.
    re-block names the list item it repeats or the fix that caused it.
    Pending/blocked tickets do not stop later work.
 6. Write each result note as the author's message: result, what is actually
-   running, acceptance checks and any pending action; the watcher delivers it.
+   running, acceptance checks and any pending action; it is delivered as step
+   1 says.
    Continue FIFO work while useful, then end the session;
    the watcher resumes persistent state when work is open again. Stay quiet on
    empty/unchanged state, except for a new failure, completion or required
@@ -519,8 +533,9 @@ queue survives downtime.
 `events --ticket <id>` is the durable record for all harnesses. A notice is
 delivered once per id: Whycode keeps every id it has taken, and an event is
 acknowledged only after its `delivered` receipt, so a crash in between only
-acknowledges later. Harness Link `link_send` is not used for queue events:
-Whycode sessions never read it, and a stored message is not a delivery. The
+acknowledges later. With the inbox, Harness Link `link_send` is not used for
+queue events: Whycode sessions never read it, and a stored message is not a
+delivery. The
 builder remains responsible for the build even when the author is offline.
 
 Recovery is explicit. Inspect the owner chat, live processes and integration

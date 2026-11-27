@@ -15,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest.mock import patch
 
 
 SCRIPTS = Path(__file__).resolve().parent
@@ -38,6 +39,7 @@ with open(control / "sessions.log", "a") as output:
     output.write(json.dumps({"pid": os.getpid(), "lease": lease,
                              "prompt": "## This run" in prompt and "FIFO" in prompt,
                              "origin_rules": "ORIGIN MAIN RULES" in prompt,
+                             "inbox": '"author_notices": "whycode_inbox"' in prompt,
                              "cwd": os.getcwd()}) + "\n")
 if (control / "noop").exists():
     sys.exit(0)
@@ -1114,6 +1116,143 @@ class WatcherTests(unittest.TestCase):
         self.assertEqual(self.notices(), [])
         alert = next(a for a in self.alerts() if a["condition"] == "undelivered:1")
         self.assertIn("before the inbox scope", alert["detail"])
+
+    def watcher_module(self):
+        spec = importlib.util.spec_from_file_location("watcher_inbox", WATCHER)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def deliver(self, module=None):
+        module = module or self.watcher_module()
+        return module.deliver_notices(self.root, module.load_config(self.root))
+
+    def test_the_prompt_keeps_harness_link_until_the_watcher_delivers_itself(self):
+        # An installed watcher from before this change reads the merged prompt from
+        # origin/main: without `author_notices` in its run context the builder must keep
+        # delivering through Harness Link.
+        prompt = (SCRIPTS / "build-queue-builder-prompt.md").read_text()
+        messages = prompt[prompt.index("## Messages"):prompt.index("## End of the run")]
+        self.assertIn('`"whycode_inbox"`', messages)
+        self.assertIn("Missing: the installed watcher predates that delivery", messages)
+        self.assertIn("`link_send`", messages)
+        self.assertIn("`ack --event <id>` only after", messages)
+        self.enqueue(1)
+        self.watcher("run")
+        self.assertTrue(self.sessions()[0]["inbox"])  # this watcher says it delivers
+
+    def test_a_new_author_head_gets_no_outdated_block_notice(self):
+        self.fake_whycode()
+        first = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(first), "--status", "blocked", "--note", "finding")
+        self.git("-c", "user.name=T", "-c", "user.email=t@example.invalid", "commit",
+                 "--allow-empty", "-qm", "new reviewed head")
+        self.head = self.git("rev-parse", "HEAD").strip()
+        second = self.enqueue(1)
+        self.assertEqual(self.statuses(), {first: "superseded", second: "queued"})
+        self.deliver()
+        self.assertEqual(self.notices(), [])
+        self.assertTrue(all(e["acknowledged_at"] for e in self.ticket_events(first)))
+
+    def queue_a_dependency_return(self):
+        parent = self.enqueue(1)
+        child = self.enqueue(2, "--depends-on", "https://github.com/example/app/pull/1")
+        self.cancel(parent)
+        self.assertIn(child, self.queue("return-stale-dependencies", "--minutes", "0")["returned"])
+        return child
+
+    def test_a_resubmitted_unchanged_head_gets_no_outdated_block_notice(self):
+        self.fake_whycode()
+        child = self.queue_a_dependency_return()
+        self.assertEqual(self.enqueue(2), child)
+        self.assertEqual(self.statuses()[child], "queued")
+        self.configure_watcher(undelivered_minutes=-1)
+        self.deliver()
+        self.assertFalse(any(f"ticket #{child}:" in n["text"] for n in self.notices()))
+        self.assertTrue(all(e["acknowledged_at"] for e in self.ticket_events(child)))
+
+    def test_a_dependency_return_asks_to_wait_not_to_change_code(self):
+        self.fake_whycode()
+        child = self.queue_a_dependency_return()
+        self.deliver()
+        notice = next(n for n in self.notices() if f"ticket #{child}:" in n["text"])
+        self.assertIn("Resubmit once it is merged through the queue", notice["text"])
+        self.assertIn("waits for its dependency", notice["title"])
+        self.assertNotIn("Fix every finding by class", notice["text"])
+
+    def test_a_moved_head_return_asks_to_enqueue_the_newer_head_only(self):
+        self.fake_whycode()
+        ticket = self.enqueue(1)
+        self.move_pr_head(1)
+        self.watcher("run")  # check-heads returns it, then the tick delivers
+        [notice] = self.notices()
+        self.assertIn(f"ticket #{ticket}:", notice["text"])
+        self.assertIn("head moved", notice["title"])
+        self.assertNotIn("Fix every finding by class", notice["text"])
+
+    def test_a_requeue_after_a_block_replaces_the_block_notice(self):
+        self.fake_whycode()
+        self.configure_watcher(validate_while_locked=False, undelivered_minutes=-1)
+        self.set_environment(screen_locked=True)
+        ticket = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "blocked", "--note", "finding")
+        self.queue("set", "--ticket", str(ticket), "--status", "queued", "--note", "builder fixed it")
+        self.watcher("run")
+        self.assertEqual(self.notices(), [])  # the block is history; the requeue rides along
+        self.assertEqual(self.alerts(), [])
+
+    def test_a_malformed_receipt_stops_no_other_notice(self):
+        self.fake_whycode()
+        self.cancel(self.enqueue(1))
+        self.deliver()
+        [first] = self.notices()
+        for bad in ("[]", "{}", json.dumps({"id": first["id"], "status": "lost"}), "not json"):
+            (self.inbox / "receipts" / (first["id"] + ".json")).write_text(bad)
+            self.deliver()
+        second = self.cancel(self.enqueue(2))
+        self.deliver()
+        self.assertTrue(any(f"ticket #{second}:" in n["text"] for n in self.notices()))
+        self.assertTrue(all(e["acknowledged_at"] is None for e in self.ticket_events(1)[1:]))
+
+    def test_a_notice_published_while_its_record_fails_is_not_sent_twice(self):
+        self.fake_whycode()
+        ticket = self.enqueue(1)
+        self.queue("claim")
+        self.queue("set", "--ticket", str(ticket), "--status", "pending_install", "--note",
+                   "pending marker")
+        module = self.watcher_module()
+        with patch.object(module, "write_json", side_effect=OSError("disk full")):
+            self.deliver(module)
+        [first] = self.notices()
+        self.assertIn("pending marker", first["text"])
+        self.queue("set", "--ticket", str(ticket), "--status", "done", "--note", "done marker")
+        self.deliver()
+        [second] = [n for n in self.notices() if n["id"] != first["id"]]
+        self.assertIn("done marker", second["text"])
+        self.assertNotIn("pending marker", second["text"])
+        # Whycode took the first one meanwhile: only its receipt is left as evidence.
+        state = self.root / "whytap-build-queue-inbox.json"
+        state.write_text(json.dumps({**json.loads(state.read_text()), "messages": {}}))
+        self.whycode_answers(first, "delivered", target={"kind": "session"})
+        self.deliver()
+        events = self.ticket_events(ticket)
+        self.assertTrue(all(e["acknowledged_at"] for e in events if e["status"] != "done"))
+
+    def test_lengths_are_counted_in_whycodes_units(self):
+        self.fake_whycode()
+        ticket = self.enqueue(1, "--title", "\U0001F9EA" * 130)
+        self.queue("set", "--ticket", str(ticket), "--status", "cancelled", "--note",
+                   "\U0001F9EA" * 11000 + "\x01" * 9000)
+        self.deliver()
+        [notice] = self.notices()
+        units = lambda text: len(text.encode("utf-16-le")) // 2
+        self.assertLessEqual(units(notice["title"]), 200)
+        self.assertLessEqual(units(notice["text"]), 20000)
+        self.assertLessEqual(len(json.dumps(notice, ensure_ascii=False).encode()), 128 * 1024)
+        self.assertNotIn("\ud83e", notice["text"])  # no character is cut in half
+        self.assertIn("(the rest: status --ticket %d)" % ticket, notice["text"])
 
     def test_a_long_note_fits_whycodes_limit(self):
         self.fake_whycode()

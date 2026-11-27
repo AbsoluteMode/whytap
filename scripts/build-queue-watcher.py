@@ -50,7 +50,9 @@ INBOX_SOURCE = "whytap-build-queue"
 # A notice of its own for these; queued/in_progress events ride along with the next one.
 NOTICE_STATUSES = ("blocked", "pending_install", "done", "superseded", "cancelled")
 FINAL_STATUSES = ("blocked", "done", "superseded", "cancelled")
-INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`
+INBOX_TEXT_LIMIT = 20000      # Whycode's limit for `text`, in UTF-16 units
+INBOX_FILE_LIMIT = 128 * 1024  # Whycode's limit for the whole file, in bytes
+RECEIPT_STATUSES = ("queued", "delivered", "rejected")
 INBOX_KEPT_MESSAGES = 1000    # delivered records kept in the inbox state
 PROMPT_SOURCE = "scripts/build-queue-builder-prompt.md"
 OUTBOX_LIMIT = 500  # alert lines kept per unwritable target
@@ -560,7 +562,8 @@ def ticket_rows(root, undelivered_since):
             "FROM tickets t WHERE t.status IN ('queued', 'in_progress', 'pending_install')")]
         undelivered = [dict(r) for r in db.execute(
             "SELECT e.id, e.ticket, e.status, e.created_at, t.pr, t.source, "
-            "t.status AS ticket_status FROM events e "
+            "t.status AS ticket_status, (SELECT MAX(id) FROM events x WHERE x.ticket = e.ticket) "
+            "AS newest_id FROM events e "
             "JOIN tickets t ON t.id = e.ticket WHERE e.acknowledged_at IS NULL "
             "AND e.created_at >= ? ORDER BY e.id", (undelivered_since,))]
     finally:
@@ -612,9 +615,10 @@ def findings(root, config, context, previous, now, inbox=None):
         found["no_progress"] = {"sessions": context["no_progress"],
                                 "detail": f"{context['no_progress']} builder sessions in a row "
                                           "ended without changing the queue"}
-    # The backstop of the Whycode inbox notices: an author still not told. A receipt or a
-    # start of a ticket that is still open rides along with its next notice, so only a
-    # state change (or anything of a closed ticket) counts; a rejected notice counts at once.
+    # The backstop of the Whycode inbox notices: an author still not told. Only the
+    # ticket's newest event as a state change (or anything of a closed ticket) counts:
+    # a receipt, start or requeue of an open ticket, and anything a newer event replaced,
+    # rides along with its next notice. A rejected notice counts at once.
     # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
     rejected = {}
     for message_id, record in inbox.get("messages", {}).items():
@@ -627,8 +631,8 @@ def findings(root, config, context, previous, now, inbox=None):
                  for event_id in record.get("events", [])}
     for e in undelivered:
         late = age_minutes(e["created_at"], now)
-        rides_along = e["status"] not in NOTICE_STATUSES and \
-            e["ticket_status"] not in FINAL_STATUSES
+        rides_along = e["ticket_status"] not in FINAL_STATUSES and (
+            e["status"] not in NOTICE_STATUSES or e["id"] != e["newest_id"])
         if e["id"] not in rejected and (rides_along or late <= config["undelivered_minutes"]):
             continue
         if e["id"] in rejected:
@@ -699,30 +703,83 @@ def ensure_inbox_scope(root, now=None):
 
 
 def inbox_events(root, since):
+    """Unacknowledged events in scope, each with its ticket and the ticket's newest event
+    (acknowledged or not): the newest one is the ticket's actual state."""
     db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
     db.row_factory = sqlite3.Row
     try:
+        columns = {c[1] for c in db.execute("PRAGMA table_info(tickets)")}
+        returned = "t.auto_returned" if "auto_returned" in columns else "0"
+        depends = "t.depends_on" if "depends_on" in columns else "'[]'"
         return [dict(r) for r in db.execute(
             "SELECT e.id, e.ticket, e.status, e.note, e.created_at, t.pr, t.head, t.title, "
-            "t.source, t.session, t.acceptance, t.status AS ticket_status FROM events e "
-            "JOIN tickets t ON t.id = e.ticket WHERE e.acknowledged_at IS NULL "
-            "AND e.created_at >= ? ORDER BY e.id", (since,))]
+            "t.source, t.session, t.acceptance, t.status AS ticket_status, "
+            + returned + " AS auto_returned, " + depends + " AS depends_on, "
+            "n.id AS newest_id, n.acknowledged_at AS newest_acknowledged FROM events e "
+            "JOIN tickets t ON t.id = e.ticket "
+            "JOIN events n ON n.id = (SELECT MAX(id) FROM events x WHERE x.ticket = e.ticket) "
+            "WHERE e.acknowledged_at IS NULL AND e.created_at >= ? ORDER BY e.id", (since,))]
     finally:
         db.close()
 
 
-def clip(text, limit):
+def ticket_of_event(root, event_id):
+    db = sqlite3.connect((root / QUEUE).resolve().as_uri() + "?mode=ro", uri=True, timeout=30)
+    try:
+        row = db.execute("SELECT ticket FROM events WHERE id = ?", (event_id,)).fetchone()
+        return row[0] if row else None
+    finally:
+        db.close()
+
+
+def utf16_units(text):
+    """Whycode checks lengths in JavaScript, which counts UTF-16 code units."""
+    return len(str(text).encode("utf-16-le")) // 2
+
+
+def clip(text, limit, tail=" [...]"):
+    """At most `limit` UTF-16 units, never splitting a character."""
     text = str(text or "")
-    return text if len(text) <= limit else text[:limit].rstrip() + " [...]"
+    if utf16_units(text) <= limit:
+        return text
+    budget, used, kept = max(limit - utf16_units(tail), 0), 0, []
+    for character in text:
+        size = 2 if ord(character) > 0xFFFF else 1
+        if used + size > budget:
+            break
+        kept.append(character)
+        used += size
+    return "".join(kept).rstrip() + tail
 
 
 def pr_label(pr):
     return "PR #" + str(pr).rstrip("/").rsplit("/", 1)[-1]
 
 
-def notice_guidance(status, helper_path, pr):
+def return_kind(ticket, status):
+    """`finding`, or the structured kind of a return made without review."""
+    if status != "blocked" or not ticket.get("auto_returned"):
+        return "finding"
+    try:
+        dependencies = json.loads(ticket.get("depends_on") or "[]")
+    except ValueError:
+        dependencies = []
+    return "dependency" if dependencies and "dependency" in (ticket.get("note") or "") \
+        else "moved_head"
+
+
+def notice_guidance(status, kind, helper_path, pr):
     enqueue = (f'python3 "{helper_path}" enqueue --pr {pr} --head <new reviewed head> '
                "--title ... --checks ... --dependencies ... --acceptance ...")
+    if kind == "dependency":
+        return ("Returned without review: nothing in your change was judged, so do not change "
+                "code for it. Wait until the dependency named in the note is merged through "
+                "the queue, then resubmit the same head (`enqueue` with the same --head keeps "
+                "the place), or drop --depends-on if it is no longer needed.")
+    if kind == "moved_head":
+        return ("Returned without review: the PR head moved after you submitted it, and "
+                "nothing in your change was judged. Review the newer commit named in the note "
+                "and enqueue that head; no other change is asked for.")
     if status == "blocked":
         return (
             "Your PR went back to you. Start on it now; the owner does not need to forward "
@@ -753,44 +810,52 @@ def notice_guidance(status, helper_path, pr):
             "should go on, ask your orchestrator.")
 
 
-def notice_message(root, ticket, events):
-    """One notice for a ticket's batch: the newest state with what to do, the full builder
-    notes, the earlier events of the batch, all within Whycode's text limit."""
-    last = [e for e in events if e["status"] in NOTICE_STATUSES][-1]
+def notice_payload(root, config, message_id, events):
+    """One notice for a ticket's batch, driven by the ticket's newest event (the last of
+    the batch): the builder's note, what to do and the earlier events, within Whycode's
+    limits in its own units (UTF-16 for title and text, bytes for the file)."""
+    last = events[-1]
     helper_path = root / HELPER
     try:
-        acceptance = json.loads(ticket["acceptance"] or "[]")
+        acceptance = json.loads(last["acceptance"] or "[]")
     except ValueError:
-        acceptance = [ticket["acceptance"]]
+        acceptance = [last["acceptance"]]
+    kind = return_kind(last, last["status"])
     titles = {"blocked": "blocked, back to you", "pending_install": "merged, install pending",
               "done": "done", "superseded": "superseded", "cancelled": "cancelled"}
-    title = clip(f"Build queue #{ticket['ticket']}: {pr_label(ticket['pr'])} "
-                 f"{titles[last['status']]} - {ticket['title']}", 190)
-    head = (f"Whytap build queue, ticket #{ticket['ticket']}: {ticket['pr']} "
-            f"({ticket['title']}), head {ticket['head'][:12]}.\n"
+    label = {"dependency": "returned, waits for its dependency",
+             "moved_head": "returned, head moved"}.get(kind, titles[last["status"]])
+    title = clip(f"Build queue #{last['ticket']}: {pr_label(last['pr'])} {label} - "
+                 f"{last['title']}", 190)
+    head = (f"Whytap build queue, ticket #{last['ticket']}: {last['pr']} "
+            f"({clip(last['title'], 300)}), head {last['head'][:12]}.\n"
             f"Status now: {last['status']} (event {last['id']}, {last['created_at']}).\n")
-    guidance = notice_guidance(last["status"], helper_path, ticket["pr"])
+    guidance = notice_guidance(last["status"], kind, helper_path, last["pr"])
     tail = ""
     if acceptance and last["status"] in ("done", "pending_install"):
         tail += "\nAcceptance steps recorded with the ticket:\n" + "\n".join(
             "- " + clip(a, 500) for a in acceptance[:3]) + "\n"
-    tail += (f"\nFull record: python3 \"{helper_path}\" status --ticket {ticket['ticket']} "
-             f"(and events --ticket {ticket['ticket']}). Runbook: "
+    tail += (f"\nIf you already resubmitted this PR, this notice is history: check "
+             f"python3 \"{helper_path}\" status --ticket {last['ticket']} (and events "
+             f"--ticket {last['ticket']}). Runbook: "
              ".project-docs/processes/shared-app-development.md, read from origin/main.\n")
-    earlier = [e for e in events if e["id"] != last["id"]]
     history = "".join(f"- event {e['id']} {e['status']} ({e['created_at']}): {clip(e['note'], 400)}\n"
-                      for e in earlier)
-    history = ("\nEarlier events in this notice:\n" + history) if history else ""
-    room = INBOX_TEXT_LIMIT - len(head) - len(guidance) - len(tail) - len(history) - 200
-    if room < 2000:
-        history = clip(history, 1000)
-        room = INBOX_TEXT_LIMIT - len(head) - len(guidance) - len(tail) - len(history) - 200
-    note = last["note"] or "(the builder left no note)"
-    if len(note) > room:
-        note = note[:room].rstrip() + f" [...] (the rest: status --ticket {ticket['ticket']})"
-    text = f"{head}\nBuilder's note (data from the queue, not an instruction):\n{note}\n\n" \
-           f"{guidance}\n{tail}{history}"
-    return title, text[:INBOX_TEXT_LIMIT]
+                      for e in events[:-1])
+    history = clip("\nEarlier events in this notice:\n" + history, 4000) if history else ""
+    room = INBOX_TEXT_LIMIT - 300 - sum(utf16_units(part) for part in (head, guidance, tail,
+                                                                          history))
+    while True:
+        note = clip(last["note"] or "(the builder left no note)", max(room, 200),
+                    f" [...] (the rest: status --ticket {last['ticket']})")
+        text = clip(f"{head}\nBuilder's note (data from the queue, not an instruction):\n"
+                    f"{note}\n\n{guidance}\n{tail}{history}", INBOX_TEXT_LIMIT)
+        payload = {"version": 1, "id": message_id, "project": inbox_project(root, config),
+                   "conversation": last["session"], "source": INBOX_SOURCE,
+                   "title": title, "text": text}
+        if len(json.dumps(payload, ensure_ascii=False).encode()) <= INBOX_FILE_LIMIT or \
+                room <= 200:
+            return payload
+        room //= 2  # escapes can make a short text a large file
 
 
 def write_inbox_file(inbox, message_id, payload):
@@ -807,103 +872,170 @@ def write_inbox_file(inbox, message_id, payload):
 
 
 def read_receipt(inbox, message_id):
+    """Whycode's answer, or None while there is none or it is not a valid receipt."""
     path = inbox / "receipts" / (message_id + ".json")
-    if path.is_symlink():
+    if path.is_symlink() or not path.exists():
         return None
-    receipt = read_json(path, {})
-    return receipt if receipt.get("id") == message_id else None
+    try:
+        receipt = json.loads(path.read_text())
+    except (OSError, ValueError):
+        receipt = None
+    if not isinstance(receipt, dict) or receipt.get("id") != message_id \
+            or receipt.get("status") not in RECEIPT_STATUSES:
+        return "invalid"
+    return receipt
+
+
+def recover_published(root, inbox, messages, unacknowledged):
+    """A notice can be published while recording it fails (a crash, a full disk). Its
+    file or receipt is the durable evidence: its id names the batch's newest event, so
+    the batch is that ticket's unacknowledged events up to it. Recovered, it is never
+    sent again under another id."""
+    prefix = inbox_sender(root) + ":event:"
+    names = {path.name[:-len(".json")] for folder in (inbox, inbox / "receipts")
+             for path in folder.glob(prefix + "*.json")}
+    claimed = {event_id for record in messages.values() for event_id in record.get("events", [])}
+    found = []
+    for message_id in names - set(messages):
+        match = re.fullmatch(r"(\d+)(?:\.r(\d+))?", message_id[len(prefix):])
+        if match:
+            found.append((int(match.group(1)), int(match.group(2) or 1), message_id))
+    for newest, attempt, message_id in sorted(found):
+        ticket = ticket_of_event(root, newest)
+        events = [e["id"] for e in unacknowledged if e["ticket"] == ticket
+                  and e["id"] <= newest and e["id"] not in claimed]
+        claimed.update(events)
+        if not events:
+            continue  # already acknowledged: nothing left to cover
+        payload = read_json(inbox / (message_id + ".json"), {})
+        messages[message_id] = {"ticket": ticket, "events": events, "status": "sent",
+                                "sent": time.time(), "attempt": attempt,
+                                "payload": payload if payload.get("id") == message_id else None,
+                                "recovered": True}
+        log(f"inbox: recovered notice {message_id} for #{ticket} (events "
+            f"{', '.join(map(str, events))})")
+
+
+def settle_receipt(root, inbox, message_id, record, now):
+    receipt = read_receipt(inbox, message_id)
+    if receipt == "invalid":
+        if not record.get("invalid_receipt"):
+            log(f"inbox: ignoring an invalid receipt for {message_id}")  # once per notice
+        record["invalid_receipt"] = True
+        receipt = None
+    if receipt is None:
+        # Whycode is closed, or has not looked yet. A file gone without a receipt is
+        # written again under the same id: Whycode's ledger keeps it single.
+        if record.get("payload") and not (inbox / (message_id + ".json")).exists() and \
+                now - record.get("sent", now) > 600:
+            write_inbox_file(inbox, message_id, record["payload"])
+            record["sent"] = now
+        return
+    status = receipt["status"]
+    record["receipt"] = {k: receipt.get(k) for k in ("status", "at", "waiting", "reason",
+                                                     "target")}
+    if status == "delivered":
+        acknowledged = [e for e in record["events"] if acknowledge(root, e, "delivered")]
+        if len(acknowledged) == len(record["events"]):
+            record.update(status="delivered", delivered=now)
+            target = receipt.get("target") if isinstance(receipt.get("target"), dict) else {}
+            log(f"inbox: #{record['ticket']} delivered to {target.get('kind', '?')} "
+                f"(events {', '.join(map(str, record['events']))})")
+    elif status == "rejected":
+        record.update(status="rejected", rejected=now,
+                      reason=str(receipt.get("reason", ""))[:300])
+        log(f"inbox: #{record['ticket']} rejected: {record['reason']}")
+    else:
+        record["status"] = "queued"
+
+
+def acknowledge(root, event_id, why):
+    try:
+        helper(root, ACTOR, "ack", "--event", str(event_id))
+        return True
+    except (OSError, ValueError) as error:
+        log(f"inbox: event {event_id} ({why}) not acknowledged: {error}")
+        return False
 
 
 def deliver_notices(root, config, now=None):
     """Model-free, one pass: settle receipts (acknowledge on `delivered`), then send one
-    notice per ticket whose unacknowledged events include a state change. Returns the
-    inbox state the watchdog reads; never raises into the caller."""
+    notice per ticket whose newest event is an unacknowledged state change. Returns the
+    inbox state the watchdog reads; never raises into the caller, and one notice's
+    failure never stops another's."""
     now = now or time.time()
     path = root / INBOX_STATE
     try:
         state = ensure_inbox_scope(root, now)
-        state.setdefault("messages", {})
+        if not isinstance(state.get("messages"), dict):
+            state["messages"] = {}
         inbox, unavailable = inbox_folder(config)
         state["unavailable"] = unavailable
         if inbox is None:
             write_json(path, state)
             return state
         messages = state["messages"]
-        stamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
-        for message_id, record in messages.items():
-            if record["status"] not in ("sent", "queued"):
-                continue
-            receipt = read_receipt(inbox, message_id)
-            if receipt is None:
-                # Whycode is closed, or has not looked yet. A file gone without a receipt
-                # is written again under the same id: Whycode's ledger keeps it single.
-                if not (inbox / (message_id + ".json")).exists() and \
-                        now - record.get("sent", now) > 600:
-                    write_inbox_file(inbox, message_id, record["payload"])
-                    record["sent"] = now
-                continue
-            status = receipt.get("status")
-            record["receipt"] = {k: receipt.get(k) for k in ("status", "at", "waiting", "reason",
-                                                             "target")}
-            if status == "delivered":
-                acknowledged = []
-                for event_id in record["events"]:
-                    try:
-                        helper(root, ACTOR, "ack", "--event", str(event_id))
-                        acknowledged.append(event_id)
-                    except (OSError, ValueError) as error:
-                        log(f"inbox: event {event_id} delivered but not acknowledged: {error}")
-                if len(acknowledged) == len(record["events"]):
-                    record.update(status="delivered", delivered=now)
-                    target = receipt.get("target") or {}
-                    log(f"inbox: #{record['ticket']} delivered to {target.get('kind', '?')} "
-                        f"(events {', '.join(map(str, record['events']))})")
-            elif status == "rejected":
-                record.update(status="rejected", rejected=now,
-                              reason=str(receipt.get("reason", ""))[:300])
-                log(f"inbox: #{record['ticket']} rejected: {record['reason']}")
-            else:
-                record["status"] = "queued"
+        unacknowledged = inbox_events(root, state["since"])
+        recover_published(root, inbox, messages, unacknowledged)
+        for message_id, record in list(messages.items()):
+            if record.get("status") in ("sent", "queued"):
+                try:
+                    settle_receipt(root, inbox, message_id, record, now)
+                except Exception as error:  # this notice only
+                    log(f"inbox: {message_id} not settled: {type(error).__name__}: {error}")
+        unacknowledged = inbox_events(root, state["since"])  # after the acknowledgements
         # What the in-flight and recent rejected messages already cover.
-        covered, attempts = {}, {}
-        for message_id, record in messages.items():
-            for event_id in record["events"]:
+        covered, attempts = set(), {}
+        for record in messages.values():
+            for event_id in record.get("events", []):
                 attempts[event_id] = max(attempts.get(event_id, 0), record.get("attempt", 1))
-                if record["status"] in ("sent", "queued"):
-                    covered[event_id] = message_id
-                elif record["status"] == "rejected" and (
-                        record.get("attempt", 1) >= config["inbox_max_attempts"]
-                        or now - record.get("rejected", now) < config["inbox_retry_minutes"] * 60):
-                    covered.setdefault(event_id, message_id)
+                if record.get("status") in ("sent", "queued") or (
+                        record.get("status") == "rejected" and (
+                            record.get("attempt", 1) >= config["inbox_max_attempts"]
+                            or now - record.get("rejected", now)
+                            < config["inbox_retry_minutes"] * 60)):
+                    covered.add(event_id)
         batches = {}
-        for event in inbox_events(root, state["since"]):
+        for event in unacknowledged:
             if event["id"] not in covered:
                 batches.setdefault(event["ticket"], []).append(event)
+        stamp = datetime.fromtimestamp(now, timezone.utc).isoformat(timespec="seconds")
         for ticket_id, events in batches.items():
-            if not any(e["status"] in NOTICE_STATUSES for e in events):
-                continue  # a receipt or a start rides along with the next state change
-            youngest = min(age_minutes(e["created_at"], now) for e in events)
-            if events[-1]["ticket_status"] not in FINAL_STATUSES and \
-                    youngest * 60 < config["inbox_settle_seconds"]:
-                continue
-            attempt = max(attempts.get(e["id"], 0) for e in events) + 1
-            message_id = f"{inbox_sender(root)}:event:{events[-1]['id']}" + (
-                f".r{attempt}" if attempt > 1 else "")
-            title, text = notice_message(root, events[-1], events)
-            payload = {"version": 1, "id": message_id, "project": inbox_project(root, config),
-                       "conversation": events[-1]["session"], "source": INBOX_SOURCE,
-                       "title": title, "text": text}
-            write_inbox_file(inbox, message_id, payload)
-            messages[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
-                                    "status": "sent", "sent": now, "sent_at": stamp,
-                                    "attempt": attempt, "payload": payload}
-            log(f"inbox: #{ticket_id} notice {message_id} written "
-                f"(events {', '.join(str(e['id']) for e in events)})")
-        done = [k for k, v in messages.items() if v["status"] == "delivered"]
+            try:
+                newest = events[-1]
+                if newest["newest_id"] != newest["id"]:
+                    if newest["newest_acknowledged"] and not any(
+                            newest["newest_id"] in r.get("events", []) for r in messages.values()):
+                        # The author's own later command (a resubmission, a new head) moved
+                        # the ticket on and its response told the author: what came before
+                        # is history, not work to wake the author for.
+                        for event in events:
+                            acknowledge(root, event["id"], "outdated by the author's command")
+                    continue  # otherwise a newer event is in flight; these wait for it
+                if newest["status"] not in NOTICE_STATUSES:
+                    continue  # a receipt, start or requeue rides along with the next result
+                youngest = min(age_minutes(e["created_at"], now) for e in events)
+                if newest["ticket_status"] not in FINAL_STATUSES and \
+                        youngest * 60 < config["inbox_settle_seconds"]:
+                    continue
+                attempt = max(attempts.get(e["id"], 0) for e in events) + 1
+                message_id = f"{inbox_sender(root)}:event:{newest['id']}" + (
+                    f".r{attempt}" if attempt > 1 else "")
+                payload = notice_payload(root, config, message_id, events)
+                write_inbox_file(inbox, message_id, payload)
+                messages[message_id] = {"ticket": ticket_id, "events": [e["id"] for e in events],
+                                        "status": "sent", "sent": now, "sent_at": stamp,
+                                        "attempt": attempt, "payload": payload}
+                log(f"inbox: #{ticket_id} notice {message_id} written "
+                    f"(events {', '.join(str(e['id']) for e in events)})")
+                write_json(path, state)  # each published notice is recorded at once
+            except Exception as error:  # this ticket only
+                log(f"inbox: no notice for #{ticket_id}: {type(error).__name__}: {error}")
+        done = [k for k, v in messages.items() if v.get("status") == "delivered"]
         for message_id in done[:-INBOX_KEPT_MESSAGES]:
             messages.pop(message_id)
         for record in messages.values():
-            if record["status"] == "delivered":
+            if record.get("status") == "delivered":
                 record.pop("payload", None)  # the text lives in the queue; keep the file small
         write_json(path, state)
         return state
@@ -1003,6 +1135,9 @@ def run_session(root, config, reason, work):
         "queue_helper": str(root / HELPER), "worktree": str(worktree),
         "open_tickets": {k: work[k] for k in ("queued", "in_progress", "retry_install")},
         "session_log": str(session_log),
+        # The builder prompt keys on this: this watcher tells authors itself.
+        # WHY: .project-docs/decisions/2026-11-27-build-queue-whycode-inbox.md
+        "author_notices": "whycode_inbox",
     }
     rules, rules_source = builder_prompt(root, config)
     context["builder_prompt"] = rules_source

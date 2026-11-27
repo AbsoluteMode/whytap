@@ -12,16 +12,18 @@ new account system, hosted service or second copy of the user's knowledge.
 | Meeting notes and checkpoints | `Meetings/MeetingsStore.swift`, `Meetings/MeetingFinalizeManifest.swift` | `Application Support/Sidekey/Meetings/`; staged audio only while recording and processing (24 h after a failure), durable processing state |
 | Case snippets | `Case/CaseVaultStore.swift` | AES-GCM encrypted file under `Application Support/<bundle ID>/`, Keychain encryption key, backup before save |
 | Case vault and AI broker | `Case/CaseVaultStore.swift`, `Case/Broker/` | Schema 3 (projects with descriptions, secrets with `projectID`, app registrations with Accept/Bypass and project scope) in the same encrypted file; v1 and v2 migrate losslessly and an older build reports `needsNewerApp`. The broker listens on a Unix socket `case-broker.sock` (fallback `cb.sock`) in `Application Support/<bundle ID>/` (directory 0700, socket 0600); the decrypted payload stays in memory for it until quit. Values reach a command only through its environment |
-| Agent memory and sessions | `AgentDaemon/AgentDaemonWorkingDirectory.swift`, `AgentDaemon/AgentSessionStore.swift` | `Application Support/whytap/agent/` with AGENTS.md, sessions.json and bounded native-conversation.json; old OpenCode data remains unused |
+| Agent memory and sessions | `AgentDaemon/AgentDaemonWorkingDirectory.swift`, `AgentDaemon/AgentSessionStore.swift` | `Application Support/whytap/agent/` with AGENTS.md (plus its `CLAUDE.md` alias) and sessions.json (Claude Code and Codex session IDs); the earlier built-in agent's native-conversation.json and old OpenCode data remain unused |
 
 Paths in the code column start at `Sources/Sidekey/`. Application Support is the
 current macOS user's directory. Whytap retains the historical `Sidekey`, `whytap`
 and `Whytap` store names to preserve existing keys, notes and memory. Do not
 rename them without an explicit migration and recovery path.
 
-The app's native agent calls the selected OpenRouter, OpenAI or Anthropic model directly; web search uses that provider's own search tool, or Tavily with its own Keychain key. Actions are
-enabled by default so implementation and review can edit files and run tests;
-the user may disable them in Settings. The dedicated neutral workspace is not a filesystem sandbox. Source customization can use any coding harness.
+The app's Agent runs the user's own Claude Code or Codex with that tool's
+sign-in and settings; Whytap stores no key for it. Actions are enabled by
+default so implementation and review can edit files and run tests; the user
+may disable them in Settings, which maps to the tool's own permission flags.
+The dedicated neutral workspace is not a filesystem sandbox. Source customization can use any coding harness.
 
 Tests should inject temporary directories, UserDefaults suites, fake credentials
 and provider adapters. They must not need the user's API keys, SSH connections,

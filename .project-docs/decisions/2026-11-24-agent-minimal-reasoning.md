@@ -3,7 +3,7 @@ id: agent-minimal-reasoning-2026-11-24
 type: decision
 title: The built-in Agent asks for the least reasoning its model accepts
 summary: The built-in Agent sends the lowest reasoning setting its model takes, from the tables Drop Smart uses - OpenAI none, minimal or low; Anthropic low effort with thinking off on Claude Haiku 5.5 and Claude Sonnet 5 and between_tools on Claude Sonnet 5.5; OpenRouter off or the lowest level of its catalog entry. In a turn with the provider's own web search OpenAI minimal becomes low (Claude Sonnet 5.5 kept its own thinking there until 2026-11-26, see 2026-11-26-agent-fast-search-answers.md). Any HTTP 400 on the turn's first request that carried a reasoning field is repeated once at OpenAI low or without the field, as in Smart; the error text is not read.
-status: confirmed
+status: stale
 tags: [agent, native-agent, anthropic, openai, openrouter, effort, reasoning, latency, diagnostics]
 canonical_for: [agent-reasoning]
 verified_at: 2026-11-24
@@ -20,16 +20,18 @@ sources:
   - type: url
     reference: https://developers.openai.com/api/docs/guides/reasoning
     confirmed_at: 2026-11-24
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentEffort.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentEffort.swift
     confirmed_at: 2026-11-24
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentMinimalReasoningTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentMinimalReasoningTests.swift
     confirmed_at: 2026-11-24
-related: [2026-11-23-agent-low-effort.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-26-agent-fast-search-answers.md]
+related: [2026-11-23-agent-low-effort.md, 2026-11-24-smart-minimal-reasoning.md, 2026-11-26-agent-fast-search-answers.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # The built-in Agent asks for the least reasoning
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in agent was removed; the Agent's reasoning is chosen in Models → Harness from the CLI's own list. Drop Smart keeps its own minimal-reasoning record.
 
 ## Context
 

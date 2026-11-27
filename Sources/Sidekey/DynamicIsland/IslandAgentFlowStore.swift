@@ -133,7 +133,7 @@ final class IslandAgentFlowStore: ObservableObject {
     private let responseStore: AskResponseStore
     private let dropProviderBrand: @MainActor () -> TranscriptionProviderBrand?
     private let dropCleanupBrand: @MainActor () -> TranscriptionProviderBrand?
-    /// Model-author mark for the native agent (legacy CLI mark otherwise), shown in the
+    /// The harness mark (Claude Code or Codex), shown in the
     /// breathing provider logo during AGENT voice (Right Cmd hold). Injected so
     /// tests can supply a fake active provider; the default reads the shared
     /// `AgentProviderStore`. Returns nil when no CLI is connected.
@@ -370,7 +370,7 @@ final class IslandAgentFlowStore: ObservableObject {
         case .voiceRecording:
             // Breathing provider logo resolves by recording SOURCE: Google
             // search (R-Option hold) shows the Google mark; otherwise the
-            // native agent's selected model author (R-Cmd hold). The Google
+            // Agent's harness mark (R-Cmd hold). The Google
             // flag is set AFTER the phase change and re-runs `recompute()` via
             // `setActiveSourceIsGoogle`, so this branch re-resolves to `.google`
             // once the flag flips. `agentProviderBrand()` is nil when no agent is connected.

@@ -23,7 +23,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AgentDaemon/AgentHarnessIntegrationTests.swift
     confirmed_at: 2026-11-27
-related: [2026-10-22-native-agent.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-27-subtitle-engine-choice.md]
+related: [2026-10-22-native-agent.md, 2026-11-20-harness-access.md, 2026-11-21-one-whytap-mcp-server.md, 2026-11-27-subtitle-engine-choice.md, 2026-11-22-agent-provider-web-search.md, 2026-11-26-agent-sources.md, 2026-11-27-agent-sources-gated.md, 2026-11-24-agent-minimal-reasoning.md, 2026-11-23-agent-low-effort.md, 2026-11-26-agent-fast-search-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-20-agent-command-utf8-locale.md, ../project.md, 2026-10-19-api-hints.md, 2026-11-21-first-launch-onboarding.md, 2026-11-21-free-api-report.md, 2026-11-22-onboarding-journey.md, 2026-11-26-test-suite-speed.md, 2026-11-27-settings-models-recompute-while-hidden.md, 2026-11-27-compact-key-tiles.md]
 ---
 
 # The Agent runs on the user's own Claude Code or Codex
@@ -208,5 +208,20 @@ Not measured: answer latency against the native agent.
    model step uses the shared LLM row's features instead of the Agent route.
    Same PR, owner request: Subtitles engine choice
    (2026-11-27-subtitle-engine-choice.md).
+3. Deletion (third PR): the built-in agent is gone, not hidden: its model
+   loop, tools, finish_answer schema, plain-text card fallback, provider web
+   search and Tavily (API keys tile, onboarding step, hints, backup entry,
+   README card and its four images, the bundled mark), connected Sources and
+   their settings, per-turn agent cost metering, the OpenCode leftovers
+   (installer, config, built-in Case client in the picker), the dead
+   Agents-tab setup views, the model-author artwork downloader and the
+   catalog's web-search flag. Stored data is not touched: the Tavily Keychain
+   item, `agent.native.*` and `agent.opencode.*` values, the `.agent` route,
+   native-conversation.json, OpenCode runtime files and a saved built-in
+   Case registration stay readable for a rollback build; Whytap no longer
+   reads the Tavily key or backs it up. Answer cards come from the
+   `useful.actions` fence the prompt asks for. The decisions that defined the
+   removed behavior are marked stale with a pointer here; records that only
+   mentioned Tavily carry a "superseded 2026-11-27" note.
 
 2026-11-27 · task 106

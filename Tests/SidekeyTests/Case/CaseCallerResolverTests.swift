@@ -158,7 +158,9 @@ final class CaseCallerResolverTests: XCTestCase {
         XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
-    func test_builtin_opencode_pid_matches() {
+    /// The earlier in-app agent no longer runs: a stored registration for it
+    /// never matches, even for a process that looks like its old OpenCode.
+    func test_builtin_opencode_registration_never_matches() {
         let fake = FakeProcessInspector()
         fake.add(900, parent: 800, helper)
         fake.add(800, parent: 700, "/bin/sh")
@@ -166,7 +168,7 @@ final class CaseCallerResolverTests: XCTestCase {
         fake.add(600, parent: 1, "/Applications/Whytap.app/Contents/MacOS/Sidekey")
         let reg = registration("Whytap agent", .builtInOpenCode)
         let resolver = CaseCallerResolver(inspector: fake, registrations: [reg])
-        XCTAssertEqual(resolver.resolve(peerPID: 900), .registered(reg))
+        XCTAssertEqual(resolver.resolve(peerPID: 900), .human)
     }
 
     // MARK: Spoofing and nesting

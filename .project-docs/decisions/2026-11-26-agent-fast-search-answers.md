@@ -3,7 +3,7 @@ id: agent-fast-search-answers-2026-11-26
 type: decision
 title: A simple question with a web search is answered fast by the built-in Agent
 summary: Claude Sonnet 5.5 gets thinking between_tools also beside Anthropic's web search (its own default thinking held the first byte about 9 s); several finish_answer calls alone give the first valid one; Claude citation tags are removed from answers; a simple factual question is answered in 1-3 sentences; direct Anthropic requests after a turn's first mark the tools and instructions for the prompt cache.
-status: confirmed
+status: stale
 tags: [agent, native-agent, anthropic, web-search, latency, reasoning, prompt-cache]
 canonical_for: [agent-search-latency]
 verified_at: 2026-11-26
@@ -14,16 +14,18 @@ sources:
   - type: url
     reference: https://platform.claude.com/docs/en/build-with-claude/prompt-caching
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentModel.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentModel.swift
     confirmed_at: 2026-11-26
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentMinimalReasoningTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentMinimalReasoningTests.swift
     confirmed_at: 2026-11-26
-related: [2026-11-24-agent-minimal-reasoning.md]
+related: [2026-11-24-agent-minimal-reasoning.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # A simple question with a web search is answered fast
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in agent and its web search were removed.
 
 ## Context
 

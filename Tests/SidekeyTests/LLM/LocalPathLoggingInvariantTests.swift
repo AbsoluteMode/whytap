@@ -23,7 +23,6 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
         "Sources/Sidekey/Streaming/BYOK/ProviderBatchTranscriber.swift",
         "Sources/Sidekey/AIRouting/ProviderKeyChecker.swift",
         "Sources/Sidekey/AIRouting/ModelProbe.swift",
-        "Sources/Sidekey/AgentDaemon/NativeAgentDiagnostics.swift",
         "Sources/Sidekey/AgentDaemon/ClaudeCodeProvider.swift",
         "Sources/Sidekey/AgentDaemon/CodexProvider.swift",
         "Sources/Sidekey/AgentDaemon/ClaudeModelCatalogReader.swift",
@@ -52,21 +51,6 @@ final class LocalPathLoggingInvariantTests: XCTestCase {
                 XCTAssertFalse(source.contains(call), "\(relativePath): \(call) bypasses CleanupDiagnostics")
             }
             XCTAssertTrue(source.contains("diagnostics(") , "\(relativePath): expected a CleanupDiagnostics line")
-        }
-    }
-
-    /// Agent sources carry tool results, arguments and secrets: that code
-    /// writes nothing to the log at all. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
-    func test_agentSourcesNeverLog() throws {
-        let files = ["MCPValue", "MCPError", "MCPProcess", "MCPTransport", "MCPClient", "SourceModel",
-                     "SourceToolClassifier", "MiniTOML", "MCPConfigImporter", "FolderSource", "SourcePresets",
-                     "SourcesController"].map { "Sources/Sidekey/Assistant/Connections/\($0).swift" }
-            + ["Sources/Sidekey/AgentDaemon/NativeAgentSources.swift"]
-        for relativePath in files {
-            let source = try readProjectFile(relativePath)
-            for call in ["os_log(", "Logger(", "NSLog(", "print(", "OSLog(", "debugPrint("] {
-                XCTAssertFalse(source.contains(call), "\(relativePath): \(call)")
-            }
         }
     }
 

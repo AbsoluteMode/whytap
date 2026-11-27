@@ -3,7 +3,7 @@ id: agent-provider-web-search-2026-11-22
 type: decision
 title: The native Agent searches with its model provider's own web search; Tavily is the fallback
 summary: On Anthropic, OpenAI and OpenRouter routes the Agent searches with the provider's server-side web search tool by default; a Search row in API & Models → Models shows and picks the search (built-in or Tavily), Tavily serves models without built-in search, and with neither the Agent answers in one line how to turn search on. Fallback to Tavily needs positive evidence; the search budget is per turn.
-status: confirmed
+status: stale
 tags: [agent, native-agent, web-search, tavily, anthropic, openai, openrouter, costs]
 canonical_for: [agent-web-search]
 verified_at: 2026-11-22
@@ -23,16 +23,18 @@ sources:
   - type: url
     reference: https://openrouter.ai/docs/guides/features/server-tools/web-search
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentWebSearch.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentWebSearch.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentWebSearchTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentWebSearchTests.swift
     confirmed_at: 2026-11-22
-related: [2026-10-22-native-agent.md, 2026-10-27-anthropic-token-costs.md, 2026-11-21-free-api-report.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-23-agent-low-effort.md]
+related: [2026-10-22-native-agent.md, 2026-10-27-anthropic-token-costs.md, 2026-11-21-free-api-report.md, 2026-11-22-openai-agent-probe-responses.md, 2026-11-23-agent-low-effort.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # The Agent searches with its model provider
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): Tavily removed; the built-in agent and its provider web search were removed. Web search, if any, is the user's own Claude Code or Codex's.
 
 ## Context
 

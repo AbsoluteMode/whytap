@@ -17,8 +17,8 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AIRouting/ModelProbe.swift
     confirmed_at: 2026-11-22
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentOpenAITests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentOpenAITests.swift
     confirmed_at: 2026-11-22
 related: [2026-11-22-agent-provider-web-search.md, 2026-11-22-shared-model-rows.md, 2026-10-19-api-and-models.md, 2026-11-23-agent-low-effort.md]
 ---

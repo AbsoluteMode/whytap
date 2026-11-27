@@ -3,7 +3,7 @@ id: native-agent-2026-10-22
 type: decision
 title: Native Whytap agent with Tavily search and a dedicated workspace
 summary: Replace OpenCode dispatch with a bounded direct model/tool loop, preserve selected routes and memory, and configure Tavily independently.
-status: confirmed
+status: stale
 tags: [agent, native, tavily, search, workspace, context, actions, privacy]
 canonical_for: [agent-runtime, agent-workspace]
 verified_at: 2026-10-28
@@ -11,11 +11,11 @@ sources:
   - type: user-confirmed
     reference: On 2026-10-28 the user approved structured Agent completion with a required answer, separate source cards, explicit uncertainty and application validation after a source-only response.
     confirmed_at: 2026-10-28
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentFinalAnswer.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentFinalAnswer.swift
     confirmed_at: 2026-10-28
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentFinalAnswerTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentFinalAnswerTests.swift
     confirmed_at: 2026-10-28
   - type: user-confirmed
     reference: On 2026-10-27 the user reported that greetings succeed but tool-using requests fail and explicitly requested diagnostic logs. The repeat was on installed 1601, before the canonical-continuation fix was promoted.
@@ -29,8 +29,8 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Agent/AgentControllerHistoryTests.swift
     confirmed_at: 2026-10-27
-  - type: repository
-    reference: Tests/SidekeyTests/AgentDaemon/NativeAgentTests.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Tests/SidekeyTests/AgentDaemon/NativeAgentTests.swift
     confirmed_at: 2026-10-27
   - type: user-confirmed
     reference: On 2026-10-26 the user approved removing the card-description language sentence from the native system prompt after replica runs showed Russian/German descriptions for English requests.
@@ -50,8 +50,8 @@ sources:
   - type: repository
     reference: Sources/Sidekey/AgentDaemon/AgentModelBrand.swift
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/AgentModelIconStore.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/AgentModelIconStore.swift
     confirmed_at: 2026-10-22
   - type: user-confirmed
     reference: On 2026-10-22 the user corrected the Tavily setup location; all API keys belong in API & Models rather than Agents. Keep the existing credential while moving the form.
@@ -59,22 +59,24 @@ sources:
   - type: user-confirmed
     reference: On 2026-10-22 the user authorized a lightweight custom agent instead of OpenCode, Tavily search, fast initialization and a dedicated workspace; approve and bypass modes are a later phase. They selected the Whytap data folder separately from source code.
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentProvider.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentProvider.swift
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentModel.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentModel.swift
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/NativeAgentTools.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/NativeAgentTools.swift
     confirmed_at: 2026-10-22
-  - type: repository
-    reference: Sources/Sidekey/AgentDaemon/TavilySearch.swift
+  - type: commit
+    reference: 6bc1cd8a2cf73736c77492a800309246f552092f:Sources/Sidekey/AgentDaemon/TavilySearch.swift
     confirmed_at: 2026-10-22
 related: [../project.md, 2026-10-22-agent-answers-and-screen.md, 2026-11-20-agent-command-utf8-locale.md, 2026-11-21-structured-agent-answers.md, 2026-11-22-native-agent-app-control.md, 2026-11-22-agent-provider-web-search.md, 2026-11-23-agent-low-effort.md, 2026-11-26-agent-sources.md, 2026-11-27-agent-harness-cli.md]
 ---
 
 # Decision
+
+Historical decision: superseded on 2026-11-27 by [the agent harness](2026-11-27-agent-harness-cli.md): the built-in model loop, its tools and native conversation were removed; Right Command runs the user's Claude Code or Codex.
 
 ## Structured completion
 

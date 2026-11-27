@@ -51,28 +51,6 @@ final class CloudRemovalTests: XCTestCase {
         XCTAssertEqual(BuildConfig.landingURL.host, "github.com")
     }
 
-    /// Agent sources reach only servers the user configured. The only
-    /// addresses in that code are GitHub's MCP server and the token pages the
-    /// GitHub and Jira tiles open. WHY: .project-docs/decisions/2026-11-26-agent-sources.md
-    func testAgentSourcesContainNoOtherHosts() throws {
-        let allowed: Set<String> = ["api.githubcopilot.com", "github.com", "id.atlassian.com", "docs.github.com",
-                                    "your-team.atlassian.net", "example.com"]
-        let expression = try NSRegularExpression(pattern: #"https?://([A-Za-z0-9.-]+)"#)
-        let files = try appSourceFiles().filter {
-            $0.path.contains("/Assistant/") || $0.lastPathComponent == "NativeAgentSources.swift"
-                || $0.lastPathComponent == "AddSourceSheet.swift" || $0.lastPathComponent == "AgentSourcesSettings.swift"
-        }
-        XCTAssertFalse(files.isEmpty)
-        for url in files {
-            let source = try String(contentsOf: url, encoding: .utf8)
-            for match in expression.matches(in: source, range: NSRange(source.startIndex..., in: source)) {
-                let host = (source as NSString).substring(with: match.range(at: 1))
-                XCTAssertTrue(allowed.contains(host) || host == "localhost" || host == "127.0.0.1",
-                              "\(url.lastPathComponent): \(host)")
-            }
-        }
-    }
-
     /// Every `.swift` file under `Sources/` (all targets), not just the app
     /// library, so the preview executable cannot drift either.
     private func appSourceFiles() throws -> [URL] {

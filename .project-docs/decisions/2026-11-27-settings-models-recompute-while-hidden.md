@@ -17,10 +17,12 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Settings/SettingsWindowController.swift
     confirmed_at: 2026-11-27
-related: []
+related: [2026-11-27-agent-harness-cli.md]
 ---
 
 # The Settings Models model does not recompute while Settings is closed
+
+> Superseded 2026-11-27: Tavily removed; a Tavily key change no longer refreshes Keys & models. See [the agent harness](2026-11-27-agent-harness-cli.md).
 
 ## Context
 

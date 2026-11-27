@@ -38,7 +38,6 @@ final class APIAndModelsRenderTests: XCTestCase {
         }
     }
 
-    /// The Search row under Speech and LLM: built-in, Tavily and Off.
     /// Models with the Harness row: a Mac that has to choose one (closed and
     /// open), Claude Code ready, and Codex with Fast mode.
     func test_render_harness_row() async throws {

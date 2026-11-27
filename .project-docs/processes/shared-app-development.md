@@ -71,7 +71,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-builder-never-reviews.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-preview-before-validation.md, ../decisions/2026-11-26-release-batches.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-builder-never-reviews.md]
 ---
 
 # Parallel development, one working Whytap
@@ -314,6 +314,61 @@ The session runs unattended with the engine's approval prompts disabled,
 because it must merge, package and replace the app; its authority is this
 process and the builder prompt, never queue contents.
 
+### Preview lane and release batches
+
+On 2026-11-26 the owner set the order: he checks the feature itself in his
+running app first; the full suite and the merge follow the owner's
+approval, once for everything approved (see the
+[preview decision](../decisions/2026-11-26-preview-before-validation.md) and
+the [release batches decision](../decisions/2026-11-26-release-batches.md)).
+The maintainer enables it with `activate --preview-lane --orchestrator <id>
+--orchestrator-token-file <path>` from clean main with no session running;
+until then `--preview` submissions go through normal validation.
+
+**Policy by lane and stage** (the single policy; the builder prompt and the
+preview prompt follow it):
+
+| Lane, stage | Checks before the suite | Full suite | Merge | Install |
+|---|---|---|---|---|
+| Normal (`enqueue` without `--preview`) | per PR: documentation checks, build, `swift test --filter` | per PR candidate | per PR | grouped, at most four runtime PRs |
+| Preview (`--preview`, admitted) | build and safety checks only | none; the worker's targeted tests | none | main + train + this PR, safety checks, admission of the whole composition, handoff gate |
+| Release batch (approved previews) | documentation checks, build | one on the batch, failures bisected by failing tests | member by member, each merge a checkpoint (`pending_install --install-first`) | one, main + remaining train |
+
+No lane or stage has a builder code review: the only review is the
+orchestrator's one inquisition on the release candidate before a public
+release ("The builder never reviews").
+
+Every install, in either lane, uses the local arm64 build, records its
+composition in the app (`ExodiaBuildComposition`), checks signature,
+identity, designated requirement, a higher build than the installed app and
+the native `--installation-check`, takes `whytap-app.lock`, passes
+`preview-handoff` right before a normal Quit allowed by a fresh meeting gate,
+and keeps a signed rollback bundle. Protected-data tests skipped behind a
+locked screen run on main before any install.
+
+A worker submits a reviewed head with `enqueue ... --preview` after its branch
+build and targeted tests. Only a PR whose every changed input is of a
+preview-safe kind (regular files: Swift sources and tests, Markdown, images
+whose bytes match their type, text resources) and whose changed Swift files
+name no state gateway, file, process or run-time loading API anywhere is
+previewed; a PR that builds on another open PR is not. Everything else goes
+to normal validation, and its author is told why. The installed app itself is
+the record of what the owner sees: the queue compares it with the train to
+decide a rebuild, refuses `awaiting_approval` unless the app carries the train
+plus that preview, and binds every decision to the app's current build.
+
+The owner's decisions come only from the configured orchestrator, never the
+builder, which proves itself with its private file. The commands are `approve --ticket <id> --head <sha> --build <n> --by
+"<owner's words>" --note <context>` and `reject --ticket <id> --head <sha>
+--build <n> --note "<what to change>"`. A fix is enqueued again with
+`--preview` and keeps the preview's place. `release --by "<owner's words>"`,
+or the watcher's count trigger when `release_after_approved` is set, starts
+one release batch. The receipt shows previews only under **Preview, not
+merged**. The watchdog raises `ready_to_check:<ticket>` for each preview
+awaiting the owner. Activation and deactivation refuse while a preview or a
+batch is unfinished or the app lock is held; deactivation also switches the
+preview lane off, and queued previews go to normal validation.
+
 A worker uses the shared helper even from a worktree that predates this change:
 
 ```bash
@@ -403,7 +458,11 @@ empty or already on `origin/main`, runs the full suite and merges. A
 `reject` cancels the preview ticket and the next install leaves the PR out.
 A new head without an `ok` is a new preview and supersedes the earlier one.
 Builder tooling and documentation-only PRs have nothing to preview: their
-own tests and documentation checks, then the merge.
+own tests and documentation checks, then the merge. Once the maintainer
+enables the preview lane ("Preview lane and release batches" below), previews
+use `enqueue --preview`, the orchestrator's `approve`/`reject` and release
+batches instead of `PREVIEW AWAITING OWNER` tickets and
+`whytap-owner-decisions.txt`; this manual rule applies until then.
 
 **One inquisition per release.** The orchestrator, not the builder, owns
 review: approved features accumulate on main; when the orchestrator decides
@@ -592,15 +651,17 @@ Under the lock:
    build and pass both sides' tests. The builder does not review the diff.
 2. Resolve dependencies before final validation. For runtime changes,
    run the required local build/tests, including the integrated full suite, on
-   the final candidate. Documentation-only changes use documentation checks.
+   the final candidate: one PR in the normal lane, the whole batch in a
+   release batch (see "Policy by lane and stage"). Documentation-only changes use documentation checks.
    Keep GitHub Actions disabled. Do not repeat broad checks without a change,
    failure or concrete remaining risk.
 3. Merge through the repository's PR workflow, checking the exact submitted
    head SHA and base. If either moves, reconcile and validate the affected result.
    Fetch and verify the merged source/tree before packaging. Do not force-push
    shared main or bypass the release gates.
-4. Group the install, never the tests: each PR is still checked,
-   tested and merged alone. The helper marks each ticket `runtime` at
+4. In the normal lane, group the install, never the tests: each
+   PR is still checked, tested and merged alone (a release batch is tested
+   as one composition, see "Policy by lane and stage"). The helper marks each ticket `runtime` at
    submission (any changed path outside documentation, tests, `.github/` and
    the queue's own scripts). After merging a runtime PR, count the merged
    runtime tickets waiting for an automatic install, including this one. While

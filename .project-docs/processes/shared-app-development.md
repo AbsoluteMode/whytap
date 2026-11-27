@@ -393,7 +393,7 @@ the builder turn below
    verified install set the ticket `blocked` with a note that starts
    `PREVIEW AWAITING OWNER` and names the installed build, the main base and
    each member PR with its exact head, list them under **Preview, not
-   merged** in `build/CURRENT_BUILD.md`, and message the author with the
+   merged** in the build receipt, and message the author with the
    acceptance steps for the owner. This `blocked` is not a finding. A train
    member that no longer merges cleanly is left out and its author is told.
 2. **Owner decisions.** The orchestrator appends each decision of the owner

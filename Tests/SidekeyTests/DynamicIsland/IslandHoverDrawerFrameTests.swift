@@ -134,6 +134,60 @@ final class IslandHoverDrawerFrameTests: XCTestCase {
     func testATileJustPastTheGlassBelowIsRemoved() throws { try throwOut(.below) }
     func testATileJustPastTheGlassAboveTowardTheNotchIsRemoved() throws { try throwOut(.above) }
 
+    /// A top-row tile grabbed near its top edge and dragged to the screen's
+    /// top (here the window's top) is thrown out; just above the glass it is
+    /// not.
+    func testATileGrabbedNearItsTopIsRemovedAtTheScreensTop() throws {
+        let glass = try XCTUnwrap(bridge.drawerFrame(in: window))
+        let tile = tileFrame(.notes)
+        let press = CGPoint(x: tile.midX, y: tile.maxY - 2)
+        let top = window.frame.height
+        XCTAssertGreaterThan(top, glass.maxY)
+        XCTAssertTrue(bridge.mouseDown(at: press, in: window, allowed: true))
+        bridge.mouseDragged(at: CGPoint(x: press.x + 6, y: press.y), in: window, allowed: true)
+        XCTAssertEqual(bridge.reorderingTool, .notes)
+        bridge.mouseDragged(at: CGPoint(x: press.x, y: glass.maxY + 4), in: window, allowed: true)
+        XCTAssertFalse(bridge.motion.outside, "Just above the glass the picture is still over it")
+        bridge.mouseDragged(at: CGPoint(x: press.x, y: top), in: window, allowed: true)
+        XCTAssertTrue(bridge.motion.outside, "At the screen's top the whole picture has left the glass")
+        bridge.mouseUp(at: CGPoint(x: press.x, y: top), in: window, allowed: true)
+        XCTAssertFalse(store.slots.contains(.notes))
+    }
+
+    /// With 13+ tools the grid scrolls. A tile cut by the viewport is still
+    /// lifted with its whole frame, the picture the layer draws, so its
+    /// removal is judged on the whole tile and not on the visible sliver.
+    func testAPartlyScrolledTileIsLiftedWithItsWholeFrame() throws {
+        let many = HoverTool.allCases.filter { IslandHoverReorder.canLift($0, slots: HoverTool.allCases) }
+        try XCTSkipIf(many.count < 14, "needs 14 liftable tools")
+        store.replaceEditableSlots(with: Array(many.prefix(14)))
+        settle(0.6)
+        let scroll = try XCTUnwrap(Self.firstScrollView(in: hosting), "13+ tools scroll")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 20))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        settle(0.4)
+        let full = tileFrame(.notes).height
+        var cut: (HoverTool, CGRect)?
+        for tool in store.slots where tool != .settings {
+            let frame = tileFrame(tool)
+            if !frame.isNull, frame.height > 4, frame.height < full - 4 { cut = (tool, frame); break }
+        }
+        let (tool, visible) = try XCTUnwrap(cut, "a row is partly scrolled out")
+        let press = CGPoint(x: visible.midX, y: visible.midY)
+        XCTAssertTrue(bridge.mouseDown(at: press, in: window, allowed: true))
+        bridge.mouseDragged(at: CGPoint(x: press.x + 6, y: press.y), in: window, allowed: true)
+        XCTAssertEqual(bridge.reorderingTool, tool)
+        let lifted = try XCTUnwrap(bridge.liftedTileFrame)
+        XCTAssertEqual(lifted.height, full, accuracy: 0.5, "the whole tile, not the visible \(visible.height) pt")
+        bridge.mouseUp(at: CGPoint(x: press.x + 6, y: press.y), in: window, allowed: true)
+    }
+
+    private static func firstScrollView(in view: NSView) -> NSScrollView? {
+        if let scroll = view as? NSScrollView { return scroll }
+        for child in view.subviews { if let found = firstScrollView(in: child) { return found } }
+        return nil
+    }
+
     func testAReleaseWithTheTileStillOverTheGlassKeepsIt() throws {
         let glass = try XCTUnwrap(bridge.drawerFrame(in: window))
         let tile = tileFrame(.notes)

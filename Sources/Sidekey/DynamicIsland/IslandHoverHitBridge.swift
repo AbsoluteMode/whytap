@@ -43,7 +43,11 @@ struct IslandHoverHitSnapshot: Equatable {
     let owner: UUID
     let id: IslandHoverHitTargetID
     let context: String
+    /// The part that can be hit: clipped to the scroll viewport and region.
     let frame: CGRect
+    /// The whole target, also where a scroll view clips it. A lifted tile is
+    /// drawn whole, so its picture is measured from this.
+    var fullFrame: CGRect? = nil
 }
 
 enum IslandHoverHitGeometry {
@@ -106,6 +110,10 @@ struct IslandHoverReorder: Equatable {
     /// both in window coordinates: the picture follows the pointer from there.
     var tile: CGRect? = nil
     var lift: CGPoint? = nil
+    /// The highest point the pointer can reach (the screen's top), in window
+    /// coordinates. Nil when unknown: the picture then follows the pointer
+    /// exactly.
+    var ceiling: CGFloat? = nil
 
     /// The area a tile must leave when the drawer's frame is unknown: the
     /// grid and this much around it.
@@ -118,11 +126,40 @@ struct IslandHoverReorder: Equatable {
 
     /// The lifted tile's picture with the pointer at `point`, as drawn while
     /// lifted (`liftedScale`, around its centre).
-    func tileFrame(at point: CGPoint) -> CGRect? {
+    func tileFrame(at point: CGPoint, scale: CGFloat = IslandHoverReorderMotionCurve.liftedScale) -> CGRect? {
         guard let tile, let lift, !tile.isNull, !tile.isEmpty else { return nil }
-        let grow = IslandHoverReorderMotionCurve.liftedScale - 1
+        let grow = scale - 1
         return tile.insetBy(dx: -tile.width * grow / 2, dy: -tile.height * grow / 2)
             .offsetBy(dx: point.x - lift.x, dy: point.y - lift.y)
+    }
+
+    /// The area the tile's picture must leave to be thrown out.
+    private var removalArea: CGRect? {
+        if let panel, !panel.isNull, !panel.isEmpty { return panel }
+        let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
+        return grid.isNull ? nil : grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin)
+    }
+
+    /// Where the picture is drawn for the pointer at `point`. Below the
+    /// drawer's top it follows the pointer exactly. Above it, toward the
+    /// notch, the picture rises a little faster than the pointer when the
+    /// screen's top would otherwise stop the pointer before the whole picture
+    /// has left the drawer (a tile grabbed near its top edge): with the
+    /// pointer at the top the picture is just past the drawer, so upward
+    /// removal is reachable wherever the tile was grabbed. Removal is always
+    /// judged on this drawn picture.
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    func pictureAnchor(for point: CGPoint) -> CGPoint {
+        guard let ceiling, let area = removalArea, let tile, let lift, !tile.isNull, !tile.isEmpty
+        else { return point }
+        let top = area.maxY
+        guard point.y > top, ceiling > top else { return point }
+        let half = tile.height * IslandHoverReorderMotionCurve.liftedScale / 2
+        let bottomAtCeiling = tile.midY - half + (ceiling - lift.y)
+        let shortfall = top - bottomAtCeiling
+        guard shortfall > 0 else { return point }
+        let progress = min(1, (point.y - top) / (ceiling - top))
+        return CGPoint(x: point.x, y: point.y + shortfall * progress)
     }
 
     /// The tile's picture is entirely outside the hover: letting go here
@@ -131,16 +168,15 @@ struct IslandHoverReorder: Equatable {
     /// reorder or, outside the grid, a cancel. Touching the edge is outside.
     /// Every side counts: below, beside, and above toward the notch.
     // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
-    func removesRelease(at point: CGPoint) -> Bool {
-        let area: CGRect
-        if let panel, !panel.isNull, !panel.isEmpty {
-            area = panel
-        } else {
-            let grid = cells.values.reduce(CGRect.null) { $0.union($1) }
-            guard !grid.isNull else { return false }
-            area = grid.insetBy(dx: -Self.releaseMargin, dy: -Self.releaseMargin)
-        }
-        guard let picture = tileFrame(at: point) else { return !area.contains(point) }
+    ///
+    /// `outside` is whether the tile already shows the remove cue: it is then
+    /// drawn smaller (`outsideScale`), and only that smaller picture touching
+    /// the drawer again brings it back, so the cue does not flip at a boundary
+    /// the visible tile never reached.
+    func removesRelease(at point: CGPoint, outside: Bool = false) -> Bool {
+        guard let area = removalArea else { return false }
+        let scale = outside ? IslandHoverReorderMotionCurve.outsideScale : IslandHoverReorderMotionCurve.liftedScale
+        guard let picture = tileFrame(at: pictureAnchor(for: point), scale: scale) else { return !area.contains(point) }
         let overlap = area.intersection(picture)
         return overlap.isNull || overlap.width <= 0 || overlap.height <= 0
     }
@@ -244,6 +280,8 @@ final class IslandHoverHitBridge: ObservableObject {
     /// Less is a click; this much says the person wants to drag (REV 3).
     static let dragThreshold: CGFloat = 4
     private var reorder: IslandHoverReorder?
+    /// The lifted tile's frame as measured at the lift (for tests).
+    var liftedTileFrame: CGRect? { reorder?.tile }
     /// Watches the layout while a tool is lifted: a change the drag did not
     /// make (Settings Sync, Settings, the MCP tool) ends the drag as it is.
     private var layoutWatch: AnyCancellable?
@@ -398,8 +436,11 @@ final class IslandHoverHitBridge: ObservableObject {
         for tile in live where tile.id.surface == .tile && tile.context == candidate.context {
             if let placed = tile.id.tool, let index = store.slots.firstIndex(of: placed) { cells[index] = tile.frame }
         }
+        // The screen's top in window coordinates: the pointer stops there.
+        let screenTop = (window.screen?.frame.maxY ?? window.frame.maxY) - window.frame.minY
         reorder = IslandHoverReorder(tool: tool, original: store.slots, cells: cells, panel: drawerFrame(in: window),
-                                     tile: candidate.frame, lift: pressPoint)
+                                     tile: candidate.fullFrame ?? candidate.frame, lift: pressPoint,
+                                     ceiling: screenTop)
         liftPoint = pressPoint
         motion.reset()
         startEscapeWatch()
@@ -450,8 +491,8 @@ final class IslandHoverHitBridge: ObservableObject {
     /// letting go removes it; any part back over the drawer clears that.
     func moveLiftedTool(to point: CGPoint) {
         guard let reorder else { return }
-        if let liftPoint { motion.follow(from: liftPoint, to: point) }
-        let outside = reorder.removesRelease(at: point)
+        if let liftPoint { motion.follow(from: liftPoint, to: reorder.pictureAnchor(for: point)) }
+        let outside = reorder.removesRelease(at: point, outside: motion.outside)
         if outside != motion.outside {
             motion.setOutside(outside)
             dragEffects.cursor(outside)
@@ -694,7 +735,7 @@ final class IslandHoverHitBridge: ObservableObject {
                 target: targetFrame, visible: visibleFrame, region: regionFrame
             ) else { return nil }
             return IslandHoverHitSnapshot(owner: view.owner, id: view.targetID,
-                                          context: view.targetContext, frame: clipped)
+                                          context: view.targetContext, frame: clipped, fullFrame: targetFrame)
         }
         .sorted { $0.owner.uuidString < $1.owner.uuidString }
     }
@@ -742,13 +783,13 @@ final class IslandHoverHitBridge: ObservableObject {
         dragCandidate = nil
         if let reorder {
             // The landing starts from where the pointer let go.
-            if let liftPoint { motion.follow(from: liftPoint, to: point) }
+            if let liftPoint { motion.follow(from: liftPoint, to: reorder.pictureAnchor(for: point)) }
             if !allowed {
                 // Hover dispatch stopped: keep the last allowed order, never
                 // the cell under an ineligible release.
                 finishReorder()
                 tracking.discardSequence()
-            } else if reorder.removesRelease(at: point) {
+            } else if reorder.removesRelease(at: point, outside: motion.outside) {
                 removeLiftedTool(at: point, in: window)
                 tracking.discardSequence()
             } else {

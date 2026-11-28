@@ -66,6 +66,25 @@ maintainer also found that a tool added from More appeared with a lag
   on the left, 90 on the right, 169 below, 40 above). The live window is
   agent-sized (notification zone on the left, the agent wing on the right,
   the answer zone below), so a tile had to leave the whole window.
+- **Judged on the drawn picture (release-batch inquisition, 2026-11-28).**
+  Removal is always judged on what is drawn:
+  - Once the cue shows, the tile is drawn at `outsideScale` (0.9), and only
+    that smaller picture touching the drawer again clears the cue. Before,
+    the 1.1 picture decided, so the cue flipped back while the visible tile
+    was still clear of the glass.
+  - A lifted tile keeps its whole frame (`IslandHoverHitSnapshot.fullFrame`)
+    even when the scrolling grid (13+ tools) shows only part of it. The
+    clipped frame made a partly visible tile count as out too early.
+  - Upward: the pointer stops at the screen's top, 32 to 46 pt above the
+    glass, which is less than a 1.1 tile hanging below a pointer that
+    grabbed it near its top edge. Above the drawer's top,
+    `pictureAnchor(for:)` lets the picture rise faster than the pointer by
+    exactly the missing distance, spread over the way from the glass to the
+    screen's top (`ceiling`). With the pointer at the top, the whole picture
+    has just left. Inside the drawer, and wherever no help is needed, the
+    picture follows the pointer exactly. The anchor and the removal test use
+    the same picture, so a removal never happens while any part of the
+    drawn tile is still over the glass.
 - **One transaction per add or remove.** `IslandHoverHitBridge.editLayout`
   changes the layout, the edit hold and the released press inside the same
   `withAnimation`. `mouseUp` runs the action first and clears the press only

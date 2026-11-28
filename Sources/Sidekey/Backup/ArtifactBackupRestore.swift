@@ -1234,6 +1234,7 @@ struct ArtifactRestoreTransaction {
         // the user changed meanwhile stays as it is.
         var preserve: Set<String> = payload.schema < 3 ? [ConfigBackupRegistry.aiRoutingKey, ConfigBackupRegistry.aiRoutingPreservedKey] : []
         if payload.schema < 4 { preserve.formUnion(CalendarAccountSettings.keys) }
+        preserve.formUnion(payload.keysUnknownToWriter)
         try ConfigBackupRegistry.apply(payload.values, sections: payload.appliedSections,
                                        preservingMissingKeys: preserve, to: defaults)
     }
@@ -1434,11 +1435,26 @@ struct ArtifactRestoreTransaction {
 /// blocks the user edited meanwhile. A missing list still means "all blocks".
 /// Schema 3 includes Keys & models' binary routing document. Older snapshots
 /// cannot clear current routes simply because their format predated that key.
+///
+/// `knownKeys` lists every preference the writing app could back up. A key
+/// missing from `values` is reset only when the writer knew it; a key added
+/// in a later app keeps its current value. Optional, so archives without it
+/// (written up to 2.2.27) and apps that ignore it (2.2.27 itself) keep working.
+/// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
 struct ArtifactSettingsPayload: Codable, Equatable {
     static let currentSchema = 4
     var schema: Int = ArtifactSettingsPayload.currentSchema
     var values: [String: ConfigBackupValue]
     var selectedSections: [ConfigBackupSection]?
+    var knownKeys: [String]?
+
+    /// Registry keys the writer of this payload could not have contained:
+    /// keys missing from its `knownKeys`, or, for a payload without that list,
+    /// the keys added after the last release that wrote none.
+    var keysUnknownToWriter: Set<String> {
+        guard let knownKeys else { return ConfigBackupRegistry.keysAddedAfterUnlistedArchives }
+        return Set(ConfigBackupRegistry.entries.keys).subtracting(knownKeys)
+    }
 
     var appliedSections: Set<ConfigBackupSection> {
         guard let selectedSections, !selectedSections.isEmpty else {

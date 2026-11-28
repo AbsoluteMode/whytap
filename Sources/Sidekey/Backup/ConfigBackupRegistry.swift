@@ -254,6 +254,15 @@ enum ConfigBackupRegistry {
         }
     }
 
+    /// Keys added after 2.2.27, the last release whose archives carry no
+    /// `knownKeys`. Such an archive could not contain them, so restoring it
+    /// keeps their current values. Never extend this list: archives written
+    /// since list their known keys, which covers every later addition.
+    /// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
+    static let keysAddedAfterUnlistedArchives: Set<String> = [
+        "hotkeys.googleSearchTextShortcut", "hotkeys.googleSearchVoiceShortcut", "hotkeys.googleSearchVoiceGesture",
+    ]
+
     static func apply(_ values: [String: ConfigBackupValue], sections: Set<ConfigBackupSection>,
                       preservingMissingKeys: Set<String> = [], to defaults: UserDefaults) throws {
         try validate(values)

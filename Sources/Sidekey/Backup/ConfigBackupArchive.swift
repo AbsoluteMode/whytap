@@ -50,6 +50,11 @@ struct ConfigBackupSnapshot: Codable, Equatable, Identifiable {
     /// Only the application's explicitly supported provider accounts, never the
     /// user's whole Keychain. Nil means credentials were not requested.
     var credentials: [String: String]? = nil
+    /// Every preference this app could back up when the snapshot was made.
+    /// Nil in snapshots made up to 2.2.27; restoring a block from one keeps
+    /// the keys added since (`ConfigBackupRegistry.keysAddedAfterUnlistedArchives`).
+    /// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
+    var knownKeys: [String]? = ConfigBackupRegistry.entries.keys.sorted()
 
     func hasSameContent(as other: Self) -> Bool {
         preferences == other.preferences && credentials == other.credentials

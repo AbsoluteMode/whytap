@@ -25,6 +25,24 @@ window belongs to the app's ordinary surfaces, with the serif headline as
 the one thing shared with the first launch. See
 `.project-docs/decisions/2026-11-24-whats-new-window.md`.
 
+## Island beside the system Dynamic Island — 2026-11-22
+
+- On a touch MacBook Pro macOS draws its own Dynamic Island around the camera
+  (Live Activities, calls, Siri, the microphone and camera indicators). Whytap
+  never covers it: the capsule keeps its external-monitor shape (orb, 170 pt
+  black middle, hints; 310 pt) and sits 8 pt right of a band of at least
+  260 pt centered on the camera.
+- The drawer, tiles (90 pt), music strip and agent faces keep the capsule's
+  width and grow the way they always did; only the capsule's position changes.
+- Notification cards appear left of the band, on the other side of the camera,
+  not left of the capsule.
+- Settings -> General -> Display -> Island position: Automatic, Beside the camera
+  (a preview of this layout on a notched Mac) and Around the camera.
+- Verified with scenario tests and offscreen schematic renders only. The real
+  band width, whether the system island draws above Whytap and how taps behave
+  next to it need the MacBook. See the
+  [decision](../.project-docs/decisions/2026-11-22-island-beside-system-island.md).
+
 ## Server window — 2026-11-22
 
 The person comes to connect their own server and say what runs on it. First

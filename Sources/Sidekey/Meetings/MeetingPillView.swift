@@ -170,6 +170,10 @@ final class MeetingPillPanel: NSPanel {
             auxiliaryTopRightArea: auxiliaryTopRightArea
         )
 
+        return suggestionFrame(forIslandFrame: islandFrame)
+    }
+
+    static func suggestionFrame(forIslandFrame islandFrame: NSRect) -> NSRect {
         let panelSize = suggestionPanelSize(forIslandFrame: islandFrame)
 
         return NSRect(
@@ -189,13 +193,9 @@ final class MeetingPillPanel: NSPanel {
     }
 
     static func suggestionFrame(on screen: IslandScreenDescriptor) -> NSRect {
-        suggestionFrame(
-            frame: screen.frame,
-            visibleFrame: screen.visibleFrame,
-            safeAreaTopInset: screen.safeAreaTopInset,
-            auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: screen.auxiliaryTopRightArea
-        )
+        // Through the descriptor so the nudge follows the island also when it
+        // sits beside the system Dynamic Island.
+        suggestionFrame(forIslandFrame: IslandFrameLayout.islandFrame(on: screen))
     }
 
     static func topCenterFrame(

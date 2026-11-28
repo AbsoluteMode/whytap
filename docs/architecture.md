@@ -1270,10 +1270,10 @@ Shelved data (ShelvedDropLearningData): the Vocabulary backup section still
 Island display selection (multi-monitor):
   IslandScreenResolver.selectDescriptor is a pure function: user preference
   (Settings -> General -> "Show island on") -> screen with a real notch ->
-  primary display -> first. NSScreen.main is NEVER used (it is the key
-  window's screen and moves with every click). All overlay panels position
-  through currentDescriptor()/currentVisibleFrame() and follow
-  selectionDidChangeNotification. WHY:
+  built-in touch display -> primary display -> first. NSScreen.main is NEVER
+  used (it is the key window's screen and moves with every click). All
+  overlay panels position through currentDescriptor()/currentVisibleFrame()
+  and follow selectionDidChangeNotification. WHY:
   docs/decisions/2026-07-07-island-display-selection-not-nsscreen-main.md
   The plate's top is the screen top and its height the camera band, which can
   be fractional (27.5 pt). AppKit snaps the island window outward to whole
@@ -1281,6 +1281,24 @@ Island display selection (multi-monitor):
   actual window height (width stays as requested); a host of the requested
   height left a one-pixel line above the island. WHY:
   .project-docs/decisions/2026-11-26-island-host-fills-window-height.md
+
+Island beside the system Dynamic Island (touch MacBook Pro, macOS 27):
+  macOS shows its own island (Live Activities, calls, Siri, the microphone
+  and camera indicators) around the camera there, so the capsule must not
+  cover it. NSScreen.touchCapabilities (read by selector: the project builds
+  with the macOS 26 SDK; absent before macOS 27 = no touch) and
+  CGDisplayIsBuiltin mark the touch MacBook's own display. Settings -> General
+  -> Display -> Island position: Automatic (beside the system island only on
+  that display; when every screen reports touch, Apple's Sidecar caveat, it
+  changes nothing), Beside the camera (also a preview on a notched Mac),
+  Around the camera (the earlier layout). Beside it, the capsule keeps the
+  external-monitor shape (310 pt, so drawer, tiles and hit zones are
+  unchanged) 8 pt right of a band centered on the camera, at least 260 pt and
+  never narrower than the reported cutout (sidekey.dynamicIsland.
+  systemIslandReservedWidth default, 120-600, no UI); notification cards go
+  left of the band. The choice is per Mac (backed up, not synced). Every
+  other Mac keeps every island frame. WHY:
+  .project-docs/decisions/2026-11-22-island-beside-system-island.md
 
 Now Playing:
   MediaRemoteNowPlayingSource runs the vendored adapter as a long-lived child

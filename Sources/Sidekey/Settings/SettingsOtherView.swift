@@ -25,6 +25,10 @@ struct SettingsOtherView: View {
     private let open: (SettingsWindowTab) -> Void
 
     @State private var islandAutoHideEnabled: Bool
+    /// Settings → General → Display → "Island position". WHY:
+    /// .project-docs/decisions/2026-11-22-island-beside-system-island.md
+    @State private var systemIslandPlacement = IslandSystemIslandPlacement.current()
+
     @State private var screenshotProtectionEnabled: Bool
 
     init(
@@ -103,6 +107,26 @@ struct SettingsOtherView: View {
                             )
                             .accessibilityLabel("Show island on")
                         }
+
+                        MacRowSeparator()
+                        MacRow(
+                            title: "Island position",
+                            subtitle: "Automatic keeps the camera area free for the system Dynamic Island on a touch MacBook Pro."
+                        ) {
+                            MacPopup(
+                                items: IslandSystemIslandPlacement.allCases.map {
+                                    .init(value: $0, label: $0.title)
+                                },
+                                selection: Binding(
+                                    get: { systemIslandPlacement },
+                                    set: { newValue in
+                                        systemIslandPlacement = newValue
+                                        IslandSystemIslandPlacement.set(newValue)
+                                    }
+                                )
+                            )
+                            .accessibilityLabel("Island position")
+                        }
                     }
                 }
 
@@ -144,6 +168,7 @@ struct SettingsOtherView: View {
             // Re-read live values so a tab revisit (SwiftUI recreates this view)
             // never shows a stale toggle state.
             islandAutoHideEnabled = islandIdlePreferences.isEnabled
+            systemIslandPlacement = IslandSystemIslandPlacement.current()
             screenshotProtectionEnabled = privacyPreferences.screenshotProtectionEnabled
         }
         .onReceive(NotificationCenter.default.publisher(for: IslandIdlePreferences.didChangeNotification)) { _ in

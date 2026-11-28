@@ -292,6 +292,10 @@ final class ClaudeCodeProvider: CLIProvider {
                 continuation.finish()
                 return
             }
+            // Whytap's instructions from WHYTAP.md, system-level and beside
+            // the user's own CLAUDE.md, which Claude Code loads by itself.
+            // WHY: .project-docs/decisions/2026-11-28-agent-harness-instructions.md
+            args += AgentHarnessInstructions.claudeFlags(workspace: workingDir)
             var resultSeen = false
             let registry = ClaudeTaskRegistry()
 

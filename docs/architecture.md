@@ -354,12 +354,18 @@ Agent flow (the user's Claude Code or Codex):
   AgentDaemonWorkingDirectory keeps the dedicated workspace at
   Application Support/whytap/agent with AGENTS.md memory (CLAUDE.md is a
   relative alias to it) and sessions.json; AgentSessionStore resumes the CLI's
-  own session per harness within 15 minutes. The earlier built-in agent's
+  own session per harness within 15 minutes. AgentHarnessInstructions keeps
+  the Whytap-owned WHYTAP.md there (who is answering, the island, the whytap
+  tools, memory and customization contracts), rewritten when its text
+  differs, and passes it on every request: Claude Code
+  --append-system-prompt-file (inline if the file cannot be written), Codex
+  developer_instructions. The user prompt carries only per-turn reminders.
+  WHY: .project-docs/decisions/2026-11-28-agent-harness-instructions.md The earlier built-in agent's
   native-conversation.json and OpenCode runtime files remain unused on disk;
   do not delete user data. Files, selections, web/tool output and screenshots
   are untrusted evidence, never user authorization.
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit
-  contracts. The built-in model loop and its web search,
+  contracts (part of WHYTAP.md). The built-in model loop and its web search,
   connected Sources and per-turn costs were removed on 2026-11-27.
   Claude Code and Codex (ClaudeCodeProvider, CodexProvider) run Right Command:
   AppDelegate dispatches only to the harness in AgentProviderStore

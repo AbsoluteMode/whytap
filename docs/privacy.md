@@ -235,7 +235,9 @@ what the tool sends to its service and keeps is governed by that tool and its
 provider's policies.
 
 The dedicated `Application Support/whytap/agent` folder retains AGENTS.md memory
-(with a `CLAUDE.md` alias) and the tools' session IDs. A session older than 15
+(with a `CLAUDE.md` alias), Whytap's own instructions for the tool
+(`WHYTAP.md`, which contains local Monitor paths and no user content) and the
+tools' session IDs. A session older than 15
 minutes is not resumed. Files of the earlier built-in agent
 (`native-conversation.json`) and of OpenCode remain on disk unused and can
 contain earlier content, including screenshots; the migration does not erase

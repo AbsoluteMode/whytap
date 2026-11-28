@@ -78,11 +78,9 @@ by deleting the folder and downloading it again.
   returns no text for audio at speech level (any 100 ms above about
   -34 dBFS) ends with "No text from local model, Retry" instead of
   silence. A quiet take stays silence (2026-07-26 decision unchanged).
-- Download: percent from bytes plus a time left from the rate over the
-  last 15 s, smoothed; shown after 4 s of data ("Estimating time left…"
-  before), "Stalled. Check your connection." after 10 s without progress.
-  A failed download keeps "Check your connection and try again." with
-  Download.
+- Download: percent from bytes plus a time left from the measured rate
+  (details in "Download progress from real bytes" below). A failed download
+  keeps "Check your connection and try again." with Download.
 - Preparation: no progress signal exists, so the time left is the expected
   duration minus the elapsed time, with a moving bar and no percentage.
   Under a minute it says "Less than a minute left"; past the expectation
@@ -155,6 +153,40 @@ Pro, Max and Ultra: x0.75. Reload: 15 s on 8 GB, 8 s otherwise.
   readiness check now keeps a take off half-written files instead.
 
 2026-11-28, task 119.
+
+## Download progress from real bytes
+
+The owner's acceptance of build 1808 failed: the bar jumped from 4% to 97%
+and the card said "99% of about 470 MB · About 1157 min left".
+
+Recorded on 2026-11-28 with `OnDeviceDownloadProgressRecordingTests` (a
+real download into a scratch folder): FluidAudio's `downloadRepo` reported
+progress only when a file finished, 24 callbacks for 23 files. It passes
+its progress delegate to the async `URLSession.download(for:)`, which never
+calls `didWriteData`. The encoder weights are about 445 MB of 483 MB, so
+the raw fraction went from 0.0244 to 0.4851 (our 4.9% to 97%) after 12.8 s
+without a callback; on a slower connection that silence lasts minutes. The
+old estimator then divided the remaining 1-3% by the rate of the small tail
+files, whose bytes are tiny next to their per-request latency, and smoothed
+seconds rather than rate, so the number grew into hours.
+
+- `OnDeviceModelDownloader` fetches exactly the files FluidAudio would (its
+  public registry, the required Core ML folders plus root `.json`/`.txt`
+  files, the same request timeout and optional token), skips files in place
+  and downloads the rest with a delegate-based task, reporting bytes about
+  ten times a second. Recorded: 170 callbacks, no step above 1.2%. Files
+  already on disk count in the first report, which is the estimator's
+  baseline, so they never read as speed. The download ends when the last
+  byte lands and Preparing starts at once.
+- `OnDeviceDownloadRateEstimator` takes the rate only inside a continuous
+  run of reports (a gap over 1 s starts a new run, as each file is a new
+  request) within the last 5 s, smoothed by half. A number needs 8 reports
+  in 2 s and is held 5 s across a gap; there is none before 4 s or the first
+  percent, after 8 s without bytes ("Stalled. Check your connection."), at
+  98% or more ("Almost done"), or above two hours.
+- `OnDeviceDownloadReplayTests` replays the recorded sequences (FluidAudio's,
+  a clean download, a partly cached one) with a stall inserted and a tail
+  a hundred times slower.
 
 ## Launch order with Shot's recognizer
 

@@ -133,8 +133,10 @@ Voice flow (Drop / dictation):
             no text for speech-level audio ends as .localModelNoText ("No
             text from local model, Retry"), not silence. Meeting phrases wait
             without a limit. Time left (OnDeviceSpeechProgress.swift):
-            download from the measured rate (OnDeviceDownloadRateEstimator,
-            Stalled after 10 s), preparation from the expected duration by
+            download bytes from OnDeviceModelDownloader (FluidAudio's own
+            download reports only whole files) and the rate of the current
+            steady run (OnDeviceDownloadRateEstimator: Stalled after 8 s,
+            Almost done from 98%, no number when unreliable), preparation from the expected duration by
             chip/RAM or the last one measured on this Mac
             (OnDeviceSpeechPreparationEstimator, "Taking longer than usual,
             still working" past it); OnDeviceSpeechModelController.timeLeft

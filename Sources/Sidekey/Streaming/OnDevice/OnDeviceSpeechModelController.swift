@@ -96,8 +96,9 @@ final class OnDeviceSpeechModelController: ObservableObject {
     @discardableResult
     func download() async -> Bool {
         if case .downloading = status {} else {
+            // The downloader's first report is the baseline (files already
+            // on disk count there), not a zero recorded here.
             rate = OnDeviceDownloadRateEstimator()
-            rate.record(fraction: 0, at: now())
             status = .downloading(0)
         }
         do {

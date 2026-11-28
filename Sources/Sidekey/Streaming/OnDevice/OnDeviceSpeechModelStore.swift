@@ -520,14 +520,14 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
     ) async throws {
         let parent = directory.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        // FluidAudio reports its file download as 0 to 0.5 of a pass that
-        // would go on to compile; the mapper keeps the bar monotonic.
+        // Real byte progress: FluidAudio's own download reports only whole
+        // files (4.9% to 97% in one step), see OnDeviceModelDownloader.
+        // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
         let segments = MonotonicFractionMapperBox(segmentCount: 1)
-        try await DownloadUtils.downloadRepo(
-            model.repo, to: parent,
-            variant: model.encoderPrecision.rawValue,
-            progressHandler: { progress(segments.map(min(1, $0.fractionCompleted * 2))) }
-        )
+        try await OnDeviceModelDownloader(model: model).download(to: parent) { done, total in
+            guard total > 0 else { return }
+            progress(segments.map(Double(done) / Double(total)))
+        }
         try Task.checkCancellation()
         guard modelFilesExist(model, root: parent) else {
             throw OnDeviceSpeechError.modelNotDownloaded

@@ -11,6 +11,8 @@ enum OnDeviceSpeechTimeLeft: Equatable, Sendable {
     case stalled
     /// The preparation passed its expected duration.
     case longerThanUsual
+    /// The download's last share: a number there would be noise.
+    case almostDone
 }
 
 /// The short copy for `OnDeviceSpeechTimeLeft`. Never counts below "less
@@ -23,6 +25,7 @@ enum OnDeviceSpeechProgressText {
             return seconds > 60 ? "About \(minutes(seconds)) min left" : "Less than a minute left"
         case .stalled: return "Stalled. Check your connection."
         case .longerThanUsual: return "Taking longer than usual, still working"
+        case .almostDone: return "Almost done"
         }
     }
 
@@ -35,6 +38,7 @@ enum OnDeviceSpeechProgressText {
             return seconds > 60 ? "about \(count) minutes left" : "less than a minute left"
         case .stalled: return "stalled, check your connection"
         case .longerThanUsual: return "taking longer than usual, still working"
+        case .almostDone: return "almost done"
         }
     }
 
@@ -44,21 +48,39 @@ enum OnDeviceSpeechProgressText {
     static func minutes(_ seconds: TimeInterval) -> Int { Int((seconds / 60).rounded(.up)) }
 }
 
-/// Time left for a download from its fraction over time. The rate is the
-/// progress across the last `window` seconds, so a burst or a pause between
-/// files does not swing the number; the shown value is smoothed.
+/// Time left for a download from its byte fraction over time.
+///
+/// The rate comes only from a continuous run of reports (no gap over
+/// `runGap`) inside the last `window` seconds, smoothed. A gap starts a new
+/// run: between files the download makes a new request, and per-request
+/// latency says nothing about the connection (recorded: 4.9% for four
+/// seconds of small files, then 7% a second through the weight file). The
+/// number shows while bytes flow steadily and is held for `hold` seconds
+/// across a gap; otherwise there is no number. It never shows before
+/// `minimumSampleTime` or the first percent, during a stall, past `nearEnd`
+/// ("Almost done"), or above `maximumSeconds`. The first report is the
+/// baseline: the downloader's first report already counts the files in
+/// place, so they never read as speed.
 struct OnDeviceDownloadRateEstimator: Equatable, Sendable {
-    /// Seconds of data before a number appears.
     var minimumSampleTime: TimeInterval = 4
     /// Seconds without progress that count as stalled.
-    var stallAfter: TimeInterval = 10
-    var window: TimeInterval = 15
-    var smoothing: Double = 0.35
+    var stallAfter: TimeInterval = 8
+    var window: TimeInterval = 5
+    var smoothing: Double = 0.5
+    var nearEnd: Double = 0.98
+    var maximumSeconds: TimeInterval = 2 * 3600
+    var runGap: TimeInterval = 1
+    /// A run needs this many reports within `steadySpan` to give a number.
+    var steadyReports = 8
+    var steadySpan: TimeInterval = 2
+    var hold: TimeInterval = 5
 
     private var started: TimeInterval?
     private var samples: [Sample] = []
+    private var runStart: Sample?
     private var lastProgressAt: TimeInterval?
-    private var smoothed: TimeInterval?
+    private var smoothedRate: Double?
+    private var lastSteadyAt: TimeInterval?
 
     private struct Sample: Equatable, Sendable {
         let time: TimeInterval
@@ -69,35 +91,42 @@ struct OnDeviceDownloadRateEstimator: Equatable, Sendable {
 
     mutating func record(fraction: Double, at now: TimeInterval) {
         let fraction = min(1, max(0, fraction))
+        let sample = Sample(time: now, fraction: fraction)
         if started == nil {
             started = now
             lastProgressAt = now
-            samples = [Sample(time: now, fraction: fraction)]
+            samples = [sample]
+            runStart = sample
             return
         }
         guard let last = samples.last, fraction > last.fraction else { return }
-        samples.append(Sample(time: now, fraction: fraction))
+        if now - last.time > runGap { runStart = last }
+        samples.append(sample)
         lastProgressAt = now
-        while samples.count > 2, let first = samples.first, now - first.time > window { samples.removeFirst() }
-        if let raw = rawSecondsLeft(at: now) {
-            smoothed = smoothed.map { $0 + smoothing * (raw - $0) } ?? raw
+        samples.removeAll { now - $0.time > window }
+        if samples.count >= steadyReports,
+           samples.reversed().prefix(while: { now - $0.time <= steadySpan }).count >= steadyReports,
+           let runStart {
+            // The rate over this run, at most `window` back.
+            let base = samples.first { $0.time >= runStart.time } ?? runStart
+            if now - base.time >= 1 {
+                let rate = (fraction - base.fraction) / (now - base.time)
+                smoothedRate = smoothedRate.map { $0 + smoothing * (rate - $0) } ?? rate
+                lastSteadyAt = now
+            }
         }
     }
 
     func timeLeft(at now: TimeInterval) -> OnDeviceSpeechTimeLeft {
         guard let started, let lastProgressAt, let last = samples.last else { return .estimating }
-        if last.fraction >= 1 { return .seconds(0) }
+        if last.fraction >= nearEnd { return .almostDone }
         if now - lastProgressAt >= stallAfter { return .stalled }
-        guard now - started >= minimumSampleTime, let smoothed else { return .estimating }
-        // Time since the last sample counts down between callbacks.
-        return .seconds(max(1, smoothed - (now - last.time)))
-    }
-
-    private func rawSecondsLeft(at now: TimeInterval) -> TimeInterval? {
-        guard let first = samples.first, let last = samples.last, last.time > first.time else { return nil }
-        let rate = (last.fraction - first.fraction) / (last.time - first.time)
-        guard rate > 0 else { return nil }
-        return (1 - last.fraction) / rate
+        guard now - started >= minimumSampleTime, last.fraction >= 0.01,
+              let lastSteadyAt, now - lastSteadyAt <= hold,
+              let smoothedRate, smoothedRate > 0 else { return .estimating }
+        let seconds = (1 - last.fraction) / smoothedRate
+        guard seconds <= maximumSeconds else { return .estimating }
+        return .seconds(max(1, seconds))
     }
 }
 

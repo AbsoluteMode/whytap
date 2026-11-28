@@ -134,17 +134,29 @@ final class OnDeviceModelProgressTests: XCTestCase {
 
     // MARK: - Download: time left from the measured rate
 
+    /// Reports every 0.1 s, as the downloader sends them while bytes flow.
+    private func flow(_ rate: inout OnDeviceDownloadRateEstimator, from start: Double, to end: Double,
+                      perSecond: Double, startingAt fraction: Double) -> Double {
+        var time = start
+        var value = fraction
+        while time <= end + 1e-9 {
+            rate.record(fraction: value, at: time)
+            time += 0.1
+            value += perSecond * 0.1
+        }
+        return value
+    }
+
     func test_download_time_left_appears_after_a_few_seconds_and_updates() {
         var rate = OnDeviceDownloadRateEstimator()
-        rate.record(fraction: 0, at: 0)
-        rate.record(fraction: 0.02, at: 1)
+        var fraction = flow(&rate, from: 0, to: 1, perSecond: 0.02, startingAt: 0)
         XCTAssertEqual(rate.timeLeft(at: 1), .estimating, "one second of data is not a number yet")
 
-        for second in 2...6 { rate.record(fraction: 0.02 * Double(second), at: Double(second)) }
+        fraction = flow(&rate, from: 1.1, to: 6, perSecond: 0.02, startingAt: fraction)
         guard case .seconds(let first) = rate.timeLeft(at: 6) else { return XCTFail("\(rate.timeLeft(at: 6))") }
-        XCTAssertEqual(first, 44, accuracy: 8, "2% a second with 88% left")
+        XCTAssertEqual(first, 44, accuracy: 3, "2% a second with 88% left")
 
-        for second in 7...20 { rate.record(fraction: 0.02 * Double(second), at: Double(second)) }
+        _ = flow(&rate, from: 6.1, to: 20, perSecond: 0.02, startingAt: fraction)
         guard case .seconds(let later) = rate.timeLeft(at: 20) else { return XCTFail() }
         XCTAssertLessThan(later, first, "the number counts down")
         XCTAssertEqual(OnDeviceSpeechProgressText.timeLeft(.seconds(later)), "Less than a minute left")
@@ -152,12 +164,12 @@ final class OnDeviceModelProgressTests: XCTestCase {
 
     func test_download_time_left_hides_on_stall_and_returns_with_progress() {
         var rate = OnDeviceDownloadRateEstimator()
-        for second in 0...6 { rate.record(fraction: 0.01 * Double(second), at: Double(second)) }
-        XCTAssertNotEqual(rate.timeLeft(at: 6), .estimating)
+        let fraction = flow(&rate, from: 0, to: 6, perSecond: 0.01, startingAt: 0)
+        guard case .seconds = rate.timeLeft(at: 6) else { return XCTFail("\(rate.timeLeft(at: 6))") }
         XCTAssertEqual(rate.timeLeft(at: 17), .stalled, "no number while nothing arrives")
         XCTAssertEqual(OnDeviceSpeechProgressText.timeLeft(.stalled), "Stalled. Check your connection.")
-        rate.record(fraction: 0.08, at: 18)
-        guard case .seconds = rate.timeLeft(at: 18) else { return XCTFail("back after progress") }
+        _ = flow(&rate, from: 18, to: 20, perSecond: 0.01, startingAt: fraction)
+        guard case .seconds = rate.timeLeft(at: 20) else { return XCTFail("back after progress") }
     }
 
     func test_minutes_round_up_and_never_count_below_less_than_a_minute() {
@@ -194,14 +206,16 @@ final class OnDeviceModelProgressTests: XCTestCase {
         await eventually { await store.hasProgress() }
         XCTAssertEqual(controller.timeLeft, .estimating)
 
-        for step in 1...8 {
-            clock = 100 + Double(step)
-            await store.emit(0.05 * Double(step))
-            await eventually { if case .downloading(let f) = controller.status { return f >= 0.05 * Double(step) - 1e-9 }; return false }
+        // 5% a second, reported every 0.1 s, for 8 s.
+        for step in 1...80 {
+            clock = 100 + Double(step) / 10
+            let fraction = 0.005 * Double(step)
+            await store.emit(fraction)
+            await eventually { if case .downloading(let f) = controller.status { return f >= fraction - 1e-9 }; return false }
         }
         await controller.tick()
         guard case .seconds(let left) = controller.timeLeft else { return XCTFail("\(String(describing: controller.timeLeft))") }
-        XCTAssertEqual(left, 12, accuracy: 4, "5% a second with 60% left")
+        XCTAssertEqual(left, 12, accuracy: 2, "5% a second with 60% left")
 
         clock += 30
         await controller.tick()

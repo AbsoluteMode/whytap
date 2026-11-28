@@ -82,7 +82,7 @@ final class ScreenshotTests: XCTestCase {
         XCTAssertTrue(try ScreenshotTextDetector.boxes(fixture(text: false)).isEmpty)
     }
 
-    func testCopyTextRecognizesEnglishCyrillicAndCodesOnLightAndDarkRetinaImages() throws {
+    func testCopyTextRecognizesEnglishCyrillicAndCodesOnLightAndDarkRetinaImages() async throws {
         for dark in [false, true] {
             let context = try XCTUnwrap(CGContext(data: nil, width: 1000, height: 400, bitsPerComponent: 8,
                 bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
@@ -96,26 +96,28 @@ final class ScreenshotTests: XCTestCase {
             ("Invoice 401" as NSString).draw(at: CGPoint(x: 30, y: 130), withAttributes: attributes)
             ("Привет мир 123456" as NSString).draw(at: CGPoint(x: 30, y: 50), withAttributes: attributes)
             NSGraphicsContext.current = previous
-            let text = try ScreenshotTextDetector.text(XCTUnwrap(context.makeImage()))
+            let text = try await ScreenshotTextDetector.text(XCTUnwrap(context.makeImage()))
             for expected in ["Invoice", "401", "Привет", "мир", "123456"] {
                 XCTAssertTrue(text.contains(expected), "Missing \(expected), dark=\(dark)")
             }
         }
     }
 
-    func testCopyTextUsesOnlyFlattenedCropAndCannotReadCoveredPixels() throws {
+    func testCopyTextUsesOnlyFlattenedCropAndCannotReadCoveredPixels() async throws {
         let source = try fixture(), size = CGSize(width: 800, height: 400)
         let crop = CGRect(x: 0, y: 0, width: 400, height: 160)
         let selected = try ScreenshotRenderer.image(source: source, size: size, annotations: [], crop: crop)
-        let text = try ScreenshotTextDetector.text(selected)
+        let text = try await ScreenshotTextDetector.text(selected)
         XCTAssertTrue(text.contains("123456")); XCTAssertFalse(text.contains("Invoice")); XCTAssertFalse(text.contains("401"))
         let cover = ScreenshotAnnotation(tool: .blur, points: [crop.origin, CGPoint(x: crop.maxX, y: crop.maxY)],
                                          patch: try fixture(width: 400, height: 160, text: false))
         let covered = try ScreenshotRenderer.image(source: source, size: size, annotations: [cover], crop: crop)
-        XCTAssertTrue(try ScreenshotTextDetector.text(covered).isEmpty)
+        let coveredText = try await ScreenshotTextDetector.text(covered)
+        XCTAssertTrue(coveredText.isEmpty)
         let placed = ScreenshotAnnotation(tool: .text, points: [CGPoint(x: 40, y: 60)], color: .black, width: 5, text: "PLACED 902")
         let edited = try ScreenshotRenderer.image(source: source, size: size, annotations: [cover, placed], crop: crop)
-        XCTAssertTrue(try ScreenshotTextDetector.text(edited).contains("PLACED 902"))
+        let editedText = try await ScreenshotTextDetector.text(edited)
+        XCTAssertTrue(editedText.contains("PLACED 902"))
     }
 
     func testBlurDetectionIncludesSmallDigitsAndCyrillicInBothAppearances() throws {

@@ -8,7 +8,10 @@ enum ScreenshotTextCopy {
 
     static func perform(source: CGImage, size: CGSize, annotations: [ScreenshotAnnotation], crop: CGRect,
                         pasteboard: NSPasteboard = .general,
-                        recognize: @escaping @Sendable (CGImage) throws -> String = { try ScreenshotTextDetector.text($0) },
+                        recognize: @escaping @Sendable (CGImage) async throws -> String = { image in
+                            await ScreenshotTextDetector.warmUp().value
+                            return try await ScreenshotTextDetector.text(image)
+                        },
                         write: ((String, NSPasteboard) -> Bool)? = nil,
                         isCurrent: () -> Bool) async -> Outcome {
         guard !Task.isCancelled, isCurrent() else { return .discarded }
@@ -18,7 +21,8 @@ enum ScreenshotTextCopy {
                 // Recognize only the flattened crop, including Blur, never hidden source pixels.
                 // WHY: .project-docs/decisions/2026-10-20-screenshot-toolbar.md
                 let image = try ScreenshotRenderer.image(source: source, size: size, annotations: annotations, crop: crop)
-                return try recognize(image)
+                try Task.checkCancellation()
+                return try await recognize(image)
             }
             let text = try await withTaskCancellationHandler(operation: { try await worker.value }, onCancel: { worker.cancel() })
             guard !Task.isCancelled, isCurrent() else { return .discarded }

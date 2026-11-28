@@ -60,5 +60,25 @@ generated-fixture recognition output for quality comparison. Wall-clock
 thresholds vary with the system model cache and available hardware, so the
 test suite checks correctness without asserting a time budget.
 
+Release-batch review (2026-11-28, same Mac), measured with fresh benchmark
+clients:
+
+- The cache belongs to the executable: a second launch of the same binary
+  prepares in about 0.1 s. The 28 s preparation therefore runs once after
+  each newly installed build, not after every restart.
+- The waiting happens in the system `ANECompilerService` (about 90% of a core
+  for the whole preparation), although the request is set to the CPU; the
+  client itself used about 4 s of CPU. A second fresh client compiling at the
+  same time failed with `e5rtError` (`create_precompiled_compute_operation`).
+  Inside Whytap only Shot uses Vision, and Copy text waits for the
+  preparation (`ScreenshotTextCopy.read(_:after:with:)`) instead of starting a
+  second compile.
+- Text and numbers Blur during that window waits for the preparation too:
+  23.7 s in a fresh client, against 0.07 s for the same Blur in a fresh
+  client without preparation. It runs off the main thread under "Blurring on
+  this Mac…". This is the accepted cost of moving the stall out of Copy text.
+- Whether an on-device Parakeet model load during the window waits for the
+  same compiler service was not measured.
+
 This supersedes the lack of warmup in the Copy text restoration section of the
 [Shot toolbar decision](2026-10-20-screenshot-toolbar.md).

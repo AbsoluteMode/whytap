@@ -9,8 +9,9 @@ enum ScreenshotTextCopy {
     static func perform(source: CGImage, size: CGSize, annotations: [ScreenshotAnnotation], crop: CGRect,
                         pasteboard: NSPasteboard = .general,
                         recognize: @escaping @Sendable (CGImage) async throws -> String = { image in
-                            await ScreenshotTextDetector.warmUp().value
-                            return try await ScreenshotTextDetector.text(image)
+                            try await ScreenshotTextCopy.read(image, after: ScreenshotTextDetector.warmUp()) {
+                                try await ScreenshotTextDetector.text($0)
+                            }
                         },
                         write: ((String, NSPasteboard) -> Bool)? = nil,
                         isCurrent: () -> Bool) async -> Outcome {
@@ -31,6 +32,17 @@ enum ScreenshotTextCopy {
         } catch {
             return Task.isCancelled || !isCurrent() ? .discarded : .failed
         }
+    }
+
+    /// Copy text started while the launch preparation still runs waits for it
+    /// instead of compiling Vision's recognizer a second time; the copy's
+    /// "Reading text on this Mac…" state stays up meanwhile.
+    // WHY: .project-docs/decisions/2026-11-28-shot-ocr-warmup.md
+    nonisolated static func read(_ image: CGImage, after preparation: Task<Void, Never>,
+                                 with recognize: @Sendable (CGImage) async throws -> String) async throws -> String {
+        await preparation.value
+        try Task.checkCancellation()
+        return try await recognize(image)
     }
 
     /// Preserve every readable type/item on failure. Never restore over a newer

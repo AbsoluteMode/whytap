@@ -1319,6 +1319,22 @@ final class BackupViewModel: ObservableObject {
 
     private func markDirty() { needsFullBackup = true; changeRevision += 1 }
 
+    /// Every preference write (an island Drop Mode or language switch too)
+    /// captures settings 600 ms later. Each Keychain read takes about 1 ms,
+    /// sometimes over 10, so the reads run off the main actor and do not take
+    /// frames from island animations.
+    // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+    nonisolated static func readCredentials(_ stores: [(String, TokenStore)]) async throws -> [String: String] {
+        let box = UncheckedCredentialStores(stores: stores)
+        return try await Task.detached(priority: .userInitiated) {
+            var credentials: [String: String] = [:]
+            for (account, store) in box.stores {
+                if let value = try store.read() { credentials[account] = value }
+            }
+            return credentials
+        }.value
+    }
+
     private func captureSettings() async {
         if let running = captureTask { await running.value; await captureSettings(); return }
         let task = Task { @MainActor in
@@ -1335,12 +1351,10 @@ final class BackupViewModel: ObservableObject {
             let key = try key()
             var warnings: [String] = []
             let values = try ConfigBackupRegistry.capture(defaults, warnings: &warnings)
-            var credentials: [String: String] = [:]
             let accounts = try ConfigBackupRegistry.credentialAccounts(in: defaults)
+            let credentials: [String: String]
             do {
-                for account in accounts {
-                    if let value = try providerStore(account).read() { credentials[account] = value }
-                }
+                credentials = try await Self.readCredentials(accounts.map { ($0, providerStore($0)) })
             } catch { throw ConfigBackupError.keyUnavailable }
             let previous = try await settingsFiles.load(keys: localHistoryKeys(current: key))
             localSettingsVersions = previous
@@ -1521,4 +1535,10 @@ enum BackupChangeProbe {
         }
         return SHA256.hash(data: Data(values.sorted().joined(separator: "\n").utf8)).map { String(format: "%02x", $0) }.joined()
     }
+}
+
+/// Token stores are value types over the Keychain (or test memory) and are only
+/// read from the one detached task that receives them.
+private struct UncheckedCredentialStores: @unchecked Sendable {
+    let stores: [(String, TokenStore)]
 }

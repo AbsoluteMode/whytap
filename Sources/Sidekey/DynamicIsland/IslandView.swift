@@ -1216,8 +1216,10 @@ struct IslandView: View {
                             fillerViewModel: fillerViewModel,
                             caseViewModel: caseViewModel,
                             onToggle: {
-                                dropMode = actions.toggleDropMode()
-                                showDropModeStatus(dropMode)
+                                // The tile's write happens first, outside the animation; the
+                                // visible switch then animates explicitly.
+                                let next = actions.toggleDropMode()
+                                switchDropMode(to: next)
                             },
                             onOpenSettings: actions.openSettings,
                             onOpenHotkeys: actions.openHotkeys,
@@ -1618,8 +1620,7 @@ struct IslandView: View {
         }
         .onChange(of: appState.dropModeHotkeyToggle) { _, toggle in
             guard let toggle else { return }
-            dropMode = toggle.mode
-            showDropModeStatus(toggle.mode)
+            switchDropMode(to: toggle.mode)
         }
         .onChange(of: appState.meetingSuggestionActive) { _, isActive in
             if isActive {
@@ -1670,6 +1671,17 @@ struct IslandView: View {
         case .thinking:  return "thinking"
         case .textInput: return "text input"
         }
+    }
+
+    /// The visible Smart/Fast switch. Its motion is scoped to the two views
+    /// that change (the tile symbol and the right-band ON Smart/Fast status),
+    /// not a transaction over the whole island. Before, the icon only
+    /// crossfaded when a click's press spring happened to carry it, a hotkey
+    /// switch cut it, and the status popped in.
+    // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+    private func switchDropMode(to mode: TranscriptionMode) {
+        dropMode = mode
+        showDropModeStatus(mode)
     }
 
     private func showDropModeStatus(_ mode: TranscriptionMode) {
@@ -1908,6 +1920,7 @@ private struct IslandWrapRow: View {
     /// `UpdateController.dismissJustInstalledIndicator()`.
     let onJustUpdatedDismiss: () -> Void
     let dropModeStatus: TranscriptionMode?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// `true` while the agent flow owns the right band + the rightward
     /// window extension — every right-band slot and the passive hints
     /// yield to it.
@@ -2142,6 +2155,8 @@ private struct IslandWrapRow: View {
                 }
             }
             .frame(width: IslandFrameLayout.rightSideWidth, alignment: .center)
+            // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+            .animation(IslandDropModeControl.switchAnimation(reduceMotion: reduceMotion), value: dropModeStatus)
         }
     }
 }

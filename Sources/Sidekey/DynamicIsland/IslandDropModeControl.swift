@@ -837,6 +837,16 @@ enum IslandLanguagePickerLayout {
     /// search field or leave `visibleArea`, and is always clamped inside the
     /// panel (inset by `edgeInset`), so neither the scroll viewport nor the
     /// drawer edge clips it. Wider-than-panel text is capped and truncated.
+    /// A name hint belongs to a flag the user can see: none for a chip
+    /// scrolled entirely out of the viewport (the pointer may still be
+    /// "hovering" it after a scroll without movement) or not measured yet.
+    /// Otherwise the hint would cover the search field or the drawer's corner.
+    static func showsNameHint(anchor: CGRect, visibleArea: CGRect) -> Bool {
+        guard !anchor.isNull, !anchor.isEmpty else { return false }
+        let visible = anchor.intersection(visibleArea)
+        return !visible.isNull && visible.width > 0 && visible.height > 0
+    }
+
     static func nameHintFrame(
         anchor: CGRect,
         size: CGSize,

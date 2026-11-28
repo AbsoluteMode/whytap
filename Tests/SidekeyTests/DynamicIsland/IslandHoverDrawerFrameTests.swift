@@ -188,6 +188,24 @@ final class IslandHoverDrawerFrameTests: XCTestCase {
         return nil
     }
 
+    /// Twelve tiles fit in four rows; adding the 13th from More makes the
+    /// grid scroll and must bring the new tool's row into view.
+    func testAddingTheThirteenthToolScrollsItIntoView() throws {
+        let liftable = HoverTool.allCases.filter { IslandHoverReorder.canLift($0, slots: HoverTool.allCases) }
+        try XCTSkipIf(liftable.count < 12, "needs 12 pinnable tools")
+        store.replaceEditableSlots(with: Array(liftable.prefix(11)))
+        settle(0.5)
+        XCTAssertEqual(store.slots.count, 12)
+        XCTAssertNil(Self.firstScrollView(in: hosting), "twelve tiles need no scrolling")
+        let added = liftable[11]
+        XCTAssertTrue(store.pin(added))
+        settle(0.8)
+        let full = tileFrame(.notes).isNull ? 0 : tileFrame(.notes).height
+        let frame = tileFrame(added)
+        XCTAssertFalse(frame.isNull, "the 13th tool is visible after it was added")
+        if full > 0 { XCTAssertEqual(frame.height, full, accuracy: 1, "and wholly in view") }
+    }
+
     func testAReleaseWithTheTileStillOverTheGlassKeepsIt() throws {
         let glass = try XCTUnwrap(bridge.drawerFrame(in: window))
         let tile = tileFrame(.notes)

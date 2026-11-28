@@ -3426,6 +3426,7 @@ struct IslandLanguagePickerPanel: View {
                 .accessibilityLabel("Search language")
 
                 if let hoveredChip,
+                   IslandLanguagePickerLayout.showsNameHint(anchor: hoveredChip.frame, visibleArea: grid.viewport),
                    let option = options.first(where: { $0.id == hoveredChip.id }),
                    option.language != nil {
                     // Only language chips get a hint; Auto/Off show their text

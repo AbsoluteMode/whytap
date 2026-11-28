@@ -69,7 +69,11 @@ underneath showed through.
   visible part, or below it when above would cover the search field, and
   clamps it inside the panel minus the edge inset; text wider than the
   panel is capped and truncated. While hovered, a scrolled chip moves its
-  hint with it; a new query or a selection removes it.
+  hint with it; a new query or a selection removes it. A chip scrolled
+  entirely out of the viewport (still "hovered" after a scroll without
+  pointer movement) or not measured yet shows no hint
+  (`IslandLanguagePickerLayout.showsNameHint`); before, its hint landed over
+  the search field (release-batch inquisition, 2026-11-28).
 - The picker has no arrow-key navigation over flags (keyboard input goes to
   the search field only), so there is no keyboard selection to label.
 

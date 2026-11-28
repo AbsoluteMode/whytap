@@ -322,6 +322,24 @@ final class IslandLanguageNameHintTests: XCTestCase {
         XCTAssertLessThanOrEqual(frame.maxY, size.height + 0.001, file: file, line: line)
     }
 
+    /// Type "e", hover Spain in the first row, then scroll down without
+    /// moving the pointer: the flag leaves the viewport while it still counts
+    /// as hovered. Its hint must go, not land over the search field; a chip
+    /// not measured yet (.zero after typing) shows none either.
+    func test_aHintGoesWhenItsFlagScrollsOutOfSightOrIsNotMeasuredYet() throws {
+        let grid = searchGrid("e")
+        XCTAssertTrue(grid.requiresScrolling)
+        let first = try XCTUnwrap(grid.flagFrames.first)
+        XCTAssertTrue(Layout.showsNameHint(anchor: first, visibleArea: grid.viewport), "On screen: hint")
+        let scrolledAbove = first.offsetBy(dx: 0, dy: -(first.maxY - grid.viewport.minY) - 4)
+        XCTAssertFalse(Layout.showsNameHint(anchor: scrolledAbove, visibleArea: grid.viewport), "Scrolled out above")
+        let partly = first.offsetBy(dx: 0, dy: -(first.height / 2) - (first.minY - grid.viewport.minY))
+        XCTAssertTrue(Layout.showsNameHint(anchor: partly, visibleArea: grid.viewport), "Half visible: hint")
+        XCTAssertFalse(Layout.showsNameHint(anchor: .zero, visibleArea: grid.viewport), "Not measured yet")
+        XCTAssertFalse(grid.input.intersects(hint("Spanish", anchor: partly, grid: grid)),
+                       "A visible flag's hint never covers the search field")
+    }
+
     func test_firstRowHintGoesBelowSoItNeverCoversTheSearchField() {
         let grid = searchGrid("e")
         let first = try! XCTUnwrap(grid.flagFrames.first)

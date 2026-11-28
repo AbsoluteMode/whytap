@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/OnDevice/OnDeviceModelPreparationTests.swift
     confirmed_at: 2026-11-28
-related: [2026-11-19-on-device-dictation.md, 2026-11-21-on-device-everywhere.md, 2026-11-19-provider-failure-reasons.md]
+related: [2026-11-19-on-device-dictation.md, 2026-11-21-on-device-everywhere.md, 2026-11-19-provider-failure-reasons.md, 2026-11-28-shot-ocr-warmup.md]
 ---
 
 ## Context
@@ -155,3 +155,16 @@ Pro, Max and Ultra: x0.75. Reload: 15 s on 8 GB, 8 s otherwise.
   readiness check now keeps a take off half-written files instead.
 
 2026-11-28, task 119.
+
+## Launch order with Shot's recognizer
+
+After a new build is installed, the speech model and Shot's Vision recognizer
+(`2026-11-28-shot-ocr-warmup.md`) both compile in the system Neural Engine
+compiler. Measured on an M4 Pro with fresh clients (2026-11-28): the speech
+model alone was ready after 13.0-13.6 s; started together with the Vision
+preparation it was ready only when Vision was, after 16.9-18.1 s (four runs,
+no failure). Run one after the other, the speech model was ready after 13.1 s
+and Vision 4 s later. `LaunchModelPreparation` therefore starts Shot's
+preparation once the speech model's launch preparation has finished; without
+a feature on this Mac it starts at once. A Copy text before that still
+prepares Vision on demand.

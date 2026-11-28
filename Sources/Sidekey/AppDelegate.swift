@@ -559,7 +559,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettingsWindow(tab: tab)
         }
         WhatsNewPresenter.shared.presentAfterLaunch(isFirstLaunch: opensOnboarding, defaults: .standard)
-        ScreenshotTextDetector.warmUp()
+        // Shot's recognizer after the speech model: dictation matters more.
+        // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+        LaunchModelPreparation.start(speech: OnDeviceSpeechWarmup.shared.launchPreparation) {
+            await ScreenshotTextDetector.warmUp().value
+        }
     }
 
     private func presentOnboarding() {

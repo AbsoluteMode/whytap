@@ -574,6 +574,41 @@ final class OnDeviceModelPreparationTests: XCTestCase {
         XCTAssertEqual(missing.count, 0, "no files, no load, no download")
     }
 
+    /// After a new build both the speech model and Shot's recognizer compile
+    /// for the Neural Engine; Shot waits until the speech model is ready, and
+    /// starts at once when nothing runs on this Mac.
+    func test_launch_prepares_the_speech_model_before_shot_ocr() async {
+        let routing = routingStore()
+        routing.setRoute(FeatureRoute(account: .thisMac, model: ModelRegistry.onDeviceSpeechModel), for: .dropFast)
+        // An async gate: a blocked semaphore would hold a cooperative thread.
+        let gate = Gate()
+        let order = Counter(), ocr = Counter()
+        let warmup = OnDeviceSpeechWarmup(routing: routing, readiness: .ready, prepare: {
+            await gate.wait()
+            order.increment()
+        })
+        warmup.start()
+        let speech = warmup.launchPreparation
+        XCTAssertNotNil(speech)
+        let both = LaunchModelPreparation.start(speech: speech) {
+            XCTAssertEqual(order.count, 1, "Shot started before the speech model was ready")
+            ocr.increment()
+        }
+        try? await Task.sleep(nanoseconds: 100_000_000)
+        XCTAssertEqual(ocr.count, 0)
+        await gate.open()
+        await both.value
+        XCTAssertEqual(ocr.count, 1)
+
+        let provider = routingStore()
+        provider.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v3"), for: .dropFast)
+        let none = OnDeviceSpeechWarmup(routing: provider, readiness: .ready, prepare: {})
+        none.start()
+        XCTAssertNil(none.launchPreparation)
+        await LaunchModelPreparation.start(speech: none.launchPreparation) { ocr.increment() }.value
+        XCTAssertEqual(ocr.count, 2)
+    }
+
     func test_switching_between_a_provider_and_this_mac_prepares_on_each_switch_to_this_mac() async {
         let routing = routingStore()
         routing.setRoute(FeatureRoute(account: .soniox, model: "stt-rt-v3"), for: .dropFast)

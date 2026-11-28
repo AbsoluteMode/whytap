@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Screenshots/ScreenshotTextCopyTests.swift
     confirmed_at: 2026-11-28
-related: [2026-10-20-screenshot-toolbar.md]
+related: [2026-10-20-screenshot-toolbar.md, 2026-11-28-on-device-model-preparation.md]
 ---
 
 ## Context

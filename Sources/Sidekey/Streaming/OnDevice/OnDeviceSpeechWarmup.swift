@@ -19,6 +19,11 @@ final class OnDeviceSpeechWarmup {
     private let prepare: @Sendable () async -> Void
     private var subscription: AnyCancellable?
     private var usedThisMac = false
+    /// The launch preparation (nil when no feature runs on this Mac or the
+    /// model is not downloaded). Other launch work that compiles for the
+    /// Neural Engine waits for it (`LaunchModelPreparation`); once finished,
+    /// awaiting it returns at once.
+    private(set) var launchPreparation: Task<Void, Never>?
 
     init(
         routing: AIRoutingStore? = nil,
@@ -53,6 +58,7 @@ final class OnDeviceSpeechWarmup {
         guard readiness.isReady() else { return }
         os_log("on-device model: warm-up reason=%{public}@", log: Self.log, type: .info, reason)
         let prepare = self.prepare
-        Task(priority: .utility) { await prepare() }
+        let task = Task(priority: .utility) { await prepare() }
+        if reason == "launch" { launchPreparation = task }
     }
 }

@@ -4265,7 +4265,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func handleMeetingsCoordinatorEvent(_ event: MeetingsCoordinatorEvent) {
         switch event {
-        case .newMeetingAvailable, .meetingFailed:
+        case .newMeetingAvailable, .meetingTranscriptAvailable, .meetingFailed:
             // Refresh the open Meetings window so a new row appears in
             // the sidebar without forcing the user to close and reopen.
             // Reading the private storage on the coordinator avoids

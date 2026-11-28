@@ -45,6 +45,11 @@ final class MeetingsDetailView: NSView {
     /// True while the Note tab's markdown editor is open — the host skips
     /// background reloads so an in-progress edit isn't stomped.
     var isEditing: Bool { model.isEditing }
+    /// What the Note tab says when the meeting has no note to show.
+    var unavailableMessage: String? { model.unavailableMessage }
+    /// The button under that message, when there is one.
+    var offeredNotesAction: NotesAction? { model.onRetryNotes == nil ? nil : model.notesAction }
+    func performNotesAction() { model.onRetryNotes?() }
 
     /// `bundleURL` / `bundleAccessRoot` are retained in the signature so the
     /// `MeetingsContentController` call site is untouched during the BlockNote
@@ -136,6 +141,7 @@ final class MeetingsDetailView: NSView {
     func loadUnavailableMeeting(
         id: UUID, message: String, isLoading: Bool = false,
         transcript: [TranscriptSegment]? = nil, onRetryNotes: (() -> Void)? = nil,
+        notesAction: NotesAction = .retryNotes,
         preservingTab: Bool = false
     ) {
         // A background refresh must not pull a reader off the Transcript tab.
@@ -150,7 +156,24 @@ final class MeetingsDetailView: NSView {
             )
         }
         model.onRetryNotes = onRetryNotes
+        model.notesAction = notesAction
         switchTo(keepTranscriptTab ? .transcribe : .note)
+    }
+
+    /// What the button under a missing note does. A failed note is retried;
+    /// a meeting stored without a notes model has its notes made for the
+    /// first time, which is not an error.
+    enum NotesAction: Equatable {
+        case retryNotes
+        case makeNotes
+
+        var title: String { self == .makeNotes ? "Make notes" : "Retry notes" }
+        var help: String {
+            self == .makeNotes ? "Make the notes from the saved transcript"
+                : "Write the notes again from the saved transcript"
+        }
+        /// A calm document for a meeting without notes; a warning for a failure.
+        var symbol: String { self == .makeNotes ? "doc.text" : "waveform.badge.exclamationmark" }
     }
 
     /// Wire the edit bridge so Done-in-editor persists. Stored weakly — the
@@ -213,6 +236,7 @@ final class MeetingDetailModel: ObservableObject {
     var onEditingFinished: (() -> Void)?
     /// Set while a meeting without a note can have its notes written again.
     @Published var onRetryNotes: (() -> Void)?
+    @Published var notesAction: MeetingsDetailView.NotesAction = .retryNotes
 
     private let meetingSharePresenter: @MainActor (MeetingSharePayload) -> Void
 
@@ -235,6 +259,7 @@ final class MeetingDetailModel: ObservableObject {
         unavailableMessage = nil
         unavailableIsLoading = false
         onRetryNotes = nil
+        notesAction = .retryNotes
         self.noteMarkdown = noteMarkdown
         self.noteBlocks = noteBlocks
         self.noteProtocol = MeetingProtocolParser.parse(noteMarkdown)
@@ -265,6 +290,7 @@ final class MeetingDetailModel: ObservableObject {
         activeTab = .note
         isEditing = false
         onRetryNotes = nil
+        notesAction = .retryNotes
     }
 
     /// The transcript of a meeting whose note is missing. The note fields
@@ -332,7 +358,7 @@ private struct MeetingDetailContentView: View {
                 ProgressView()
                     .controlSize(.small)
             } else {
-                Image(systemName: "waveform.badge.exclamationmark")
+                Image(systemName: model.notesAction.symbol)
                     .font(.system(size: 24, weight: .regular))
                     .foregroundStyle(MacSettingsTheme.text2)
             }
@@ -344,9 +370,9 @@ private struct MeetingDetailContentView: View {
             if let retry = model.onRetryNotes {
                 // The shared button: hover, pressed and keyboard-focus states
                 // over its whole hit area, like Retry in the meeting list.
-                MacButton(title: "Retry notes", style: .primary, action: retry)
+                MacButton(title: model.notesAction.title, style: .primary, action: retry)
                     .padding(.top, 4)
-                    .help("Write the notes again from the saved transcript")
+                    .help(model.notesAction.help)
             }
         }
         .padding(.horizontal, 24)

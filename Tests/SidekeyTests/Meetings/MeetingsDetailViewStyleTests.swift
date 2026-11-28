@@ -37,8 +37,10 @@ final class MeetingsDetailViewStyleTests: XCTestCase {
             contentsOf: root.appendingPathComponent("Sources/Sidekey/Meetings/MeetingsDetailView.swift"),
             encoding: .utf8
         )
-        XCTAssertTrue(detail.contains(#"MacButton(title: "Retry notes", style: .primary, action: retry)"#))
+        // One shared button serves Retry notes and Make notes.
+        XCTAssertTrue(detail.contains(#"MacButton(title: model.notesAction.title, style: .primary, action: retry)"#))
         XCTAssertFalse(detail.contains(#"Text("Retry notes")"#), "no second, hand-rolled Retry notes button")
+        XCTAssertFalse(detail.contains(#"Text("Make notes")"#), "no hand-rolled Make notes button")
 
         let button = try String(
             contentsOf: root.appendingPathComponent("Sources/Sidekey/Settings/MacUI/MacButton.swift"),

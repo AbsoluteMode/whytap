@@ -47,6 +47,9 @@ import os.log
 enum MeetingsCoordinatorEvent: Sendable {
     /// Processing finished and the store now contains the meeting.
     case newMeetingAvailable(id: UUID)
+    /// Processing finished without a Meeting notes model: the store now
+    /// contains the meeting with its transcript only. Not a failure.
+    case meetingTranscriptAvailable(id: UUID)
     /// Processing failed. Surfaced as a failed row in the meetings list.
     case meetingFailed(id: UUID, error: String?)
 }
@@ -108,7 +111,7 @@ final class MeetingsCoordinator {
     /// Shown on a meeting row when a recording finished but no provider is
     /// chosen to process it. The staged audio is kept for retries for up to
     /// `failedRecordingRetention`.
-    static let processorNotConfiguredMessage =
+    nonisolated static let processorNotConfiguredMessage =
         "Choose models for Meetings and Meeting notes in Settings > Keys & models to process this meeting."
 
     /// Shown on a meeting whose note still failed when its audio expired.
@@ -1232,7 +1235,10 @@ final class MeetingsCoordinator {
                     meetingId: meetingId
                 )
                 try? await meetingsStore?.updateProgress(id: meetingId, status: .ready)
-                eventsContinuation.yield(.newMeetingAvailable(id: meetingId))
+                let transcriptOnly = ((try? await meetingsStore?.markdown(id: meetingId)) ?? nil)
+                    == MeetingBYOKProcessor.transcriptOnlyMarkdown
+                eventsContinuation.yield(transcriptOnly ? .meetingTranscriptAvailable(id: meetingId)
+                    : .newMeetingAvailable(id: meetingId))
                 refreshOpenWindowIfNeeded()
             } catch KeychainError.unhandledError(errSecInDarkWake) {
                 // macOS cannot show a Keychain prompt in a dark wake or while
@@ -1935,9 +1941,11 @@ final class MeetingsCoordinator {
             notesRetries.remove(meetingId)
             refreshOpenWindowIfNeeded()
         }
-        guard let meta = (try? await store.list())?.first(where: { $0.id == meetingId }),
-              meta.progressStatus == .failed
-        else { return false }
+        guard let meta = (try? await store.list())?.first(where: { $0.id == meetingId }) else { return false }
+        if meta.progressStatus == .ready {
+            return await makeNotesForTranscriptOnlyMeeting(meetingId, store: store, processor: directProcessor)
+        }
+        guard meta.progressStatus == .failed else { return false }
         // While the recording is still staged, the retry is the ordinary
         // queued run: it keeps the language and reconnect markers captured at
         // Stop, cannot overlap launch recovery, and reuses the kept
@@ -1980,6 +1988,32 @@ final class MeetingsCoordinator {
                 ?? MeetingNotesFailure(error).description
             eventsContinuation.yield(.meetingFailed(id: meetingId, error: reason))
             _ = try? await store.updateProgress(id: meetingId, status: .failed, failureReason: reason)
+            return false
+        }
+    }
+
+    /// Make notes for a meeting stored with its transcript only. It stays a
+    /// ready meeting either way: a failure is kept as the row's reason, which
+    /// the note pane shows next to Make notes, and the list shows no failure.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    private func makeNotesForTranscriptOnlyMeeting(
+        _ meetingId: UUID, store: MeetingsStore, processor: any MeetingDirectProcessing
+    ) async -> Bool {
+        do {
+            guard try await processor.makeNotesForTranscriptOnlyMeeting(
+                meetingId, language: config.preferredLanguage, meetingsStore: store
+            ) else { return false }
+            _ = try? await store.updateProgress(id: meetingId, status: .ready, failureReason: nil)
+            eventsContinuation.yield(.newMeetingAvailable(id: meetingId))
+            return true
+        } catch {
+            os_log(
+                "make notes failed (meetingId: %{public}@, error: %{public}@)",
+                log: Self.log, type: .error,
+                meetingId.uuidString, String(describing: type(of: error))
+            )
+            let reason = (error as? MeetingNotesFailure)?.reason ?? MeetingNotesFailure(error).reason
+            _ = try? await store.updateProgress(id: meetingId, status: .ready, failureReason: reason)
             return false
         }
     }

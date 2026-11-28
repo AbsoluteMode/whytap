@@ -131,6 +131,76 @@ final class MeetingsContentControllerTests: XCTestCase {
         XCTAssertEqual(controller.currentMeetingId, newest)
     }
 
+    /// A meeting stored without a Meeting notes model opens with a calm
+    /// explanation and Make notes, never the fixed note in the editor, and its
+    /// transcript is on the Transcript tab.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    func test_transcript_only_meeting_shows_its_transcript_and_make_notes() async {
+        let id = UUID()
+        let segments = [TranscriptSegment(speaker: nil, start: 0, end: 2, text: "We ship on Friday.")]
+        let source = MutableSource(meetings: [makeMeeting(id: id, startedAt: Date(timeIntervalSince1970: 200))])
+        let controller = MeetingsContentController(
+            source: source,
+            markdownProvider: { _ in MeetingBYOKProcessor.transcriptOnlyMarkdown },
+            transcriptProvider: { _ in segments },
+            bundleURL: nil,
+            bundleAccessRoot: nil,
+            refreshHandler: nil
+        )
+        var made: [UUID] = []
+        controller.notesRecovery = MeetingNotesRecovery(
+            keptTranscript: { _ in nil }, retryNotes: { made.append($0) })
+
+        _ = controller.view
+        controller.selectMeeting(id: id)
+        let pane = controller.detailPane
+        await waitUntil { pane.offeredNotesAction != nil }
+
+        XCTAssertEqual(pane.unavailableMessage, MeetingsContentController.transcriptOnlyMessage)
+        XCTAssertEqual(pane.offeredNotesAction, .makeNotes)
+        XCTAssertEqual(pane.offeredNotesAction?.title, "Make notes")
+        XCTAssertFalse(pane.isEditing)
+        pane.showTab(.transcribe)
+        XCTAssertEqual(pane.currentTab, .transcribe, "the transcript is readable")
+
+        pane.performNotesAction()
+        await waitUntil { made == [id] }
+        XCTAssertEqual(made, [id])
+    }
+
+    /// Make notes failed with a configured model: the reason replaces the
+    /// explanation, still with Make notes and no failure state.
+    func test_transcript_only_meeting_shows_the_last_make_notes_failure_calmly() async {
+        let id = UUID()
+        let source = MutableSource(meetings: [makeMeeting(
+            id: id, startedAt: Date(timeIntervalSince1970: 200),
+            failureReason: "The Meeting notes provider is out of credit.")])
+        let controller = MeetingsContentController(
+            source: source,
+            markdownProvider: { _ in MeetingBYOKProcessor.transcriptOnlyMarkdown },
+            transcriptProvider: { _ in [TranscriptSegment(speaker: nil, start: 0, end: 2, text: "Hello")] },
+            bundleURL: nil,
+            bundleAccessRoot: nil,
+            refreshHandler: nil
+        )
+        controller.notesRecovery = MeetingNotesRecovery(keptTranscript: { _ in nil }, retryNotes: { _ in })
+
+        _ = controller.view
+        controller.selectMeeting(id: id)
+        let pane = controller.detailPane
+        await waitUntil { pane.offeredNotesAction != nil }
+
+        XCTAssertEqual(pane.unavailableMessage,
+                       "The Meeting notes provider is out of credit. The transcript is in the Transcript tab.")
+        XCTAssertEqual(pane.offeredNotesAction, .makeNotes)
+    }
+
+    final class MutableSource: MeetingsSidebarSource, @unchecked Sendable {
+        var meetings: [MeetingMetaWithLocalState]
+        init(meetings: [MeetingMetaWithLocalState]) { self.meetings = meetings }
+        func loadList() async throws -> [MeetingMetaWithLocalState] { meetings }
+    }
+
     private func makeMeeting(
         id: UUID,
         startedAt: Date,

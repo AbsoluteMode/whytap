@@ -175,7 +175,12 @@ extension MeetingsStore {
     /// An unreadable note or transcript reads as missing, so one damaged
     /// meeting does not fail a search over all of them.
     private func document(_ row: MeetingMetaWithLocalState) -> MeetingDocument {
-        let note = (try? markdown(id: row.id)).map(NoteMarkdownStripper.stripTranscript)
+        // A meeting stored without a notes model has no notes, only its
+        // transcript: its fixed "transcript only" note is not a note.
+        // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+        let note = (try? markdown(id: row.id)).flatMap { $0 }
+            .flatMap { $0 == MeetingBYOKProcessor.transcriptOnlyMarkdown ? nil : $0 }
+            .map(NoteMarkdownStripper.stripTranscript)
         // A meeting whose note failed still has its kept transcript.
         let transcript = (try? transcript(id: row.id)) ?? (try? transcriptAwaitingNote(meetingId: row.id))
         let stored = row.title?.trimmingCharacters(in: .whitespacesAndNewlines)

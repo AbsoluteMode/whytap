@@ -788,10 +788,21 @@ Meeting Notes:
           user chose for notes. WHY:
           .project-docs/decisions/2026-11-21-recorded-meeting-models.md).
           Speaker labels come from the provider; there is no on-device
-          diarizer, so On this Mac gives a meeting without speakers. Without a route for Meetings and Meeting notes
-          (including the retired Local route) the meeting is marked failed
-          with `MeetingsCoordinator.processorNotConfiguredMessage` and its
-          audio stays staged; a `MeetingFinalizeManifest` re-dispatches it
+          diarizer, so On this Mac gives a meeting without speakers. A
+          Meetings route alone is enough: without a Meeting notes model (none
+          chosen, or its key missing) the meeting is stored with its
+          transcript and the fixed `MeetingBYOKProcessor.transcriptOnlyMarkdown`
+          note ("Meeting transcript"), ready, with its audio released and a
+          `meetingTranscriptAvailable` event instead of a failure. Its pane
+          shows the transcript and Make notes, which writes the notes from the
+          stored transcript (every part of a continued call; a continued part
+          without a model adds its transcript and keeps the meeting's note).
+          A Make notes failure is kept as the ready row's reason. WHY:
+          .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md.
+          Without a Meetings route, or with one that cannot transcribe and no
+          notes model (including the retired Local route), the meeting is
+          marked failed with `MeetingsCoordinator.processorNotConfiguredMessage`
+          and its audio stays staged; a `MeetingFinalizeManifest` re-dispatches it
           later with the language captured at Stop time, for at most 24 hours
           after the last chunk. A recording without
           speech is not a failure: a completed job without segments

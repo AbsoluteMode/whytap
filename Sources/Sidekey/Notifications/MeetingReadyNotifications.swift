@@ -25,11 +25,24 @@ final class MeetingReadyNotifications: ObservableObject {
 
     @discardableResult
     func receive(_ event: MeetingsCoordinatorEvent) async -> Bool {
-        guard enabled, case .newMeetingAvailable(let id) = event else { return false }
+        guard enabled else { return false }
+        let id: UUID
+        let title: String
+        let body: String
+        switch event {
+        case .newMeetingAvailable(let meetingId):
+            (id, title, body) = (meetingId, "Meeting notes are ready", "Click to open your meeting notes.")
+        case .meetingTranscriptAvailable(let meetingId):
+            // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+            (id, title, body) = (meetingId, "Meeting transcript is ready",
+                                 "No notes model is chosen. Click to open the transcript.")
+        case .meetingFailed:
+            return false
+        }
         return await hub.receive(LocalNotificationEvent(
             id: Self.sourceID + ":" + id.uuidString,
             source: Self.sourceID, sourceName: "Meeting notes",
-            title: "Meeting notes are ready", body: "Click to open your meeting notes.",
+            title: title, body: body,
             link: nil, timestamp: Date(), customTint: "#785EFF", customLogo: "whytap",
             meetingID: id
         ))

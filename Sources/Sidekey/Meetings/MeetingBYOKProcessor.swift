@@ -17,6 +17,11 @@ protocol MeetingDirectProcessing: AnyObject {
     func writeNotesFromKeptTranscript(
         _ retry: MeetingNotesRetry, language: String?, meetingsStore: MeetingsStore?
     ) async throws -> Bool
+    /// Make notes for a meeting stored with its transcript only. `false` when
+    /// the meeting is gone or already has notes.
+    func makeNotesForTranscriptOnlyMeeting(
+        _ meetingId: UUID, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool
 }
 
 /// Why a meeting's note could not be written although its transcript exists.
@@ -70,10 +75,25 @@ struct MeetingNotesRetry: Equatable, Sendable {
     let durationSeconds: TimeInterval
 }
 
+extension OpenRouterLLMError {
+    /// The Meeting notes route has no model to run: none is chosen, or its
+    /// provider has no key. A meeting then keeps its transcript only.
+    var meansNoNotesModel: Bool {
+        switch self {
+        case .notConfigured, .missingModel, .missingKey: return true
+        default: return false
+        }
+    }
+}
+
 extension MeetingDirectProcessing {
     /// The default suits processors that keep no transcript.
     func writeNotesFromKeptTranscript(
         _ retry: MeetingNotesRetry, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool { false }
+
+    func makeNotesForTranscriptOnlyMeeting(
+        _ meetingId: UUID, language: String?, meetingsStore: MeetingsStore?
     ) async throws -> Bool { false }
 
     func process(event: MeetingRecorder.FinalizedEvent, startedAt: Date, language: String?,
@@ -88,6 +108,8 @@ enum MeetingBYOKProcessingError: Error, CustomStringConvertible, Equatable {
     case missingTranscriptionKey
     case missingSelfHostedBaseURL
     case directLLMDisabled
+    /// Neither notes nor a usable speech model: nothing can be made yet.
+    case notConfigured
     case noAudio
     case noTranscript
     case upstreamError(String)
@@ -102,6 +124,8 @@ enum MeetingBYOKProcessingError: Error, CustomStringConvertible, Equatable {
             return "Self-hosted transcription base URL is missing."
         case .directLLMDisabled:
             return "Direct LLM route is not enabled."
+        case .notConfigured:
+            return MeetingsCoordinator.processorNotConfiguredMessage
         case .noAudio:
             return "Meeting recording has no audio chunks."
         case .noTranscript:
@@ -166,9 +190,11 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
     }
 
     func shouldProcessDirectly() -> Bool {
-        // Recording and notes each run on the model chosen for them. Until both
-        // are chosen in Settings -> Keys & models the meeting stays staged.
-        routing.route(for: .meetings) != nil && routing.route(for: .meetingNotes) != nil
+        // A meeting needs only a speech model: without a Meeting notes model
+        // it is stored with its transcript and no notes. Without a Meetings
+        // route the meeting stays staged.
+        // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+        routing.route(for: .meetings) != nil
     }
 
     func process(
@@ -190,19 +216,34 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             let legacyNote = continuation.precedingRecordingId == continuation.meetingId && previousNote != nil
             guard previousCommitted || legacyNote else { throw MeetingContinuationError.previousPartNotReady }
         }
-        // With a transcript already kept, a notes route that cannot run is a
-        // notes failure like any other: fixed copy, transcript still offered.
         let keptBefore = try await meetingsStore.pendingTranscript(recordingId: event.meetingId)
         let hasKept = keptBefore?.isEmpty == false
-        let route: DirectLLMRoute
+        // No Meeting notes model (none chosen, or its key is missing) is not a
+        // failure: the meeting is stored with its transcript only, and the
+        // notes can be made later. A configured route that cannot run (a
+        // server without an address) still fails; with a transcript already
+        // kept that is a notes failure like any other.
+        // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+        var route: DirectLLMRoute?
         do {
-            guard let enabled = try await notesRoute.routeIfEnabled() else {
-                throw hasKept ? OpenRouterLLMError.notConfigured as Error
-                    : MeetingBYOKProcessingError.directLLMDisabled
-            }
-            route = enabled
+            route = try await notesRoute.routeIfEnabled()
+        } catch let error as OpenRouterLLMError where error.meansNoNotesModel {
+            route = nil
         } catch let error as OpenRouterLLMError where hasKept {
             throw MeetingNotesFailure(error, isLaterPart: continuation != nil)
+        }
+        // A meeting that has its transcript only gets its continued call's
+        // transcript too; Make notes then covers every part at once.
+        if let continuation,
+           try await meetingsStore.markdown(id: continuation.meetingId) == Self.transcriptOnlyMarkdown {
+            route = nil
+        }
+        // Without a notes model nothing would be made from a recording that
+        // also cannot be transcribed: that stays "not configured".
+        if route == nil, !hasKept {
+            do { _ = try resolveMeetingsRoute() } catch {
+                throw MeetingBYOKProcessingError.notConfigured
+            }
         }
 
         let endedAt = endedAt ?? startedAt.addingTimeInterval(max(0, event.totalDurationSeconds))
@@ -246,6 +287,12 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         try await meetingsStore.savePendingTranscript(
             recordingId: event.meetingId, meetingId: targetMeetingId, segments: segments
         )
+        guard let route else {
+            return try await storeTranscriptOnlyMeeting(
+                event: event, startedAt: startedAt, endedAt: endedAt,
+                segments: segments, meetingsStore: meetingsStore, continuation: continuation
+            )
+        }
         if continuation == nil {
             _ = try await meetingsStore.updateProgress(id: event.meetingId, status: .generatingProtocol)
         }
@@ -325,6 +372,66 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
             markdown: normalized, transcript: segments, continuation: nil
         )
         return true
+    }
+
+    /// The notes of a meeting stored with its transcript only, made from its
+    /// stored transcript (every part of a continued call). The speech provider
+    /// is not called. A failure is a `MeetingNotesFailure` and changes nothing.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    func makeNotesForTranscriptOnlyMeeting(
+        _ meetingId: UUID, language: String?, meetingsStore: MeetingsStore?
+    ) async throws -> Bool {
+        guard let meetingsStore else { throw MeetingBYOKProcessingError.missingStore }
+        guard let meeting = try await meetingsStore.transcriptOnlyMeeting(id: meetingId) else { return false }
+        let route: DirectLLMRoute
+        do {
+            guard let enabled = try await notesRoute.routeIfEnabled() else {
+                throw OpenRouterLLMError.notConfigured
+            }
+            route = enabled
+        } catch {
+            throw MeetingNotesFailure(error)
+        }
+        let markdown: String
+        do {
+            markdown = try await generateNoteMarkdown(
+                transcript: Self.transcriptText(meeting.transcript), route: route, language: language,
+                startedAt: meeting.startedAt, endedAt: meeting.endedAt, interruptedBySleep: false
+            )
+        } catch let error where !(error is CancellationError) {
+            throw MeetingNotesFailure(error)
+        }
+        let normalized = Self.normalizedProtocolMarkdown(markdown)
+        return try await meetingsStore.replaceTranscriptOnlyNote(
+            id: meetingId, markdown: normalized,
+            title: MeetingProtocolParser.parse(normalized)?.name ?? Self.firstMarkdownHeading(in: normalized)
+        )
+    }
+
+    /// A meeting without a Meeting notes model is finished, not failed: it is
+    /// stored with its transcript and a fixed "transcript only" note, and its
+    /// staged audio is released like any finished meeting's (notes are made
+    /// later from the stored transcript). A continued call adds its transcript
+    /// and leaves the meeting's note as it is.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    private func storeTranscriptOnlyMeeting(
+        event: MeetingRecorder.FinalizedEvent, startedAt: Date, endedAt: Date,
+        segments: [TranscriptSegment], meetingsStore: MeetingsStore, continuation: MeetingContinuation?
+    ) async throws -> UUID {
+        let meetingId = try await meetingsStore.storeProcessedRecording(
+            recordingId: event.meetingId, startedAt: startedAt, endedAt: endedAt,
+            duration: event.totalDurationSeconds, title: Self.transcriptOnlyTitle,
+            markdown: Self.transcriptOnlyMarkdown, transcript: segments, continuation: continuation
+        )
+        cleanupStagingDirectory(for: event)
+        os_log(
+            "meeting stored with its transcript only, no notes model (meetingId: %{public}@, duration_s: %{public}d)",
+            log: Self.log,
+            type: .info,
+            event.meetingId.uuidString,
+            MeetingsCoordinator.roundedDurationSeconds(event.totalDurationSeconds)
+        )
+        return meetingId
     }
 
     /// What the notes model reads: speaker-attributed turns when the provider
@@ -479,6 +586,17 @@ final class MeetingBYOKProcessor: MeetingDirectProcessing {
         }
         return "\(MeetingProtocolParser.marker)\n\(trimmed)"
     }
+
+    nonisolated static let transcriptOnlyTitle = "Meeting transcript"
+
+    /// The note of a meeting stored without a Meeting notes model. The notes
+    /// window shows the transcript and Make notes instead of this text; older
+    /// builds and backups read it as a plain note.
+    nonisolated static let transcriptOnlyMarkdown = """
+    # Meeting transcript
+
+    No notes were made because Meeting notes had no model. The transcript is in the Transcript tab.
+    """
 
     nonisolated static let noSpeechTitle = "No speech detected"
 

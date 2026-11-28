@@ -772,12 +772,12 @@ Under the lock:
    refuses a locked screen or a session not in front, so every Quit, including
    a resumed candidate, happens while someone is at the Mac); never reuse a cached
    result or replace an error/timeout with an empty activity list. Whytap's
-   own audio capture (a meeting, manual Notes, dictation, Subtitles), a call
-   app's microphone or output, a browser microphone, an unknown microphone
-   user, browser audio that could be a muted call, or an unknown result means
-   **pending**: record `pending_install --retry-install`, release the lock and
-   let the watcher retry silently. Discord voice chat and macOS CoreSpeech do
-   not defer.
+   own audio capture (a meeting, manual Notes, dictation, agent voice, Subtitles), an
+   input user whose bundle ID cannot be read, an incomplete snapshot, or an
+   unknown result means **pending**: record `pending_install --retry-install`,
+   release the lock and let the watcher retry silently. A microphone or speaker
+   held only by another app (a call, a browser broadcast, Discord, macOS
+   CoreSpeech) does not defer.
    Do not ask for a saved/idle confirmation on each build. On 2026-10-20 the
    user gave standing permission to interrupt other work outside meetings,
    including dictation, agent work, editors and backup. The conservative probe
@@ -798,19 +798,19 @@ bundle IDs of active processes three times one second apart. It never records
 audio, reads browser URLs or calendar data, opens UI, or requests permissions.
 An install interrupts only Whytap, so Whytap's own input (every capture path
 runs in its process, system audio through an in-process tap) always defers.
-Input from a known call app, a browser, an unidentified or an unknown process
-defers. Discord (the owner's always-on voice chat, which Whytap does not
-record) and `com.apple.CoreSpeech` are ignored for input and output. Output
-from known call apps defers; browser/WebKit output is uncertain because a
-muted call and media share this signal. Merely leaving Zoom or a browser open
-is not a meeting signal. Property/list failures, stale results and the
-20-second timeout defer.
+Whytap's own input is the only audio signal that defers (plus input from a
+process whose bundle ID cannot be read, which might be Whytap, and an incomplete
+snapshot). Microphone or output held by any other identified app (call apps,
+browsers, Discord, `com.apple.CoreSpeech`) is ignored: it is not Whytap's work and
+an install relaunches only Whytap. Merely leaving Zoom or a browser open is not a
+meeting signal. Property/list failures, stale results and the 20-second timeout
+defer. WHY: .project-docs/decisions/2026-11-28-meeting-gate-foreign-microphone.md
 
 This is an activity check, not a guarantee that every possible meeting can be
-detected: a call with both input and output fully closed is invisible, a
-listening-only call in an unrecognized native app may be missed, and a work
-call in Discord does not defer (an install then relaunches only Whytap). Browser media
-can delay an update. Preserve these limits in the local handoff evidence rather
+detected. A call in another app never defers, and the gate cannot see a shown
+"Take notes" nudge or the 45-second meeting reconnect window, because Whytap
+captures nothing then; an install in those moments relaunches Whytap and drops
+that offer. Preserve these limits in the local handoff evidence rather
 than claiming an authoritative in-process meeting status. A future reliable
 runtime signal may strengthen this gate; it must not invent an idle result.
 The decision and standing authorization are recorded in

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/DynamicIsland/IslandHoverDrawerMotionTests.swift
     confirmed_at: 2026-11-27
-related: [2026-11-26-hover-unpin-and-more-tools.md, 2026-11-25-island-hover-reorder.md]
+related: [2026-11-26-hover-unpin-and-more-tools.md, 2026-11-25-island-hover-reorder.md, 2026-11-28-hover-drag-out-whole-tile.md]
 ---
 
 ## Context
@@ -112,3 +112,5 @@ of the hover, and that More should be the whole bottom strip.
 - Building More on the click with a longer fade (hides the spike, keeps it).
 
 2026-11-27 · branch feature/hover-drag-out-remove
+
+2026-11-28: a dragged tool is removed only once its whole tile has left the drawer; see 2026-11-28-hover-drag-out-whole-tile.md.

@@ -94,7 +94,7 @@ python3 scripts/customize.py build
 ```
 
 Inspect one row and multiple rows, add/reorder/remove (in Settings and in the
-drawer: drag a tile out of the panel, right-click Remove from Hover, More tools strip -> click),
+drawer: drag a tile until it has fully left the panel, right-click Remove from Hover, More tools strip -> click),
 Settings locking, relaunch
 persistence and each tool's own optional hotkey (Settings → Hotkeys → Tools; there
 are no positional shortcuts). Verify that
@@ -123,7 +123,7 @@ must refer to the same unchanged control; dragging out, changing context or
 closing the panel cancels activation. A tile pressed and moved
 `dragThreshold` (4 pt) lifts instead (`liftPressedTool`): the grid's cells are measured once at the lift,
 the pointer over a cell puts the tool there, the lifted tool holds the drawer
-open, the release never activates it, a release outside the drawer removes the
+open, the release never activates it, a release with the whole tile outside the drawer (`removesRelease`, any side) removes the
 tool (`removeLiftedTool`), Escape restores the earlier order and a layout change
 the drag did not make ends it
 ([decision](../../.project-docs/decisions/2026-11-25-island-hover-reorder.md)).
@@ -136,7 +136,15 @@ it must stay held (`held`, `away`, `reentered`) until a click outside, or the
 pointer leaving, returning and leaving again. For a stuttering add/remove, run
 `IslandHoverDrawerMotionTests` with `WHYTAP_HOVER_MOTION_DIR` set: it hosts the
 real drawer offscreen, reports main-thread time per change and writes frame
-strips ([decision](../../.project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md))
+strips ([decision](../../.project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md)).
+The removal frame is the glass panel the backdrop reports (`.drawer`);
+`IslandHoverDrawerFrameTests` pins it to the glass on every side. Measure a
+region by its bounds, never `visibleRect` alone (since macOS 14 it can be the
+whole window). `IslandHoverAddLatencyTests` does the same for an add in the real island. An add
+or remove must change the layout, the edit hold and the press in one animated
+transaction (`editLayout`); `IslandHoverAddTransactionTests` fails on a
+synchronous update inside the click
+([decision](../../.project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md))
 ([decision](../../.project-docs/decisions/2026-11-26-hover-unpin-and-more-tools.md)). Internal search editing transitions must
 not resign the key window before the result receives its owned mouse-up.
 

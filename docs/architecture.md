@@ -1724,14 +1724,19 @@ held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
 so the island and Settings -> Features -> Hover change at once and a tile
 sliding under the pointer cannot send the tool back. A lifted tool is drawn
 larger with a shadow, holds the drawer open (IslandView interactionHeld and
-isHoverExpanded), and its release never activates it. Since 2026-11-27 a
-release outside the drawer's frame (IslandHoverReorder.panel, measured at the
-lift from the .navigation region; 24 pt around the tools when unknown)
-removes the tool (removeLiftedTool -> HoverLayoutStore.unpin): outside, the
+isHoverExpanded), and its release never activates it. Since 2026-11-28 a
+release with the whole tile outside the drawer's frame removes the tool: the
+tile's picture (IslandHoverReorder.tileFrame, its cell at the lifted 1.1 scale
+following the pointer) must not overlap the glass panel (IslandHoverReorder.panel,
+measured at the lift from the .drawer region the glass backdrop reports, by
+its bounds; 24 pt around the tools when unknown) on any side (removeLiftedTool -> HoverLayoutStore.unpin): outside, the
 floating tile shrinks, dims and shows a red minus and the cursor becomes the
 system disappearing-item cursor; the release plays the system poof
 (NSAnimationEffect, skipped under Reduce Motion) and the picture fades in
-place (ReorderPhase .removed). Releasing back inside keeps the tool; Escape,
+place (ReorderPhase .removed). Releasing with any part of the tile over the
+drawer keeps the tool. Pin and unpin change the layout, the edit hold and the
+press in one animated transaction (editLayout), so SwiftUI does not update the
+island inside the click; an added tile fades in within 0.12 s. Escape,
 watched by key monitors only for the drag, restores the order before the lift.
 A layout change the drag did not
 write (Settings Sync) ends it without undoing that change; hide, drawer close

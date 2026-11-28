@@ -64,7 +64,8 @@ final class HistoryBackdropTests: XCTestCase {
         XCTAssertFalse(glass.contains(".background(Color.clear)"))
         let island = try source("Sources/Sidekey/DynamicIsland/IslandView.swift")
         XCTAssertFalse(island.contains("hoverPanelMode != .history"), "History gets the drawer backdrop")
-        XCTAssertTrue(island.contains(".islandHoverGlassSurface()\n"))
+        XCTAssertTrue(island.contains(".islandHoverGlassSurface(reportingDrawerTo: hoverHitBridge)\n"),
+                      "Every drawer mode gets the glass, which also reports the drag-out frame")
     }
 
     func test_the_history_preview_uses_the_shared_backdrop_on_every_system() throws {

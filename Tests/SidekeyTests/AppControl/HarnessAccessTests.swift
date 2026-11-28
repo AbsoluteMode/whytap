@@ -188,9 +188,9 @@ final class HarnessAccessTests: XCTestCase {
 
     func test_dictation_list_writes_are_gated_like_meetings() async {
         XCTAssertEqual(HarnessAccessGate.gatedOperations,
-                       AppControlMeetings.operations.union(["vocab_add", "filler_add"]))
+                       AppControlMeetings.operations.union(["vocab_add", "filler_add", "vocab_remove", "filler_remove"]))
         prompt.answer = .deny
-        for operation in ["vocab_add", "filler_add"] {
+        for operation in ["vocab_add", "filler_add", "vocab_remove", "filler_remove"] {
             let answer = await read(operation)
             XCTAssertEqual(answer?.data.object?["code"], .string("access_denied"), operation)
         }
@@ -222,6 +222,19 @@ final class HarnessAccessTests: XCTestCase {
         }
         XCTAssertEqual(vocabulary.terms, [])
         XCTAssertEqual(fillers.terms(), [])
+        // Removal the same way: the entries stay.
+        vocabulary.setTerms(["Whytap"]); fillers.add("Whytap")
+        for operation in ["vocab_remove", "filler_remove"] {
+            let request = AppControlRequest(operation, arguments: ["terms": .array([.string("whytap")])])
+            let response = await gate.handle(request, peerPID: helper) { request in
+                _ = self.store.record(.deny, for: self.claude, at: Date())
+                return lists.handle(request.operation, request.arguments)
+            }
+            XCTAssertEqual(response.data.object?["code"], .string("access_denied"), operation)
+            _ = self.store.record(.allow, for: self.claude, at: Date())
+        }
+        XCTAssertEqual(vocabulary.terms, ["Whytap"])
+        XCTAssertEqual(fillers.terms(), ["Whytap"])
     }
 
     func test_a_script_in_the_harness_shell_gets_nothing_even_after_yes() async {

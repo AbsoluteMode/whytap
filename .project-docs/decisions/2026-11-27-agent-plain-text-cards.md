@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Agent/AgentPlainTextCardsTests.swift
     confirmed_at: 2026-11-27
-related: [2026-11-27-agent-harness-cli.md, 2026-11-22-agent-insert-card.md]
+related: [2026-11-27-agent-harness-cli.md, 2026-11-22-agent-insert-card.md, 2026-11-28-agent-harness-instructions.md]
 ---
 
 # Claude Code and Codex answers get cards from their own text

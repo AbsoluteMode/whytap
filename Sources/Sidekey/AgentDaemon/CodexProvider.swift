@@ -171,6 +171,10 @@ final class CodexProvider: CLIProvider {
                     args += ["-c", "service_tier=\(cliTier)"]
                 }
             }
+            // Whytap's instructions from WHYTAP.md as developer instructions,
+            // beside the user's own AGENTS.md, which Codex loads by itself.
+            // WHY: .project-docs/decisions/2026-11-28-agent-harness-instructions.md
+            args += AgentHarnessInstructions.codexFlags(workspace: workingDir)
             if let tid = resumeSessionID { args.append(tid) }
             args.append("-")
 

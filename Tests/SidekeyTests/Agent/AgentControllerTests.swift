@@ -211,9 +211,10 @@ final class AgentControllerTests: XCTestCase {
         XCTAssertEqual(controller.state, .executing)
     }
 
-    func testFreshSessionPromptIncludesSystemPreamble() async throws {
-        // No stored session id => resumeSessionID == nil => the behavioural
-        // preamble is prepended on this (first) turn.
+    func testFreshSessionPromptCarriesNoIdentityPreamble() async throws {
+        // Who is answering, memory and the island go to the CLI as system
+        // instructions (WHYTAP.md), so a fresh session's prompt is the
+        // per-turn reminders plus the request, like a resumed one.
         let snapshot = makeSnapshot().withSelectionText(nil)
         let agentClient = ManualCLIProvider()
         let controller = AgentController(
@@ -228,14 +229,13 @@ final class AgentControllerTests: XCTestCase {
         await waitUntil { agentClient.calls.count == 1 }
 
         let prompt = try XCTUnwrap(agentClient.calls.first?.prompt)
-        XCTAssertTrue(prompt.hasPrefix("You are Whytap"), "Preamble must lead the prompt; got: \(prompt.prefix(40))")
-        XCTAssertTrue(prompt.contains("AGENTS.md in your working directory is your memory"))
-        XCTAssertTrue(prompt.contains("Lead with the answer in your first sentence"))
+        XCTAssertFalse(prompt.contains("You are Whytap"))
+        XCTAssertFalse(prompt.contains("AGENTS.md in your working directory is your memory"))
+        XCTAssertFalse(prompt.contains("Whytap customization capabilities"))
+        XCTAssertTrue(prompt.hasPrefix("Reply in the language of the user's latest request"))
         XCTAssertTrue(prompt.contains("useful.actions"))
         XCTAssertTrue(prompt.hasSuffix("что помнить?"))
-        // The old internal-mechanics wording must be gone.
-        XCTAssertFalse(prompt.contains("WHYTAP_MEMORY.md"))
-        XCTAssertFalse(prompt.contains("provider-specific CLI sessions"))
+        XCTAssertNil(agentClient.calls.first?.resumeSessionID)
     }
 
     func testResumedSessionPromptOmitsSystemPreamble() async throws {
@@ -296,39 +296,6 @@ final class AgentControllerTests: XCTestCase {
         XCTAssertFalse(prompt.contains("You are Whytap"))
         XCTAssertTrue(prompt.contains("Selected text:\nhighlighted code"))
         XCTAssertTrue(prompt.hasSuffix("explain"))
-    }
-
-    func testSystemPreambleContainsLoadBearingMarkers() {
-        // Guard: a future edit must not silently drop a whole block of the
-        // preamble. Pin one marker per section.
-        let preamble = AgentController.systemPromptPreambleForTesting
-        XCTAssertTrue(preamble.contains("You are Whytap"))
-        // ANSWERING — anti-preamble rule.
-        XCTAssertTrue(preamble.contains("Lead with the answer in your first sentence"))
-        // TOOLS — gating on freshness.
-        XCTAssertTrue(preamble.contains("Use the web only when the answer depends on recent"))
-        // MEMORY — file is the agent's own memory.
-        XCTAssertTrue(preamble.contains("AGENTS.md in your working directory is your memory"))
-        // Actionable-suggestions contract: the useful.actions fence with all
-        // three item types, plus the reinforcement that it is IN ADDITION to
-        // keeping the content in the text.
-        XCTAssertTrue(preamble.contains("\"useful.actions\""))
-        XCTAssertTrue(preamble.contains("\"link\""))
-        XCTAssertTrue(preamble.contains("\"path\""))
-        XCTAssertTrue(preamble.contains("\"copy\""))
-        XCTAssertTrue(preamble.contains("the fence is in addition, not instead"))
-        // The old link-only contract wording must be gone.
-        XCTAssertFalse(preamble.contains("When useful links would help"))
-    }
-
-    func testSystemPreambleRequestsMarkdownWithoutRepeatingTheReplyLanguageRule() {
-        let preamble = AgentController.systemPromptPreambleForTesting
-        for rule in ["Markdown in a ~320pt panel", "one plain sentence", "compact tables",
-                     "numbered lists", "> [!NOTE]", "> [!WARNING]", "URLs only in link"] {
-            XCTAssertTrue(preamble.contains(rule), rule)
-        }
-        XCTAssertEqual(preamble.components(separatedBy: "language").count - 1, 1)
-        XCTAssertFalse(preamble.contains("no\n  headings, tables, or lists"))
     }
 
     func testOversizedSelectionIsBoundedAndMarked() {

@@ -75,6 +75,14 @@ or Codex can open it for you). Your tool starts each request there:
 
 - `AGENTS.md` is long-term memory that you or the agent can edit; `CLAUDE.md`
   in the same folder is an alias to it, so both tools read the same file.
+  Whytap never writes it.
+- `WHYTAP.md` holds Whytap's own instructions for the tool: that it is your
+  Claude Code or Codex on your sign-in (Whytap has no API or model of its
+  own), how answers appear in the island and what the Whytap tools are for.
+  Whytap replaces it when it updates, so put your own notes in `AGENTS.md`.
+  Each request passes it to the tool as system instructions; a session that
+  began before an update keeps the earlier instructions until a new one
+  starts.
 - A follow-up within 15 minutes resumes the tool's own session, so it keeps
   its context; after that a new session starts.
 

@@ -178,68 +178,6 @@ final class AgentController: ObservableObject {
     /// this flag prevents a second emission inside `continueSubmit`.
     private var didEmitTurnStarted = false
 
-    /// Behavioural system prompt prepended to the FIRST turn of a fresh agent
-    /// session (when `resumeSessionID == nil`). On resume the CLI already has
-    /// it in history, so it is not resent. The agent does NOT edit this — it is
-    /// our control over behaviour, kept out of the `AGENTS.md` memory file so
-    /// the two layers (behaviour here, facts there) never duplicate. English by
-    /// design: system prompts are more reliable in English; the agent still
-    /// replies to the user in the user's language per the instruction below.
-    private static let sharedMemoryPromptPreamble = """
-    You are Whytap — the user's assistant, one keystroke away on their Mac.
-    They summon you mid-task, so respect their attention: be fast and brief.
-    Reply in the user's language.
-
-    ANSWERING
-    - Lead with the answer in your first sentence. No preamble, no restating the
-      question, no "Sure"/"Based on…", and never praise the question.
-    - The answer renders as Markdown in a ~320pt panel. Use one plain sentence
-      for one fact, compact tables for shared attributes, numbered lists for
-      steps and a single > [!NOTE] or > [!WARNING] for an essential caveat.
-    - On a question, be decisive: if it's ambiguous, make the most reasonable
-      assumption and answer — don't bounce a question back.
-    - On a task, when you're missing what you need (e.g. "reply to Katya" — who,
-      where), find it yourself first: check your memory, the user's connected
-      tools, the web. Only if you still can't, ask the user one short question.
-      Never guess at an irreversible action.
-    - Don't hedge, moralize, or pad ("It's important to…", "As an AI…"). If you
-      don't know or a tool finds nothing, say so in one line. No trailing summary,
-      "related topics", or closing question.
-
-    TOOLS
-    - Answer timeless or well-known things from your own knowledge — don't search.
-      Use the web only when the answer depends on recent, real-time, or external
-      facts (news, prices, weather, people, events) or on something specific to
-      this Mac. Default to one search; never more than two for the same thing.
-    - "Who painted Guernica?" → answer directly. "Weather in Yerevan?" → search.
-
-    MEMORY
-    - AGENTS.md in your working directory is your memory — yours to maintain, not
-      just read. Read it at the start.
-    - Record what's durable so you don't ask twice: facts about the user and their
-      preferences; who the people they mention are; what a recurring task needs and
-      how they like it done. When you ask the user for something missing, write the
-      answer down.
-    - Refresh stale entries; when a newer fact contradicts an old one, replace it;
-      drop duplicates. Keep it concise — it loads every session.
-    - Store only what changes how you act for this user. Never store secrets,
-      tokens, or personal data — the file is plaintext.
-
-    When your answer contains something the user can act on — a file path, a
-    command or snippet to paste, or an external link — also surface it as one
-    final JSON code fence so they can insert or open it in one keystroke. Keep it
-    in your text too if it is a path, command or snippet: the fence is in addition, not instead.
-    Put URLs only in link items in the fence so they appear as source cards. Fence: kind
-    "useful.actions", schemaVersion 1, items each {type, description} where type is
-    "link" (with url), "path" (with path), or "copy" (with text).
-    """
-
-    /// Read-only test seam for the behavioural preamble. The constant itself is
-    /// private (it is our behaviour contract, not API); this exposes its text
-    /// to a guard test that pins the load-bearing markers so a future edit
-    /// can't silently drop a section.
-    static var systemPromptPreambleForTesting: String { sharedMemoryPromptPreamble }
-
     static let maximumSelectionCharacters = 24_000
     static let selectionTruncationMarker = "\n\n[Selection shortened by Whytap]\n\n"
     // WHY: .project-docs/decisions/2026-10-22-agent-answers-and-screen.md
@@ -977,22 +915,19 @@ final class AgentController: ObservableObject {
         return text.isEmpty
     }
 
-    /// Assembles the prompt sent to the CLI. The behavioural preamble is
-    /// prepended only when `includePreamble` is true — the first turn of a
-    /// fresh session. On resume it is already in the CLI's history, so callers
-    /// pass `false` and the prompt is just the optional selection plus query.
-    private func buildPrompt(query: String, snapshot: FocusSnapshot, includePreamble: Bool) -> String {
+    /// Assembles the prompt sent to the CLI: the optional selection, the
+    /// per-turn reminders and the request. Who is answering, the island, the
+    /// Whytap tools, memory and customization go to the CLI as system-level
+    /// instructions from WHYTAP.md (`AgentHarnessInstructions`), not here.
+    // WHY: .project-docs/decisions/2026-11-28-agent-harness-instructions.md
+    private func buildPrompt(query: String, snapshot: FocusSnapshot) -> String {
         var parts: [String] = []
-        if includePreamble {
-            parts.append(Self.sharedMemoryPromptPreamble)
-            parts.append(WhytapCustomizationContext.promptInstructions)
-        }
         if let selection = snapshot.selectionText, !selection.isEmpty {
             parts.append("Selected text:\n\(Self.selectionForPrompt(selection))")
         }
-        // The first-turn preamble is not resent when a native CLI session is
-        // resumed. Reinforce language, concise answers, actions and screen
-        // discovery each turn, including sessions begun before an app update.
+        // A session keeps its first turn's instructions. Reinforce language,
+        // concise answers, actions and screen discovery each turn, including
+        // sessions begun before an app update.
         parts.append(Self.perTurnLanguageInstruction)
         parts.append(WhytapCustomizationContext.notificationInstructions)
         parts.append(query)
@@ -1035,13 +970,8 @@ final class AgentController: ObservableObject {
         // WHY: .project-docs/decisions/2026-10-19-remove-projects.md
         // Agent requests use only the neutral workspace and session store.
         let sessionStore = agentSessionStore
-        // Resume id drives both the CLI resume AND whether to send the
-        // behavioural preamble: nil means a fresh session (first turn) that has
-        // never seen it, so prepend; non-nil means the preamble is already in
-        // the CLI's history and must not be repeated. Computed before
-        // buildPrompt so the two stay in lock step.
         let resumeSessionID = sessionStore.sessionID(for: provider.id)
-        let prompt = buildPrompt(query: text, snapshot: snapshot, includePreamble: resumeSessionID == nil)
+        let prompt = buildPrompt(query: text, snapshot: snapshot)
         consume(provider.run(prompt: prompt, resumeSessionID: resumeSessionID, options: options))
     }
 

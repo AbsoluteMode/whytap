@@ -27,6 +27,13 @@ enum StreamingSessionError: Error, Equatable {
     /// terminal frame, so the session resolves immediately with this case
     /// rather than waiting out the watchdog.
     case endOfStreamSendFailed
+    /// On this Mac: the model was still loading when the take's wait ended.
+    case localModelPreparing
+    /// On this Mac: the model did not load.
+    case localModelFailed
+    /// On this Mac: the model loaded during the take and gave no text for
+    /// audio at speech level. Not trusted as silence.
+    case localModelNoText
 }
 
 /// Outcome of one streaming session, surfaced to the AppDelegate so the

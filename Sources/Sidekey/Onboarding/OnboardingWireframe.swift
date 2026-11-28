@@ -1093,8 +1093,8 @@ struct OnboardingSourceStage: View {
 
     private var laptopDetail: String {
         switch onDevice.status {
-        case .downloading(let fraction) where chosen == .laptop:
-            return "Downloading the speech model · \(Int((fraction * 100).rounded()))%"
+        case .downloading, .preparing where chosen == .laptop:
+            return OnboardingModelProgressStrip.line(onDevice.status, timeLeft: onDevice.timeLeft) ?? ""
         case .ready where chosen == .laptop:
             return "Speech model ready · nothing leaves this Mac"
         default:

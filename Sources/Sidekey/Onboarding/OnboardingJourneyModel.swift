@@ -1445,11 +1445,22 @@ final class OnboardingJourneyModel: ObservableObject {
 
     static let noSpeech = "No speech heard — try again."
 
+    /// Drop pressed before the model on this Mac is ready: what it is doing
+    /// and how long it still needs, not an open-ended "in a moment".
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    static func modelNotReadyMessage(_ status: OnDeviceSpeechModelStatus, timeLeft: OnDeviceSpeechTimeLeft?) -> String {
+        let left = OnDeviceSpeechProgressText.timeLeft(timeLeft ?? .estimating)
+        if status == .preparing { return "The speech model is preparing · \(left). Drop works as soon as it's ready." }
+        return "The speech model is still downloading · \(left). Drop works as soon as it's ready."
+    }
+
     /// Drop was pressed before its speech was set up (or while the model is
     /// still downloading): said on the try step instead of Settings over it.
     func noteDropSetupFailure(_ feature: AIFeature) {
         if case .downloading = onDevice.status {
-            outcomes[.tryDrop] = .failed("The speech model is still downloading — try again in a moment.")
+            outcomes[.tryDrop] = .failed(Self.modelNotReadyMessage(onDevice.status, timeLeft: onDevice.timeLeft))
+        } else if onDevice.status == .preparing {
+            outcomes[.tryDrop] = .failed(Self.modelNotReadyMessage(onDevice.status, timeLeft: onDevice.timeLeft))
         } else {
             outcomes[.tryDrop] = .failed("\(feature.title) has no speech model yet — set one in Settings.")
         }

@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/ProviderFailureTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-18-provider-batch-transcription.md, 2026-10-21-provider-key-tiles.md, 2026-10-19-api-and-models.md]
+related: [2026-10-18-provider-batch-transcription.md, 2026-10-21-provider-key-tiles.md, 2026-10-19-api-and-models.md, 2026-11-28-on-device-model-preparation.md]
 ---
 
 ## Context

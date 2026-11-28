@@ -20,11 +20,26 @@ enum ProviderFailure: Equatable, Sendable {
     case notResponding
     /// The request did not leave this Mac.
     case noConnection
+    /// On this Mac: the model is still loading.
+    case localModelPreparing
+    /// On this Mac: the model did not load.
+    case localModelFailed
+    /// On this Mac: a model that loaded during the take gave no text.
+    case localModelNoText
 
     /// `nil` for a failure that says nothing about the provider (a cancelled
     /// request, no batch path, a malformed answer): the caller keeps its own
     /// wording.
     init?(_ error: Error) {
+        if let local = error as? OnDeviceSpeechError {
+            switch local {
+            case .modelPreparing: self = .localModelPreparing
+            case .modelLoadFailed, .modelNotDownloaded: self = .localModelFailed
+            case .modelNoText: self = .localModelNoText
+            case .noAudio: return nil
+            }
+            return
+        }
         if let failure = error as? ProviderBatchTranscriptionError {
             switch failure {
             case .elevenLabs(_, .missingPermissions): self = .missingPermission
@@ -71,6 +86,9 @@ enum ProviderFailure: Equatable, Sendable {
         case .busy: return "\(provider) is busy, try again"
         case .notResponding: return "\(provider) is not responding"
         case .noConnection: return "No connection"
+        case .localModelPreparing: return "Local model still preparing, retry soon"
+        case .localModelFailed: return "Local model didn't load"
+        case .localModelNoText: return "No text from local model, Retry"
         }
     }
 
@@ -81,10 +99,22 @@ enum ProviderFailure: Equatable, Sendable {
         case .keyRefused: return .rejected(.invalidKey)
         case .missingPermission: return .rejected(.missingSpeechPermission)
         case .outOfCredit: return .rejected(.outOfCredit)
-        case .refused, .busy, .notResponding, .noConnection: return nil
+        case .refused, .busy, .notResponding, .noConnection, .localModelPreparing, .localModelFailed,
+             .localModelNoText: return nil
         }
     }
 
     /// Only the user can fix it, in Keys & models: Retry alone cannot help.
-    var needsSettings: Bool { keyStatus != nil }
+    /// A model that did not load is shown there with Try Again.
+    var needsSettings: Bool { keyStatus != nil || self == .localModelFailed }
+
+    /// The still-preparing message with the preparation's time left, so the
+    /// user knows when Retry will work.
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    static func localModelPreparingMessage(_ timeLeft: OnDeviceSpeechTimeLeft?) -> String {
+        guard case .seconds(let seconds) = timeLeft else { return ProviderFailure.localModelPreparing.dropMessage(provider: "") }
+        return seconds > 60
+            ? "Local model: about \(OnDeviceSpeechProgressText.minutes(seconds)) min left"
+            : "Local model: less than a minute left"
+    }
 }

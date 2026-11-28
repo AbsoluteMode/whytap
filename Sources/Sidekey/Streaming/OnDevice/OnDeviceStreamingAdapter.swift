@@ -17,7 +17,10 @@ struct OnDeviceStreamingAdapter: BYOKTranscriptionAdapter {
     /// only finals, so they skip the extra decodes.
     var livePartials: Bool
     var readiness: OnDeviceSpeechReadiness = .live
-    var decoder: any OnDeviceSpeechDecoding = ParakeetSpeechDecoder()
+    /// No wait limit: phrases queue while the model loads (the first load
+    /// after a download can take minutes) instead of ending the meeting's
+    /// stream. WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    var decoder: any OnDeviceSpeechDecoding = ParakeetSpeechDecoder(preparationWait: nil)
 
     func open(language: String?, terms: [String]) async throws -> BYOKUpstreamSession {
         // The downloaded model is the credential: without it nothing opens.

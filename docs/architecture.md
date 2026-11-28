@@ -114,6 +114,35 @@ Voice flow (Drop / dictation):
             none for Cyrillic ones. The loaded model is released after five
             idle minutes. No Costs rows. WHY:
             .project-docs/decisions/2026-11-19-on-device-dictation.md
+            Preparation (the Core ML load; the first after a download
+            compiles for the Neural Engine, minutes on an older Mac) is one
+            shared task in OnDeviceSpeechModelStore, started when the files
+            land, at launch and on a switch to On this Mac
+            (OnDeviceSpeechWarmup), by the Settings card and when a take
+            begins. A caller's wait ends on its deadline or cancellation; the
+            load goes on and its model is kept. Settings: Downloading →
+            Preparing → Ready (loaded in this launch) or "didn't load" with
+            Try Again. Readiness = files in place and no download running.
+            Partials skip an unloaded model; on release the island shows
+            "preparing local model…" for at most 45 s
+            (ParakeetSpeechDecoder.takePreparationWait), then the whole kept
+            take is decoded, or the take ends without the batch rung as
+            .localModelPreparing ("Local model still preparing, retry soon")
+            or .localModelFailed ("Local model didn't load", opens Settings)
+            with Retry (20 s wait). A model loaded during the take that gives
+            no text for speech-level audio ends as .localModelNoText ("No
+            text from local model, Retry"), not silence. Meeting phrases wait
+            without a limit. Time left (OnDeviceSpeechProgress.swift):
+            download bytes from OnDeviceModelDownloader (FluidAudio's own
+            download reports only whole files) and the rate of the current
+            steady run (OnDeviceDownloadRateEstimator: Stalled after 8 s,
+            Almost done from 98%, no number when unreliable), preparation from the expected duration by
+            chip/RAM or the last one measured on this Mac
+            (OnDeviceSpeechPreparationEstimator, "Taking longer than usual,
+            still working" past it); OnDeviceSpeechModelController.timeLeft
+            feeds the Settings card, onboarding (OnboardingModelProgressStrip
+            in the Journey footer) and the island's Retry message.
+            WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
             Meetings use OnDeviceStreamingAdapter (from RealtimeAdapterFactory,
             unmetered): OnDevicePhraseSegmenter cuts the stream at 700 ms
             pauses or 12 s (at the quietest frame), each phrase is decoded

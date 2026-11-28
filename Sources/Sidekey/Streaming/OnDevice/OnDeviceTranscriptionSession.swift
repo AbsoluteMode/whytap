@@ -10,6 +10,16 @@ import os.log
 /// trailing window) both use it, so a partial can never corrupt the final.
 protocol OnDeviceSpeechDecoding: Sendable {
     func decode(samples: [Float], language: String?) async throws -> String
+    /// Starts loading the model (or joins the load in progress) without
+    /// waiting for it.
+    func prepareModel() async
+    /// Whether a decode can start without loading the model first.
+    func modelIsLoaded() async -> Bool
+}
+
+extension OnDeviceSpeechDecoding {
+    func prepareModel() async {}
+    func modelIsLoaded() async -> Bool { true }
 }
 
 /// Production decoder: one stateless full-buffer pass per call. An `actor`, so
@@ -20,14 +30,36 @@ protocol OnDeviceSpeechDecoding: Sendable {
 /// is not available without forking the package. A bounded-window fresh-state
 /// re-decode gives correct, growing live text at constant cost instead.
 actor ParakeetSpeechDecoder: OnDeviceSpeechDecoding {
-    private let store: any OnDeviceSpeechModelManaging
+    /// How long a take waits, after the key is released, for a model that is
+    /// still loading. Past it the take ends with Retry and the load goes on.
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    static let takePreparationWait: Duration = .seconds(45)
+    /// The batch rung and Retry: under `BatchRecoveryDeadline` (30 s), so
+    /// the take ends with the model's own reason, not a generic timeout.
+    static let batchPreparationWait: Duration = .seconds(20)
 
-    init(store: any OnDeviceSpeechModelManaging = OnDeviceSpeechModelStore.shared) {
+    private let store: any OnDeviceSpeechModelManaging
+    private let preparationWait: Duration?
+
+    init(
+        store: any OnDeviceSpeechModelManaging = OnDeviceSpeechModelStore.shared,
+        preparationWait: Duration? = ParakeetSpeechDecoder.takePreparationWait
+    ) {
         self.store = store
+        self.preparationWait = preparationWait
+    }
+
+    nonisolated func prepareModel() async {
+        let store = self.store
+        Task(priority: .userInitiated) { await store.prepare() }
+    }
+
+    nonisolated func modelIsLoaded() async -> Bool {
+        await store.isLoaded()
     }
 
     func decode(samples: [Float], language: String?) async throws -> String {
-        let manager = try await store.acquire()
+        let manager = try await store.acquire(within: preparationWait)
         do {
             var state = TdtDecoderState.make(decoderLayers: await manager.decoderLayerCount)
             let result = try await manager.transcribe(
@@ -61,6 +93,11 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// `drop_live`, which keeps the start of a long take in a client's field.
     // WHY: .project-docs/decisions/2026-11-24-drop-live-for-dictation-clients.md
     var onTranscriptWindow: ((String, Bool) -> Void)?
+    /// The key was released and the model is still loading: the take waits
+    /// for it (at most `ParakeetSpeechDecoder.takePreparationWait`). Lets the
+    /// island say so instead of showing "listening…".
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    var onPreparingModel: (() -> Void)?
 
     private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "on-device-speech")
 
@@ -108,6 +145,11 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     private let languageCode: String?
 
     private var drainTask: Task<Void, Never>?
+    private var finalTask: Task<String, Error>?
+    private var cancelRequested = false
+    /// Whether the model was in memory when the take began. An empty result
+    /// from a model that loaded during the take is not trusted as silence.
+    private var modelLoadedAtStart = true
     private var failureWatchTask: Task<Void, Never>?
     private var signalContinuation: CheckedContinuation<Signal, Never>?
     private var pendingSignal: Signal?
@@ -151,6 +193,12 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
             return .failed(.transportFailed)
         }
 
+        // Load the model while the user speaks: after a launch, an idle
+        // unload or a fresh download it is not in memory yet.
+        let decoder = self.decoder
+        modelLoadedAtStart = await decoder.modelIsLoaded()
+        Task { await decoder.prepareModel() }
+
         // Keep every chunk and, about every 0.8 s, re-decode a bounded trailing
         // window (`partialWindowSamples`, under FluidAudio's 15 s single-chunk
         // threshold, so each pass costs the same however long the take is)
@@ -191,21 +239,67 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
             await drainTask?.value
             failureWatchTask?.cancel()
             let pcm = takeAudio()
+            let final = Task { @MainActor [weak self] () async throws -> String in
+                guard let self else { throw CancellationError() }
+                return try await self.transcribe(pcm: pcm)
+            }
+            finalTask = final
             do {
-                let text = try await transcribe(pcm: pcm)
+                let text = try await final.value
+                finalTask = nil
+                guard !cancelRequested else {
+                    await teardown()
+                    return .cancelled
+                }
+                // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+                if text.isEmpty, !modelLoadedAtStart, Self.hasSpeechLevelAudio(pcm) {
+                    os_log("on-device take: no text from a model loaded during the take",
+                           log: Self.log, type: .error)
+                    await teardown()
+                    return .failed(.localModelNoText)
+                }
                 onTranscriptUpdate?(text)
                 await teardown()
                 return .transcript(text)
             } catch {
+                finalTask = nil
+                await teardown()
+                if cancelRequested { return .cancelled }
                 os_log(
                     "on-device speech failed: %{public}@",
                     log: Self.log,
                     type: .error,
-                    String(describing: error)
+                    OnDeviceSpeechModelStore.describe(error)
                 )
-                await teardown()
-                return .failed(.transportFailed)
+                return .failed(Self.sessionError(for: error))
             }
+        }
+    }
+
+    /// A model that is still loading or did not load is named, so the take
+    /// ends with that reason and Retry instead of a generic failure.
+    /// Any 100 ms of the take louder than about -34 dBFS: speech, not a
+    /// silent room or digital silence.
+    nonisolated static func hasSpeechLevelAudio(_ pcm: Data, threshold: Float = 0.02) -> Bool {
+        let window = 1_600
+        let samples = floatSamples(fromPCM16LittleEndian: pcm)
+        guard samples.count >= window else { return false }
+        var start = 0
+        while start + window <= samples.count {
+            var sum: Float = 0
+            for index in start..<(start + window) { sum += samples[index] * samples[index] }
+            if (sum / Float(window)).squareRoot() > threshold { return true }
+            start += window
+        }
+        return false
+    }
+
+    nonisolated static func sessionError(for error: Error) -> StreamingSessionError {
+        switch error as? OnDeviceSpeechError {
+        case .modelPreparing: return .localModelPreparing
+        case .modelLoadFailed, .modelNotDownloaded: return .localModelFailed
+        case .modelNoText: return .localModelNoText
+        case .noAudio, .none: return .transportFailed
         }
     }
 
@@ -216,7 +310,9 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     }
 
     func cancel() async {
+        cancelRequested = true
         audioEngine.stop()
+        finalTask?.cancel()
         signal(.cancel)
     }
 
@@ -256,6 +352,9 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     /// decode runs on the decoder's actor (off the main actor); only the cheap
     /// guard + callback run here.
     private func emitPartial(samples: [Float], shifted: Bool) async {
+        // A partial never waits for the model: the chunks are kept and the
+        // final pass covers them.
+        guard await decoder.modelIsLoaded() else { return }
         do {
             let text = try await decoder.decode(
                 samples: samples,
@@ -286,6 +385,11 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
         // Parakeet rejects takes under 0.3 s; that little audio holds no word,
         // so it is silence (nothing pasted), not a failure.
         guard samples.count >= 4_800 else { return "" }
+        if !(await decoder.modelIsLoaded()) {
+            os_log("on-device take: waiting for the model samples=%{public}d",
+                   log: Self.log, type: .info, samples.count)
+            onPreparingModel?()
+        }
         return try await decoder.decode(
             samples: samples,
             language: languageCode
@@ -327,6 +431,19 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
                 let sample = Int16(bitPattern: UInt16(bytes[2 * index]) | (UInt16(bytes[2 * index + 1]) << 8))
                 return Float(sample) / Float(Int16.max)
             }
+        }
+    }
+}
+
+extension StreamingSessionError {
+    /// The on-device model's own reason, for the delivery ladder: retrying
+    /// the same model at once cannot help, so the take ends with Retry.
+    var onDeviceModelError: OnDeviceSpeechError? {
+        switch self {
+        case .localModelPreparing: return .modelPreparing
+        case .localModelFailed: return .modelLoadFailed
+        case .localModelNoText: return .modelNoText
+        default: return nil
         }
     }
 }

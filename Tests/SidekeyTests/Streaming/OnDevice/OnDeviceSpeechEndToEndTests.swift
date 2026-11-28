@@ -15,9 +15,12 @@ final class OnDeviceSpeechEndToEndTests: XCTestCase {
 
         let downloadStarted = Date()
         try await store.download(progress: nil)
+        print("E2E download \(String(format: "%.1f", Date().timeIntervalSince(downloadStarted))) s")
+        let prepared = await store.prepare()
+        XCTAssertTrue(prepared)
         let status = await store.status()
         XCTAssertEqual(status, .ready)
-        print("E2E download+load \(String(format: "%.1f", Date().timeIntervalSince(downloadStarted))) s")
+        print("E2E download+prepare \(String(format: "%.1f", Date().timeIntervalSince(downloadStarted))) s")
 
         let transcriber = OnDeviceBatchTranscriber(readiness: .ready, decoder: ParakeetSpeechDecoder(store: store))
         let files = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)

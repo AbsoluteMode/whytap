@@ -443,6 +443,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Settings → Keys & models API-key field (and any other field) can't paste.
         AppMainMenu.installIfNeeded()
 
+        // Load the model on this Mac now if a feature runs on it, so the
+        // first take does not wait for Core ML.
+        // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+        OnDeviceSpeechWarmup.shared.start()
+
         // Avoid a cold PDF decode in the Dynamic Island's first drop-recording
         // ticker for each transcription provider mark.
         ProviderBrandIconAsset.prewarmTranscriptionProviderAssets()
@@ -554,7 +559,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettingsWindow(tab: tab)
         }
         WhatsNewPresenter.shared.presentAfterLaunch(isFirstLaunch: opensOnboarding, defaults: .standard)
-        ScreenshotTextDetector.warmUp()
+        // Shot's recognizer after the speech model: dictation matters more.
+        // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+        LaunchModelPreparation.start(speech: OnDeviceSpeechWarmup.shared.launchPreparation) {
+            await ScreenshotTextDetector.warmUp().value
+        }
     }
 
     private func presentOnboarding() {
@@ -3034,6 +3043,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             onDevice?.onTranscriptWindow = { [weak self] text, shifted in
                 self?.dropLiveFeed.partial(text, take: liveTake, shifted: shifted)
             }
+            // Released while the model on this Mac still loads: the island
+            // says so instead of "listening…".
+            // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+            onDevice?.onPreparingModel = { [weak self] in
+                guard let self, self.streamingSetupGeneration == setupGeneration else { return }
+                IslandPanel.shared.agentFlow.dropLocalModelPreparing()
+            }
             // Surface live STT partials in the island recording wing as words
             // land — the same `onTranscriptUpdate` sink the agent voice flow
             // uses (inherited via `StreamingSessionRunning:
@@ -3572,7 +3588,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
-        AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
+        AppState.shared.dropDeliveryFailureMessage = failure == .localModelPreparing
+            ? ProviderFailure.localModelPreparingMessage(OnDeviceSpeechModelStore.shared.currentPreparationTimeLeft())
+            : failure.dropMessage(provider: provider)
         if let status = failure.keyStatus {
             KeyStatusStore.shared.set(status, for: route.account, at: Date())
         }
@@ -3894,6 +3912,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             sink.clearPendingRetry()
         case .cancelled:
             sink.failTelemetry("cancelled"); sink.setPhase(.idle)
+        case .failed(let error) where error.onDeviceModelError != nil:
+            // The model on this Mac is still loading, or did not load. The
+            // batch rung would run the same model again, so the take ends
+            // with the model's reason and Retry over the kept audio.
+            // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+            if let local = error.onDeviceModelError { sink.noteBatchFailure(local) }
+            await recoverOrSalvage(
+                pcm: capturedPCM, lastPartial: lastPartial,
+                hasBatchTranscriber: hasBatchTranscriber,
+                deadline: deadline,
+                skipBatchReason: Self.localModelFailureReason(error),
+                transcribe: transcribe, sink: sink)
         case .failed, .degraded:
             await recoverOrSalvage(
                 pcm: capturedPCM, lastPartial: lastPartial,
@@ -3903,10 +3933,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    static func localModelFailureReason(_ error: StreamingSessionError) -> String {
+        switch error {
+        case .localModelPreparing: return "local_model_preparing"
+        case .localModelNoText: return "local_model_no_text"
+        default: return "local_model_failed"
+        }
+    }
+
     /// Rungs 2–4: full batch → raw partial → deliveryFailed/idle.
     private static func recoverOrSalvage(
         pcm: Data, lastPartial: String, hasBatchTranscriber: Bool,
         deadline: BatchRecoveryDeadline = .production,
+        skipBatchReason: String? = nil,
         transcribe: @escaping (Data) async throws -> String, sink: DropBatchRecoverySink
     ) async {
         /// `armRetry: false` means the batch rung already SUCCEEDED and returned
@@ -3962,6 +4001,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 sink.failTelemetry(armRetry ? "degraded_no_audio" : batchFailureReason)
                 sink.setPhase(.idle)
             }
+        }
+        if let skipBatchReason {
+            await salvageOrFail(batchFailureReason: skipBatchReason); return
         }
         guard shouldAttemptBatchRecovery(
             hasAudio: !pcm.isEmpty,

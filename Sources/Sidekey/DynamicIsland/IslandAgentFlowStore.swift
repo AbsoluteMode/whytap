@@ -149,6 +149,9 @@ final class IslandAgentFlowStore: ObservableObject {
     private var dropPhase: AppPhase = .idle
     private var dropDeliveryFailureMessage: String?
     private var dropTranscript: String = ""
+    /// The key is released and the take waits for the model on this Mac.
+    /// Cleared by the next phase change.
+    private var dropModelPreparing = false
 
     private var cancellables: Set<AnyCancellable> = []
 
@@ -268,9 +271,19 @@ final class IslandAgentFlowStore: ObservableObject {
     func dropPhaseChanged(_ newPhase: AppPhase, failureMessage: String? = nil) {
         dropPhase = newPhase
         dropDeliveryFailureMessage = failureMessage
+        dropModelPreparing = false
         if newPhase == .idle {
             dropTranscript = ""
         }
+        recompute()
+    }
+
+    /// The released take waits for the model on this Mac to load: a working
+    /// slot with its own label replaces "listening…" until the phase moves on.
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    func dropLocalModelPreparing() {
+        guard dropPhase == .transcribing else { return }
+        dropModelPreparing = true
         recompute()
     }
 
@@ -393,6 +406,10 @@ final class IslandAgentFlowStore: ObservableObject {
             // slot) keeps the pre-roll setup + early partials as "listening…",
             // never a premature "thinking…".
             switch dropPhase {
+            case .transcribing where dropModelPreparing:
+                recordingProviderBrand = nil
+                activityLabel = Self.preparingLocalModelLabel
+                wing = .acting
             case .recording, .transcribing:
                 recordingProviderBrand = dropProviderBrand()
                 wing = .recording(transcript: dropTranscript)
@@ -437,6 +454,10 @@ final class IslandAgentFlowStore: ObservableObject {
     /// Working-state label shown in the `.acting` slot while a degraded Drop is
     /// being batch-recovered (`AppPhase.finishing`).
     static let finishingLabel = "finishing…"
+
+    /// Working-state label while a released take waits for the model on this
+    /// Mac to load.
+    static let preparingLocalModelLabel = "preparing local model…"
 
     /// Non-alarming copy for the persistent total-offline Drop-delivery failure
     /// wing (`AppPhase.deliveryFailed`). The Retry affordance sits beside it.

@@ -247,7 +247,9 @@ struct OnboardingSpeechPage: View {
         let detail: String
         let action: String
 
-        init(_ status: OnDeviceSpeechModelStatus, model: OnDeviceSpeechModel = .parakeetTdtV3) {
+        init(_ status: OnDeviceSpeechModelStatus, timeLeft: OnDeviceSpeechTimeLeft? = nil,
+             model: OnDeviceSpeechModel = .parakeetTdtV3) {
+            let left = OnDeviceSpeechProgressText.timeLeft(timeLeft ?? .estimating)
             switch status {
             case .notDownloaded:
                 detail = "Free, works offline · \(model.approximateSize)"
@@ -255,7 +257,10 @@ struct OnboardingSpeechPage: View {
             case .downloading(let fraction):
                 detail = OnDeviceSpeechCard.Presentation.isStarting(fraction)
                     ? "Starting the download…"
-                    : "Downloading · \(OnDeviceSpeechCard.Presentation.percent(fraction))% of \(model.approximateSize)"
+                    : "Downloading · \(OnDeviceSpeechCard.Presentation.percent(fraction))% · \(left)"
+                action = "Use for Drop"
+            case .preparing:
+                detail = "Preparing · \(left)"
                 action = "Use for Drop"
             case .ready:
                 detail = "Already on this Mac · works offline"
@@ -263,12 +268,15 @@ struct OnboardingSpeechPage: View {
             case .failed:
                 detail = "The download didn't finish. Try again."
                 action = "Download and use for Drop"
+            case .loadFailed:
+                detail = "The model didn't load. Try again."
+                action = "Download and use for Drop"
             }
         }
     }
 
     var body: some View {
-        let presentation = Presentation(onDevice.status)
+        let presentation = Presentation(onDevice.status, timeLeft: onDevice.timeLeft)
         OnboardingSplit(step: "Speech", index: model.pageIndex, count: model.pages.count, top: 44, back: model.backAction) {
             VStack(alignment: .leading, spacing: 0) {
                 OnboardingHeadline(plain: "Your voice,", italic: "typed.")
@@ -292,6 +300,13 @@ struct OnboardingSpeechPage: View {
                             if case .downloading(let fraction) = onDevice.status {
                                 OnboardingProgressLine(fraction: fraction)
                                     .accessibilityLabel("Download progress")
+                                    .accessibilityValue(OnDeviceSpeechCard.Presentation(
+                                        onDevice.status, timeLeft: onDevice.timeLeft).accessibilityValue)
+                            } else if onDevice.status == .preparing {
+                                OnboardingProgressLine(fraction: 0, indeterminate: true)
+                                    .accessibilityLabel("Preparation progress")
+                                    .accessibilityValue(OnDeviceSpeechCard.Presentation(
+                                        onDevice.status, timeLeft: onDevice.timeLeft).accessibilityValue)
                             }
                             OnboardingPrimaryButton(title: presentation.action, chevron: false, action: model.startOnDevice)
                         }
@@ -806,7 +821,7 @@ struct OnboardingPermissionsPage: View {
                             .foregroundColor(OnboardingTheme.muted)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    OnboardingModelStatusCard(status: onDevice.status)
+                    OnboardingModelStatusCard(status: onDevice.status, timeLeft: onDevice.timeLeft)
                 }
                 .frame(maxWidth: 420)
             }
@@ -943,6 +958,12 @@ struct OnboardingPrivacyMock: View {
 /// The speech model's download, shown while the person does something else.
 struct OnboardingModelStatusCard: View {
     let status: OnDeviceSpeechModelStatus
+    var timeLeft: OnDeviceSpeechTimeLeft?
+
+    /// The line under the bar: time left, then that the person can go on.
+    static func hint(_ timeLeft: OnDeviceSpeechTimeLeft?) -> String {
+        "\(OnDeviceSpeechProgressText.timeLeft(timeLeft ?? .estimating)). \(OnDeviceSpeechProgressText.continueHint)"
+    }
 
     var body: some View {
         switch status {
@@ -960,15 +981,35 @@ struct OnboardingModelStatusCard: View {
                         .contentTransition(.numericText())
                 }
                 OnboardingProgressLine(fraction: fraction)
-                Text("Downloading in the background. Drop works as soon as it lands.")
+                    .accessibilityLabel("Download progress")
+                    .accessibilityValue(OnDeviceSpeechCard.Presentation(status, timeLeft: timeLeft).accessibilityValue)
+                Text(Self.hint(timeLeft))
+                    .font(OnboardingTheme.sans(11.5))
+                    .foregroundColor(OnboardingTheme.faint)
+            }
+        case .preparing:
+            card {
+                HStack {
+                    Text("Speech model")
+                        .font(OnboardingTheme.sans(13, weight: .semibold))
+                        .foregroundColor(OnboardingTheme.ink)
+                    Spacer()
+                    Text("Preparing")
+                        .font(OnboardingTheme.mono(12, weight: .medium))
+                        .foregroundColor(OnboardingTheme.muted)
+                }
+                OnboardingProgressLine(fraction: 0, indeterminate: true)
+                    .accessibilityLabel("Preparation progress")
+                    .accessibilityValue(OnDeviceSpeechCard.Presentation(status, timeLeft: timeLeft).accessibilityValue)
+                Text(Self.hint(timeLeft))
                     .font(OnboardingTheme.sans(11.5))
                     .foregroundColor(OnboardingTheme.faint)
             }
         case .ready:
             card {
-                OnboardingStageStatus(tone: .success, text: "The speech model is on this Mac.")
+                OnboardingStageStatus(tone: .success, text: "The speech model is ready. Drop works now.")
             }
-        case .notDownloaded, .failed:
+        case .notDownloaded, .failed, .loadFailed:
             EmptyView()
         }
     }
@@ -1066,10 +1107,23 @@ struct OnboardingTryPage: View {
         } else if !model.dropReady, case .downloading(let fraction) = onDevice.status {
             VStack(alignment: .leading, spacing: 9) {
                 OnboardingStageStatus(tone: .neutral, text: OnDeviceSpeechCard.Presentation.isStarting(fraction)
-                    ? "The speech model is starting to download. Drop works as soon as it's on this Mac."
-                    : "The speech model is downloading: \(OnDeviceSpeechCard.Presentation.percent(fraction))%. Drop works as soon as it's on this Mac.")
+                    ? "The speech model is starting to download. Drop works as soon as it's ready."
+                    : "Downloading the speech model: \(OnDeviceSpeechCard.Presentation.percent(fraction))% · \(OnDeviceSpeechProgressText.timeLeft(onDevice.timeLeft ?? .estimating)). Drop works as soon as it's ready.")
                 OnboardingProgressLine(fraction: fraction)
                     .frame(maxWidth: 260)
+                    .accessibilityLabel("Download progress")
+                    .accessibilityValue(OnDeviceSpeechCard.Presentation(
+                        onDevice.status, timeLeft: onDevice.timeLeft).accessibilityValue)
+            }
+        } else if !model.dropReady, onDevice.status == .preparing {
+            VStack(alignment: .leading, spacing: 9) {
+                OnboardingStageStatus(tone: .neutral,
+                                      text: "Preparing the speech model · \(OnDeviceSpeechProgressText.timeLeft(onDevice.timeLeft ?? .estimating)). Drop works as soon as it's ready.")
+                OnboardingProgressLine(fraction: 0, indeterminate: true)
+                    .frame(maxWidth: 260)
+                    .accessibilityLabel("Preparation progress")
+                    .accessibilityValue(OnDeviceSpeechCard.Presentation(
+                        onDevice.status, timeLeft: onDevice.timeLeft).accessibilityValue)
             }
         } else if !model.dropReady || model.dropSetupFailure != nil {
             HStack(spacing: 12) {

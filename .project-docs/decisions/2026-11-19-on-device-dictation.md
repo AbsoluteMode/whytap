@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/OnDevice/OnDeviceDictationTests.swift
     confirmed_at: 2026-11-19
-related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md, 2026-11-21-on-device-everywhere.md, 2026-11-21-first-launch-onboarding.md, 2026-11-27-compact-key-tiles.md]
+related: [2026-10-18-remove-local-models.md, 2026-10-19-api-and-models.md, 2026-10-18-legacy-model-cleanup.md, 2026-10-18-provider-batch-transcription.md, 2026-11-21-on-device-everywhere.md, 2026-11-21-first-launch-onboarding.md, 2026-11-27-compact-key-tiles.md, 2026-11-28-on-device-model-preparation.md]
 ---
 
 ## Context
@@ -104,6 +104,9 @@ through Core ML with no further dependency.
   downloading them again. The load has a 60 s deadline: past it the take
   fails and the tile offers Download again, but a short re-download can still
   start without a click. Avoiding it needs a load path that never downloads.
+  Superseded on 2026-11-28: the 60 s deadline waited for the load anyway and
+  discarded its model; preparation is now shared and kept
+  ([on-device model preparation](2026-11-28-on-device-model-preparation.md)).
 - English terms inside Russian speech are transliterated by the model.
 
 ## Follow-up: its own card

@@ -737,10 +737,12 @@ enum FeatureCatalog {
     private static func missingModelAction(_ feature: AIFeature, snapshot: FeatureSetupSnapshot) -> FeatureSetupAction? {
         if feature.modelUse(on: .onDevice) != nil, case .available(let status) = snapshot.onDevice {
             switch status {
-            case .notDownloaded, .failed: return .downloadOnDeviceModel(feature)
+            // Download of files already in place only prepares the model again.
+            case .notDownloaded, .failed, .loadFailed: return .downloadOnDeviceModel(feature)
             // The download is running; its progress is the answer.
             case .downloading: return nil
-            case .ready: return .useOnDeviceModel(feature)
+            // A take waits for a preparation in progress.
+            case .preparing, .ready: return .useOnDeviceModel(feature)
             }
         }
         return snapshot.modelAlternatives.contains(feature) ? .chooseModel(feature) : .addKey(feature)

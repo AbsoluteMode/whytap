@@ -141,6 +141,9 @@ struct OnboardingJourneyView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(model.notes.joined(separator: "\n"))
+            } else if model.progress.source == .onThisMac, model.step != .source {
+                // On the source step the laptop's caption says the same.
+                OnboardingModelProgressStrip(onDevice: model.onDevice)
             }
             Spacer(minLength: 0)
             rightAction

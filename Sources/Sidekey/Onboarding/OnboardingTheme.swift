@@ -303,21 +303,39 @@ struct OnboardingStageStatus: View {
     }
 }
 
-/// A thin progress line for the model download.
+/// A thin progress line for the model download. `indeterminate` (the
+/// model's preparation, which has no progress signal) sweeps a highlight
+/// along the track instead of a fill; with Reduce Motion it rests.
 struct OnboardingProgressLine: View {
     let fraction: Double
+    var indeterminate = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var sweep = false
 
     var body: some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule().fill(Color.white.opacity(0.08))
-                Capsule().fill(LinearGradient(colors: [OnboardingTheme.accent, Color(red: 0.70, green: 0.60, blue: 1)],
-                                              startPoint: .leading, endPoint: .trailing))
-                    .frame(width: max(4, proxy.size.width * min(1, max(0, fraction))))
+                if indeterminate {
+                    Capsule().fill(LinearGradient(
+                        colors: [OnboardingTheme.accent.opacity(0), OnboardingTheme.accent, OnboardingTheme.accent.opacity(0)],
+                        startPoint: .leading, endPoint: .trailing))
+                        .frame(width: 70)
+                        .offset(x: reduceMotion ? 0 : (sweep ? proxy.size.width : -70))
+                } else {
+                    Capsule().fill(LinearGradient(colors: [OnboardingTheme.accent, Color(red: 0.70, green: 0.60, blue: 1)],
+                                                  startPoint: .leading, endPoint: .trailing))
+                        .frame(width: max(4, proxy.size.width * min(1, max(0, fraction))))
+                }
             }
+            .clipShape(Capsule())
         }
         .frame(height: 3)
         .animation(.easeOut(duration: 0.3), value: fraction)
+        .onAppear {
+            guard indeterminate, !reduceMotion else { return }
+            withAnimation(.linear(duration: 1.25).repeatForever(autoreverses: false)) { sweep = true }
+        }
     }
 }
 

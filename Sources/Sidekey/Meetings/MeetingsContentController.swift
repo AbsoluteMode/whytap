@@ -49,6 +49,7 @@ final class MeetingsContentController: NSViewController {
     private var sidebarRefreshGeneration: UInt64 = 0
 
     var currentMeetingId: UUID? { detailView.currentMeetingId }
+    var detailPane: MeetingsDetailView { detailView }
     var listPage: MeetingListModel.Page { sidebarController.page }
 
     init(
@@ -399,6 +400,10 @@ final class MeetingsContentController: NSViewController {
                              version: Int, title: String?, preservingTab: Bool) async {
         currentTitle = title ?? meetingTitle(for: id)
         pendingDetailRefreshId = nil
+        if markdown == MeetingBYOKProcessor.transcriptOnlyMarkdown, let transcript, !transcript.isEmpty {
+            showTranscriptOnly(id: id, transcript: transcript, preservingTab: preservingTab)
+            return
+        }
         await detailView.loadMeeting(
             id: id,
             noteMarkdown: NoteMarkdownStripper.stripTranscript(markdown),
@@ -447,6 +452,35 @@ final class MeetingsContentController: NSViewController {
             preservingTab: preservingTab
         )
     }
+
+    /// A meeting stored without a Meeting notes model: a calm explanation
+    /// and Make notes on the Note tab, the transcript on the Transcript tab.
+    /// The fixed "transcript only" note is never opened in the editor.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    private func showTranscriptOnly(id: UUID, transcript: [TranscriptSegment], preservingTab: Bool) {
+        let reason = sidebarController.meetings.first { $0.id == id }?.failureReason?.nilIfBlank
+        detailView.loadUnavailableMeeting(
+            id: id,
+            message: reason.map { "\($0) \(Self.transcriptOnlyRetryHint)" } ?? Self.transcriptOnlyMessage,
+            transcript: transcript,
+            onRetryNotes: notesRecovery == nil ? nil : { [weak self] in
+                guard let self, let recovery = self.notesRecovery else { return }
+                self.detailView.loadUnavailableMeeting(
+                    id: id, message: "Making the notes from the transcript…", isLoading: true,
+                    transcript: transcript, notesAction: .makeNotes
+                )
+                Task { @MainActor in await recovery.retryNotes(id) }
+            },
+            notesAction: .makeNotes,
+            preservingTab: preservingTab
+        )
+    }
+
+    static let transcriptOnlyMessage =
+        "No notes yet: Meeting notes had no model when this meeting ended. The transcript is in the "
+        + "Transcript tab. To make notes, choose a Meeting notes model in Settings > Keys & models, "
+        + "then click Make notes."
+    static let transcriptOnlyRetryHint = "The transcript is in the Transcript tab."
 
     private func unavailableMessage(for id: UUID) -> String {
         guard let meta = sidebarController.meetings.first(where: { $0.id == id }) else {

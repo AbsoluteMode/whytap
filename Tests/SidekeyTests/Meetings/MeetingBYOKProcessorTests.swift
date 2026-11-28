@@ -404,10 +404,16 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         await store.close()
     }
 
-    func test_kept_transcript_with_the_notes_key_removed_fails_with_fixed_copy_not_a_raw_error() async throws {
+    /// The notes key was removed after the transcript was kept: that is "no
+    /// notes model", so the meeting is stored with its transcript only rather
+    /// than failed again.
+    func test_kept_transcript_with_the_notes_key_removed_is_stored_with_its_transcript_only() async throws {
         let setup = Setup(meetings: FeatureRoute(account: .deepgram, model: "nova-3"))
-        let processor = setup.processor(openRouterClient: SwitchableLLMClient(), sonioxSession: session, recorded: { _ in
-            FixedRecordedTranscriber(text: "unused")
+        var transcriptions = 0
+        let llm = SwitchableLLMClient()
+        let processor = setup.processor(openRouterClient: llm, sonioxSession: session, recorded: { _ in
+            transcriptions += 1
+            return FixedRecordedTranscriber(text: "unused")
         })
         let store = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
         let meetingId = UUID()
@@ -417,13 +423,16 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         try setup.keys.delete(account: OpenRouterLLMKeyStore.account)
         let event = MeetingRecorder.FinalizedEvent(meetingId: meetingId, chunkURLs: [], totalDurationSeconds: 1, reason: .user)
 
-        do {
-            _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
-            XCTFail("expected a notes failure")
-        } catch let failure as MeetingNotesFailure {
-            XCTAssertTrue(failure.description.contains("key of the Meeting notes provider is missing"))
-            XCTAssertTrue(failure.description.hasSuffix(MeetingNotesFailure.transcriptKept))
-        }
+        _ = try await processor.process(event: event, startedAt: Date(), language: nil, meetingsStore: store)
+
+        XCTAssertEqual(transcriptions, 0, "the kept transcript is reused")
+        XCTAssertTrue(llm.transcriptsSeen.isEmpty)
+        let note = try await store.markdown(id: meetingId)
+        XCTAssertEqual(note, MeetingBYOKProcessor.transcriptOnlyMarkdown)
+        let stored = try await store.transcript(id: meetingId)
+        XCTAssertEqual(stored?.map(\.text), ["We ship on Friday."])
+        let leftover = try await store.pendingTranscript(recordingId: meetingId)
+        XCTAssertNil(leftover)
         await store.close()
     }
 
@@ -539,11 +548,12 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         await store.close()
     }
 
-    func test_meeting_waits_without_a_notes_model() {
+    func test_a_speech_model_alone_is_enough_to_process_a_meeting() {
         let both = Setup(meetings: FeatureRoute(account: .soniox, model: "stt-async-v5"))
         XCTAssertTrue(both.processor(openRouterClient: SpyLLMClient(), sonioxSession: session).shouldProcessDirectly())
         let noNotes = Setup(meetings: FeatureRoute(account: .soniox, model: "stt-async-v5"), notes: nil)
-        XCTAssertFalse(noNotes.processor(openRouterClient: SpyLLMClient(), sonioxSession: session).shouldProcessDirectly())
+        XCTAssertTrue(noNotes.processor(openRouterClient: SpyLLMClient(), sonioxSession: session).shouldProcessDirectly(),
+                      "without a notes model the meeting keeps its transcript only")
         let noMeetings = Setup(meetings: nil)
         XCTAssertFalse(noMeetings.processor(openRouterClient: SpyLLMClient(), sonioxSession: session).shouldProcessDirectly())
     }
@@ -645,6 +655,326 @@ final class MeetingBYOKProcessorTests: XCTestCase {
         await store.close()
     }
 
+    // MARK: - No Meeting notes model: the meeting keeps its transcript only
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+
+    /// A clean Mac with only Parakeet downloaded and no notes model, no keys:
+    /// the meeting is transcribed and finishes as an ordinary meeting with its
+    /// transcript. No failure, no failed event, the audio is released.
+    func test_parakeet_only_without_a_notes_model_finishes_with_the_transcript_and_no_failure() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        let meetingId = UUID()
+
+        await harness.finish(meetingId, text: "We ship on Friday.")
+
+        XCTAssertEqual(harness.events.names, ["transcript"], "no failed event, no notes-ready event")
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .ready)
+        XCTAssertNil(row?.failureReason)
+        XCTAssertEqual(row?.title, MeetingBYOKProcessor.transcriptOnlyTitle)
+        let transcript = try await harness.store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.text), ["We ship on Friday."])
+        XCTAssertEqual(harness.adapterCalls, 1)
+        XCTAssertTrue(harness.llm.transcriptsSeen.isEmpty, "no notes model is asked")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.dir(meetingId).path),
+                       "the audio goes like after any finished meeting")
+
+        // MCP tools and search: no note, the transcript is readable and found.
+        let document = try await harness.store.document(id: meetingId)
+        XCTAssertNil(document?.note, "the fixed transcript-only note is not a note")
+        XCTAssertEqual(document?.transcript?.map(\.text), ["We ship on Friday."])
+        let found = try await harness.store.search(MeetingSearchRequest(query: "friday", limit: 5))
+        XCTAssertEqual(found.hits.map(\.meta.id), [meetingId])
+        XCTAssertEqual(found.hits.first?.hasNote, false)
+        let noteWords = try await harness.store.search(MeetingSearchRequest(query: "model", limit: 5))
+        XCTAssertTrue(noteWords.hits.isEmpty, "the fixed explanation is not searchable as a note")
+
+        // Relaunch: nothing is staged, nothing is retried, nothing fails.
+        await harness.coordinator.recoverFinalizeManifestsOnLaunch()
+        let after = try await harness.row(meetingId)
+        XCTAssertEqual(after?.progressStatus, .ready)
+        XCTAssertNil(after?.failureReason)
+        XCTAssertEqual(harness.adapterCalls, 1)
+        await harness.close()
+    }
+
+    /// The user adds a notes model later and clicks Make notes: the notes are
+    /// made from the stored transcript without the speech model, and the
+    /// meeting's title comes from them.
+    func test_make_notes_after_a_model_is_added_uses_the_stored_transcript() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        let meetingId = UUID()
+        await harness.finish(meetingId, text: "We ship on Friday.")
+
+        // Make notes before a model exists: nothing is made, nothing fails.
+        let early = await harness.coordinator.retryNotes(meetingId: meetingId)
+        XCTAssertFalse(early)
+        let waiting = try await harness.row(meetingId)
+        XCTAssertEqual(waiting?.progressStatus, .ready, "a transcript-only meeting is never marked failed")
+        XCTAssertEqual(waiting?.failureReason, "Meeting notes has no model. Choose one in Settings > Keys & models.")
+
+        harness.addNotesModel()
+        let made = await harness.coordinator.retryNotes(meetingId: meetingId)
+
+        XCTAssertTrue(made)
+        XCTAssertEqual(harness.adapterCalls, 1, "the speech model is not run again")
+        XCTAssertEqual(harness.llm.transcriptsSeen.count, 1)
+        XCTAssertTrue(harness.llm.transcriptsSeen.first?.contains("We ship on Friday.") == true)
+        let note = try await harness.store.markdown(id: meetingId)
+        XCTAssertEqual(note, "<!-- protocol:v1 -->\n# Release plan")
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.title, "Release plan")
+        XCTAssertEqual(row?.progressStatus, .ready)
+        XCTAssertNil(row?.failureReason)
+        XCTAssertEqual(harness.events.names.last, "notes")
+        let document = try await harness.store.document(id: meetingId)
+        XCTAssertNotNil(document?.note)
+
+        // A second click finds the notes made and pays for nothing.
+        let again = await harness.coordinator.retryNotes(meetingId: meetingId)
+        XCTAssertFalse(again)
+        XCTAssertEqual(harness.llm.transcriptsSeen.count, 1)
+        await harness.close()
+    }
+
+    /// A configured notes model that fails on Make notes keeps the meeting a
+    /// ready transcript-only meeting with the reason for the pane.
+    func test_make_notes_with_a_failing_model_keeps_the_transcript_only_meeting_ready_with_the_reason() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        let meetingId = UUID()
+        await harness.finish(meetingId, text: "We ship on Friday.")
+        harness.addNotesModel()
+        harness.llm.failure = OpenRouterLLMError.unexpectedStatus(402, "Insufficient credits. We ship on Friday.")
+
+        let made = await harness.coordinator.retryNotes(meetingId: meetingId)
+
+        XCTAssertFalse(made)
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .ready)
+        XCTAssertEqual(row?.failureReason, "The Meeting notes provider is out of credit.")
+        let note = try await harness.store.markdown(id: meetingId)
+        XCTAssertEqual(note, MeetingBYOKProcessor.transcriptOnlyMarkdown)
+        XCTAssertFalse(harness.events.names.contains("failed"))
+        await harness.close()
+    }
+
+    /// A continued call without a notes model: its transcript joins the
+    /// meeting's, and Make notes later covers both parts at once.
+    func test_continued_call_without_a_notes_model_adds_its_transcript_and_make_notes_covers_both() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        let meetingId = UUID(), part = UUID()
+        await harness.finish(meetingId, text: "First call")
+
+        await harness.finish(part, text: "Second call", continuation: MeetingContinuation(
+            meetingId: meetingId, precedingRecordingId: meetingId,
+            startedAt: harness.started, audioOffsetSeconds: 4, gapSeconds: 120))
+
+        let rows = try await harness.store.list()
+        XCTAssertEqual(rows.map(\.id), [meetingId], "one meeting")
+        XCTAssertEqual(rows.first?.progressStatus, .ready)
+        XCTAssertNil(rows.first?.failureReason)
+        let transcript = try await harness.store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.text), ["First call", "Reconnected after 2m 0s", "Second call"])
+        let note = try await harness.store.markdown(id: meetingId)
+        XCTAssertEqual(note, MeetingBYOKProcessor.transcriptOnlyMarkdown)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.dir(part).path))
+        XCTAssertEqual(harness.events.names, ["transcript", "transcript"])
+
+        harness.addNotesModel()
+        let made = await harness.coordinator.retryNotes(meetingId: meetingId)
+        XCTAssertTrue(made)
+        let seen = harness.llm.transcriptsSeen.first ?? ""
+        XCTAssertTrue(seen.contains("First call") && seen.contains("Second call"), "the notes cover every part")
+        await harness.close()
+    }
+
+    /// A meeting that already has notes, continued after the notes model was
+    /// removed: the continued call's transcript is added, the notes stay.
+    func test_continued_call_of_a_meeting_with_notes_keeps_the_notes_and_adds_the_transcript() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        harness.addNotesModel()
+        let meetingId = UUID(), part = UUID()
+        await harness.finish(meetingId, text: "First call")
+        let note = try await harness.store.markdown(id: meetingId)
+        harness.removeNotesModel()
+
+        await harness.finish(part, text: "Second call", continuation: MeetingContinuation(
+            meetingId: meetingId, precedingRecordingId: meetingId,
+            startedAt: harness.started, audioOffsetSeconds: 4, gapSeconds: 120))
+
+        let after = try await harness.store.markdown(id: meetingId)
+        XCTAssertEqual(after, note, "the notes are not replaced")
+        let transcript = try await harness.store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.text), ["First call", "Reconnected after 2m 0s", "Second call"])
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .ready)
+        XCTAssertNil(row?.failureReason)
+        XCTAssertFalse(harness.events.names.contains("failed"))
+        await harness.close()
+    }
+
+    /// A meeting that failed with "not configured" before this change is
+    /// still staged: the next launch makes it a transcript-only meeting.
+    func test_relaunch_turns_a_staged_not_configured_meeting_into_a_transcript_only_meeting() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        let meetingId = UUID()
+        try harness.stage(meetingId)
+        try await harness.store.upsertProgress(
+            meta: MeetingMetaWithLocalState(
+                id: meetingId, startedAt: harness.started, endedAt: harness.started.addingTimeInterval(4),
+                durationSeconds: 4, title: nil, syncStatus: .new, serverVersion: 0, createdAt: harness.started),
+            status: .failed, failureReason: MeetingsCoordinator.processorNotConfiguredMessage)
+        harness.adapterText = "We ship on Friday."
+
+        await harness.coordinator.recoverFinalizeManifestsOnLaunch()
+
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .ready)
+        XCTAssertNil(row?.failureReason)
+        let transcript = try await harness.store.transcript(id: meetingId)
+        XCTAssertEqual(transcript?.map(\.text), ["We ship on Friday."])
+        XCTAssertFalse(FileManager.default.fileExists(atPath: harness.dir(meetingId).path))
+        await harness.close()
+    }
+
+    /// A configured notes model that fails while the meeting is processed is
+    /// still a failure, as before: failed row, failed event, audio kept.
+    func test_configured_notes_model_failing_during_processing_still_fails_the_meeting() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session)
+        harness.addNotesModel()
+        harness.llm.failure = OpenRouterLLMError.unexpectedStatus(402, "no credit")
+        let meetingId = UUID()
+
+        await harness.finish(meetingId, text: "We ship on Friday.")
+
+        XCTAssertEqual(harness.events.names, ["failed"])
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .failed)
+        XCTAssertEqual(row?.failureReason,
+                       "The Meeting notes provider is out of credit. " + MeetingNotesFailure.transcriptKept)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: harness.dir(meetingId).path))
+        await harness.close()
+    }
+
+    /// Nothing can transcribe (Parakeet not downloaded) and no notes model:
+    /// as before, failed with the "not configured" copy and the audio staged.
+    func test_nothing_configured_still_fails_with_the_not_configured_copy_and_keeps_the_audio() async throws {
+        let harness = try TranscriptOnlyHarness(test: self, root: root, session: session, speechReady: false)
+        let meetingId = UUID()
+
+        await harness.finish(meetingId, text: "unused")
+
+        XCTAssertEqual(harness.events.names, ["failed"])
+        let row = try await harness.row(meetingId)
+        XCTAssertEqual(row?.progressStatus, .failed)
+        XCTAssertEqual(row?.failureReason, MeetingsCoordinator.processorNotConfiguredMessage)
+        XCTAssertEqual(harness.adapterCalls, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: harness.dir(meetingId).path))
+        await harness.close()
+    }
+
+    /// One meeting through the real processor and coordinator, with the
+    /// Meetings route on this Mac (Parakeet) and no Meeting notes model.
+    @MainActor private final class TranscriptOnlyHarness {
+        let setup: Setup
+        let llm: SwitchableLLMClient
+        let store: MeetingsStore
+        let coordinator: MeetingsCoordinator
+        let stagingRoot: URL
+        let events = EventLog()
+        let started = Date(timeIntervalSince1970: 1_000)
+        var adapterCalls = 0
+        var adapterText = ""
+        private var reader: Task<Void, Never>?
+
+        init(test: XCTestCase, root: URL, session: URLSession, speechReady: Bool = true) throws {
+            setup = Setup(meetings: FeatureRoute(account: .thisMac, model: OnDeviceSpeechModel.parakeetTdtV3.rawValue),
+                          notes: nil)
+            let client = SwitchableLLMClient()
+            llm = client
+            let meetingsStore = try MeetingsStore(rootDirectory: root.appendingPathComponent("store"))
+            store = meetingsStore
+            let staging = root.appendingPathComponent("staging")
+            stagingRoot = staging
+            var harness: TranscriptOnlyHarness?
+            let processor = setup.processor(
+                openRouterClient: client, sonioxSession: session,
+                recorded: { _ in XCTFail("this Mac has no recorded path"); throw StopAfterAdapter() },
+                makeAdapter: { _ in
+                    harness?.adapterCalls += 1
+                    return FixedTranscriptAdapter(text: harness?.adapterText ?? "")
+                },
+                onDevice: speechReady ? .ready : OnDeviceSpeechReadiness { false })
+            let defaults = UserDefaults(suiteName: "transcript.only.\(UUID().uuidString)")!
+            coordinator = MeetingsCoordinator(config: MeetingsConfig(defaults: defaults),
+                detector: StubbedMeetingDetector(), stagingRoot: { staging },
+                meetingsStore: meetingsStore, directProcessor: processor, meetingsEnabled: { true })
+            harness = self
+            let stream = coordinator.events
+            let log = events
+            reader = Task { @MainActor in for await event in stream { log.append(event) } }
+        }
+
+        func dir(_ id: UUID) -> URL { stagingRoot.appendingPathComponent(id.uuidString) }
+
+        @discardableResult
+        func stage(_ id: UUID) throws -> URL {
+            try FileManager.default.createDirectory(at: dir(id), withIntermediateDirectories: true)
+            let chunk = dir(id).appendingPathComponent("chunk-000.wav")
+            try MeetingBYOKProcessorTests.wav(samples: [1, 2, 3, 4]).write(to: chunk)
+            let manifest = MeetingFinalizeManifest(recorderMeetingId: id, startedAt: started,
+                endedAt: started.addingTimeInterval(4), durationSeconds: 4, language: nil,
+                chunkFileNames: [chunk.lastPathComponent], isFinal: true)
+            try MeetingFinalizeManifestStore().write(manifest, to: dir(id))
+            return chunk
+        }
+
+        /// Stop: the recording is handed to processing and processed.
+        func finish(_ id: UUID, text: String, continuation: MeetingContinuation? = nil) async {
+            adapterText = text
+            let expected = events.names.count + 1
+            guard let chunk = try? stage(id) else { return XCTFail("could not stage") }
+            await coordinator.dispatchFinalizedForProcessing(
+                event: .init(meetingId: id, chunkURLs: [chunk], totalDurationSeconds: 4, reason: .user),
+                startedAt: continuation == nil ? started : started.addingTimeInterval(124),
+                endedAt: nil, reconnectMarkers: [], language: nil, continuation: continuation)
+            await events.wait(for: expected)
+        }
+
+        func row(_ id: UUID) async throws -> MeetingMetaWithLocalState? {
+            try await store.list().first { $0.id == id }
+        }
+
+        func addNotesModel() {
+            setup.routing.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/auto"), for: .meetingNotes)
+        }
+
+        func removeNotesModel() { setup.routing.setRoute(nil, for: .meetingNotes) }
+
+        func close() async {
+            reader?.cancel()
+            await store.close()
+        }
+    }
+
+    @MainActor private final class EventLog {
+        private(set) var names: [String] = []
+
+        func append(_ event: MeetingsCoordinatorEvent) {
+            switch event {
+            case .newMeetingAvailable: names.append("notes")
+            case .meetingTranscriptAvailable: names.append("transcript")
+            case .meetingFailed: names.append("failed")
+            }
+        }
+
+        func wait(for count: Int) async {
+            for _ in 0..<200 where names.count < count {
+                try? await Task.sleep(nanoseconds: 5_000_000)
+            }
+        }
+    }
+
     private static func emptyEvent() -> MeetingRecorder.FinalizedEvent {
         MeetingRecorder.FinalizedEvent(meetingId: UUID(), chunkURLs: [], totalDurationSeconds: 0, reason: .user)
     }
@@ -686,7 +1016,8 @@ final class MeetingBYOKProcessorTests: XCTestCase {
             openRouterClient: any OpenRouterLLMClienting,
             sonioxSession: URLSession,
             recorded: ((RecordedMeetingRoute) throws -> any MeetingRecordedTranscribing)? = nil,
-            makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.make
+            makeAdapter: @escaping (ResolvedRoute) throws -> BYOKTranscriptionAdapter = RealtimeAdapterFactory.make,
+            onDevice: OnDeviceSpeechReadiness = .live
         ) -> MeetingBYOKProcessor {
             MeetingBYOKProcessor(
                 routing: routing,
@@ -698,7 +1029,8 @@ final class MeetingBYOKProcessorTests: XCTestCase {
                 makeAdapter: makeAdapter,
                 makeRecordedTranscriber: recorded ?? { route in
                     RecordedMeetingTranscriber(route: route, session: sonioxSession, usageSink: { _ in })
-                }
+                },
+                onDevice: onDevice
             )
         }
     }

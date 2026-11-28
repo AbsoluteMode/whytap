@@ -52,6 +52,13 @@ enum MeetingProgressStatus: String, Sendable, Codable, Equatable {
 /// Flat row type for the meetings list: the recording timestamps plus the
 /// local-only state — a `syncStatus` flag (new/read/pending_sync/failed), a
 /// user-editable `title` override and the processing status.
+/// What Make notes needs from a meeting stored with its transcript only.
+struct TranscriptOnlyMeeting: Sendable, Equatable {
+    let transcript: [TranscriptSegment]
+    let startedAt: Date
+    let endedAt: Date
+}
+
 struct MeetingMetaWithLocalState: Sendable, Equatable {
     let id: UUID
     let startedAt: Date
@@ -592,10 +599,14 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
         }
         let markdown: String
         let transcript: [TranscriptSegment]
+        let transcriptOnlyPart = addition == MeetingBYOKProcessor.transcriptOnlyMarkdown
         if let continuation, let oldMarkdown {
             let uneditedSilence = oldTranscript.isEmpty
                 && oldMarkdown == MeetingBYOKProcessor.noSpeechMarkdown
+            // A part stored without a notes model adds its transcript only:
+            // the meeting keeps its note (or its "transcript only" note).
             markdown = newTranscript.isEmpty ? oldMarkdown : uneditedSilence ? addition
+                : transcriptOnlyPart ? oldMarkdown
                 : MeetingContinuationMarkdown.appending(addition, to: oldMarkdown)
             let marker = TranscriptSegment(speaker: nil,
                 start: continuation.audioOffsetSeconds, end: continuation.audioOffsetSeconds,
@@ -632,7 +643,7 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
             // The note now carries the transcript; the kept copy has done its job.
             try executeBound("DELETE FROM meeting_pending_transcripts WHERE recording_id = ?",
                 values: [recordingId.uuidString])
-            if continuation != nil, !newTranscript.isEmpty {
+            if continuation != nil, !newTranscript.isEmpty, !transcriptOnlyPart {
                 try executeBound("INSERT INTO meeting_note_additions(meeting_id, version, content) VALUES (?, ?, ?)",
                     values: [id.uuidString, String(meta.serverVersion), addition])
             }
@@ -643,6 +654,39 @@ actor MeetingsStore: MeetingsStoring, ArtifactMeetingsExporting {
         }
         try flushPendingContent(id: id)
         return id
+    }
+
+    // MARK: - Meetings stored with their transcript only
+
+    /// A meeting stored without a Meeting notes model: its stored transcript
+    /// (every part) and times, or `nil` when it is gone, has notes, or has no
+    /// transcript.
+    // WHY: .project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md
+    func transcriptOnlyMeeting(id: UUID) throws -> TranscriptOnlyMeeting? {
+        guard let row = try list().first(where: { $0.id == id }),
+              try markdown(id: id) == MeetingBYOKProcessor.transcriptOnlyMarkdown,
+              let segments = try transcript(id: id), !segments.isEmpty else { return nil }
+        return TranscriptOnlyMeeting(
+            transcript: segments, startedAt: row.startedAt,
+            endedAt: row.endedAt ?? row.startedAt.addingTimeInterval(TimeInterval(row.durationSeconds))
+        )
+    }
+
+    /// Replaces a "transcript only" note with the notes made later. `false`
+    /// when the meeting is gone or no longer has the "transcript only" note,
+    /// so notes made twice, or after Delete, write nothing. A title the user
+    /// gave the meeting stays.
+    func replaceTranscriptOnlyNote(id: UUID, markdown newMarkdown: String, title: String?) throws -> Bool {
+        try flushPendingContent(id: id)
+        guard let row = try list().first(where: { $0.id == id }),
+              try markdown(id: id) == MeetingBYOKProcessor.transcriptOnlyMarkdown,
+              try updateRow(id: id, version: row.serverVersion + 1) else { return false }
+        try writeMarkdown(id, markdown: newMarkdown)
+        let stored = row.title?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if stored == nil || stored?.isEmpty == true || stored == MeetingBYOKProcessor.transcriptOnlyTitle {
+            try updateTitle(id: id, title: title)
+        }
+        return true
     }
 
     private struct PendingContent: Codable {

@@ -72,6 +72,22 @@ final class MeetingReadyNotificationTests: XCTestCase {
         restored.setSuspended(true)
     }
 
+    /// A meeting finished without a notes model says it has a transcript,
+    /// not notes, and opens that meeting.
+    func testTranscriptOnlyMeetingNotifiesThatItsTranscriptIsReady() async throws {
+        let (defaults, hub, directory, suite) = fixture()
+        defer { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }
+        let source = MeetingReadyNotifications(defaults: defaults, hub: hub)
+        let id = UUID()
+        let received = await source.receive(.meetingTranscriptAvailable(id: id))
+        XCTAssertTrue(received)
+        let event = try XCTUnwrap(hub.current)
+        XCTAssertEqual(event.meetingID, id)
+        XCTAssertEqual(event.title, "Meeting transcript is ready")
+        XCTAssertEqual(event.body, "No notes model is chosen. Click to open the transcript.")
+        hub.setSuspended(true)
+    }
+
     func testLegacyHistoryAndExternalLinksKeepTheirNavigationAndCannotSupplyMeetingTarget() throws {
         let (_, hub, directory, suite) = fixture()
         defer { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: directory) }

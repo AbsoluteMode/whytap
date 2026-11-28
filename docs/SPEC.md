@@ -705,6 +705,21 @@ Open notes and transcripts refresh automatically in both Notes surfaces. Active
 drafts defer that refresh until Cancel or successful persistence after Done;
 merely submitting a debounced save does not reload older stored text.
 See [the continuation decision](../.project-docs/decisions/2026-10-20-meeting-continuations.md).
+
+**Without a Meeting notes model (2026-11-28):** a speech model alone is enough.
+When the Meetings route can transcribe (Parakeet on this Mac or a speech
+provider) but Meeting notes has no model or its key is missing, the meeting is
+transcribed and finishes as an ordinary meeting titled "Meeting transcript":
+no failure, no red row, and its audio is released like after any finished
+meeting. Its note pane explains that notes need a model and offers Make notes;
+the Transcript tab shows the transcript. Once a model is chosen, Make notes
+writes the notes from the stored transcript (all parts of a continued call)
+without the speech model. A Make notes failure stays on the pane as its reason;
+the meeting stays ready. A configured notes model that fails while the meeting
+is processed still fails the meeting with its transcript kept, and a meeting
+that nothing can transcribe still fails as not configured. See
+[the decision](../.project-docs/decisions/2026-11-28-meeting-transcript-without-notes-model.md).
+
 The backend design below is historical; current processing uses the user's BYOK
 routes and the native notes viewer.
 

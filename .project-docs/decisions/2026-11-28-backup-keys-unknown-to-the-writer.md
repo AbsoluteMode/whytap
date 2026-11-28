@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Backup/BackupKeysUnknownToWriterTests.swift
     confirmed_at: 2026-11-28
-related: [2026-10-19-config-backup.md]
+related: [2026-10-19-config-backup.md, 2026-11-28-subtitle-engine-choice.md]
 ---
 
 # Backup keys unknown to the writer
@@ -44,7 +44,11 @@ refuse every new archive.
 - On restore, a missing key is reset only when the writer knew it. Without a
   list (archives and snapshots up to 2.2.27), the keys added since, listed once
   in `ConfigBackupRegistry.keysAddedAfterUnlistedArchives`, keep their values.
-  That list is never extended; later additions are covered by `knownKeys`.
+  That list is closed with the release that ships `knownKeys`: it holds the
+  three Google Search hotkeys and the Subtitles engine choice, the keys added
+  between 2.2.27 and this release. Later additions are covered by
+  `knownKeys`. The Subtitles engine's separate `keptWhenAbsent` list from its
+  PR was folded into this mechanism, so restore has one rule.
 - The payload schema stays 4. Decoders that do not know the field ignore it, so
   2.2.27 still restores new archives.
 

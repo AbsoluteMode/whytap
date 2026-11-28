@@ -66,6 +66,24 @@ final class BackupKeysUnknownToWriterTests: XCTestCase {
         XCTAssertNil(target.defaults.string(forKey: googleGesture))
     }
 
+    /// The Subtitles engine decides where subtitle audio goes: an archive from
+    /// 2.2.27 cannot change it, one whose writer knew the setting restores it
+    /// (a missing value included), and App defaults resets it.
+    func testTheSubtitlesEngineChoiceFollowsTheSameRule() async throws {
+        let engine = SubtitleAudioTranslate.Choice.defaultsKey
+        let target = try ArtifactBackupTestProfile()
+        defer { target.tearDown() }
+        target.defaults.set("soniox", forKey: engine)
+        try await restore(ArtifactSettingsPayload(values: [:], selectedSections: [.models]), into: target)
+        XCTAssertEqual(target.defaults.string(forKey: engine), "soniox", "a 2.2.27 archive keeps this Mac's engine")
+        try await restore(ArtifactSettingsPayload(values: [engine: .string("openAI")], selectedSections: [.models],
+                                                  knownKeys: ConfigBackupRegistry.entries.keys.sorted()), into: target)
+        XCTAssertEqual(target.defaults.string(forKey: engine), "openAI")
+        try await restore(ArtifactSettingsPayload(values: [:], selectedSections: [.models],
+                                                  knownKeys: ConfigBackupRegistry.entries.keys.sorted()), into: target)
+        XCTAssertNil(target.defaults.string(forKey: engine), "a writer that knew it and had none restores none")
+    }
+
     /// The class, not one instance: any key missing from the writer's list
     /// keeps its value, so later additions need no new exception.
     func testAnyKeyTheWriterDidNotKnowKeepsItsValue() async throws {

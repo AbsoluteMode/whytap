@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SubtitleAudioTranslateTests.swift
     confirmed_at: 2026-11-28
-related: [2026-11-25-subtitle-soniox-engine.md, 2026-11-22-subtitle-audio-translate-slot.md]
+related: [2026-11-25-subtitle-soniox-engine.md, 2026-11-22-subtitle-audio-translate-slot.md, 2026-11-28-backup-keys-unknown-to-the-writer.md]
 ---
 
 # The user chooses the Subtitles engine; without a choice OpenAI stays
@@ -70,9 +70,14 @@ asked for a model choice instead and kept both providers.
   a readable key (`not_configured`). Subtitles still have no feature route, so
   `set_model` / `list_models` do not cover them.
 - **Backup and sync.** The key is in the Keys & models block of
-  `ConfigBackupRegistry` (so Settings sync carries it too). It is listed in
-  `keptWhenAbsent`: restoring an archive without it (every archive made
-  before this change) keeps this Mac's value instead of clearing it.
+  `ConfigBackupRegistry` (so Settings sync carries it too). Restore uses the
+  one mechanism for keys an archive's writer did not know
+  (`2026-11-28-backup-keys-unknown-to-the-writer.md`): archives made before
+  this change (2.2.27 and earlier, no `knownKeys`) cannot contain it, so it
+  is in `keysAddedAfterUnlistedArchives` and restoring them keeps this Mac's
+  value. An archive whose writer knew the key restores it like any other
+  setting, a missing value included; App defaults resets it. On the release
+  branch this replaced the PR's separate `keptWhenAbsent` list.
 - **Unchanged.** Costs record each session under the engine's account and
   model (`AIUsageContext .subtitlesAudio`); runtime error messages name the
   engine in use; the one-hour limit.

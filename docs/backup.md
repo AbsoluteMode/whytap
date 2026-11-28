@@ -130,8 +130,10 @@ draft blocks restore, while ordinary backups can continue.
 - Keys & models routes for every feature, the Subtitles engine choice,
   registered server addresses, languages,
   meeting preferences, hotkeys, vocabulary, Toolbox layout,
-  display and feature settings, and agent preferences. Older archives without
-  a Subtitles engine choice keep this Mac's choice.
+  display and feature settings, and agent preferences. Archives from 2.2.27
+  and earlier could not contain settings added since (the Subtitles engine
+  choice, the Google Search hotkeys), so restoring them keeps this Mac's values;
+  newer archives record which settings they knew.
 - Whytap's saved speech and text provider keys (including Anthropic and each
   registered custom server), and independently recoverable
   Case items and secrets.

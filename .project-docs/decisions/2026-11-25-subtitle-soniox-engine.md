@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Translation/SonioxRealtimeTranslateAdapterTests.swift
     confirmed_at: 2026-11-25
-related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-11-25-subtitle-soniox-live-original.md]
+related: [2026-11-22-subtitle-audio-translate-slot.md, 2026-11-25-subtitle-soniox-live-original.md, 2026-11-28-subtitle-engine-choice.md]
 ---
 
 # Subtitles run on Soniox live translation, OpenAI only without a Soniox key

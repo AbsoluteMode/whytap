@@ -75,13 +75,6 @@ enum ConfigBackupRegistry {
         return result
     }()
 
-    /// Keys added after archives already existed. An archive without one
-    /// predates it (or had no value), so restoring it keeps this Mac's value
-    /// instead of resetting it: a Subtitles engine choice must not change
-    /// where audio goes without the user's action.
-    // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
-    static let keptWhenAbsent: Set<String> = [SubtitleAudioTranslate.Choice.defaultsKey]
-
     static let credentialAccounts: Set<String> = Set(
         ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "byok." + $0 + ".api_key" }
         + ["byok.openrouter.llm_api_key", "byok.custom_llm.api_key", "byok.anthropic.api_key", "byok.openai.llm_api_key", TavilySearch.keychainAccount])
@@ -264,11 +257,14 @@ enum ConfigBackupRegistry {
 
     /// Keys added after 2.2.27, the last release whose archives carry no
     /// `knownKeys`. Such an archive could not contain them, so restoring it
-    /// keeps their current values. Never extend this list: archives written
-    /// since list their known keys, which covers every later addition.
+    /// keeps their current values; for the Subtitles engine that means an old
+    /// backup never changes where subtitle audio goes. Closed with the
+    /// release that ships `knownKeys`: archives written since list their
+    /// known keys, which covers every later addition.
     /// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
     static let keysAddedAfterUnlistedArchives: Set<String> = [
         "hotkeys.googleSearchTextShortcut", "hotkeys.googleSearchVoiceShortcut", "hotkeys.googleSearchVoiceGesture",
+        SubtitleAudioTranslate.Choice.defaultsKey,
     ]
 
     static func apply(_ values: [String: ConfigBackupValue], sections: Set<ConfigBackupSection>,
@@ -276,7 +272,7 @@ enum ConfigBackupRegistry {
         try validate(values)
         for (key, entry) in entries where sections.contains(entry.section) {
             if let value = values[key] { defaults.set(try value.propertyListValue(), forKey: key) }
-            else if !preservingMissingKeys.contains(key), !keptWhenAbsent.contains(key) {
+            else if !preservingMissingKeys.contains(key) {
                 if key == aiRoutingKey {
                     // A reset must stay Not set after launch; removing this
                     // marker would re-run migration from the frozen old tab.

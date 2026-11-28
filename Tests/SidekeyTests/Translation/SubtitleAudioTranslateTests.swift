@@ -148,19 +148,26 @@ final class SubtitleAudioTranslateTests: XCTestCase {
     // MARK: - Backup
 
     /// An archive from before the choice existed leaves it as it is; a newer
-    /// archive restores it.
+    /// archive restores it. Restore decides through the one rule for keys an
+    /// archive's writer did not know (`ArtifactSettingsPayload.keysUnknownToWriter`).
+    /// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
     func testAnOlderBackupKeepsTheChoiceAndANewerOneRestoresIt() throws {
+        func restore(_ payload: ArtifactSettingsPayload) throws {
+            try ConfigBackupRegistry.apply(payload.values, sections: payload.appliedSections,
+                                           preservingMissingKeys: payload.keysUnknownToWriter, to: defaults)
+        }
         choice.saved = .soniox
         defaults.set("de", forKey: "sidekey.translation.subtitleTarget")
-        try ConfigBackupRegistry.apply(["sidekey.translation.subtitleTarget": .string("fr")],
-                                       sections: [.models], to: defaults)
+        try restore(ArtifactSettingsPayload(values: ["sidekey.translation.subtitleTarget": .string("fr")],
+                                            selectedSections: [.models]))
         XCTAssertEqual(choice.saved, .soniox)
         XCTAssertEqual(defaults.string(forKey: "sidekey.translation.subtitleTarget"), "fr")
         XCTAssertNil(defaults.object(forKey: "sidekey.translation.source"), "other absent keys still clear as before")
         let captured = try ConfigBackupRegistry.capture(defaults)
         XCTAssertEqual(captured[SubtitleAudioTranslate.Choice.defaultsKey], .string("soniox"))
         choice.saved = .openAI
-        try ConfigBackupRegistry.apply(captured, sections: [.models], to: defaults)
+        try restore(ArtifactSettingsPayload(values: captured.filter { ConfigBackupRegistry.entries[$0.key]?.section == .models },
+                                            selectedSections: [.models], knownKeys: ConfigBackupRegistry.entries.keys.sorted()))
         XCTAssertEqual(choice.saved, .soniox)
     }
 

@@ -554,7 +554,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerInputIsTopCenteredAboveFlags() {
-        let panelSize = CGSize(width: 312, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 312, height: IslandLanguagePickerLayout.drawerHeight)
         let optionCount = IslandLanguageControl.pickerOptions().count
         let inputFrame = IslandLanguagePickerLayout.inputFrame(
             panelSize: panelSize,
@@ -572,7 +572,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerPlacesAutoNextToInputAndUniqueFlagsInFourRowsBelowInput() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let options = IslandLanguageControl.pickerOptions()
         let optionCount = options.count
         let inputFrame = IslandLanguagePickerLayout.inputFrame(
@@ -603,7 +603,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerBalancesFlagsAcrossRowsInsteadOfLeavingSparseLastRow() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let flagFrames = IslandLanguagePickerLayout.flagFrames(
             panelSize: panelSize,
             count: IslandLanguageControl.pickerOptions().count
@@ -619,7 +619,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languageVariantFramesStayCenteredInsteadOfAnchoringToPanelEdges() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let frames = IslandLanguagePickerLayout.variantFrames(
             panelSize: panelSize,
             count: 2
@@ -631,7 +631,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languageVariantFramesShrinkToFitSevenVariantsIntoOneBalancedRow() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let frames = IslandLanguagePickerLayout.variantFrames(
             panelSize: panelSize,
             count: 7
@@ -645,7 +645,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerFilteredResultsUseLargeTargetsBelowTopInput() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let inputFrame = IslandLanguagePickerLayout.inputFrame(
             panelSize: panelSize,
             optionCount: 2,
@@ -721,7 +721,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerUsesMoreRowsWhenHoverPanelIsTall() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let flagFrames = IslandLanguagePickerLayout.flagFrames(
             panelSize: panelSize,
             count: IslandLanguageControl.pickerOptions().count
@@ -732,7 +732,7 @@ final class IslandDropModeControlTests: XCTestCase {
     }
 
     func test_languagePickerRowsUseEvenVerticalRhythmBelowInput() {
-        let panelSize = CGSize(width: 328, height: IslandDropModeControl.hoverPanelHeight)
+        let panelSize = CGSize(width: 328, height: IslandLanguagePickerLayout.drawerHeight)
         let flagFrames = IslandLanguagePickerLayout.flagFrames(
             panelSize: panelSize,
             count: IslandLanguageControl.pickerOptions().count

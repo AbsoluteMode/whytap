@@ -219,16 +219,162 @@ final class IslandHoverReorderTests: XCTestCase {
         XCTAssertEqual(bridge.editHold.phase, .free, "A reorder is not an edit that holds the drawer")
     }
 
-    func testTheDrawersFrameDecidesWhatOutsideMeans() {
-        let cells = [0: CGRect(x: 0, y: 0, width: 60, height: 44)]
-        let drawer = CGRect(x: -20, y: -80, width: 300, height: 200)
-        let reorder = IslandHoverReorder(tool: .notes, original: tools, cells: cells, panel: drawer)
-        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 250, y: 100)), "Footer or search: still inside")
-        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 290, y: 100)))
-        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 30, y: 130)), "Above the drawer (over the pill)")
-        let unmeasured = IslandHoverReorder(tool: .notes, original: tools, cells: cells)
-        XCTAssertFalse(unmeasured.removesRelease(at: CGPoint(x: 30, y: 44 + IslandHoverReorder.releaseMargin - 1)))
-        XCTAssertTrue(unmeasured.removesRelease(at: CGPoint(x: 30, y: 44 + IslandHoverReorder.releaseMargin + 1)))
+    // MARK: - REV 5: the whole tile leaves the hover
+
+    /// A 60 x 44 tile pressed at its centre (30, 22), in a drawer from
+    /// (0, 0) to (300, 200). Drawn lifted it is 66 x 48.4, so the pointer
+    /// must be 33 / 24.2 past an edge for the picture to have left entirely.
+    private func wholeTileReorder(panel: CGRect? = CGRect(x: 0, y: 0, width: 300, height: 200)) -> IslandHoverReorder {
+        IslandHoverReorder(tool: .notes, original: tools, cells: [0: CGRect(x: 0, y: 0, width: 60, height: 44)],
+                           panel: panel, tile: CGRect(x: 0, y: 0, width: 60, height: 44), lift: CGPoint(x: 30, y: 22))
+    }
+
+    func testThePictureFollowsThePointerAtItsLiftedSize() throws {
+        let frame = try XCTUnwrap(wholeTileReorder().tileFrame(at: CGPoint(x: 130, y: 72)))
+        XCTAssertEqual(frame.midX, 130, accuracy: 0.001)
+        XCTAssertEqual(frame.midY, 72, accuracy: 0.001)
+        XCTAssertEqual(frame.width, 60 * IslandHoverReorderMotionCurve.liftedScale, accuracy: 0.001)
+        XCTAssertEqual(frame.height, 44 * IslandHoverReorderMotionCurve.liftedScale, accuracy: 0.001)
+    }
+
+    func testAPartlyOutsideTileIsNeverRemovedOnAnySide() {
+        let reorder = wholeTileReorder()
+        let halfWidth = 33.0, halfHeight = 24.2
+        // The pointer itself is already outside the drawer on every side here.
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 150, y: -halfHeight + 1)), "Below")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 150, y: 200 + halfHeight - 1)), "Above, toward the notch")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: -halfWidth + 1, y: 100)), "Beside, left")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 300 + halfWidth - 1, y: 100)), "Beside, right")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 300 + halfWidth - 1, y: 200 + halfHeight - 1)), "A corner")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 150, y: 190)), "Over the search band")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 280, y: 10)), "Over the footer or More")
+    }
+
+    func testAFullyOutsideTileIsRemovedOnEverySideWithNoExtraDistance() {
+        let reorder = wholeTileReorder()
+        let halfWidth = 33.0, halfHeight = 24.2
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 150, y: -halfHeight - 0.5)), "Below")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 150, y: 200 + halfHeight + 0.5)), "Above, toward the notch")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: -halfWidth - 0.5, y: 100)), "Beside, left")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 300 + halfWidth + 0.5, y: 100)), "Beside, right")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 300 + halfWidth, y: 100)), "Touching the edge is outside")
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: -halfWidth - 1, y: 200 + halfHeight + 1)), "Diagonally off a corner")
+    }
+
+    func testWhereTheTileWasGrabbedDecidesHowFarThePointerGoes() {
+        // Pressed near the tile's top edge: the picture hangs below the pointer.
+        let reorder = IslandHoverReorder(tool: .notes, original: tools,
+                                         cells: [0: CGRect(x: 0, y: 0, width: 60, height: 44)],
+                                         panel: CGRect(x: 0, y: 0, width: 300, height: 200),
+                                         tile: CGRect(x: 0, y: 0, width: 60, height: 44), lift: CGPoint(x: 30, y: 40))
+        // Above the drawer by more than half a tile, the bottom still overlaps.
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 150, y: 230)))
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 150, y: 245)))
+    }
+
+    /// Grabbed near its top edge, a top-row tile hangs below the pointer;
+    /// the screen's top (32 pt above the drawer, a 24 pt menu bar) stops the
+    /// pointer before the picture can leave. Above the drawer the picture
+    /// rises a little faster, so at the screen's top it has just left.
+    func testUpwardRemovalIsReachableWhereverTheTileWasGrabbed() throws {
+        var reorder = IslandHoverReorder(tool: .notes, original: tools,
+                                         cells: [0: CGRect(x: 0, y: 150, width: 60, height: 50)],
+                                         panel: CGRect(x: 0, y: 0, width: 300, height: 200),
+                                         tile: CGRect(x: 0, y: 150, width: 60, height: 50), lift: CGPoint(x: 30, y: 198))
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 30, y: 232)),
+                       "Without the screen's top known, the pointer at 232 leaves the picture over the drawer")
+        reorder.ceiling = 232
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 30, y: 232)), "Pointer at the screen's top: removed")
+        // Never while any part of the drawn picture is still over the drawer.
+        var y: CGFloat = 150
+        while y <= 232 {
+            let point = CGPoint(x: 30, y: y)
+            let drawn = try XCTUnwrap(reorder.tileFrame(at: reorder.pictureAnchor(for: point)))
+            let overlap = drawn.intersection(CGRect(x: 0, y: 0, width: 300, height: 200))
+            let visiblyOver = !overlap.isNull && overlap.width > 0 && overlap.height > 0
+            if reorder.removesRelease(at: point) {
+                XCTAssertFalse(visiblyOver, "removal at y=\(y) while the drawn picture overlaps the drawer")
+            }
+            y += 0.5
+        }
+        XCTAssertEqual(reorder.pictureAnchor(for: CGPoint(x: 30, y: 180)), CGPoint(x: 30, y: 180),
+                       "Inside the drawer the picture follows the pointer exactly")
+    }
+
+    /// Grabbed at its middle the picture leaves the drawer before the screen's
+    /// top: it follows the pointer exactly, with no extra speed.
+    func testAMiddleGrabNeedsNoHelpUpward() {
+        let reorder = IslandHoverReorder(tool: .notes, original: tools,
+                                         cells: [0: CGRect(x: 0, y: 150, width: 60, height: 50)],
+                                         panel: CGRect(x: 0, y: 0, width: 300, height: 200),
+                                         tile: CGRect(x: 0, y: 150, width: 60, height: 50), lift: CGPoint(x: 30, y: 175),
+                                         ceiling: 240)
+        XCTAssertEqual(reorder.pictureAnchor(for: CGPoint(x: 30, y: 220)), CGPoint(x: 30, y: 220))
+    }
+
+    /// Outside, the tile is drawn at 0.9x; it comes back only when that
+    /// smaller picture touches the drawer, not where the 1.1x one would.
+    func testTheRemoveCueStaysUntilTheSmallerOutsidePictureTouchesTheDrawer() {
+        let reorder = wholeTileReorder()
+        let lifted = 44 * IslandHoverReorderMotionCurve.liftedScale / 2
+        let outside = 44 * IslandHoverReorderMotionCurve.outsideScale / 2
+        let between = CGPoint(x: 150, y: -(lifted + outside) / 2)   // 1.1x overlaps, 0.9x does not
+        XCTAssertFalse(reorder.removesRelease(at: between, outside: false), "Not yet out at the lifted size")
+        XCTAssertTrue(reorder.removesRelease(at: between, outside: true), "Already out: the drawn 0.9x tile is clear")
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 150, y: -outside + 1), outside: true),
+                       "The visible tile touching the drawer brings it back")
+    }
+
+    func testWithoutTheDrawersFrameTheGridAndItsMarginAreTheHover() {
+        let reorder = wholeTileReorder(panel: nil)
+        let edge = 44 + IslandHoverReorder.releaseMargin
+        XCTAssertFalse(reorder.removesRelease(at: CGPoint(x: 30, y: edge + 24.2 - 1)))
+        XCTAssertTrue(reorder.removesRelease(at: CGPoint(x: 30, y: edge + 24.2 + 0.5)))
+        let pointOnly = IslandHoverReorder(tool: .notes, original: tools,
+                                           cells: [0: CGRect(x: 0, y: 0, width: 60, height: 44)])
+        XCTAssertFalse(pointOnly.removesRelease(at: CGPoint(x: 30, y: edge - 1)), "No tile known: the pointer decides")
+        XCTAssertTrue(pointOnly.removesRelease(at: CGPoint(x: 30, y: edge + 1)))
+    }
+
+    /// The fixture has no drawer region: the hover is the row (y 0...44)
+    /// plus the margin, and the lifted tile is 66 x 48.4 around the pointer.
+    func testThePointerOutsideWithTheTileStillOverlappingKeepsTheTool() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        let top = point(0).y + 22 + IslandHoverReorder.releaseMargin
+        let partlyOut = CGPoint(x: point(0).x, y: top + 10)
+        drag(to: partlyOut)
+        XCTAssertFalse(bridge.motion.outside, "Part of the tile is still over the hover: no remove cue")
+        up(at: partlyOut)
+        XCTAssertEqual(store.slots, tools, "Released partly outside: kept where it was")
+        XCTAssertNotEqual(bridge.reorderPhase.state, .removed)
+    }
+
+    func testTheCueAppearsTheMomentTheWholeTileIsOutAndGoesWhenAnyPartReturns() {
+        XCTAssertTrue(down(0))
+        XCTAssertTrue(bridge.liftPressedTool())
+        let top = point(0).y + 22 + IslandHoverReorder.releaseMargin
+        let halfHeight = 22 * IslandHoverReorderMotionCurve.liftedScale
+        drag(to: CGPoint(x: point(0).x, y: top + halfHeight + 1))
+        XCTAssertTrue(bridge.motion.outside, "Fully out: the cue says letting go removes it")
+        // Outside it is drawn at 0.9x: the lifted size touching again is not
+        // what the user sees, so the cue stays until the drawn tile touches.
+        drag(to: CGPoint(x: point(0).x, y: top + halfHeight - 1))
+        XCTAssertTrue(bridge.motion.outside, "The visible 0.9x tile is still clear of the hover")
+        let outsideHalf = 22 * IslandHoverReorderMotionCurve.outsideScale
+        drag(to: CGPoint(x: point(0).x, y: top + outsideHalf - 1))
+        XCTAssertFalse(bridge.motion.outside, "A sliver of the visible tile back over the hover: no longer a removal")
+        up(at: CGPoint(x: point(0).x, y: top + outsideHalf - 1))
+        XCTAssertEqual(store.slots, tools)
+
+        XCTAssertTrue(down(1))
+        XCTAssertTrue(bridge.liftPressedTool())
+        let beside = CGPoint(x: point(3).x + 30 + IslandHoverReorder.releaseMargin + 33 + 1, y: point(1).y)
+        drag(to: beside)
+        XCTAssertTrue(bridge.motion.outside, "Beside the hover counts too")
+        up(at: beside)
+        XCTAssertEqual(store.slots, [.inputLang, .monitor, .settings])
+        XCTAssertEqual(bridge.reorderPhase.state, .removed)
     }
 
     func testEscapeDuringADragPutsEverythingBack() {

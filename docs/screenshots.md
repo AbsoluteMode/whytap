@@ -94,8 +94,9 @@ from the selected, edited area on this Mac, copies plain text and closes the
 editor. It reads the same flattened pixels as image export, including Blur and
 placed labels; text outside the crop is excluded. Accurate system recognition
 supports English and Russian and keeps language correction off for numbers and
-codes. The first request can take longer while macOS initializes recognition.
-Progress stays visible; Escape cancels without copying a late result. If no
+codes. Whytap prepares recognition in the background when it opens. If you
+copy text before preparation finishes, the first request can still take
+longer. Progress stays visible and Escape cancels without copying a late result. If no
 readable text is found or recognition fails, the editor stays open for retry or
 image copy. A clipboard write failure restores the previous readable contents
 while the operation still owns the clipboard; it never restores over a newer

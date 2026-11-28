@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AppControl/HarnessAccessTests.swift
     confirmed_at: 2026-11-23
-related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md]
+related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-20-harness-access.md, 2026-11-23-vocabulary-route-budget.md, 2026-11-27-drop-list-removal-mcp.md]
 ---
 
 # The Agent adds words to Vocab and Filler
@@ -49,6 +49,12 @@ already has its own operations.
   characters, 100 terms). Both post their change notifications, so an open
   island editor reloads; every take reads both lists. No defaults write of
   its own.
+- **The advertised length limit on the raw term.** Both tools advertise
+  `maxLength` 50 per term. Since 2026-11-28 it is checked on the submitted
+  string as JSON Schema counts it, in code points before trimming, for the
+  whole batch before anything changes (50 spaces plus `x`, or 26 `e` with a
+  combining accent, is too long); the stores' own 50-character rule still
+  applies to the trimmed term. The removal tools follow the same rule.
 - **One line.** A term with a line break or a control character (category
   Cc, line and paragraph separators) is refused; format characters such as
   the zero-width non-joiner (U+200C) that Persian needs stay, as the stores
@@ -106,8 +112,12 @@ parser and plain in the step label. Filler: a word saved, an open editor
 reloaded and the next take's filter removing it; existing, too long,
 multi-line, blank and a full list of 100. `HarnessAccessTests`: both writes
 gated with the meeting tools, a No refused, a script in the harness shell
-refused, and access turned off while a request waits writing nothing. Not
-tested: the installed app, a live model.
+refused, and access turned off while a request waits writing nothing.
+`DropListAddRawLengthTests`: padded, combining-mark and 49-letters-plus-spaces
+terms over 50 code points after a valid term add nothing to either list; a
+padded term of exactly 50 code points is added trimmed; 25 accented letters
+(50 code points) are accepted; the schema limit equals both stores' limit.
+Not tested: the installed app, a live model.
 
 ## Rejected
 

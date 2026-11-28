@@ -3,8 +3,11 @@ import Foundation
 /// User-controlled display preferences. `hideHelpers` is surfaced by
 /// the status-bar menu as "Hide Helpers" and removes inline shortcut
 /// affordances. `hideIslandHoverWidgets` is the Dynamic Island eye
-/// toggle: when enabled, hover expansion and the Now Playing island
-/// surfaces stay hidden until the user opens the eye again.
+/// toggle: when enabled, the drawer no longer appears under the mouse and
+/// the hover music strip stays hidden until the user opens the eye again.
+/// Explicit requests (Settings -> Features Open/Edit, a tool's hotkey, a
+/// whytap link) still open their panel.
+/// WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
 ///
 /// `ObservableObject` (not the lighter-weight `@MainActor` pattern used
 /// by `PrivacyPreferences`) because three of the four helper consumers
@@ -68,9 +71,10 @@ final class DisplayPreferences: ObservableObject {
         }
     }
 
-    /// When `true`, the Dynamic Island ignores hover expansion and hides
-    /// its compact/expanded Now Playing widgets. Default = `false` so the
-    /// island behaves normally until the user closes the eye button.
+    /// When `true`, the Dynamic Island ignores expansion on mouse hover and
+    /// hides the hover Now Playing strip (the compact wing stays); explicit
+    /// panel requests still open. Default = `false` so the island behaves
+    /// normally until the user closes the eye button.
     @Published var hideIslandHoverWidgets: Bool = false {
         didSet {
             defaults.set(hideIslandHoverWidgets, forKey: Key.hideIslandHoverWidgets)

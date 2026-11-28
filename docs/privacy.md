@@ -205,11 +205,15 @@ other applications are not silently copied. [Coverage and recovery](backup.md).
 ## Translation and subtitles
 
 Translate sends submitted text to the chosen Translation LLM route. Subtitles
-send system audio to Soniox (`stt-rt-v6` live translation) with the Soniox
-key from Keys & models, or, without a Soniox key, to OpenAI
+send system audio to the engine chosen in Keys & models -> Models -> Subtitles:
+Soniox (`stt-rt-v6` live translation) with the Soniox key, or OpenAI
 (`gpt-realtime-translate`) with the OpenAI key; the provider returns the
-translation and the transcript of what it heard. Without either key Subtitles
-do not start. This is
+translation and the transcript of what it heard. Without a choice they use
+OpenAI, or Soniox when only a Soniox key exists, and the engine that first
+runs is remembered, so adding the other key later does not move the audio.
+If the chosen engine's key is missing or unreadable, Subtitles do not start
+and are never sent to the other provider instead. Without either key
+Subtitles do not start. This is
 the next version after 2.2.26; in 2.2.26 Subtitles send system audio to the
 speech route chosen for them (or recognize it On this Mac) and the finished
 phrases to their own language-model route. A session ends by itself after one hour, like Stop. It never opens the microphone or creates a

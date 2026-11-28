@@ -63,6 +63,8 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
 | `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated (needs the Yes) |
 | `whytap_filler_add` | — | Add words Drop removes from dictation (Filler; needs the Yes) |
+| `whytap_vocab_remove` | — | Coding tools only (not the built-in Agent): remove named Vocab entries (needs the Yes) |
+| `whytap_filler_remove` | — | Coding tools only (not the built-in Agent): remove named Filler entries so Drop keeps them (needs the Yes) |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
 | `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
@@ -76,7 +78,10 @@ set up with them. Other clients can invoke the CLI directly:
 
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
-Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
+Smart), `autoHideIsland` (boolean) and `subtitlesEngine` (`soniox`/`openAI`:
+where Subtitles send system audio; `null` until chosen, which runs OpenAI unless
+only a Soniox key exists; only an engine with a readable key can be set).
+`get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation.
 
@@ -84,8 +89,8 @@ no arbitrary UserDefaults operation.
 
 These are Drop's hand-filled lists, the ones the island's Vocab and Filler
 editors fill. Each operation adds through that list's own store and checks,
-so an open editor shows the entry and the next dictation reads it. Neither
-reads a list back or removes an entry; remove entries in the island. An
+so an open editor shows the entry and the next dictation reads it. Nothing
+reads a list back. An
 entry already there is reported and left as it is, so a retry is safe. One
 invalid entry (empty, too long, a line break or control character) adds
 nothing (`invalid_term`); joiners such as the Persian zero-width non-joiner
@@ -104,6 +109,18 @@ shows `Vocab + whytap` above its answer, with the spelling exactly as saved.
 holds 100): words Drop removes from dictation, Fast and Smart (`um`, `ну`).
 When removing them would leave a Fast take empty, Drop pastes the take
 unfiltered. The Agent shows `Filler + ну`.
+
+`whytap_vocab_remove` and `whytap_filler_remove` take `terms` (1–20) and
+remove exactly those entries, matched in any letter case and without
+surrounding spaces on either side (a restored backup can hold `"  Word  "`).
+A removed entry comes back as `removed` with its saved spelling, trimmed; a
+term that is not in the list is `missing`, which changes nothing and is not
+an error. One invalid entry (empty, more than one line or longer than 50
+characters) removes nothing, and there is no way to clear a whole list.
+Only Claude Code, Codex and other connected coding tools get them; the
+built-in Agent can add entries but not remove them. `whytap_filler_remove` makes Drop keep a word
+again; to cut a word from dictation use `whytap_filler_add`. Coding tools
+need the same one-time Yes.
 
 There is no Replace list: it came with Drop learning, which was shelved on
 2026-11-23.
@@ -176,8 +193,8 @@ notes so "split this call into tasks" works without extra setup.
 
 Feature IDs are `dropFast`, `dropSmart`, `dropSmartCleanup`, `meetings`,
 `meetingNotes`, `agent`, `agentVoice`, `voiceSearch` and `translation`.
-Subtitles have no route: they run on OpenAI Audio translate with the OpenAI
-key. Accounts use the exact ID returned
+Subtitles have no route: their engine (Soniox or OpenAI live translation) is
+the `subtitlesEngine` setting. Accounts use the exact ID returned
 by `list_models`: built-in provider IDs or an already configured server ID.
 The application-control server cannot add a provider, change an endpoint URL
 or read a key.

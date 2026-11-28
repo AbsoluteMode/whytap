@@ -65,6 +65,10 @@ final class HistoryMultiPasteTests: XCTestCase {
         private(set) var receivedAtRestore: Int?
         /// A copy by the user at this virtual time.
         var userCopyAtMs: UInt64?
+        /// Another app's copy lands while a refused write is in progress.
+        var copyLandsDuringRefusedWrite = false
+        /// Generations handed to `suppressOwn`, in order.
+        private(set) var suppressed: [Int] = []
 
         static func label(_ group: HistoryPasteGroup) -> String {
             switch group {
@@ -109,7 +113,12 @@ final class HistoryMultiPasteTests: XCTestCase {
                     if failingWrites.contains(writeIndex) {
                         changeCount += 1   // the refused write cleared the pasteboard
                         content = ""
-                        return .failed
+                        let cleared = changeCount
+                        if copyLandsDuringRefusedWrite {
+                            changeCount += 1
+                            content = "other copy"
+                        }
+                        return .failed(clearedChangeCount: cleared)
                     }
                     changeCount += 1
                     content = Self.label(group)
@@ -124,7 +133,7 @@ final class HistoryMultiPasteTests: XCTestCase {
                     contentSignalsReads = signals
                     return .written(.init(changeCount: changeCount, readsBefore: signals ? reads : nil))
                 },
-                paste: { [unowned self] _ in
+                paste: { [unowned self] _, _ in
                     events.append("cmd-v")
                     let ok = pasteResults.isEmpty ? true : pasteResults.removeFirst()
                     if ok, let delay = readDelayMs { pendingReads.append(now + delay) }
@@ -140,7 +149,8 @@ final class HistoryMultiPasteTests: XCTestCase {
                     changeCount += 1
                     content = "original"
                     contentSignalsReads = false
-                }
+                },
+                suppressOwn: { [unowned self] in suppressed.append($0) }
             )
         }
     }
@@ -407,6 +417,54 @@ final class HistoryMultiPasteTests: XCTestCase {
         XCTAssertEqual(recorder.content, "original")
     }
 
+    /// The accepted behaviour: three marked rows paste all three, the
+    /// previous clipboard comes back, and only the series' own generations
+    /// (three writes and the restore) are kept out of clipboard history.
+    func testThreeMarkedRowsPasteAllThreeAndOnlyTheSeriesOwnWritesAreSuppressed() async {
+        let recorder = Recorder()
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 3)
+        XCTAssertEqual(recorder.received, ["text \"a\"", "image 2", "image 3"])
+        XCTAssertEqual(recorder.content, "original")
+        XCTAssertEqual(recorder.suppressed, [1, 2, 3, 4], "three writes, then the restore")
+    }
+
+    /// A copy the user makes during the series is never suppressed: no
+    /// generation at or above it is handed to `suppressOwn`, so clipboard
+    /// history records it, and it is not overwritten by the restore.
+    func testUserCopyDuringTheSeriesIsRecordedAndNotOverwritten() async {
+        let recorder = Recorder()
+        recorder.readDelayMs = 50
+        recorder.userCopyAtMs = 20
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 1)
+        XCTAssertFalse(recorder.events.contains("restore"))
+        XCTAssertEqual(recorder.content, "user copy")
+        XCTAssertEqual(recorder.suppressed, [1])
+        XCTAssertTrue(recorder.suppressed.allSatisfy { $0 < recorder.changeCount },
+                      "the user's generation stays visible to clipboard history")
+    }
+
+    /// A refused write during which another copy landed: the pasteboard no
+    /// longer holds the series' own generation, so nothing is restored over
+    /// the fresh copy and that copy is not suppressed.
+    func testRefusedWriteNeverRestoresOverACopyThatLandedDuringIt() async {
+        let recorder = Recorder()
+        recorder.failingWrites = [1]
+        recorder.copyLandsDuringRefusedWrite = true
+        let posted = await recorder.paster().run(HistoryPastePlan.groups(for: [
+            textCard(1, "a"), imageCard(2), imageCard(3),
+        ]))
+        XCTAssertEqual(posted, 1)
+        XCTAssertFalse(recorder.events.contains("restore"))
+        XCTAssertEqual(recorder.content, "other copy")
+        XCTAssertEqual(recorder.suppressed, [1, 2], "the first write and the refused write's own clear")
+    }
+
     func testImageWithNothingPastableIsSkippedAndTheRestContinues() async {
         let recorder = Recorder()
         recorder.emptyWrites = [1]
@@ -544,7 +602,7 @@ final class HistoryMultiPasteTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { _ in true },
             write: { HistoryPasteboardWriter.writeForPaste($0, to: pasteboard, assetsDirectory: assets, reads: reads) },
-            paste: { _ in
+            paste: { _, _ in
                 readers.append(Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 450_000_000)
                     received.append(self.chromiumStyleRead(pasteboard) ?? "nothing")

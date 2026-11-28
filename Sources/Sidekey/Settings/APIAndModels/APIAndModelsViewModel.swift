@@ -40,20 +40,72 @@ struct FeatureRow: Equatable, Identifiable {
     var id: AIFeature { feature }
 }
 
-/// Subtitles' row: the engine the keys give, preselected. Soniox live
-/// translation with the Soniox key, otherwise OpenAI gpt-realtime-translate
-/// with the OpenAI key; no engine choice.
-// WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+/// Subtitles' row: the engine the user chose (Soniox live translation or
+/// OpenAI gpt-realtime-translate), or the default without a choice. Only an
+/// engine whose key can be read is selectable; a chosen engine that lost its
+/// key stays chosen and the row asks for setup.
+// WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
 // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
 struct AudioTranslateSlot: Equatable {
+    typealias Engine = SubtitleAudioTranslate.Engine
     var soniox: SubtitleAudioTranslate.KeyState
     var openAI: SubtitleAudioTranslate.KeyState
+    /// The saved choice; nil until the user picks one or Subtitles first open.
+    var saved: Engine? = nil
 
-    var engine: SubtitleAudioTranslate.Engine? { SubtitleAudioTranslate.engine(soniox: soniox, openAI: openAI) }
-    /// Subtitles can run: one of the keys can be read.
+    /// The engine Subtitles use, whether or not its key works.
+    var intended: Engine? { SubtitleAudioTranslate.intended(saved: saved, soniox: soniox, openAI: openAI) }
+    /// The engine that can run now.
+    var engine: Engine? { SubtitleAudioTranslate.engine(saved: saved, soniox: soniox, openAI: openAI) }
+    /// Subtitles can run: the intended engine's key can be read.
     var isActive: Bool { engine != nil }
-    /// Without a key, the engine a Soniox key would give.
-    var label: String { (engine ?? .soniox).label }
+    /// The menu's title; like any row without a model when nothing is set.
+    var label: String { intended?.label ?? "Choose a model" }
+    /// The collapsed line.
+    var summary: String { intended?.model ?? "Choose a model" }
+
+    func keyState(_ engine: Engine) -> SubtitleAudioTranslate.KeyState {
+        engine == .soniox ? soniox : openAI
+    }
+
+    func isSelectable(_ engine: Engine) -> Bool { keyState(engine) == .present }
+
+    /// The intended engine's key problem, shown under the row.
+    var issue: String? {
+        guard let intended, engine == nil else { return nil }
+        return keyState(intended) == .unreadable
+            ? "Couldn't read the \(intended.providerName) key"
+            : "Needs \(Self.keyPhrase(intended))"
+    }
+
+    static func keyPhrase(_ engine: Engine) -> String {
+        engine == .openAI ? "an OpenAI key" : "a Soniox key"
+    }
+
+    /// The model picker's sections: Soniox, then OpenAI, one model each. An
+    /// engine without a readable key is listed but disabled, with what it needs.
+    /// With neither key the picker shows its usual "Add a key" state instead.
+    var sections: [PickerSection] {
+        if soniox == .missing, openAI == .missing { return [] }
+        return Engine.allCases.map { engine in
+            let state: PickerOptionState
+            switch keyState(engine) {
+            case .present: state = .verified
+            case .missing: state = .notSupported(reason: "Add \(Self.keyPhrase(engine)) in API keys to use it")
+            case .unreadable: state = .notSupported(reason: "Check the \(engine.providerName) key in API keys")
+            }
+            return PickerSection(
+                account: engine.account, title: engine.providerName,
+                options: [PickerOption(model: engine.model, state: state, isSelected: engine == intended, hint: nil)],
+                refreshFailed: false,
+                keyProblem: keyState(engine) == .unreadable ? "Couldn't read the key" : nil)
+        }
+    }
+
+    /// The engine a picker row names.
+    static func engine(account: ProviderAccount, model: String) -> Engine? {
+        Engine.allCases.first { $0.account == account && $0.model == model }
+    }
 }
 
 /// One line of the Models card: what the user turns on (Drop Smart, Meetings)
@@ -68,7 +120,7 @@ struct FeatureGroup: Equatable, Identifiable {
     /// What the collapsed line names: Subtitles' one model, otherwise every
     /// route's model.
     var summaryParts: [String] {
-        if let slot = audioTranslate { return [(slot.engine ?? .soniox).model] }
+        if let slot = audioTranslate { return [slot.summary] }
         return rows.map(\.modelSummary)
     }
     var summary: String { summaryParts.joined(separator: " · ") }
@@ -78,8 +130,8 @@ struct FeatureGroup: Equatable, Identifiable {
         rows.contains { $0.feature == feature }
             || (audioTranslate != nil && [.subtitlesAudio, .subtitlesTranslation].contains(feature))
     }
-    /// Subtitles ask for setup without a Soniox or OpenAI key, other groups for an
-    /// unset route.
+    /// Subtitles ask for setup when their engine has no readable key, other
+    /// groups for an unset route.
     var needsSetup: Bool {
         if let slot = audioTranslate { return !slot.isActive }
         return rows.contains { $0.status == .notSet }
@@ -181,6 +233,9 @@ final class APIAndModelsViewModel: ObservableObject {
     private let routing: AIRoutingStore
     private let keys: ProviderKeyStore
     private let agentSettings: AgentSettingsStore
+    /// Subtitles' saved engine.
+    // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
+    private let subtitleEngine: SubtitleAudioTranslate.Choice
 
     func makeTavilySettings() -> TavilySettings { TavilySettings(keys: keys) }
     private let catalogs: ModelCatalogStore
@@ -223,9 +278,11 @@ final class APIAndModelsViewModel: ObservableObject {
         now: @escaping () -> Date = Date.init,
         inputLanguage: (@MainActor () -> String?)? = nil,
         onDevice: OnDeviceSpeechReadiness = .live,
-        agentSettings: AgentSettingsStore? = nil
+        agentSettings: AgentSettingsStore? = nil,
+        subtitleEngine: SubtitleAudioTranslate.Choice = SubtitleAudioTranslate.Choice()
     ) {
         self.onDevice = onDevice
+        self.subtitleEngine = subtitleEngine
         self.agentSettings = agentSettings ?? .shared
         let routing = routing ?? .shared
         let catalogs = catalogs ?? .shared
@@ -258,6 +315,19 @@ final class APIAndModelsViewModel: ObservableObject {
         NotificationCenter.default.publisher(for: .whytapTavilyKeyChanged)
             .sink { [weak self] _ in Self.onMain { self?.tavilyKeyChanged() } }
             .store(in: &observers)
+    }
+
+    /// Keys & models → Models → Subtitles: saves the engine when its key can
+    /// be read; an engine without a working key is never chosen. Returns
+    /// whether the choice is now `engine`.
+    // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
+    @discardableResult
+    func selectSubtitleEngine(_ engine: SubtitleAudioTranslate.Engine) -> Bool {
+        recompute()
+        guard audioTranslate.isSelectable(engine) else { return false }
+        subtitleEngine.saved = engine
+        recompute()
+        return true
     }
 
     /// Keys & models → Models → Search: the Agent model's search (`.auto`) or Tavily.
@@ -687,7 +757,13 @@ final class APIAndModelsViewModel: ObservableObject {
     // MARK: - Models
 
     func sections(for feature: AIFeature) -> [PickerSection] {
-        resolver.sections(for: feature)
+        keys.withLookupPass { resolver.sections(for: feature) }
+    }
+
+    /// One Keychain pass for several reads of this model (Settings -> Features
+    /// builds its snapshot from every feature's sections).
+    func withKeyLookupPass<T>(_ body: () throws -> T) rethrows -> T {
+        try keys.withLookupPass(body)
     }
 
     func missingProviderHint(for feature: AIFeature) -> String? {
@@ -1128,12 +1204,17 @@ final class APIAndModelsViewModel: ObservableObject {
     }
 
     private func recompute() {
+        keys.withLookupPass { recomputeInPass() }
+    }
+
+    private func recomputeInPass() {
         let chips = keyedAccounts().map(chip(for:))
-        let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)))
+        let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)),
+                                      saved: subtitleEngine.saved)
         if audioTranslate != slot { audioTranslate = slot }
         let rows = AIFeature.activeCases.map(row(for:))
         let groups = resolver.aliasGroups()
-        // Subtitles without a Soniox or OpenAI key count as a feature without a model.
+        // Subtitles whose engine has no readable key count as a feature without a model.
         let unset = rows.filter { $0.status == .notSet }.count + (slot.isActive ? 0 : 1)
         let banner: String?
         if chips.isEmpty || unset == 0 {

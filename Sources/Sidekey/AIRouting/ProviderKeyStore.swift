@@ -47,15 +47,38 @@ struct ProviderKeyStore {
     }
 
     private let makeStore: (String) -> any TokenStore
+    /// Shared by every copy of this store (the Models view model and its
+    /// resolver hold copies), so one pass reads each account once.
+    private let pass = LookupPass()
 
     init(makeStore: @escaping (String) -> any TokenStore = { KeychainStore(service: BuildConfig.keychainService, account: $0) }) {
         self.makeStore = makeStore
+    }
+
+    /// Runs `body` as one pass: each account is read from the Keychain at most
+    /// once, and later lookups in the pass reuse that answer. A Keychain read
+    /// costs about 1 ms on the main thread (sometimes over 10); Settings ->
+    /// Features asked for the same few keys about 150 times per redraw, which
+    /// stalled the island's Drop Mode switch for about a second. Nothing is
+    /// kept after the outermost pass ends; saves and deletes forget the account.
+    // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+    func withLookupPass<T>(_ body: () throws -> T) rethrows -> T {
+        pass.begin()
+        defer { pass.end() }
+        return try body()
     }
 
     /// Looks the account's key up and keeps "there is none" (`absent`) apart
     /// from "the Keychain would not say" (`unreadable`). A `TokenStore` reports
     /// an item that is not there as `nil`, and every other failure by throwing.
     func lookup(account: String) -> KeyLookup {
+        if let remembered = pass.answer(for: account) { return remembered }
+        let answer = readLookup(account: account)
+        pass.remember(answer, for: account)
+        return answer
+    }
+
+    private func readLookup(account: String) -> KeyLookup {
         let stored: String?
         do {
             stored = try makeStore(account).read()
@@ -81,11 +104,43 @@ struct ProviderKeyStore {
 
     /// Stores the key without surrounding whitespace, replacing any earlier one.
     func save(_ key: String, account: String) throws {
+        pass.forget(account)
         try makeStore(account).save(key.trimmingCharacters(in: .whitespacesAndNewlines))
     }
 
     /// Removing a key that is not there is not an error.
     func delete(account: String) throws {
+        pass.forget(account)
         try makeStore(account).delete()
+    }
+}
+
+/// The answers of the current `ProviderKeyStore.withLookupPass`, empty outside one.
+private final class LookupPass: @unchecked Sendable {
+    private let lock = NSLock()
+    private var depth = 0
+    private var answers: [String: ProviderKeyStore.KeyLookup] = [:]
+
+    func begin() { lock.lock(); depth += 1; lock.unlock() }
+
+    func end() {
+        lock.lock(); defer { lock.unlock() }
+        depth -= 1
+        if depth == 0 { answers.removeAll() }
+    }
+
+    func answer(for account: String) -> ProviderKeyStore.KeyLookup? {
+        lock.lock(); defer { lock.unlock() }
+        return depth > 0 ? answers[account] : nil
+    }
+
+    func remember(_ answer: ProviderKeyStore.KeyLookup, for account: String) {
+        lock.lock(); defer { lock.unlock() }
+        if depth > 0 { answers[account] = answer }
+    }
+
+    func forget(_ account: String) {
+        lock.lock(); defer { lock.unlock() }
+        answers[account] = nil
     }
 }

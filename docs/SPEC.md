@@ -467,10 +467,12 @@ Meeting Notes).
 сдвига на 4 pt) и едет за курсором, остальные плавно сдвигаются; отпустил —
 порядок сохранён и совпадает со списком в Settings. Обычный клик открывает
 инструмент как раньше, Settings не двигается. Чтобы убрать инструмент, его
-выкидывают из hover: потянуть иконку за край панели — она уменьшается,
-тускнеет, получает красный минус, курсор становится системным «исчезающим»;
-отпустил снаружи — «пуф», плитка исчезает, соседи плавно смыкаются. Вернуть
-внутрь до отпускания или Escape — отмена. Правый клик или Control-клик по
+выкидывают из hover: как только иконка целиком вышла за панель (с любой
+стороны, без отдельной цели и лишнего расстояния), она уменьшается, тускнеет,
+получает красный минус, курсор становится системным «исчезающим»; отпустил —
+«пуф», плитка исчезает, соседи плавно смыкаются. Пока хоть часть иконки над
+панелью, отпускание её не убирает; Escape — отмена. Добавленная плитка
+появляется сразу и плавно проявляется. Правый клик или Control-клик по
 плитке → «Remove from Hover» остаётся запасным путём (у Settings пункт
 недоступен: Settings всегда остаётся). Вся нижняя полоса панели — кнопка «More
 tools» с шевроном справа: раскрывает под собой список инструментов не из
@@ -800,14 +802,16 @@ Translate и Subtitles доступны через поиск инструмен
 ввод и результат, запуск по Enter, закрытие по Escape. Язык и вторичные действия
 доступны в контекстном меню; сохранённый язык не меняется.
 Translation использует свою LLM;
-Subtitles слышат и переводят в одной сессии: Soniox `stt-rt-v6` (one-way
-перевод) с тем же ключом Soniox, что у Drop; оригинал показывается по мере
-звучания (нефинальные токены, ~1 с), перевод фразы приходит примерно
-через секунду после её конца, кусок перевода сразу целиком. Без ключа Soniox — OpenAI
-`gpt-realtime-translate` с OpenAI-ключом. В Models у Subtitles обычная строка с
-заранее выбранной моделью («Soniox · stt-rt-v6» или
-«OpenAI · gpt-realtime-translate» — по ключу, без выбора движка); без обоих
-ключей она выглядит как любая строка без модели, а Start называет причину. Сессия сама останавливается через час, как
+Subtitles hear and translate in one session on the engine the user chooses in
+Keys & models -> Models -> Subtitles (the same model control and picker as other
+rows): Soniox `stt-rt-v6` one-way translation with the Soniox key Drop uses
+(the original shows as heard, about 1 s; a phrase's translation arrives about a
+second after it ends), or OpenAI `gpt-realtime-translate` with the OpenAI key.
+Only an engine whose key can be read is selectable; the other is listed with
+the key it needs. Without a choice: OpenAI, or Soniox when only its key exists;
+the default that first runs is saved. A chosen engine without a readable key is
+never replaced by the other: the row asks for setup and Start names the key.
+Without either key the row looks like any row without a model. Сессия сама останавливается через час, как
 по Stop, без таймеров и надписей. Прежние маршруты Speech/LLM субтитров
 не используются (сохранены для отката).
 Окно субтитров во время сессии не меняет размер (и до первого звука, и после

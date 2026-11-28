@@ -217,6 +217,11 @@ struct IslandHoverPanelControl: View {
                 .font(.system(size: 17, weight: .semibold))
                 .foregroundStyle(isRecording ? Color.red : Color.blue)
                 .symbolRenderingMode(.monochrome)
+                // A changed symbol (Drop Mode bolt <-> sparkles) replaces itself
+                // natively inside the caller's animation.
+                // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+                .contentTransition(.symbolEffect(.replace))
+                .animation(IslandDropModeControl.switchAnimation(reduceMotion: reduceMotion), value: systemImage)
 
         case .flag(let flag):
             Text(flag)

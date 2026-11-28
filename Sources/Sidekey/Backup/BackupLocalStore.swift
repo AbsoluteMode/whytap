@@ -240,6 +240,7 @@ enum BackupSettingsBlockRestore {
         var schema: Int
         var values: [String: ConfigBackupValue]
         var selectedSections: [ConfigBackupSection]
+        var knownKeys: [String]?
     }
     static func archive(_ snapshot: ConfigBackupSnapshot, section: ConfigBackupSection,
                         key: Data, directory: URL = ConfigBackupFiles.defaultRoot) throws -> (URL, ArtifactBackupSection) {
@@ -257,7 +258,8 @@ enum BackupSettingsBlockRestore {
             payload = try JSONEncoder.artifactBackup.encode(BlockPayload(
                 schema: snapshot.schemaVersion >= 3 ? ArtifactSettingsPayload.currentSchema : (snapshot.schemaVersion == 2 ? 3 : 2),
                 values: snapshot.preferences.filter { ConfigBackupRegistry.entries[$0.key]?.section == section },
-                selectedSections: [section]))
+                selectedSections: [section],
+                knownKeys: snapshot.knownKeys))
         }
         let digest = SHA256.hash(data: payload).map { String(format: "%02x", $0) }.joined()
         let manifest = ArtifactBackupManifest(id: UUID(), createdAt: snapshot.createdAt,

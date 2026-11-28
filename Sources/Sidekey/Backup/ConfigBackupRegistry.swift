@@ -39,6 +39,7 @@ enum ConfigBackupRegistry {
         add(.models, .string, ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "sidekey.models.byokModel." + $0 })
         add(.models, .string, ["sidekey.translation.textTarget", "sidekey.translation.subtitleTarget", "sidekey.translation.source"])
         add(.models, .bool, ["sidekey.translation.original"])
+        add(.models, .string, [SubtitleAudioTranslate.Choice.defaultsKey])
         add(.models, .data, [aiRoutingKey])
         add(.models, .propertyList, [aiRoutingPreservedKey])
         // Keep migration completion with the map so restore preserves deliberate old-stock assignments.
@@ -253,6 +254,18 @@ enum ConfigBackupRegistry {
             }
         }
     }
+
+    /// Keys added after 2.2.27, the last release whose archives carry no
+    /// `knownKeys`. Such an archive could not contain them, so restoring it
+    /// keeps their current values; for the Subtitles engine that means an old
+    /// backup never changes where subtitle audio goes. Closed with the
+    /// release that ships `knownKeys`: archives written since list their
+    /// known keys, which covers every later addition.
+    /// WHY: .project-docs/decisions/2026-11-28-backup-keys-unknown-to-the-writer.md
+    static let keysAddedAfterUnlistedArchives: Set<String> = [
+        "hotkeys.googleSearchTextShortcut", "hotkeys.googleSearchVoiceShortcut", "hotkeys.googleSearchVoiceGesture",
+        SubtitleAudioTranslate.Choice.defaultsKey,
+    ]
 
     static func apply(_ values: [String: ConfigBackupValue], sections: Set<ConfigBackupSection>,
                       preservingMissingKeys: Set<String> = [], to defaults: UserDefaults) throws {

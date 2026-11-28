@@ -319,7 +319,10 @@ a tool need not be pinned to run from the keyboard. `ToolHotkeyBinding.resolve`
 produces registrations with independent Carbon IDs, and `AppDelegate` captures
 the tool directly. Tile clicks, search and hotkeys share `HoverSlotRouter`.
 Inline panels request the existing policy-gated hover expansion; actions and
-navigation run directly. Output Language retains its Smart Mode requirement.
+navigation run directly. With "Hide Hover and Music" (the island's eye) on, an
+inline panel's hotkey still opens its panel: the eye hides only the drawer
+appearing under the mouse. WHY:
+`.project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md`. Output Language retains its Smart Mode requirement.
 Translate and Subtitles hotkeys toggle: a second press closes the window if that
 mode is visible; the other mode's hotkey switches it instead.
 The existing Meeting record row remains the primary record toggle; Record in

@@ -33,15 +33,32 @@ enum NativeAgentAppControl {
     nonisolated static let prefix = "whytap_"
     static let resultLimit = 32_000
 
-    /// The MCP catalog is the one source of names, descriptions and schemas.
+    /// Operations only external harnesses (Claude Code, Codex) get: removing
+    /// Vocab and Filler entries. The built-in agent can still add them.
+    // WHY: .project-docs/decisions/2026-11-27-drop-list-removal-mcp.md
+    static let externalOnly: Set<String> = ["whytap_vocab_remove", "whytap_filler_remove"]
+
+    /// The MCP catalog is the one source of names, descriptions and schemas,
+    /// minus the external-only operations and the add tools' pointers to them.
     static let tools: [Tool] = AppControlMCPServer.tools.compactMap { value in
         guard let tool = value.object, let name = tool["name"]?.string, name.hasPrefix(prefix),
+              !externalOnly.contains(name),
               let description = tool["description"]?.string, let schema = tool["inputSchema"] else { return nil }
-        return Tool(name: name, description: description, schema: schema,
+        return Tool(name: name, description: nativeDescription(description), schema: schema,
                     writes: tool["annotations"]?.object?["readOnlyHint"] != .bool(true))
     }
 
     static func tool(named name: String) -> Tool? { tools.first { $0.name == name } }
+
+    /// An add tool's description without its pointer to the removal tool the
+    /// built-in agent does not have.
+    static func nativeDescription(_ description: String) -> String {
+        description
+            .replacingOccurrences(of: "Cannot read Vocab terms; whytap_vocab_remove removes them.",
+                                  with: "Cannot read or remove Vocab terms.")
+            .replacingOccurrences(of: "Cannot read Filler terms; whytap_filler_remove removes them.",
+                                  with: "Cannot read or remove Filler terms.")
+    }
 
     /// The operation a `whytap` call names, if it is one of the catalog's.
     static func operation(of call: NativeAgentToolCall) -> Tool? {
@@ -216,6 +233,8 @@ enum NativeAgentAppControl {
             switch (key, value) {
             case ("dropMode", .string(let mode)): return "Drop mode → " + (mode == "smart" ? "Smart" : "Fast")
             case ("autoHideIsland", .bool(let on)): return "Auto-hide island → " + (on ? "On" : "Off")
+            case ("subtitlesEngine", .string(let raw)):
+                return "Subtitles model → " + (SubtitleAudioTranslate.Engine(rawValue: raw)?.label ?? raw)
             case ("inputLanguage", _): return "Input language → " + (language(value) ?? "Auto")
             case ("outputLanguage", _): return "Output language → " + (language(value) ?? "Off")
             default: return nil

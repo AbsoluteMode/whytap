@@ -1,5 +1,6 @@
 import AppKit
 import XCTest
+import os
 @testable import Sidekey
 
 @MainActor
@@ -33,6 +34,30 @@ final class ScreenshotTextCopyTests: XCTestCase {
         XCTAssertEqual(board.string(forType: .string), "Invoice 401\nПривет 123456")
         XCTAssertEqual(board.pasteboardItems?.count, 1)
         XCTAssertNil(board.data(forType: .rtf))
+    }
+
+    func testBackToBackCopiesReadDenseRetinaAndSmallMixedCrops() async throws {
+        let board = try board(); defer { board.releaseGlobally() }
+
+        let full = ScreenshotOCRFixture.full
+        let (fullSource, _) = try full.screenshot()
+        let fullCopy = await ScreenshotTextCopy.perform(source: fullSource, size: ScreenshotOCRFixture.displaySize,
+            annotations: [], crop: full.crop, pasteboard: board, isCurrent: { true })
+        XCTAssertEqual(fullCopy, .copied)
+        let fullText = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertTrue(fullText.contains("Build 4310"))
+        XCTAssertTrue(fullText.contains("Сборка"))
+        XCTAssertTrue(fullText.contains("Build 4411"))
+
+        let mixed = ScreenshotOCRFixture.mixed
+        let (mixedSource, _) = try mixed.screenshot()
+        let mixedCopy = await ScreenshotTextCopy.perform(source: mixedSource, size: ScreenshotOCRFixture.displaySize,
+            annotations: [], crop: mixed.crop, pasteboard: board, isCurrent: { true })
+        XCTAssertEqual(mixedCopy, .copied)
+        let mixedText = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertTrue(mixedText.contains("Build 4310"))
+        XCTAssertTrue(mixedText.contains("Сборка 4311"))
+        XCTAssertFalse(mixedText.contains("Build 4411"))
     }
 
     func testWriteFailureRestoresAllPreviousItemsAndFormats() async throws {
@@ -87,6 +112,7 @@ final class ScreenshotTextCopyTests: XCTestCase {
                 crop: CGRect(x: 0, y: 0, width: 40, height: 20), pasteboard: board,
                 recognize: { _ in
                     entered.fulfill(); release.wait()
+                    XCTAssertTrue(Task.isCancelled)
                     return "Late cancelled result"
                 }, isCurrent: { true })
         }
@@ -95,6 +121,48 @@ final class ScreenshotTextCopyTests: XCTestCase {
         let result = await task.value
         XCTAssertEqual(result, .discarded)
         XCTAssertEqual(board.changeCount, count); XCTAssertEqual(Pasteboard.snapshot(of: board), previous)
+    }
+
+    /// A copy started during the launch preparation waits for it, reads once
+    /// afterwards, and an Escape while waiting reads nothing.
+    func testCopyDuringPreparationWaitsForItAndReadsOnce() async throws {
+        let board = try board(); defer { board.releaseGlobally() }
+        let image = try fixture(), gate = DispatchSemaphore(value: 0)
+        let events = OSAllocatedUnfairLock(initialState: [String]())
+        let preparation = Task.detached(priority: .utility) {
+            events.withLock { $0.append("prepare start") }
+            gate.wait()
+            events.withLock { $0.append("prepare end") }
+        }
+        let copy = Task {
+            await ScreenshotTextCopy.perform(source: image, size: CGSize(width: 40, height: 20), annotations: [],
+                crop: CGRect(x: 0, y: 0, width: 40, height: 20), pasteboard: board,
+                recognize: { image in
+                    try await ScreenshotTextCopy.read(image, after: preparation) { _ in
+                        events.withLock { $0.append("read") }
+                        return "Ready 123"
+                    }
+                }, isCurrent: { true })
+        }
+        try await Task.sleep(nanoseconds: 200_000_000)
+        XCTAssertEqual(events.withLock { $0 }, ["prepare start"], "the copy must not read while preparing")
+        gate.signal()
+        let result = await copy.value
+        XCTAssertEqual(result, .copied)
+        XCTAssertEqual(board.string(forType: .string), "Ready 123")
+        XCTAssertEqual(events.withLock { $0 }, ["prepare start", "prepare end", "read"])
+
+        let slow = Task.detached(priority: .utility) { gate.wait() }
+        let cancelled = Task {
+            try await ScreenshotTextCopy.read(image, after: slow) { _ in
+                events.withLock { $0.append("read after Escape") }
+                return "Late"
+            }
+        }
+        try await Task.sleep(nanoseconds: 100_000_000)
+        cancelled.cancel(); gate.signal()
+        do { _ = try await cancelled.value; XCTFail("a cancelled copy must not read") } catch is CancellationError {}
+        XCTAssertFalse(events.withLock { $0 }.contains("read after Escape"))
     }
 
     func testNewGenerationDiscardsAResultFromTheOldCapture() async throws {

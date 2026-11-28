@@ -194,7 +194,7 @@ struct FeatureRequirement: Equatable, Identifiable {
     enum Kind: Equatable {
         /// A model route of `AIRoutingStore`.
         case model(AIFeature)
-        /// Subtitles run on the Soniox key, or the OpenAI key without it (`SubtitleAudioTranslate`).
+        /// Subtitles' chosen engine (Soniox or OpenAI) has a readable key (`SubtitleAudioTranslate`).
         case subtitlesKey
         case permission(FeaturePermission)
         /// Drop's shortcut is installed and macOS delivers it.
@@ -243,7 +243,8 @@ enum FeatureSetupAction: Equatable {
         case .chooseModel: return "Choose a model"
         case .addKey: return "Add a key"
         case .fixKey: return "Fix the key"
-        case .addOpenAIKey: return "Add a Soniox key"
+        // Subtitles: the chosen engine may be Soniox or OpenAI.
+        case .addOpenAIKey: return "Add a key"
         case .allow(let permission): return "Allow \(permission.title)"
         case .openInputMonitoring: return "Open Input Monitoring"
         case .restartWhytap: return "Restart Whytap"
@@ -698,7 +699,7 @@ enum FeatureCatalog {
         case .model(let feature):
             return modelState(feature, snapshot: snapshot)
         case .subtitlesKey:
-            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No Soniox or OpenAI key", action: .addOpenAIKey)
+            return snapshot.subtitlesKeyPresent ? .met : .unmet(reason: "No readable key for the Subtitles model", action: .addOpenAIKey)
         case .permission(let permission):
             return permissionState(permission, snapshot: snapshot)
         case .dropShortcut:

@@ -947,7 +947,13 @@ Hover capsules and materials:
   30 pt white icon disk with 17 pt blue symbols and a normal-case 11 pt title.
   No small status captions are drawn; current values remain in VoiceOver.
   Record lights its icon red with a soft glow while recording, alongside the
-  existing right-wing indicator. The grid supplies each instance's exact width through
+  existing right-wing indicator. A Smart/Fast switch (click or hotkey) animates
+  only the views that change: the tile symbol replaces itself
+  (`.contentTransition(.symbolEffect(.replace))`) and the right-band ON
+  Smart/Fast status enters, both with `IslandDropModeControl.switchAnimation`
+  (0.3 s smooth, none with Reduce Motion), never a transaction over the whole
+  island (.project-docs/decisions/2026-11-28-drop-mode-switch-motion.md).
+  The grid supplies each instance's exact width through
   IslandHoverControlsLayout.tileWidth(panelWidth:): (panelWidth - 24 - 16) / 3.
   User feedback on 2026-10-18 called the 24 pt disks and 12 pt symbols too small;
   larger icons retain the same capsule and text sizes.
@@ -1299,6 +1305,18 @@ Now Playing:
   stale results. No Automation prompt is added. WHY:
   .project-docs/decisions/2026-10-19-nowplaying-artwork-recovery.md
 
+Hover eye ("Hide Hover and Music"):
+  DisplayPreferences.hideIslandHoverWidgets hides the hover drawer appearing
+  under the mouse and the music strip; the compact music wing stays. An
+  explicit request still opens its panel: Settings -> Features Open/Edit, a
+  tool's hotkey and a whytap link all set programmaticHoverPanelRequest, and a
+  non-glance request with the eye on sets IslandView.explicitlyOpened. Until
+  that drawer closes (Escape, outside click, the usual collapse), the pointer
+  and keyboard keep it as usual (IslandView.hoverDrawerShown). The eye itself
+  is unchanged; closing it again closes the panel. Brightness keys are not
+  intercepted while the eye is on, so their glance never asks. WHY:
+  .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+
 Island idle-hide:
   ~20s without activity -> the compact pill fades to the bare notch (opacity
   0 + click-through; the window never moves or resizes). IslandIdleController
@@ -1591,9 +1609,14 @@ SettingsFeaturesView lists the catalog with each status and icon
 (AppFeature.symbol: the island tool's icon, else the one its Hotkeys row
 carries; FeatureIcon, also in each screen's header), read through
 FeatureSetupSnapshot.live from the same APIAndModelsViewModel and
-PermissionsSettingsViewModel the older tabs show. The snapshot reads provider
-keys from the Keychain on the main thread, so it is rebuilt only when a value
-it shows changes: Notify and Monitor reach it through
+PermissionsSettingsViewModel the older tabs show. The snapshot is built in
+SettingsFeaturesView's body, so on every redraw (also when the island switches
+Drop Mode). It asks every feature's sections once, inside one
+ProviderKeyStore.withLookupPass, which reads each key from the Keychain at
+most once per build (before: about 150 main-thread reads and a 243 ms block
+per Drop Mode switch with Features open,
+.project-docs/decisions/2026-11-28-drop-mode-switch-motion.md). Its other
+refresh triggers are kept to values it shows: Notify and Monitor reach it through
 FeaturesEnvironment.snapshotCountChanges (their counts, including a usable
 Server status after the Monitor reload completes), and
 NotifyScriptSupervisor publishes its 2 s registry reread only when it differs
@@ -1713,14 +1736,19 @@ held, the pointer over a cell calls HoverLayoutStore.placeTool for that slot,
 so the island and Settings -> Features -> Hover change at once and a tile
 sliding under the pointer cannot send the tool back. A lifted tool is drawn
 larger with a shadow, holds the drawer open (IslandView interactionHeld and
-isHoverExpanded), and its release never activates it. Since 2026-11-27 a
-release outside the drawer's frame (IslandHoverReorder.panel, measured at the
-lift from the .navigation region; 24 pt around the tools when unknown)
-removes the tool (removeLiftedTool -> HoverLayoutStore.unpin): outside, the
+isHoverExpanded), and its release never activates it. Since 2026-11-28 a
+release with the whole tile outside the drawer's frame removes the tool: the
+tile's picture (IslandHoverReorder.tileFrame, its cell at the lifted 1.1 scale
+following the pointer) must not overlap the glass panel (IslandHoverReorder.panel,
+measured at the lift from the .drawer region the glass backdrop reports, by
+its bounds; 24 pt around the tools when unknown) on any side (removeLiftedTool -> HoverLayoutStore.unpin): outside, the
 floating tile shrinks, dims and shows a red minus and the cursor becomes the
 system disappearing-item cursor; the release plays the system poof
 (NSAnimationEffect, skipped under Reduce Motion) and the picture fades in
-place (ReorderPhase .removed). Releasing back inside keeps the tool; Escape,
+place (ReorderPhase .removed). Releasing with any part of the tile over the
+drawer keeps the tool. Pin and unpin change the layout, the edit hold and the
+press in one animated transaction (editLayout), so SwiftUI does not update the
+island inside the click; an added tile fades in within 0.12 s. Escape,
 watched by key monitors only for the drag, restores the order before the lift.
 A layout change the drag did not
 write (Settings Sync) ends it without undoing that change; hide, drawer close
@@ -2361,8 +2389,16 @@ Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 editors' own stores and rules; open editors reload from the stores'
 notifications and every take reads the lists. One invalid entry adds nothing
 (line breaks and control characters are refused, joiners like U+200C pass);
-an existing entry is reported in its saved form, never rewritten. No read or
-removal, no per-route promise (each route sends what its model supports).
+an existing entry is reported in its saved form, never rewritten.
+whytap_vocab_remove and whytap_filler_remove take 1–20 named entries out
+through the stores' remove (any letter case, request and saved entries both
+trimmed): removed with the saved spelling, missing when not there (no error),
+at most 50 characters each checked before any change, confirmed against the
+whole saved list, no way to clear a list; they alone carry destructiveHint.
+They are for external harnesses only: NativeAgentAppControl.externalOnly
+keeps them out of the built-in Agent's catalog and dispatch. WHY:
+.project-docs/decisions/2026-11-27-drop-list-removal-mcp.md No read, no
+per-route promise (each route sends what its model supports).
 External harnesses need HarnessAccessGate's Yes (gatedOperations), with
 HarnessConsent rechecked right before the write; the built-in Agent adds what
 the current request names. App-owned change lines are escaped as Markdown
@@ -2641,8 +2677,13 @@ Spotlight, Pin above windows and
 Output size are removed, including their commands/shortcuts. Copy text uses accurate
 on-device Vision recognition on the flattened, edited crop, including Blur,
 then copies plain text and closes. Empty/error results keep the editor open;
-Escape cancels and generation checks reject late results. Rendering and OCR
-run off the UI thread. Copy text can also be assigned to an arrow without
+Escape cancels the Vision request and generation checks reject late results.
+Rendering and OCR run off the UI thread. Whytap starts one utility-priority
+Vision preparation request on generated text at launch. An early Copy text
+waits for that same task off the UI thread. The local Screenshot log records
+only the OCR phase, crop dimensions, and Vision duration.
+WHY: `.project-docs/decisions/2026-11-28-shot-ocr-warmup.md`.
+Copy text can also be assigned to an arrow without
 changing existing bindings. Cmd-Z / Shift-Cmd-Z undo/redo screenshot edits
 from every screenshot panel through both key-equivalent and direct window dispatch,
 using physical Z so Russian input works; focused text fields retain native text undo.

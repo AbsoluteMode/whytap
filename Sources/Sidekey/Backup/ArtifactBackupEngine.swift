@@ -268,7 +268,7 @@ final class ArtifactBackupEngine {
         var payloads: [ArtifactInlinePayload] = []
         if sections.contains(.settings) {
             let values = try ConfigBackupRegistry.capture(environment.defaults, warnings: &warnings)
-            let payload = ArtifactSettingsPayload(values: values)
+            let payload = ArtifactSettingsPayload(values: values, knownKeys: ConfigBackupRegistry.entries.keys.sorted())
             payloads.append(ArtifactInlinePayload(path: "settings/preferences.json", section: .settings,
                                                  data: try JSONEncoder.artifactBackup.encode(payload)))
         }

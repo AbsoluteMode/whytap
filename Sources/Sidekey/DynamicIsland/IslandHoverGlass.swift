@@ -87,7 +87,20 @@ struct IslandHoverBackdropView: View {
 /// gets an opaque dark card on every system.
 struct IslandHoverGlassSurfaceModifier: ViewModifier {
     var cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
+    /// The hover drawer: its glass reports its own frame (`.drawer`), the
+    /// frame a dragged tile must leave to be removed.
+    var drawerBridge: IslandHoverHitBridge?
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    @ViewBuilder
+    private func backdropView(_ backdrop: IslandHoverBackdrop) -> some View {
+        if let drawerBridge {
+            IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius)
+                .islandHoverHitRegion(bridge: drawerBridge, surface: .drawer)
+        } else {
+            IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius)
+        }
+    }
 
     func body(content: Content) -> some View {
         let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
@@ -97,14 +110,14 @@ struct IslandHoverGlassSurfaceModifier: ViewModifier {
         )
         if backdrop == .nativeGlass {
             content
-                .background { IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius) }
+                .background { backdropView(backdrop) }
                 .overlay {
                     IslandHoverGlassRim(shape: shape)
                         .allowsHitTesting(false)
                 }
         } else {
             content
-                .background(IslandHoverBackdropView(backdrop: backdrop, cornerRadius: cornerRadius))
+                .background(backdropView(backdrop))
                 .clipShape(shape)
         }
     }
@@ -186,8 +199,9 @@ extension View {
     }
 
     func islandHoverGlassSurface(
-        cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius
+        cornerRadius: CGFloat = IslandDropModeControl.detachedPanelCornerRadius,
+        reportingDrawerTo drawerBridge: IslandHoverHitBridge? = nil
     ) -> some View {
-        modifier(IslandHoverGlassSurfaceModifier(cornerRadius: cornerRadius))
+        modifier(IslandHoverGlassSurfaceModifier(cornerRadius: cornerRadius, drawerBridge: drawerBridge))
     }
 }

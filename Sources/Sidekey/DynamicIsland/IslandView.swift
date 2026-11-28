@@ -270,6 +270,11 @@ struct IslandView: View {
     @State private var dropModeStatus: TranscriptionMode?
     @State private var dropModeStatusGeneration = 0
     @State private var hoverPanelMode: IslandHoverPanelMode = .controls
+    /// The drawer was opened by an explicit request (Settings -> Features
+    /// Open/Edit, a tool's hotkey, a whytap link) while the eye hides hover.
+    /// Until it closes, the pointer and keyboard keep it as usual.
+    /// WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+    @State private var explicitlyOpened = false
     /// While the pointer is still where the taller panel was, the hover zone keeps
     /// that height so the short Brightness strip does not close the drawer under it.
     @State private var hoverPanelHeightHold: CGFloat?
@@ -320,6 +325,8 @@ struct IslandView: View {
             base = IslandDropModeControl.detachedPanelGap + IslandCaseVaultStyle.panelHeight
         case .brightness:
             base = IslandDropModeControl.detachedPanelGap + IslandBrightnessStrip.contentHeight
+        case .languagePicker, .outputLanguagePicker:
+            base = IslandDropModeControl.languagePickerHoverPanelHeight
         default:
             base = IslandDropModeControl.hoverPanelHeight
         }
@@ -608,6 +615,7 @@ struct IslandView: View {
         panelHovering = false
         mouseExpanded = false
         appState.programmaticHoverExpansion = false
+        explicitlyOpened = false
         onKeyboardFocusRequest(false)
     }
 
@@ -615,15 +623,32 @@ struct IslandView: View {
         // Union the mouse-hover signal with programmatic expansion (a Hover-slot
         // ⌥N press — D4), then gate the result on the policy so neither path
         // forces the drawer open during a meeting suggestion / agent flow.
-        !displayPreferences.hideIslandHoverWidgets
-            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
-                || hoverHitBridge.holdsDrawer || appState.programmaticHoverExpansion)
-            && IslandHoverPolicy.allowsExpansion(
+        Self.hoverDrawerShown(
+            eyeHidesHover: displayPreferences.hideIslandHoverWidgets,
+            explicitlyOpened: explicitlyOpened,
+            programmaticExpansion: appState.programmaticHoverExpansion,
+            pointerOrFocusHolds: isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
+                || hoverHitBridge.holdsDrawer,
+            policyAllows: IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
                 agentFlowActive: agentFlow.blocksHoverDrawer(dropTargetsDrawer: appState.dropTargetsHoverEditor),
                 caseApprovalActive: appState.caseApprovalActive
             )
+        )
+    }
+
+    /// Whether the hover drawer shows. The eye ("Hide Hover and Music") hides
+    /// only the drawer appearing under the mouse (and the music strip): an
+    /// explicitly opened drawer shows anyway, and while it is up the pointer and
+    /// keyboard hold it as usual. A brightness glance is not explicit: with the
+    /// eye on the brightness keys are not intercepted at all (`BrightnessKeys`).
+    /// WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+    static func hoverDrawerShown(eyeHidesHover: Bool, explicitlyOpened: Bool, programmaticExpansion: Bool,
+                                 pointerOrFocusHolds: Bool, policyAllows: Bool) -> Bool {
+        guard policyAllows else { return false }
+        if eyeHidesHover && !explicitlyOpened { return false }
+        return pointerOrFocusHolds || programmaticExpansion
     }
 
     private var meetingRecordingSnapshot: IslandMeetingRecordingSnapshot? {
@@ -1214,8 +1239,10 @@ struct IslandView: View {
                             fillerViewModel: fillerViewModel,
                             caseViewModel: caseViewModel,
                             onToggle: {
-                                dropMode = actions.toggleDropMode()
-                                showDropModeStatus(dropMode)
+                                // The tile's write happens first, outside the animation; the
+                                // visible switch then animates explicitly.
+                                let next = actions.toggleDropMode()
+                                switchDropMode(to: next)
                             },
                             onOpenSettings: actions.openSettings,
                             onOpenHotkeys: actions.openHotkeys,
@@ -1273,7 +1300,10 @@ struct IslandView: View {
                         .onReceive(hoverHitBridge.dismissals) { dismissHoverMenu() }
                         // History too: on macOS 14/15 it once opted out and its gaps showed other windows.
                         // WHY: .project-docs/decisions/2026-11-21-history-backdrop-always.md
-                        .islandHoverGlassSurface()
+                        // The glass backdrop also reports its frame: a dragged tile that
+                        // has left it entirely is removed.
+                        // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+                        .islandHoverGlassSurface(reportingDrawerTo: hoverHitBridge)
                         // The pointer reached the shorter strip: the held zone below it can go.
                         .onContinuousHover { phase in
                             // Local space: the drawer's top stays put while it shrinks.
@@ -1524,12 +1554,14 @@ struct IslandView: View {
                 hoverPanelMode = .controls
                 onKeyboardFocusRequest(false)
                 appState.programmaticHoverExpansion = false
+                explicitlyOpened = false
                 appState.hoveredMusicTransport = nil
             }
             onHoverChange(isHoverExpanded)
             onHoverPanelBandHeightChange(activeHoverPanelHeight)
         }
         .onChange(of: isHoverExpanded) { _, expanded in
+            if !expanded { explicitlyOpened = false }
             hoverHitBridge.setEnabled(expanded)
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
@@ -1556,10 +1588,20 @@ struct IslandView: View {
         // drawer). Action/navigate tools never set a request — they fire their
         // IslandActions closure directly in `AppDelegate`.
         .onChange(of: appState.programmaticHoverPanelRequest) { _, request in
-            guard let request, isHoverExpanded else { return }
+            guard let request else { return }
             // A closed Calendar ("Soon") never opens its panel, whoever asks.
             if request.panel == .calendar, !CalendarAvailability.isOpen {
                 appState.programmaticHoverExpansion = false
+                return
+            }
+            // An explicit request opens its panel even with the eye on; only a
+            // glance (brightness keys) stays a hover-only appearance.
+            // WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+            if displayPreferences.hideIslandHoverWidgets, !request.isGlance, appState.programmaticHoverExpansion {
+                explicitlyOpened = true
+            }
+            guard isHoverExpanded else {
+                explicitlyOpened = false
                 return
             }
             if request.isGlance, !Self.brightnessGlanceMayOpen(
@@ -1616,8 +1658,7 @@ struct IslandView: View {
         }
         .onChange(of: appState.dropModeHotkeyToggle) { _, toggle in
             guard let toggle else { return }
-            dropMode = toggle.mode
-            showDropModeStatus(toggle.mode)
+            switchDropMode(to: toggle.mode)
         }
         .onChange(of: appState.meetingSuggestionActive) { _, isActive in
             if isActive {
@@ -1668,6 +1709,17 @@ struct IslandView: View {
         case .thinking:  return "thinking"
         case .textInput: return "text input"
         }
+    }
+
+    /// The visible Smart/Fast switch. Its motion is scoped to the two views
+    /// that change (the tile symbol and the right-band ON Smart/Fast status),
+    /// not a transaction over the whole island. Before, the icon only
+    /// crossfaded when a click's press spring happened to carry it, a hotkey
+    /// switch cut it, and the status popped in.
+    // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+    private func switchDropMode(to mode: TranscriptionMode) {
+        dropMode = mode
+        showDropModeStatus(mode)
     }
 
     private func showDropModeStatus(_ mode: TranscriptionMode) {
@@ -1906,6 +1958,7 @@ private struct IslandWrapRow: View {
     /// `UpdateController.dismissJustInstalledIndicator()`.
     let onJustUpdatedDismiss: () -> Void
     let dropModeStatus: TranscriptionMode?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// `true` while the agent flow owns the right band + the rightward
     /// window extension — every right-band slot and the passive hints
     /// yield to it.
@@ -2140,6 +2193,8 @@ private struct IslandWrapRow: View {
                 }
             }
             .frame(width: IslandFrameLayout.rightSideWidth, alignment: .center)
+            // WHY: .project-docs/decisions/2026-11-28-drop-mode-switch-motion.md
+            .animation(IslandDropModeControl.switchAnimation(reduceMotion: reduceMotion), value: dropModeStatus)
         }
     }
 }
@@ -2944,7 +2999,16 @@ struct IslandDropModeHoverPanel: View {
     // MARK: - Tool grid
     // WHY: .project-docs/decisions/2026-11-27-hover-drag-out-and-smooth-edits.md
 
-    static let tileTransition = AnyTransition.scale(scale: 0.6).combined(with: .opacity)
+    /// An added tile is there at once: it fades in within 0.12 s (also a
+    /// dissolve under Reduce Motion) while it grows from 0.85 with the
+    /// edit's spring. A spring-driven fade from 0.6 left it at about a
+    /// quarter of its opacity 50 ms after the click. A removed tile shrinks
+    /// and fades with the spring.
+    // WHY: .project-docs/decisions/2026-11-28-hover-drag-out-whole-tile.md
+    static let tileTransition = AnyTransition.asymmetric(
+        insertion: .scale(scale: 0.85).combined(with: .opacity.animation(.easeOut(duration: 0.12))),
+        removal: .scale(scale: 0.6).combined(with: .opacity)
+    )
 
     private var tiles: some View {
         IslandHoverTileGridLayout {
@@ -3315,6 +3379,10 @@ struct IslandLanguagePickerPanel: View {
     @State private var placeholderStartDate = Date()
     @State private var searchFocused = false
     @State private var expandedLanguageGroup: IslandLanguageOption?
+    /// The chip under the pointer and its frame in the panel's space.
+    @State private var hoveredChip: IslandLanguageHoveredChip?
+
+    static let coordinateSpaceName = "IslandLanguagePickerPanel"
 
     private var options: [IslandLanguageOption] {
         if isFiltering {
@@ -3339,24 +3407,34 @@ struct IslandLanguagePickerPanel: View {
         expandedLanguageGroup != nil && !isFiltering
     }
 
+    private var gridContent: IslandLanguagePickerLayout.Content {
+        if isFiltering { return .filtered }
+        return isChoosingLanguageVariant ? .variants : .fullGrid
+    }
+
     var body: some View {
         GeometryReader { proxy in
-            let panelSize = proxy.size
-            let inputFrame = IslandLanguagePickerLayout.inputFrame(
-                panelSize: panelSize,
-                optionCount: options.count,
-                anchorsToFullGrid: !isFiltering
+            let options = self.options
+            let grid = IslandLanguagePickerLayout.grid(
+                panelSize: proxy.size,
+                count: options.count,
+                content: gridContent
             )
+            let inputFrame = grid.input
 
             ZStack {
                 IslandLanguageFlagCloud(
                     options: options,
                     selectedLanguage: selectedLanguage,
                     leadingOptionID: leadingOption.id,
-                    panelSize: panelSize,
+                    grid: grid,
                     isFiltering: isFiltering,
                     isChoosingLanguageVariant: isChoosingLanguageVariant,
-                    onActivateOption: activateOption
+                    onActivateOption: activateOption,
+                    onHoverChip: { hoveredChip = $0 },
+                    onUnhoverChip: { id in
+                        if hoveredChip?.id == id { hoveredChip = nil }
+                    }
                 )
 
                 ZStack {
@@ -3381,7 +3459,31 @@ struct IslandLanguagePickerPanel: View {
                 )
                 .position(x: inputFrame.midX, y: inputFrame.midY)
                 .accessibilityLabel("Search language")
+
+                if let hoveredChip,
+                   IslandLanguagePickerLayout.showsNameHint(anchor: hoveredChip.frame, visibleArea: grid.viewport),
+                   let option = options.first(where: { $0.id == hoveredChip.id }),
+                   option.language != nil {
+                    // Only language chips get a hint; Auto/Off show their text
+                    // and are the only pinned chips, so the anchor is a
+                    // scrolling chip seen through the viewport.
+                    let text = IslandLanguageControl.nameHint(for: option)
+                    let frame = IslandLanguagePickerLayout.nameHintFrame(
+                        anchor: hoveredChip.frame,
+                        size: IslandLanguagePickerLayout.nameHintSize(for: text),
+                        panelSize: proxy.size,
+                        visibleArea: grid.viewport
+                    )
+                    IslandLanguageNameHint(text: text)
+                        .frame(width: frame.width, height: frame.height)
+                        .position(x: frame.midX, y: frame.midY)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+                        .transition(.opacity)
+                }
             }
+            .coordinateSpace(name: Self.coordinateSpaceName)
+            .animation(.easeOut(duration: 0.10), value: hoveredChip?.id)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .onAppear {
@@ -3394,10 +3496,12 @@ struct IslandLanguagePickerPanel: View {
             if !newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 expandedLanguageGroup = nil
             }
+            hoveredChip = nil
         }
     }
 
     private func activateOption(_ option: IslandLanguageOption) {
+        hoveredChip = nil
         guard !isFiltering, option.hasLanguageVariants else {
             expandedLanguageGroup = nil
             onSelectLanguage(option.language)
@@ -3573,34 +3677,66 @@ private struct IslandLanguageFlagCloud: View {
     /// "off" for the output picker. When `selectedLanguage` is nil, this
     /// option gets the selected highlight instead of always using "auto".
     let leadingOptionID: String
-    let panelSize: CGSize
+    let grid: IslandLanguagePickerLayout.Grid
     let isFiltering: Bool
     let isChoosingLanguageVariant: Bool
     let onActivateOption: (IslandLanguageOption) -> Void
+    let onHoverChip: (IslandLanguageHoveredChip) -> Void
+    let onUnhoverChip: (String) -> Void
 
     var body: some View {
-        let frames = isChoosingLanguageVariant
-            ? IslandLanguagePickerLayout.variantFrames(panelSize: panelSize, count: options.count)
-            : IslandLanguagePickerLayout.flagFrames(
-                panelSize: panelSize,
-                count: options.count,
-                anchorsToFullGrid: !isFiltering
-            )
+        let pinned = Array(options.prefix(grid.pinnedFrames.count))
+        let scrolling = Array(
+            options.dropFirst(pinned.count).prefix(grid.flagFrames.count)
+        )
+        let viewport = grid.viewport
+
         ZStack {
-            ForEach(Array(options.prefix(frames.count).enumerated()), id: \.element.id) { index, option in
-                IslandLanguageFlagChip(
-                    option: option,
-                    selected: isSelected(option),
-                    enlarged: isFiltering,
-                    showsLanguageLabel: isChoosingLanguageVariant,
-                    action: {
-                        onActivateOption(option)
-                    }
-                )
-                .frame(width: frames[index].width, height: frames[index].height)
-                .position(x: frames[index].midX, y: frames[index].midY)
+            ForEach(Array(pinned.enumerated()), id: \.element.id) { index, option in
+                chip(option, frame: grid.pinnedFrames[index])
             }
+
+            // Flags never draw outside the drawer: rows beyond its height
+            // scroll inside this clipped viewport, which also bounds hit-testing.
+            // WHY: .project-docs/decisions/2026-11-28-language-picker-scrolls-inside-panel.md
+            ScrollView(.vertical) {
+                ZStack {
+                    ForEach(Array(scrolling.enumerated()), id: \.element.id) { index, option in
+                        chip(option, frame: grid.contentFrame(grid.flagFrames[index]))
+                    }
+                }
+                .frame(width: viewport.width, height: grid.contentHeight)
+            }
+            .scrollDisabled(!grid.requiresScrolling)
+            .scrollIndicators(grid.requiresScrolling ? .automatic : .hidden)
+            // A new result set starts at its first row.
+            .id(scrolling.map(\.id))
+            .frame(width: viewport.width, height: viewport.height)
+            .clipped()
+            .contentShape(Rectangle())
+            .position(x: viewport.midX, y: viewport.midY)
         }
+    }
+
+    private func chip(_ option: IslandLanguageOption, frame: CGRect) -> some View {
+        IslandLanguageFlagChip(
+            option: option,
+            selected: isSelected(option),
+            enlarged: isFiltering,
+            showsLanguageLabel: isChoosingLanguageVariant,
+            action: {
+                onActivateOption(option)
+            },
+            onHoverChange: { hovering, panelFrame in
+                if hovering {
+                    onHoverChip(IslandLanguageHoveredChip(id: option.id, frame: panelFrame))
+                } else {
+                    onUnhoverChip(option.id)
+                }
+            }
+        )
+        .frame(width: frame.width, height: frame.height)
+        .position(x: frame.midX, y: frame.midY)
     }
 
     private func isSelected(_ option: IslandLanguageOption) -> Bool {
@@ -3611,14 +3747,41 @@ private struct IslandLanguageFlagCloud: View {
     }
 }
 
+struct IslandLanguageHoveredChip: Equatable {
+    let id: String
+    let frame: CGRect
+}
+
+/// Name of the hovered language: a small capsule in the search field's
+/// style, placed by `IslandLanguagePickerLayout.nameHintFrame`.
+private struct IslandLanguageNameHint: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: IslandLanguagePickerLayout.nameHintFontSize, weight: .medium))
+            .foregroundStyle(IslandInk.color.opacity(0.92))
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, IslandLanguagePickerLayout.nameHintHorizontalPadding)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Capsule().fill(Color.black.opacity(0.78)))
+            .overlay(Capsule().stroke(IslandInk.color.opacity(0.18), lineWidth: 0.8))
+    }
+}
+
 private struct IslandLanguageFlagChip: View {
     let option: IslandLanguageOption
     let selected: Bool
     let enlarged: Bool
     let showsLanguageLabel: Bool
     let action: () -> Void
+    /// Hover state with the chip's frame in the picker panel's space; sent
+    /// again when the frame moves (scrolling) while hovered.
+    let onHoverChange: (Bool, CGRect) -> Void
 
     @State private var hovering = false
+    @State private var panelFrame: CGRect = .zero
 
     var body: some View {
         let usesCapsuleChrome = showsLanguageLabel
@@ -3644,10 +3807,19 @@ private struct IslandLanguageFlagChip: View {
             )
             .scaleEffect(hovering ? IslandLanguageFlagChipStyle.hoverScale(for: option) : 1)
             .contentShape(Rectangle())
-            .onHover { hovering = $0 }
+            .onGeometryChange(for: CGRect.self) {
+                $0.frame(in: .named(IslandLanguagePickerPanel.coordinateSpaceName))
+            } action: { frame in
+                panelFrame = frame
+                if hovering { onHoverChange(true, frame) }
+            }
+            .onHover { isHovering in
+                hovering = isHovering
+                onHoverChange(isHovering, panelFrame)
+            }
             .onTapGesture { action() }
             .animation(.easeOut(duration: 0.10), value: hovering)
-            .accessibilityLabel(option.label)
+            .accessibilityLabel(IslandLanguageControl.nameHint(for: option))
             .accessibilityAddTraits(.isButton)
     }
 

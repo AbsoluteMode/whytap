@@ -75,7 +75,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in },
             changeCount: { writes.count },
             restore: {}
@@ -88,6 +88,43 @@ final class AutoPasteEngineTests: XCTestCase {
         XCTAssertEqual(env.postedEvents.count, 12, "Three Cmd+V sequences")
         XCTAssertTrue(env.postedEvents.allSatisfy { $0.pid == Self.targetA.pid },
                       "Every series key event is addressed to the target, never the global HID stream")
+    }
+
+    /// Universal Clipboard (or the user) replaces the pasteboard while the
+    /// series waits for the focus to settle: no V-down may reach the target,
+    /// which would otherwise paste content that is not the series', and the
+    /// series stops without giving the clipboard "back" over the new copy.
+    func testHistorySeriesSendsNoVDownWhenThePasteboardChangedBeforeIt() async throws {
+        let env = TestEnv(frontmost: Self.targetA, modifierFlagsSequence: [[]], permission: true)
+        let engine = env.makeEngine()
+        engine.rememberTargetBeforeRecording()
+        let target = try XCTUnwrap(engine.currentTarget())
+        var copied = false
+        env.onSleep = { [unowned env] _ in
+            if !copied { copied = true; env.changeCount += 1 }   // a copy lands
+        }
+        var restored = false
+        let paster = HistoryMultiPaster(
+            targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
+            write: { [unowned env] _ in
+                env.changeCount += 1
+                return .written(.init(changeCount: env.changeCount, readsBefore: nil))
+            },
+            paste: { first, expected in
+                await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first, expectedChangeCount: expected)
+            },
+            awaitConsumed: { _ in },
+            changeCount: { [unowned env] in env.changeCount },
+            restore: { restored = true }
+        )
+
+        let posted = await paster.run(Self.mixedSeries)
+
+        XCTAssertEqual(posted, 0)
+        XCTAssertFalse(env.postedEvents.contains { $0.keyCode == Self.v && $0.down },
+                       "No V-down once the pasteboard no longer holds the series' write")
+        XCTAssertFalse(restored, "The new copy is not overwritten")
+        XCTAssertTrue(env.logs.contains { $0.message.hasPrefix("autopaste_series_stopped reason=pasteboard_replaced") })
     }
 
     /// Index in `postedEvents` of the second group's Command-down.
@@ -111,7 +148,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in },
             changeCount: { writes.count },
             restore: {}
@@ -146,7 +183,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in },
             changeCount: { writes.count },
             restore: {}
@@ -172,7 +209,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in env.frontmost = Self.targetB },
             changeCount: { writes.count },
             restore: {}
@@ -210,7 +247,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in
                 env.frontmost = Self.targetB
                 engine.rememberTargetBeforeRecording()
@@ -236,7 +273,7 @@ final class AutoPasteEngineTests: XCTestCase {
         let paster = HistoryMultiPaster(
             targetIsCurrent: { engine.isSeriesTargetCurrent(target, requireFrontmost: !$0) },
             write: { writes.append($0); return .written(.init(changeCount: writes.count, readsBefore: nil)) },
-            paste: { await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: $0) },
+            paste: { first, _ in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: first) },
             awaitConsumed: { _ in
                 env.terminatedPids.insert(Self.targetA.pid)
                 env.frontmost = Self.targetB   // macOS hands focus to another app

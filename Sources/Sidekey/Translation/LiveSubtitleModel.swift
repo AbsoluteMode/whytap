@@ -157,10 +157,10 @@ final class LiveSubtitleModel: ObservableObject {
         makeAudio: @escaping () -> TerminalSystemAudioSourceStreaming = {
             CoreAudioSystemAudioSource(targetSampleRate: LiveSubtitleModel.captureSampleRate, antiAlias: true)
         },
-        // Subtitles run on Soniox live translation with the Soniox key, or on
-        // OpenAI gpt-realtime-translate with the OpenAI key; without either
-        // Start names the fix.
-        // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+        // Subtitles run on the engine chosen in Keys & models (Soniox live
+        // translation or OpenAI gpt-realtime-translate); without its key
+        // Start names the fix and never uses the other engine.
+        // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
         openTranslator: @escaping (_ source: String?, _ target: String) async throws -> SpeechTranslationSession = { source, target in
             try await SubtitleAudioTranslate.open(source: source, target: target)
         }

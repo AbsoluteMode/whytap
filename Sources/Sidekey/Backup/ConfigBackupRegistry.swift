@@ -39,6 +39,7 @@ enum ConfigBackupRegistry {
         add(.models, .string, ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "sidekey.models.byokModel." + $0 })
         add(.models, .string, ["sidekey.translation.textTarget", "sidekey.translation.subtitleTarget", "sidekey.translation.source"])
         add(.models, .bool, ["sidekey.translation.original"])
+        add(.models, .string, [SubtitleAudioTranslate.Choice.defaultsKey])
         add(.models, .data, [aiRoutingKey])
         add(.models, .propertyList, [aiRoutingPreservedKey])
         // Keep migration completion with the map so restore preserves deliberate old-stock assignments.
@@ -73,6 +74,13 @@ enum ConfigBackupRegistry {
         add(.agents, .bool, ["agent.opencode.allowActions"])
         return result
     }()
+
+    /// Keys added after archives already existed. An archive without one
+    /// predates it (or had no value), so restoring it keeps this Mac's value
+    /// instead of resetting it: a Subtitles engine choice must not change
+    /// where audio goes without the user's action.
+    // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
+    static let keptWhenAbsent: Set<String> = [SubtitleAudioTranslate.Choice.defaultsKey]
 
     static let credentialAccounts: Set<String> = Set(
         ["openAI", "selfHosted", "deepgram", "soniox", "elevenLabs"].map { "byok." + $0 + ".api_key" }
@@ -268,7 +276,7 @@ enum ConfigBackupRegistry {
         try validate(values)
         for (key, entry) in entries where sections.contains(entry.section) {
             if let value = values[key] { defaults.set(try value.propertyListValue(), forKey: key) }
-            else if !preservingMissingKeys.contains(key) {
+            else if !preservingMissingKeys.contains(key), !keptWhenAbsent.contains(key) {
                 if key == aiRoutingKey {
                     // A reset must stay Not set after launch; removing this
                     // marker would re-run migration from the frozen old tab.

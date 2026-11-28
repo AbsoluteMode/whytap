@@ -572,6 +572,9 @@ struct APIAndModelsView: View {
             ForEach(group.rows) { row in
                 statusLines(for: row, prefix: paired ? row.fieldLabel : nil)
             }
+            if let issue = group.audioTranslate?.issue {
+                subtitlesIssueLine(issue)
+            }
         }
         .onKeyPress(.escape) {
             guard expanded else { return .ignored }
@@ -615,11 +618,12 @@ struct APIAndModelsView: View {
 
     private static let providerSlotWidth: CGFloat = 132
 
-    /// Subtitles' model row, laid out like every single-model row: the engine
-    /// the keys give is preselected and the menu offers only it (Soniox with
-    /// its key, otherwise OpenAI). Without either key the card shows the same
-    /// setup contour as any row without a model, and the menu leads to API keys.
-    // WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+    /// Subtitles' model row, laid out like every single-model row: the same
+    /// model control and picker, offering Soniox and OpenAI. Only an engine
+    /// whose key can be read can be picked; the other names the key it needs.
+    /// Without a working key for the chosen engine the card shows the same
+    /// setup contour as any row without a model.
+    // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
     private func fixedModelRow(_ slot: AudioTranslateSlot) -> some View {
         GeometryReader { geometry in
             let modelWidth = max(90, geometry.size.width - 52 - 20 - Self.providerSlotWidth)
@@ -628,13 +632,7 @@ struct APIAndModelsView: View {
                     .font(.system(size: 11.5))
                     .foregroundStyle(MacSettingsTheme.text2)
                     .frame(width: 52, alignment: .leading)
-                MacMenu(title: slot.label, minWidth: modelWidth, maxWidth: modelWidth) {
-                    Button {} label: { Label(slot.label, systemImage: "checkmark") }
-                    if !slot.isActive {
-                        Divider()
-                        Button("Add a Soniox key…", action: showKeySetup)
-                    }
-                }
+                SubtitlesModelMenu(viewModel: viewModel, onAddKey: showKeySetup, width: modelWidth)
                 Color.clear.frame(width: Self.providerSlotWidth, height: 1)
                     .accessibilityHidden(true)
             }
@@ -643,7 +641,22 @@ struct APIAndModelsView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Subtitles")
         .accessibilityValue(slot.isActive ? "" : "Needs setup")
-        .help(slot.isActive ? slot.label : "Add a Soniox key (or an OpenAI key) in API keys.")
+        .help(slot.isActive ? slot.label : "Add a Soniox or OpenAI key in API keys, then choose the model here.")
+    }
+
+    /// The chosen Subtitles engine's key problem, styled like a row's status.
+    private func subtitlesIssueLine(_ issue: String) -> some View {
+        HStack(spacing: 6) {
+            Text("\(issue) ·")
+            Button("Open API keys", action: showKeySetup)
+                .buttonStyle(.plain)
+                .foregroundStyle(MacSettingsTheme.accent)
+        }
+        .font(.system(size: 11.5))
+        .foregroundStyle(MacSettingsTheme.orange)
+        .padding(.horizontal, 14)
+        .padding(.top, -3)
+        .padding(.bottom, 9)
     }
 
     private func pickers(for row: FeatureRow, paired: Bool) -> some View {

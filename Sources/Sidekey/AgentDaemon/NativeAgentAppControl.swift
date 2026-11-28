@@ -233,6 +233,8 @@ enum NativeAgentAppControl {
             switch (key, value) {
             case ("dropMode", .string(let mode)): return "Drop mode → " + (mode == "smart" ? "Smart" : "Fast")
             case ("autoHideIsland", .bool(let on)): return "Auto-hide island → " + (on ? "On" : "Off")
+            case ("subtitlesEngine", .string(let raw)):
+                return "Subtitles model → " + (SubtitleAudioTranslate.Engine(rawValue: raw)?.label ?? raw)
             case ("inputLanguage", _): return "Input language → " + (language(value) ?? "Auto")
             case ("outputLanguage", _): return "Output language → " + (language(value) ?? "Off")
             default: return nil

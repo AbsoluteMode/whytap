@@ -29,6 +29,8 @@ final class AppControlController {
     private let toolbox: AppControlToolbox
     /// Vocab and Filler entries, through the stores Drop reads at the next take.
     private let dropLists: AppControlDropLists
+    /// Subtitles' saved engine; read without the Keychain.
+    private let subtitleEngine: SubtitleAudioTranslate.Choice
     private var mutating = false
 
     init(routing: AIRoutingStore? = nil, models: APIAndModelsViewModel? = nil,
@@ -41,8 +43,10 @@ final class AppControlController {
          layout: (@MainActor () -> HoverLayoutStore)? = nil,
          hotkeys: (@MainActor () -> HotkeyPreferences)? = nil,
          vocabulary: (@MainActor () -> VocabularyCache)? = nil,
-         fillers: (@MainActor () -> FillerTermsStore)? = nil) {
+         fillers: (@MainActor () -> FillerTermsStore)? = nil,
+         subtitleEngine: SubtitleAudioTranslate.Choice = SubtitleAudioTranslate.Choice()) {
         self.meetings = meetings
+        self.subtitleEngine = subtitleEngine
         self.toolbox = AppControlToolbox(layout: layout ?? { HoverLayoutStore.shared },
                                          hotkeys: hotkeys ?? { HotkeyPreferences.shared })
         self.agentWorkspace = agentWorkspace
@@ -147,7 +151,9 @@ final class AppControlController {
                     "dropMode": .array([.string("fast"), .string("smart")]),
                     "autoHideIsland": .array([.bool(true), .bool(false)]),
                     "inputLanguage": .array([.null] + AppLanguage.all.map { .string($0.code) }),
-                    "outputLanguage": .array([.null] + AppLanguage.all.map { .string($0.code) })
+                    "outputLanguage": .array([.null] + AppLanguage.all.map { .string($0.code) }),
+                    // null: no choice yet (OpenAI, or Soniox when only its key exists).
+                    "subtitlesEngine": .array(SubtitleAudioTranslate.Engine.allCases.map { .string($0.rawValue) })
                 ])
             ]))
         case "list_models":
@@ -226,6 +232,14 @@ final class AppControlController {
                 guard let mode = TranscriptionMode(rawValue: mode) else { return invalid() }
                 preferences.setMode(mode)
             case ("autoHideIsland", .bool(let enabled)): idle.isEnabled = enabled
+            // The same check as the Subtitles model picker: only an engine
+            // whose key can be read.
+            // WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
+            case ("subtitlesEngine", .string(let raw)):
+                guard let engine = SubtitleAudioTranslate.Engine(rawValue: raw) else { return invalid() }
+                guard models.selectSubtitleEngine(engine) else {
+                    return .failure("not_configured", "Add a readable \(engine.providerName) key in Keys & models before choosing it for Subtitles.")
+                }
             case ("inputLanguage", .null): languages.selectedLanguage = nil
             case ("outputLanguage", .null): languages.targetLanguage = nil
             case ("inputLanguage", .string(let code)), ("outputLanguage", .string(let code)):
@@ -247,7 +261,8 @@ final class AppControlController {
     private var settings: [String: AppControlValue] {
         ["dropMode": .string(preferences.currentMode.rawValue), "autoHideIsland": .bool(idle.isEnabled),
          "inputLanguage": languages.selectedLanguage.map { .string($0.code) } ?? .null,
-         "outputLanguage": languages.targetLanguage.map { .string($0.code) } ?? .null]
+         "outputLanguage": languages.targetLanguage.map { .string($0.code) } ?? .null,
+         "subtitlesEngine": subtitleEngine.saved.map { .string($0.rawValue) } ?? .null]
     }
 
     /// The Speech and LLM rows as Models shows them: the model most features

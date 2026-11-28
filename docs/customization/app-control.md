@@ -78,7 +78,10 @@ set up with them. Other clients can invoke the CLI directly:
 
 Supported settings are `dropMode` (`fast`/`smart`), `inputLanguage` (language
 code/`null` for Auto), `outputLanguage` (code/`null` for off; enabling requires
-Smart) and `autoHideIsland` (boolean). `get_settings` enumerates accepted codes.
+Smart), `autoHideIsland` (boolean) and `subtitlesEngine` (`soniox`/`openAI`:
+where Subtitles send system audio; `null` until chosen, which runs OpenAI unless
+only a Soniox key exists; only an engine with a readable key can be set).
+`get_settings` enumerates accepted codes.
 Unknown fields, settings, feature IDs and wrong types are rejected. There is
 no arbitrary UserDefaults operation.
 
@@ -190,8 +193,8 @@ notes so "split this call into tasks" works without extra setup.
 
 Feature IDs are `dropFast`, `dropSmart`, `dropSmartCleanup`, `meetings`,
 `meetingNotes`, `agent`, `agentVoice`, `voiceSearch` and `translation`.
-Subtitles have no route: they run on OpenAI Audio translate with the OpenAI
-key. Accounts use the exact ID returned
+Subtitles have no route: their engine (Soniox or OpenAI live translation) is
+the `subtitlesEngine` setting. Accounts use the exact ID returned
 by `list_models`: built-in provider IDs or an already configured server ID.
 The application-control server cannot add a provider, change an endpoint URL
 or read a key.

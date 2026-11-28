@@ -802,14 +802,16 @@ Translate и Subtitles доступны через поиск инструмен
 ввод и результат, запуск по Enter, закрытие по Escape. Язык и вторичные действия
 доступны в контекстном меню; сохранённый язык не меняется.
 Translation использует свою LLM;
-Subtitles слышат и переводят в одной сессии: Soniox `stt-rt-v6` (one-way
-перевод) с тем же ключом Soniox, что у Drop; оригинал показывается по мере
-звучания (нефинальные токены, ~1 с), перевод фразы приходит примерно
-через секунду после её конца, кусок перевода сразу целиком. Без ключа Soniox — OpenAI
-`gpt-realtime-translate` с OpenAI-ключом. В Models у Subtitles обычная строка с
-заранее выбранной моделью («Soniox · stt-rt-v6» или
-«OpenAI · gpt-realtime-translate» — по ключу, без выбора движка); без обоих
-ключей она выглядит как любая строка без модели, а Start называет причину. Сессия сама останавливается через час, как
+Subtitles hear and translate in one session on the engine the user chooses in
+Keys & models -> Models -> Subtitles (the same model control and picker as other
+rows): Soniox `stt-rt-v6` one-way translation with the Soniox key Drop uses
+(the original shows as heard, about 1 s; a phrase's translation arrives about a
+second after it ends), or OpenAI `gpt-realtime-translate` with the OpenAI key.
+Only an engine whose key can be read is selectable; the other is listed with
+the key it needs. Without a choice: OpenAI, or Soniox when only its key exists;
+the default that first runs is saved. A chosen engine without a readable key is
+never replaced by the other: the row asks for setup and Start names the key.
+Without either key the row looks like any row without a model. Сессия сама останавливается через час, как
 по Stop, без таймеров и надписей. Прежние маршруты Speech/LLM субтитров
 не используются (сохранены для отката).
 Окно субтитров во время сессии не меняет размер (и до первого звука, и после

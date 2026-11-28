@@ -9,7 +9,9 @@
 > [shared-app-development](.project-docs/processes/shared-app-development.md)
 > and [`docs/architecture.md`](docs/architecture.md). Until 2026-11-22 those
 > rules were the body of this file; none of them was dropped. Before
-> integration or app actions, read them from `origin/main`.
+> integration or app actions, read them from `origin/main`. Since 2026-11-28
+> a finished fix is not enqueued: it goes straight into the owner's app with
+> `python3 scripts/owner-local.py add <PR>` (see the runbook).
 
 Everyone else (you cloned, forked or were handed this repository) needs only
 this file and the documents it links.

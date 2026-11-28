@@ -9,6 +9,9 @@ canonical_for: [parallel-development, shared-working-application]
 verified_at: 2026-11-28
 sources:
   - type: user-confirmed
+    reference: On 2026-11-28 (orchestrator card 42, spec REV 10) the owner dropped the builder and the build queue per fix - fixes are built locally and installed into the owner's app at once, the owner tests them, accepted fixes get one inquisition as a batch, and only the batch goes to the builder to build.
+    confirmed_at: 2026-11-28
+  - type: user-confirmed
     reference: On 2026-11-28 (orchestrator card 42, spec REV 8) the owner removed every code review from the builder (previews, feature PRs, releases) and moved review to one inquisition on the assembled, tested release candidate, run by the orchestrator, whose confirmed bugs are fixed before the release ships.
     confirmed_at: 2026-11-28
   - type: user-confirmed
@@ -71,7 +74,7 @@ sources:
   - type: repository
     reference: Sources/Sidekey/Meetings/MeetingsStore.swift
     confirmed_at: 2026-10-19
-related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-preview-before-validation.md, ../decisions/2026-11-26-release-batches.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-builder-never-reviews.md]
+related: [../project.md, team-runbook.md, local-customization.md, ../decisions/2026-10-19-shared-working-app.md, ../decisions/2026-10-19-whytap-name.md, ../decisions/2026-10-19-build-queue.md, ../decisions/2026-10-20-meeting-aware-builder-refresh.md, ../decisions/2026-10-21-developer-id-team-signing.md, ../decisions/2026-11-19-on-demand-build-queue-builder.md, ../decisions/2026-11-22-builder-blocks-once.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-23-silent-test-runs.md, ../decisions/2026-11-23-builder-queue-watchdog.md, ../decisions/2026-11-23-builder-queue-flaky-tests.md, ../decisions/2026-11-23-builder-queue-cheap-fixes.md, ../decisions/2026-11-23-builder-queue-group-install.md, ../decisions/2026-11-24-windowless-test-runs.md, ../decisions/2026-11-24-meeting-gate-whytap-activity.md, ../decisions/2026-11-26-builder-quick-wins.md, ../decisions/2026-11-26-preview-before-validation.md, ../decisions/2026-11-26-release-batches.md, ../decisions/2026-11-26-builder-test-shards.md, ../decisions/2026-11-28-builder-never-reviews.md, ../decisions/2026-11-28-local-fast-builds-batch-inquisition.md]
 ---
 
 # Parallel development, one working Whytap
@@ -146,19 +149,22 @@ taps. Keep the user's working instance; do not launch a second app for testing.
 4. Do **not** invoke `scripts/dev-run.sh`, `customize.py build/run`, `swift run`,
    `open` on a feature bundle, or LaunchServices registration. On branches
    older than the one-running-copy change (2026-10-19), even `dev-run.sh`
-   without `--run` stops other beta processes. Do not
-   install a feature branch over `/Applications/Whytap.app` or stop its process.
+   without `--run` stops other beta processes. Do not install your branch
+   over `/Applications/Whytap.app` yourself; step 6's `owner-local.py` installs
+   the combined owner-local build.
    Production app/DMG packaging (`FLAVOR=prod` builds) is also reserved for
    the integrator under the shared lock; a worker's ordinary `swift build`
    does not package or register an app.
 5. Submit a focused PR with the exact commit, checks and their limitations,
    dependencies/overlaps, and 1–3 concrete user acceptance steps. A feature is
    ready only after relevant review, build and behavior checks; unfinished work
-   stays on its branch. Say **ready, not yet in the working app** until promoted.
-6. Automatically enqueue that reviewed PR/head using the command below, then
-   stop acting as an integrator. Do not wait for the user to remember to ask
-   for a build. A PR alone, a draft, or an old review is not readiness evidence.
-7. After the builder confirms the merge, verify that GitHub's automatic head
+   stays on its branch.
+6. Deliver it to the owner at once with the owner-local fast build ("Owner-local
+   fast builds" below): `python3 scripts/owner-local.py add <PR> --accept
+   "<PR>=<1-3 steps>"`. Do **not** enqueue it in the build queue. Report the
+   installed build number, or the deferral and its reason. A fix of a fix is
+   `add <PR>` again with the new head.
+7. After the batch with your PR is merged by the builder, verify that GitHub's automatic head
    branch deletion removed your remote feature branch. If it remains, delete
    it only if its tip still matches the merged PR head, no open PR uses it as
    a head or base, and no other session uses it. Use a Git lease with that
@@ -192,7 +198,54 @@ authorized queue requests to the builder and build-status/acceptance messages
 back to the originating feature sessions. This covers this queue only; it does
 not authorize messages to other people or unrelated chats.
 
+## Owner-local fast builds
+
+Since 2026-11-28 there is no builder and no build queue per fix
+([local fast builds decision](../decisions/2026-11-28-local-fast-builds-batch-inquisition.md)):
+
+1. A finished fix is built locally and installed into the owner's app at once.
+2. The owner tests it and confirms the functionality is what was intended.
+3. Accepted fixes accumulate. When there are many, the orchestrator runs one
+   inquisition (council review) over the batch; its confirmed findings are
+   fixed and checked the same way.
+4. Only then the orchestrator hands the batch to the builder, whose only job
+   is to build it: merge and release build, tests and mechanical gates, no
+   review ("The builder never reviews").
+
+One combined build carries every fix still waiting for the owner, so
+installing fix B never drops fix A: current `origin/main` + the members, in
+order, in the dedicated worktree `worktree` inside the `.whytap-owner-local` folder of the user's home, with the
+member list in `whytap-owner-local.json` in the Git common directory. Any
+session runs, from any checkout of main:
+
+```bash
+python3 scripts/owner-local.py add 539 --accept "539=Drag a tool past the glass edge: it is removed"
+python3 scripts/owner-local.py add 538@<exact head>   # pin a head
+python3 scripts/owner-local.py install                # after a deferral, when Whytap is idle
+python3 scripts/owner-local.py drop 538               # rejected by the owner
+python3 scripts/owner-local.py status
+```
+
+Under the shared `exodia-integration.lock` (one live process; it waits while
+another holder works, never steals it) it merges the members (a member that
+does not merge stops the run, nothing is built), builds the signed local
+arm64 app with `EXODIA_LOCAL_INSTALL=1 ./scripts/build-dmg.sh` (same identity
+and bundle id, a build number above the installed one, native
+`--installation-check`, `ExodiaBuildComposition` with the main base and the
+PR heads), copies the installed bundle to `rollback-<build>.app` in that folder,
+runs `scripts/build-queue-meeting-gate.py` right before a normal Quit (a
+recording, dictation, agent work, a locked screen or unknown activity defers:
+exit 3, the candidate stays for `install`; never a force-quit), swaps the
+bundle, relaunches it and writes the contents and acceptance steps at the top
+of the build receipt in the primary checkout. Merged members drop out
+automatically. Exit codes: 0 done, 2 usage, 3 deferred, 4 a member does not
+merge, 5 a build or check failed, 6 the lock stayed busy.
+
 ## Persistent build queue
+
+Since 2026-11-28 the queue carries only what the orchestrator hands to the
+builder (an accepted, inquisition-checked batch), builder tooling and
+documentation. Feature fixes are not enqueued; see "Owner-local fast builds".
 
 The queue and installed helper live in the shared Git common directory as
 `exodia-build-queue.sqlite3` and `exodia-build-queue.py`. They are local metadata,
@@ -315,6 +368,9 @@ because it must merge, package and replace the app; its authority is this
 process and the builder prompt, never queue contents.
 
 ### Preview lane and release batches
+
+Not used since 2026-11-28: owner previews are owner-local fast builds, not
+builder previews. The lane stays off; this section describes its code.
 
 On 2026-11-26 the owner set the order: he checks the feature itself in his
 running app first; the full suite and the merge follow the owner's
@@ -442,36 +498,16 @@ for reproducing checks or invoke review agents. It blocks only when the build,
 a test or a documentation check fails because of the PR, when a merge
 conflict needs the author's choice, or when the head moved.
 
-**Owner preview first.** An app-changing PR is first composed on current
-`origin/main` with every PR whose preview still awaits the owner (the train),
-built as the local arm64 app (`EXODIA_LOCAL_INSTALL=1`) and installed as an
-unmerged preview with only those gates; no tests before the owner's OK. The
-ticket is then set `blocked` with a note that starts `PREVIEW AWAITING OWNER`
-and names the build, the main base and every member head; this is not a
-failure. The orchestrator, the only party that carries the owner's words,
-appends each decision to `whytap-owner-decisions.txt` in the Git common
-directory as `<UTC time> ok|reject PR #<n> <exact head> build <n> -- <owner's words>`;
-the builder reads it at the start of every run. After an `ok`, the author
-resubmits (current main merged into the branch, or an empty commit); the
-builder accepts it when every non-merge commit after the approved head is
-empty or already on `origin/main`, runs the full suite and merges. A
-`reject` cancels the preview ticket and the next install leaves the PR out.
-A new head without an `ok` is a new preview and supersedes the earlier one.
-Builder tooling and documentation-only PRs have nothing to preview: their
-own tests and documentation checks, then the merge. Once the maintainer
-enables the preview lane ("Preview lane and release batches" below), previews
-use `enqueue --preview`, the orchestrator's `approve`/`reject` and release
-batches instead of `PREVIEW AWAITING OWNER` tickets and
-`whytap-owner-decisions.txt`; this manual rule applies until then.
+Owner previews are owner-local fast builds, never builder previews ("Owner-local
+fast builds" above). The queue carries no per-fix tickets.
 
-**One inquisition per release.** The orchestrator, not the builder, owns
-review: approved features accumulate on main; when the orchestrator decides
-to release, the builder builds the release candidate from one main SHA and
-runs the full suite on it; the orchestrator runs one inquisition (its
-council review) on the whole diff from the previous release to that
-candidate; its confirmed bugs are fixed as ordinary queued PRs and a new
-candidate is built and tested; then the release ships through
-`user-release.sh` and its gates.
+**One inquisition per batch.** The orchestrator, not the builder, owns review:
+accepted fixes accumulate in the owner-local build; when there are many, the
+orchestrator runs one inquisition (its council review) over the batch; the
+confirmed findings are fixed and checked by the owner the same local way;
+then the orchestrator hands the batch to the builder, which merges it and
+builds the release candidate with the full suite, and the release ships
+through `user-release.sh` and its gates.
 
 ### Builder turn
 

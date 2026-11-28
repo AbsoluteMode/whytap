@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/History/HistoryMultiPasteTests.swift
     confirmed_at: 2026-11-28
-related: [2026-11-22-history-multi-paste.md]
+related: [2026-11-22-history-multi-paste.md, 2026-11-28-clipboard-suppression-per-owner.md]
 ---
 
 # Context

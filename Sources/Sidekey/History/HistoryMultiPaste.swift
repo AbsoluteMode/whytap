@@ -180,23 +180,24 @@ enum HistoryPasteboardWriter {
         reads: PasteboardReadMonitor
     ) -> HistoryPasteWrite {
         let readsBefore = reads.readCount
+        let ledger = PasteboardWriteLedger()
         switch group {
         case .text(let text):
             guard let written = PromisedPasteboardPayload.write(
-                [.string: Data(text.utf8)], to: pasteboard, reads: reads
-            ) else { return .failed }
+                [.string: Data(text.utf8)], to: pasteboard, reads: reads, ledger: ledger
+            ) else { return .failed(clearedChangeCount: ledger.takeFailedWrite()) }
             return .written(.init(changeCount: written.after, readsBefore: readsBefore))
         case .attachments(let items):
             if items.count == 1, case .image(let image) = items[0] {
                 guard let payload = imagePayload(image, assetsDirectory: assetsDirectory) else { return .nothing }
-                guard let written = PromisedPasteboardPayload.write(payload, to: pasteboard, reads: reads)
-                else { return .failed }
+                guard let written = PromisedPasteboardPayload.write(payload, to: pasteboard, reads: reads, ledger: ledger)
+                else { return .failed(clearedChangeCount: ledger.takeFailedWrite()) }
                 return .written(.init(changeCount: written.after, readsBefore: readsBefore))
             }
             let objects = items.compactMap { pasteboardObject(for: $0, assetsDirectory: assetsDirectory) }
             guard !objects.isEmpty else { return .nothing }
             let owned = pasteboard.clearContents()
-            guard pasteboard.writeObjects(objects) else { return .failed }
+            guard pasteboard.writeObjects(objects) else { return .failed(clearedChangeCount: owned) }
             return .written(.init(changeCount: owned, readsBefore: nil))
         }
     }
@@ -289,8 +290,11 @@ enum HistoryPasteWrite: Equatable {
     /// thumbnail); the pasteboard was not touched.
     case nothing
     case written(HistoryPasteReceipt)
-    /// The pasteboard refused the write.
-    case failed
+    /// The pasteboard refused the write. `clearedChangeCount` is the
+    /// generation of the write's own clear when it got that far (the
+    /// pasteboard is then empty and the series' to give back), `nil` when
+    /// the pasteboard was not touched.
+    case failed(clearedChangeCount: Int?)
 }
 
 /// How a wait for the target to read one paste ended (for logs and tests).
@@ -369,9 +373,11 @@ struct HistoryMultiPaster {
     let targetIsCurrent: (_ isFirst: Bool) -> Bool
     let write: (HistoryPasteGroup) -> HistoryPasteWrite
     /// Posts Cmd+V only into the series' target
-    /// (`pasteAlreadyOnPasteboard(into:restoringFocus:)`); only the first
-    /// paste may bring the target back to the front.
-    let paste: (_ isFirst: Bool) async -> Bool
+    /// (`pasteAlreadyOnPasteboard(into:restoringFocus:expectedChangeCount:)`);
+    /// only the first paste may bring the target back to the front. No V-down
+    /// is sent once the pasteboard no longer holds `expectedChangeCount`, the
+    /// series' own write.
+    let paste: (_ isFirst: Bool, _ expectedChangeCount: Int) async -> Bool
     /// Returns once the target has read the paste (`HistoryPasteReadWaiter`).
     /// Runs after every posted paste, the last one too: the next write or the
     /// restore must not replace content the target has not read yet.
@@ -379,40 +385,51 @@ struct HistoryMultiPaster {
     let changeCount: () -> Int
     /// Puts the user's clipboard from before the series back.
     let restore: () -> Void
+    /// Keeps exactly one generation the series itself wrote (a paste, a
+    /// cleared refused write, the restore) out of clipboard history, right
+    /// after that write and before anything can run in between. Never
+    /// called for a generation someone else produced: the user's own copy
+    /// during the series is recorded as usual.
+    /// WHY: .project-docs/decisions/2026-11-28-clipboard-suppression-per-owner.md
+    var suppressOwn: (Int) -> Void = { _ in }
 
     /// Returns how many pastes were posted. Stops at the first paste whose
     /// target is gone, that the engine could not post or whose content was
     /// replaced by someone else, so nothing lands in another app or out of
-    /// order. Afterwards the user's clipboard comes back, unless other
-    /// content replaced the series' last write (a user copy stays).
+    /// order. Afterwards the user's clipboard comes back only while the
+    /// pasteboard still holds the series' own last generation: a copy made
+    /// meanwhile (by the user or another app) is never overwritten.
     @discardableResult
     func run(_ groups: [HistoryPasteGroup]) async -> Int {
         var posted = 0
-        // The series' write still on the pasteboard, if any.
+        // The series' own generation still expected on the pasteboard, if any.
         var owned: Int?
-        var wroteAnything = false
         series: for group in groups {
             guard targetIsCurrent(posted == 0) else { break }
             if let owned, changeCount() != owned { return posted }
             switch write(group) {
             case .nothing:
                 continue
-            case .failed:
-                // The refused write may have cleared the pasteboard.
-                owned = nil
-                wroteAnything = true
+            case .failed(let cleared):
+                // A refused write that cleared the pasteboard leaves an empty
+                // generation of our own; one that never touched it leaves the
+                // previous generation (ours or the user's) in place.
+                if let cleared {
+                    suppressOwn(cleared)
+                    owned = cleared
+                }
                 break series
             case .written(let receipt):
+                suppressOwn(receipt.changeCount)
                 owned = receipt.changeCount
-                wroteAnything = true
-                guard await paste(posted == 0) else { break series }
+                guard await paste(posted == 0, receipt.changeCount) else { break series }
                 posted += 1
                 await awaitConsumed(receipt)
             }
         }
-        guard wroteAnything else { return posted }
-        if let owned, changeCount() != owned { return posted }
+        guard let owned, changeCount() == owned else { return posted }
         restore()
+        suppressOwn(changeCount())
         return posted
     }
 }

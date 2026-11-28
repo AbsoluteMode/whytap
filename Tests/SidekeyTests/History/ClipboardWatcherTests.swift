@@ -168,6 +168,42 @@ final class ClipboardWatcherTests: XCTestCase {
         XCTAssertTrue(entries.isEmpty, "suppression flag must block capture")
     }
 
+    /// A Drop restore finishing (its own hold raised and released) while
+    /// another owner still holds suppression must not let the watcher record
+    /// that owner's writes; once the last hold is released, a real copy is
+    /// recorded again.
+    func testAnotherOwnerReleasingItsHoldDoesNotLiftSuppression() throws {
+        let assetsDir = makeTempDir()
+        defer { try? FileManager.default.removeItem(at: assetsDir) }
+        let store = try makeStore()
+        let suppression = ClipboardSuppression()
+        let watcher = ClipboardWatcher(
+            store: store,
+            assetsDirectory: assetsDir,
+            suppression: suppression,
+            clock: { Date(timeIntervalSince1970: 1_000) }
+        )
+        suppression.setSuppressed(true)      // selection fallback's Cmd+C dance
+        suppression.setSuppressed(true)      // a Drop restore starts...
+        suppression.setSuppressed(false)     // ...and finishes
+        watcher.handleChange(
+            snapshot: .init(text: "synthetic copy", tiffData: nil, pngData: nil, fileURLs: []),
+            changeCount: 1
+        )
+        XCTAssertTrue(try store.latestClipboardEntries(limit: 10).isEmpty,
+                      "the dance's own write stays out of history while its hold is held")
+        suppression.setSuppressed(false)     // the dance releases its hold
+        suppression.setSuppressed(false)     // an extra release is ignored
+        XCTAssertFalse(suppression.isSuppressed)
+        watcher.handleChange(
+            snapshot: .init(text: "user copy", tiffData: nil, pngData: nil, fileURLs: []),
+            changeCount: 2
+        )
+        XCTAssertEqual(try store.latestClipboardEntries(limit: 10).count, 1)
+        suppression.setSuppressed(true)
+        XCTAssertTrue(suppression.isSuppressed, "a release without a hold never goes negative")
+    }
+
     /// Race protection: even after the suppression flag is cleared, any
     /// pasteboard `changeCount` <= the recorded "skip-through" threshold
     /// MUST be skipped. This guards the window between the drop

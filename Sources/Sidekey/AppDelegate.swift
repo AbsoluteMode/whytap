@@ -1922,13 +1922,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        ClipboardSuppression.shared.setSuppressed(true)
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            ClipboardSuppression.shared.setSuppressed(false)
-        }
-
+        // Exactly the generation this write produced is skipped; a copy the
+        // user makes right after is recorded, and no timed flag can lift
+        // another owner's suppression.
+        // WHY: .project-docs/decisions/2026-11-28-clipboard-suppression-per-owner.md
         historyInteraction.writeCardsToPasteboard(cards, assetsDirectory: assets)
+        ClipboardSuppression.shared.suppressThrough(changeCount: NSPasteboard.general.changeCount)
         copiedToastController?.show()
     }
 
@@ -1968,7 +1967,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             nowMs: { DispatchTime.now().uptimeNanoseconds / 1_000_000 },
             sleepMs: { ms in try? await Task.sleep(nanoseconds: ms * 1_000_000) }
         )
-        ClipboardSuppression.shared.setSuppressed(true)
+        // Only the series' own generations are kept out of clipboard history,
+        // each right after it is written (`suppressOwn`); a copy the user makes
+        // during the series is recorded and stops it.
+        // WHY: .project-docs/decisions/2026-11-28-clipboard-suppression-per-owner.md
+        let suppression = ClipboardSuppression.shared
         Task { @MainActor in
             // A Drop paste still waiting to give the clipboard back would
             // otherwise leave its dictation in our snapshot.
@@ -1984,10 +1987,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         group, to: pasteboard, assetsDirectory: assets, reads: reads
                     )
                 },
-                paste: { isFirst in await engine.pasteAlreadyOnPasteboard(into: target, restoringFocus: isFirst) },
+                paste: { isFirst, expected in
+                    await engine.pasteAlreadyOnPasteboard(
+                        into: target, restoringFocus: isFirst, expectedChangeCount: expected
+                    )
+                },
                 awaitConsumed: { receipt in waits.append(await waiter.wait(for: receipt)) },
                 changeCount: { pasteboard.changeCount },
-                restore: { Pasteboard.restore(original) }
+                restore: { Pasteboard.restore(original) },
+                suppressOwn: { suppression.suppressThrough(changeCount: $0) }
             )
             let posted = await paster.run(groups)
             os_log(
@@ -1997,8 +2005,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 waits.filter { $0 == .read }.count, waits.filter { $0 == .timeout }.count,
                 waits.filter { $0 == .gap }.count, waits.filter { $0 == .replaced }.count
             )
-            ClipboardSuppression.shared.suppressThrough(changeCount: pasteboard.changeCount)
-            ClipboardSuppression.shared.setSuppressed(false)
         }
     }
 

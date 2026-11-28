@@ -908,7 +908,16 @@ final class AutoPasteEngine {
     /// so the caller stops the rest of the series. Only the series' first
     /// paste restores focus to the target (`restoringFocus`); later ones need
     /// it to have kept focus.
-    func pasteAlreadyOnPasteboard(into target: RememberedTarget, restoringFocus: Bool) async -> Bool {
+    ///
+    /// `expectedChangeCount` is the generation the series itself wrote. If
+    /// anything else replaced it while modifiers were released or focus was
+    /// restored (a user copy, Universal Clipboard), no V-down is sent: the
+    /// target would paste content that is not the series'.
+    func pasteAlreadyOnPasteboard(
+        into target: RememberedTarget,
+        restoringFocus: Bool,
+        expectedChangeCount: Int? = nil
+    ) async -> Bool {
         if !permissionGranted(false) {
             logEmit(.info, "autopaste_post_event_preflight_false advisory=true")
         }
@@ -927,7 +936,7 @@ final class AutoPasteEngine {
         }
         sleepUs(Self.postFocusSettleMs * 1000)
         sleepUs(Self.postWriteSettleMs * 1000)
-        guard postCmdV(to: target) else { return false }
+        guard postCmdV(to: target, expectedChangeCount: expectedChangeCount) else { return false }
         logEmit(.info, "autopaste_posted_cmdv context=series")
         return true
     }
@@ -944,7 +953,7 @@ final class AutoPasteEngine {
     /// that fails before V-down releases Command in the target and stops; a
     /// target that quit by the end does not count as delivered.
     /// WHY: .project-docs/decisions/2026-11-22-history-multi-paste.md
-    private func postCmdV(to target: RememberedTarget) -> Bool {
+    private func postCmdV(to target: RememberedTarget, expectedChangeCount: Int? = nil) -> Bool {
         let steps: [(CGKeyCode, Bool, CGEventFlags)] = [
             (Self.commandKeyCode, true, []),
             (Self.vKeyCode, true, .maskCommand),
@@ -953,6 +962,12 @@ final class AutoPasteEngine {
         ]
         for (index, step) in steps.enumerated() {
             if index > 0 { sleepUs(Self.keyEventGapUs) }
+            // Up to V-down the pasteboard must still hold the series' write.
+            if index <= 1, let expectedChangeCount, currentChangeCount() != expectedChangeCount {
+                if index == 1 { postEventToPid(Self.commandKeyCode, false, [], target.pid) }
+                logEmit(.info, "autopaste_series_stopped reason=pasteboard_replaced step=\(index)")
+                return false
+            }
             guard seriesRecipientReady(target) else {
                 // Release what this sequence pressed, in the target only.
                 if index == 2 { postEventToPid(Self.vKeyCode, false, .maskCommand, target.pid) }
@@ -1132,9 +1147,10 @@ final class AutoPasteEngine {
 /// `ClipboardWatcher` (reader) for "ignore the pasteboard while drop is
 /// in flight". The coordinator has two signals:
 ///
-/// 1. `isSuppressed` — a binary flag. While true, every `handleChange`
-///    call on the watcher skips. The drop pipeline raises this before
-///    any pasteboard mutation and lowers it after the restore.
+/// 1. `isSuppressed` — true while any owner holds suppression (a counted
+///    hold, see `setSuppressed`). While true, every `handleChange` call on
+///    the watcher skips. The drop pipeline raises a hold before any
+///    pasteboard mutation and releases it after the restore.
 ///
 /// 2. `skipThroughChangeCount` — a monotonic "skip up to" threshold.
 ///    The watcher polls `NSPasteboard.changeCount` every 500 ms. A
@@ -1157,7 +1173,12 @@ final class AutoPasteEngine {
 final class ClipboardSuppression {
     static let shared = ClipboardSuppression()
 
-    private(set) var isSuppressed: Bool = false
+    /// Holds raised and not yet released, by every owner together. A
+    /// counted hold, not a bare flag: one owner lowering its own hold
+    /// (a Drop restore finishing) must not lift another owner's
+    /// suppression that is still in progress.
+    private(set) var holdCount: Int = 0
+    var isSuppressed: Bool { holdCount > 0 }
     /// Monotonic upper bound on `changeCount` values the watcher should
     /// skip even after `isSuppressed` returns to false. `-1` means "no
     /// threshold yet"; `NSPasteboard.changeCount` is always >= 0 so the
@@ -1166,10 +1187,18 @@ final class ClipboardSuppression {
 
     init() {}
 
-    /// Idempotent. Toggling the flag is the only write path; calls to
-    /// `setSuppressed(true)` while already suppressed are no-ops.
+    /// `true` raises one hold, `false` releases one. Every caller pairs
+    /// them; a release without a hold is ignored. Writers that know the
+    /// exact generation they produced should prefer
+    /// `suppressThrough(changeCount:)` right after the write: it never
+    /// covers a copy the user makes afterwards.
+    /// WHY: .project-docs/decisions/2026-11-28-clipboard-suppression-per-owner.md
     func setSuppressed(_ flag: Bool) {
-        isSuppressed = flag
+        if flag {
+            holdCount += 1
+        } else if holdCount > 0 {
+            holdCount -= 1
+        }
     }
 
     /// Advance the skip-through threshold. Calls are MONOTONIC: a

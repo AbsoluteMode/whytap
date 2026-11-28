@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: scripts/build-queue-builder-prompt.md
     confirmed_at: 2026-11-22
-related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-28-builder-never-reviews.md]
+related: [../project.md, shared-app-development.md, local-customization.md, ../decisions/2026-11-22-short-agents-entry.md, ../decisions/2026-11-28-builder-never-reviews.md, ../decisions/2026-11-28-local-fast-builds-batch-inquisition.md]
 ---
 
 # Whytap team runbook
@@ -91,15 +91,21 @@ feature sessions with regular checked integration and one working application.
 - Run exactly one Whytap instance across all channels: beta shares meetings,
   staging and clipboard history with production and competes for hotkeys.
   Production app/DMG packaging is reserved for the integrator under the lock.
-- Finished feature agents automatically submit their reviewed PR/exact head,
-  checks, dependencies and acceptance steps to the persistent build queue
-  (`scripts/build-queue.py`; installed helper in the Git common directory).
-  `enqueue` rejects a head whose guidance sync or documentation validation
-  fails. The configured builder processes FIFO, sends queue/start/result
+- No builder and no build queue per fix (2026-11-28): a finished fix goes
+  straight into the owner's app with `python3 scripts/owner-local.py add <PR>
+  --accept "<PR>=<steps>"` (one combined local build of main plus every fix
+  waiting for the owner; same identity, newer build, rollback copy, activity
+  gate, receipt). The owner tests it; accepted fixes get one inquisition as a
+  batch; only that batch goes to the builder to build. WHY:
+  .project-docs/decisions/2026-11-28-local-fast-builds-batch-inquisition.md
+- The persistent build queue (`scripts/build-queue.py`; installed helper in
+  the Git common directory) carries only the orchestrator's batches, builder
+  tooling and documentation. `enqueue` rejects a head whose guidance sync or
+  documentation validation fails. The configured builder processes FIFO, sends queue/start/result
   messages to the originating sessions and alone integrates/packages/promotes;
   it resolves routine merge conflicts itself. It never reviews code: it
   builds, tests, merges, installs and rolls back behind mechanical gates,
-  installs an app-changing PR as an owner preview first, and blocks a PR once
+  and blocks a PR once
   with every failing check; a re-block is only for a check the fix broke or
   one still failing. It is an on-demand headless
   session that a model-free launchd watcher (`scripts/build-queue-watcher.py`)
@@ -115,10 +121,9 @@ feature sessions with regular checked integration and one working application.
   `git rev-parse --git-common-dir` for protected operations. Queue claims never
   replace that lock or any validation gate. Preserve all other sessions' WIP;
   use a clean integration worktree when the primary checkout is occupied.
-- Review happens once per release, not per PR: the orchestrator has the
-  release candidate built and fully tested, runs one inquisition (council
-  review) on the whole release diff, gets its confirmed bugs fixed, then the
-  release ships. WHY: .project-docs/decisions/2026-11-28-builder-never-reviews.md
+- Review happens once per batch, not per fix: the orchestrator runs one
+  inquisition (council review) over the accepted fixes, gets its confirmed
+  findings fixed, then hands the batch to the builder to build. WHY: .project-docs/decisions/2026-11-28-builder-never-reviews.md
 - Validate the final combined candidate (build and tests) and merge through a
   PR with exact head/base checks. Routine checked integration/local refresh
   needs no repeated approval. Public publishing remains a separate action.

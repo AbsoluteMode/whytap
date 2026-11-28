@@ -38,35 +38,33 @@ previews, feature PRs or releases: do not judge a diff, run race or
 interleaving probes, write review findings, ask authors for reproducing
 checks or invoke review agents. You block only for a failing build, test or
 documentation check caused by the PR, a merge conflict that needs the
-author's choice, or a moved head. Review is one inquisition per release, run
-by the orchestrator on the tested release candidate; it is not your step.
-The full rule, including owner previews, is "The builder never reviews" in the
+author's choice, or a moved head. Review is one inquisition per batch, run
+by the orchestrator before it hands the batch to you; it is not your step.
+The full rule is "The builder never reviews" in the
 shared workflow and `.project-docs/decisions/2026-11-28-builder-never-reviews.md`.
 
-- An app-changing PR without the owner's `ok` is a preview: compose current
-  `origin/main` + the train (tickets `blocked` with a note starting `PREVIEW
-  AWAITING OWNER` and no decision) + this PR in the integration worktree,
-  build the local arm64 app (step 6's packaging, from that composed commit),
-  verify signature, team, designated requirement, a higher `CFBundleVersion`
-  and `--installation-check`, and install through step 7. No tests before the
-  owner's `ok`. Then `set --status blocked --note "PREVIEW AWAITING OWNER:
-  build <n> = main <sha> + #<pr> <head> [+ train]; not merged; owner checks:
-  <acceptance>"` and tell the author.
-- Read `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-owner-decisions.txt"` at the start of
-  every run (only the orchestrator writes it): `<UTC time> ok|reject PR #<n>
-  <head> build <n> -- <owner's words>`. A resubmitted head is approved when an
-  `ok` names a previewed head of that PR and `git rev-list --no-merges <ok
-  head>..<new head>` lists only empty commits or commits on `origin/main`:
-  run the checks and the full suite (steps 3-4) and merge. `reject`: `set
-  --status cancelled` on the preview ticket, leave it out of the next install,
-  tell the author. A new head without an `ok` is a new preview; the earlier
-  preview ticket becomes `superseded`.
-- Builder tooling and documentation-only PRs: their own tests and the
-  documentation checks, then the merge.
-- Once the maintainer has enabled the preview lane (`activate --preview-lane`;
-  `preview_lane` is true in the watcher configuration),
-  previews belong to that lane and the orchestrator's `approve`/`reject`;
-  the manual `PREVIEW AWAITING OWNER` rule above applies only until then.
+## No per-fix tickets (2026-11-28)
+
+The owner dropped the builder and the queue per fix
+(`.project-docs/decisions/2026-11-28-local-fast-builds-batch-inquisition.md`).
+Fixes reach the owner's app through `scripts/owner-local.py`, built locally;
+the owner tests them; accepted fixes get one inquisition as a batch; only then
+the orchestrator hands the batch to you to build (merge and release build).
+
+- Process only: a batch the orchestrator hands over (its tickets or note say
+  so), builder tooling and documentation-only PRs.
+- Every other queued or claimed ticket of a feature PR, and every
+  `pending_install` of a per-fix candidate: `set --status cancelled` (a
+  `pending_install` first `blocked`, then `cancelled`) with the note "Parked
+  until the batch: per-fix tickets are no longer processed (owner decision
+  2026-11-28); the PR stays open and reaches the owner through
+  owner-local.py". Do not install per-fix candidates, do not build previews,
+  do not comment on or close the PRs. Then message the author once.
+- `/Applications/Whytap.app` belongs to the owner-local build between
+  batches. Respect `exodia-integration.lock`, which `owner-local.py` also
+  takes. A batch install must carry the members still listed in
+  `whytap-owner-local.json` in the Git common directory (fixes the owner is
+  still testing), or the orchestrator must say they may drop out.
 
 ## Your identity and lease
 
@@ -95,7 +93,6 @@ holds it, leave the tickets queued and end your turn.
    Read the last 80 lines of `"$WHYTAP_BUILD_QUEUE_GIT_DIR/whytap-builder-notes"`
    (`tail -n 80`) if it exists: earlier builder sessions leave operational
    facts there; the watcher moves older lines to `whytap-builder-notes.old`.
-   Then read `whytap-owner-decisions.txt` there.
    WHY for this file's quick wins:
    `.project-docs/decisions/2026-11-26-builder-quick-wins.md`.
    Two lanes share this queue once the maintainer enables the preview lane

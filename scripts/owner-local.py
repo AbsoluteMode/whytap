@@ -251,12 +251,16 @@ def running_pids():
     return [int(p) for p in out.split()]
 
 
-def gate(repo):
-    result = run(sys.executable, "scripts/build-queue-meeting-gate.py", cwd=repo, check=False)
+def gate():
+    # The gate comes from this script's own checkout, not from the caller's
+    # working directory: an older primary checkout may not contain it.
+    script = Path(__file__).resolve().parent / "build-queue-meeting-gate.py"
+    result = run(sys.executable, str(script), cwd=script.parent.parent, check=False)
     try:
         evidence = json.loads(result.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
-        evidence = {"status": "unknown", "reason": "gate output unreadable"}
+        detail = (result.stderr.strip().splitlines() or ["no output"])[-1][:160]
+        evidence = {"status": "unknown", "reason": f"gate output unreadable: {detail}"}
     return result.returncode == 0 and evidence.get("status") == "clear", evidence
 
 
@@ -266,7 +270,7 @@ def install(repo, state):
         raise Stop(2, "no candidate: run `build` first")
     candidate, number = Path(candidate_info["path"]), candidate_info["build"]
     verify_candidate(candidate, number)
-    clear, evidence = gate(repo)
+    clear, evidence = gate()
     if not clear:
         state["deferred"] = {"at": now(), "reason": evidence.get("reason", "")}
         receipt(repo, state, deferred=evidence.get("reason", "busy"))
@@ -346,7 +350,18 @@ def receipt(repo, state, deferred=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     old = path.read_text() if path.exists() else "# Current working Whytap\n\n"
     head, sep, rest = old.partition("\n\n")
+    rest = drop_ready_sections(rest)  # a newer run supersedes every not-installed candidate
     path.write_text(head + "\n\n" + text + rest if sep else old + "\n" + text)
+
+
+def drop_ready_sections(text):
+    kept, skipping = [], False
+    for line in text.splitlines(keepends=True):
+        if line.startswith("## "):
+            skipping = line.startswith("## Ready, not installed — owner-local ")
+        if not skipping:
+            kept.append(line)
+    return "".join(kept)
 
 
 # ---------------------------------------------------------------- commands

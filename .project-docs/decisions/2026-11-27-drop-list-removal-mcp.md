@@ -49,7 +49,10 @@ PR 525 and PR 527), so only the MCP tools are kept.
   schema's 50 characters) removes nothing, wherever it is in the batch. The
   limit applies to the submitted string as JSON Schema counts it: code
   points, before trimming (50 spaces plus `x`, or 26 `e` with a combining
-  accent, is too long although it trims or renders shorter).
+  accent, is too long although it trims or renders shorter). One line is
+  checked on the submitted string too: `"Soniox\n"` is refused, not trimmed
+  into `Soniox` (release-batch inquisition, 2026-11-28). Add and remove share
+  this check (`AppControlDropLists.submittedTerm`).
   No `all`, no extra arguments, no way to clear a list.
 - External harnesses only. The built-in Agent (`NativeAgentAppControl`)
   neither lists nor dispatches them (`externalOnly`), and its copies of the

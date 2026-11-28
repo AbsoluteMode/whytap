@@ -52,15 +52,13 @@ struct AppControlDropLists {
         // Check the whole batch first: one invalid term removes nothing.
         for item in items {
             guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
-            // The advertised schema limit applies to the submitted string as
-            // JSON Schema counts it: code points, before trimming. Checked
-            // for the whole batch before anything changes.
-            guard text.unicodeScalars.count <= limit else {
-                return Self.rejected(text, "is longer than \(limit) characters", change: "removed")
+            let term: String
+            switch Self.submittedTerm(text, limit: limit, change: "removed",
+                                      tooLong: "is longer than \(limit) characters") {
+            case .term(let checked): term = checked
+            case .rejected(let response): return response
             }
-            let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !term.isEmpty else { return Self.rejected(term, "is empty", change: "removed") }
-            guard Self.oneLine(term) else { return Self.rejected(term, "is not one line", change: "removed") }
             // Both sides without surrounding spaces: a restored backup can
             // hold "  Word  ", and the editors show it as "Word".
             let same = { (other: String) in Self.key(other).caseInsensitiveCompare(term) == .orderedSame }
@@ -99,15 +97,13 @@ struct AppControlDropLists {
         // Check the whole batch first: one invalid term adds nothing.
         for item in items {
             guard let text = item.string else { return .failure("invalid_arguments", "Each term must be a string.") }
-            // The advertised schema limit applies to the submitted string as
-            // JSON Schema counts it: code points, before trimming. Checked
-            // for the whole batch before anything changes.
             let limit = vocab ? VocabularyCache.maxTermLength : FillerTermsStore.maxTermLength
-            guard text.unicodeScalars.count <= limit else {
-                return Self.rejected(text, "is longer than \(limit) characters; use a shorter form")
+            let term: String
+            switch Self.submittedTerm(text, limit: limit, change: "added",
+                                      tooLong: "is longer than \(limit) characters; use a shorter form") {
+            case .term(let checked): term = checked
+            case .rejected(let response): return response
             }
-            let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard Self.oneLine(term) else { return Self.rejected(term, "is not one line") }
             let reason: VocabularyRejectionReason?
             if vocab {
                 if case .rejected(let why) = VocabularyCache.validate(term, against: planned) { reason = why } else { reason = nil }
@@ -165,6 +161,23 @@ struct AppControlDropLists {
     /// One line: no line breaks or control characters. Format characters such
     /// as the zero-width non-joiner (U+200C) that Persian and other scripts
     /// need stay, as the stores and editors accept them.
+    enum SubmittedTerm {
+        case term(String)
+        case rejected(AppControlResponse)
+    }
+
+    /// Every add and remove checks the term as it was sent, before anything
+    /// is trimmed: the advertised schema limit in code points (as JSON Schema
+    /// counts them) and one line, so "Soniox\n" is refused rather than
+    /// trimmed into a valid term. Returns the term without surrounding
+    /// spaces. Called for the whole batch before anything changes.
+    static func submittedTerm(_ text: String, limit: Int, change: String, tooLong: String) -> SubmittedTerm {
+        guard text.unicodeScalars.count <= limit else { return .rejected(rejected(text, tooLong, change: change)) }
+        let term = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard oneLine(text) else { return .rejected(rejected(term, "is not one line", change: change)) }
+        return .term(term)
+    }
+
     static func oneLine(_ text: String) -> Bool {
         !text.unicodeScalars.contains { scalar in
             scalar.properties.generalCategory == .control || CharacterSet.newlines.contains(scalar)

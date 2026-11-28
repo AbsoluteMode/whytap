@@ -31,6 +31,24 @@ final class AppControlDropListsRemovalTests: XCTestCase {
         }
     }
 
+    /// A line break that only trimming would hide is still not one line:
+    /// the whole batch is refused and both lists stay exactly as they were,
+    /// for removal and addition alike.
+    func testATermEndingInALineBreakIsRefusedAndNothingChanges() {
+        for operation in ["vocab_remove", "filler_remove", "vocab_add", "filler_add"] {
+            vocabulary.setTerms(["Whytap", "Soniox"])
+            for term in fillers.terms() { fillers.remove(term) }
+            _ = fillers.add("um"); _ = fillers.add("uh")
+            let second: AppControlValue = operation.hasSuffix("_add") ? .string("Deepgram\n") : .string(operation.hasPrefix("vocab") ? "Soniox\n" : "uh\n")
+            let first: AppControlValue = operation.hasSuffix("_add") ? .string("Groq") : .string(operation.hasPrefix("vocab") ? "Whytap" : "um")
+            let response = remove(operation, [first, second])
+            XCTAssertFalse(response.ok, operation)
+            XCTAssertEqual(response.data.object?["code"], .string("invalid_term"), operation)
+            XCTAssertEqual(vocabulary.terms, ["Whytap", "Soniox"], operation)
+            XCTAssertEqual(fillers.terms(), ["um", "uh"], operation)
+        }
+    }
+
     func testRemovesNamedVocabEntriesInAnyCaseAndReportsTheSavedSpelling() {
         vocabulary.setTerms(["Whytap", "Soniox", "Deepgram"])
         let response = remove("vocab_remove", [.string("  whytap "), .string("SONIOX")])

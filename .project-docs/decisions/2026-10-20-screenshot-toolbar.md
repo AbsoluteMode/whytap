@@ -83,7 +83,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Screenshots/ScreenshotSelectionTests.swift
     confirmed_at: 2026-10-20
-related: [2026-10-26-first-launch-permissions.md, ../project.md, 2026-11-22-shot-single-permission-prompt.md, 2026-11-22-shot-hover-hints.md]
+related: [2026-10-26-first-launch-permissions.md, ../project.md, 2026-11-22-shot-single-permission-prompt.md, 2026-11-22-shot-hover-hints.md, 2026-11-28-shot-ocr-warmup.md]
 ---
 
 # Inline text amendment — 2026-10-29

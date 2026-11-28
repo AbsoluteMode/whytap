@@ -35,6 +35,30 @@ final class ScreenshotTextCopyTests: XCTestCase {
         XCTAssertNil(board.data(forType: .rtf))
     }
 
+    func testBackToBackCopiesReadDenseRetinaAndSmallMixedCrops() async throws {
+        let board = try board(); defer { board.releaseGlobally() }
+
+        let full = ScreenshotOCRFixture.full
+        let (fullSource, _) = try full.screenshot()
+        let fullCopy = await ScreenshotTextCopy.perform(source: fullSource, size: ScreenshotOCRFixture.displaySize,
+            annotations: [], crop: full.crop, pasteboard: board, isCurrent: { true })
+        XCTAssertEqual(fullCopy, .copied)
+        let fullText = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertTrue(fullText.contains("Build 4310"))
+        XCTAssertTrue(fullText.contains("Сборка"))
+        XCTAssertTrue(fullText.contains("Build 4411"))
+
+        let mixed = ScreenshotOCRFixture.mixed
+        let (mixedSource, _) = try mixed.screenshot()
+        let mixedCopy = await ScreenshotTextCopy.perform(source: mixedSource, size: ScreenshotOCRFixture.displaySize,
+            annotations: [], crop: mixed.crop, pasteboard: board, isCurrent: { true })
+        XCTAssertEqual(mixedCopy, .copied)
+        let mixedText = try XCTUnwrap(board.string(forType: .string))
+        XCTAssertTrue(mixedText.contains("Build 4310"))
+        XCTAssertTrue(mixedText.contains("Сборка 4311"))
+        XCTAssertFalse(mixedText.contains("Build 4411"))
+    }
+
     func testWriteFailureRestoresAllPreviousItemsAndFormats() async throws {
         let board = try board(); defer { board.releaseGlobally() }
         let previous = Pasteboard.snapshot(of: board), image = try fixture()
@@ -87,6 +111,7 @@ final class ScreenshotTextCopyTests: XCTestCase {
                 crop: CGRect(x: 0, y: 0, width: 40, height: 20), pasteboard: board,
                 recognize: { _ in
                     entered.fulfill(); release.wait()
+                    XCTAssertTrue(Task.isCancelled)
                     return "Late cancelled result"
                 }, isCurrent: { true })
         }

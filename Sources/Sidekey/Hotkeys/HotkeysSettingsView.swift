@@ -695,6 +695,7 @@ struct HotkeySettingRow: View {
             HStack(spacing: 6) {
                 ShortcutGestureSlot(
                     title: gestureTitle ?? gesture.title,
+                    rowTitle: title,
                     isSwitchable: allowsGestureSwitch,
                     hasConflict: hasConflict,
                     onTap: {
@@ -711,10 +712,24 @@ struct HotkeySettingRow: View {
                         .help("Press a shortcut, then release all keys. Escape cancels.")
                         .accessibilityLabel("Record shortcut for \(title)")
                 } else {
-                    ForEach(Array(visibleShortcutContents.enumerated()), id: \.offset) { _, content in
-                        ShortcutKeySlot(content: content, isRecording: isRecording,
-                                        hasConflict: hasConflict, onTap: onRecord)
+                    // One element per row's keys: each cap alone read
+                    // "Shortcut key", and the row label the stack used to
+                    // carry was copied onto the mode button too, so automation
+                    // found two "Drop voice shortcut" buttons and could press
+                    // neither. WHY: .project-docs/decisions/2026-11-28-agent-all-hotkeys.md
+                    HStack(spacing: 6) {
+                        ForEach(Array(visibleShortcutContents.enumerated()), id: \.offset) { _, content in
+                            ShortcutKeySlot(content: content, isRecording: isRecording,
+                                            hasConflict: hasConflict, onTap: onRecord)
+                        }
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(title) shortcut")
+                    .accessibilityValue(isRecording ? "Recording. Press a shortcut, then release all keys; Escape cancels."
+                                        : Self.spokenKeys(shortcutContents))
+                    .accessibilityHint("Records a new shortcut.")
+                    .accessibilityAddTraits(.isButton)
+                    .accessibilityAction { onRecord() }
                 }
                 if let onClear {
                     Button(action: onClear) {
@@ -726,7 +741,6 @@ struct HotkeySettingRow: View {
                     .accessibilityLabel("Remove shortcut for \(title)")
                 }
             }
-            .accessibilityLabel("\(title) shortcut")
         }
         .padding(.vertical, 10)
         .padding(.horizontal, 14)
@@ -736,6 +750,11 @@ struct HotkeySettingRow: View {
                 .strokeBorder(MacSettingsTheme.sepStrong, lineWidth: 0.5)
         )
         .clipShape(RoundedRectangle(cornerRadius: MacSettingsTheme.radiusCard, style: .continuous))
+    }
+
+    /// The keys as one phrase for VoiceOver and automation ("Option M").
+    static func spokenKeys(_ contents: [KeycapContent]) -> String {
+        contents.isEmpty ? "Not set" : contents.map(\.spokenName).joined(separator: " ")
     }
 
     private var visibleShortcutContents: [KeycapContent?] {
@@ -752,6 +771,8 @@ private struct ShortcutGestureSlot: View {
     /// responsible for mapping the model gesture to the desired display string
     /// via `HotkeysSettingsView.voiceGestureTitle(for:)` when needed.
     let title: String
+    /// The row's action, so each row's mode button has its own name.
+    let rowTitle: String
     let isSwitchable: Bool
     let hasConflict: Bool
     let onTap: () -> Void
@@ -767,7 +788,9 @@ private struct ShortcutGestureSlot: View {
         }
         .buttonStyle(.plain)
         .disabled(!isSwitchable)
-        .accessibilityLabel(isSwitchable ? "Switch gesture" : "\(title) gesture")
+        .accessibilityLabel("\(rowTitle) mode")
+        .accessibilityValue(title)
+        .accessibilityHint(isSwitchable ? "Switches between Hold and Toggle." : "")
     }
 
     private var slotBackground: some View {

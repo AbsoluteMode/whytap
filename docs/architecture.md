@@ -2355,6 +2355,21 @@ only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
 or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+Every hotkey (Agent and `whytap mcp`, AppControlHotkeys): whytap_hotkeys_get
+lists each Settings → Hotkeys row (dropVoice, agentText, agentVoice,
+googleText, googleVoice, meetingRecord, linkInsert/Open/Next/Previous,
+agentClose), every tool as tool.<id> and the fixed Help ⌥H / Escape close,
+with keys, display, mode (hold/toggle for voice, tap otherwise), allowed
+modes, changeable, clearable and default. whytap_hotkey_set with hotkey sets
+keys and/or mode or reset: FeatureHotkey.assign/setGesture (the Features
+screen's rules: Space is Drop's alone and forces Hold) saved through
+HotkeyPreferences.apply, so the conflict model and the monitors' published
+observers are the Settings ones and the change is live at once. Written keys:
+a ⌃/⌥ combo, a bare F1–F20, right_command/right_option alone, space (Drop);
+⌘/⇧-only combos and bare typing keys stay with the Settings recorder. Only
+tool hotkeys clear; a refused or conflicting change saves nothing. Agent line
+"Hotkey: Drop voice — Space · Hold". WHY:
+.project-docs/decisions/2026-11-28-agent-all-hotkeys.md
 Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 (whytap_vocab_add, VocabularyCache.add/validate) and Filler
 (whytap_filler_add, FillerTermsStore.add/validate), 1–20 entries each, the

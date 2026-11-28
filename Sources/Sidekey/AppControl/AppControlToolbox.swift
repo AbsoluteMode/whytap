@@ -10,7 +10,7 @@ import WhytapCaseKit
 // WHY: .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
 @MainActor
 struct AppControlToolbox {
-    static let operations: Set<String> = ["toolbox_get", "toolbox_set", "hotkey_set"]
+    static let operations: Set<String> = ["toolbox_get", "toolbox_set", "hotkeys_get", "hotkey_set"]
     static let writes: Set<String> = ["toolbox_set", "hotkey_set"]
 
     let layout: () -> HoverLayoutStore
@@ -23,6 +23,11 @@ struct AppControlToolbox {
             return .success(.object(["pinned": pinnedValue,
                                      "tools": .array(HoverTool.allCases.map(toolValue))]))
         case "toolbox_set": return place(args)
+        // Every other hotkey (Drop, Agent, Google, meeting record, links,
+        // Agent close) by `hotkey` id. WHY: .project-docs/decisions/2026-11-28-agent-all-hotkeys.md
+        case "hotkeys_get": return AppControlHotkeys(hotkeys: hotkeys).list(args)
+        case "hotkey_set" where args["hotkey"] != nil:
+            return AppControlHotkeys(hotkeys: hotkeys).set(args, tool: assign)
         case "hotkey_set": return assign(args)
         default: return .failure("unknown_operation", "Unknown application-control operation.")
         }
@@ -139,7 +144,8 @@ struct AppControlToolbox {
     static func keysValue(_ shortcut: HotkeyShortcut?) -> AppControlValue {
         switch shortcut {
         case .combo(let combo)?: return .string(WhytapLink.linkKeys(for: combo))
-        case .modifier(let key)?: return .string(key.rawValue)
+        case .modifier(.rightCommand)?: return .string("right_command")
+        case .modifier(.rightOption)?: return .string("right_option")
         case .holdSpace?: return .string("space")
         case nil: return .null
         }

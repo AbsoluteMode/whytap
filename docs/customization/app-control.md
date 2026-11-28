@@ -23,8 +23,10 @@ that the installed application or a host's plugin connection has been updated.
 - Settings and model tools need Whytap running; To-do works while Whytap is
   closed. Island tools and their hotkeys (`whytap_toolbox_*`,
   `whytap_hotkey_set`) come with the next version after 2.2.26, and so do
-  `whytap_vocab_add` and `whytap_filler_add`; they need Whytap running and,
-  from a coding tool, the same one-time Yes as meetings.
+  `whytap_vocab_add` and `whytap_filler_add`; they need Whytap running.
+  `whytap_vocab_add` and `whytap_filler_add` also need, from a coding tool,
+  the same one-time Yes as meetings; island tools and hotkeys
+  (`whytap_hotkeys_get` came later) do not, like settings and models.
 - Meetings are recognized only when Claude Code or Codex started the server
   itself (the helper's direct parent, checked by Apple-vouched signature). A
   new Codex user can use meetings after the Yes but not Case.
@@ -64,7 +66,8 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated (needs the Yes) |
 | `whytap_filler_add` | — | Add words Drop removes from dictation (Filler; needs the Yes) |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
-| `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
+| `whytap_hotkeys_get` | — | Every hotkey: Drop (dictation), Agent, Google search, meeting recording, link keys, Agent close, each tool, fixed keys; keys, mode, allowed modes, default |
+| `whytap_hotkey_set` | — | Change one hotkey's keys and/or Hold or Toggle mode, or reset it; assign or clear a tool's hotkey; as Settings → Hotkeys |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
 | `whytap_todo_update` | `whytap todo set/done/reopen` | Edit title, status, parent or completion of one task (closing cascades to subtasks) |
 | `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
@@ -132,9 +135,65 @@ the nearest free keys (the same key with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or ⌃). An
 that types a character in text fields (⌥F is ƒ on US) is assigned and the
 reply's `typesInTextFields` names that character; the Hotkeys pane,
 Help and the registered shortcut update at once. A repeated identical request
-answers `changed: false`. Unknown tool ids answer `unknown_tool`. Keys, permissions, security controls,
+answers `changed: false`. Unknown tool ids answer `unknown_tool`. Provider keys, permissions, security controls,
 Case contents, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
+
+## Every hotkey
+
+`whytap_hotkeys_get` returns `hotkeys`: every Settings → Hotkeys row, every
+tool and the fixed global keys. Each has `id`, `title`, `does`, `keys`,
+`display`, `mode`, `modes`, `changeable`, `clearable`, `default`
+(`{keys, display, mode}`) and sometimes `note`.
+
+| id | Settings row | Default |
+| --- | --- | --- |
+| `dropVoice` | Drop voice (dictation) | `space`, hold |
+| `agentText` / `agentVoice` | Agent text / voice | `right_command`, tap / hold |
+| `googleText` / `googleVoice` | Google text / voice | `right_option`, tap / hold |
+| `meetingRecord` | Meeting record | `option+m` |
+| `linkInsert`, `linkOpen`, `linkNext`, `linkPrevious` | Links insert / open / next / previous | ← → ↓ ↑ |
+| `agentClose` | Agent close | `option+q` |
+| `tool.<tool id>` | Tools | none |
+| `help`, `answerEscape` | — (fixed: ⌥H, Esc) | not changeable |
+
+`mode` is `hold` or `toggle` for the voice rows (Drop, Agent voice, Google
+voice; Settings shows Hold / Toggle) and `tap` for the rest. `modes` is what
+the row accepts now: on Space only `hold`. Keys a Whytap window takes only
+while it is open (screenshot editor, Case prompt, History) are not listed.
+
+`whytap_hotkey_set` with `hotkey` takes `keys` (optional), `mode` (optional),
+or `reset: true` (default keys and mode), and `expected`, the row's current
+`keys`. "Put dictation back on hold Space" is
+`{"hotkey":"dropVoice","keys":"space","mode":"hold","expected":"`"}`.
+It makes the change Settings → Features makes for that row
+(`FeatureHotkey.assign` / `setGesture`) and saves it through
+`HotkeyPreferences.apply`, the Hotkeys Save path: the monitors re-register at
+once and Settings, Help and the island hints follow. Rules:
+
+- Keys are written, not pressed: a combo with Control or Option
+  (`option+m`, `control+command+d`), a bare `f1`–`f20`, `right_command` or
+  `right_option` alone, or `space` (Drop only). Other keys answer
+  `invalid_hotkey`; Command- or Shift-only combos and bare typing keys
+  (`` ` ``, letters) can be recorded only in Settings, so a misread request
+  cannot take ⌘C or a letter from every app.
+- Space is Drop's alone (`hotkey_not_allowed` elsewhere) and hold-only:
+  `space` sets Hold, and Toggle on Space is `invalid_mode`. Other keys keep the
+  current mode unless `mode` is given. One-shot rows accept only `tap`.
+- One physical key = one action: keys or a mode another action uses (⌥M is
+  Meeting record; Toggle on Right ⌘ is Agent text's tap) answer
+  `hotkey_conflict`, naming that action and the nearest free keys. Nothing is
+  taken over.
+- Only tool hotkeys clear (`keys: null`); other rows answer `not_clearable`.
+  `help` and `answerEscape` answer `hotkey_not_allowed`; unknown ids answer
+  `unknown_hotkey`; stale `expected` answers `conflict`. A repeated request
+  answers `changed: false`.
+- The reply has `hotkey` (the row as `whytap_hotkeys_get` lists it), `keys`
+  (`{keys, display}`), `mode`, `previous` (`{keys, mode}`) and `changed`; the
+  built-in Agent shows `Hotkey: Drop voice — Space · Hold`.
+
+`hotkey: "tool.<id>"` is the same as `tool` with the island-tool rules above;
+`reset: true` clears it.
 
 ## Meetings and access
 

@@ -363,6 +363,19 @@ dialog: the request itself is the user's, and the Agent shows
 and change nothing. Guide: [application control](customization/app-control.md).
 WHY: [Island tools and hotkeys](../.project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md).
 
+Every other hotkey is reachable the same way: `whytap_hotkeys_get` lists
+Drop (dictation), the Agent, Google search, meeting recording, the answer's
+link keys, Agent close and each tool with keys, Hold/Toggle mode, allowed
+modes and default; `whytap_hotkey_set` with a `hotkey` id changes keys and/or
+mode or resets it. It applies the row's rules from Settings → Features
+(`FeatureHotkey.assign` / `setGesture`: Space is Drop's alone and hold-only)
+and saves through `HotkeyPreferences.apply`, so the conflict model above and
+the live re-registration are the Settings ones. A model writes keys, it does
+not press them: ⌃/⌥ combos, a bare F1–F20, Right ⌘ or Right ⌥ alone, and
+Space for Drop. ⌘- or ⇧-only combos and bare typing keys (`` ` ``, letters)
+stay with the Settings recorder. Only tool hotkeys can be cleared. WHY:
+[Every hotkey from the Agent](../.project-docs/decisions/2026-11-28-agent-all-hotkeys.md).
+
 ## Meeting-record hotkey
 
 Manual Meeting Notes recording has a configurable global hotkey (default

@@ -2355,14 +2355,38 @@ only suggests the tool with its current hotkey ("Press ⌥S — that's Shot"),
 or the hover/search and an offer to set one; never ⇧⌘3/⇧⌘4 or
 capture_screen for a screenshot; no operation opens or starts a tool. WHY:
 .project-docs/decisions/2026-11-22-agent-toolbox-hotkeys.md
+Every hotkey (Agent and `whytap mcp`, AppControlHotkeys): whytap_hotkeys_get
+lists each Settings → Hotkeys row (dropVoice, agentText, agentVoice,
+googleText, googleVoice, meetingRecord, linkInsert/Open/Next/Previous,
+agentClose), every tool as tool.<id> and the fixed Help ⌥H / Escape close,
+with keys, display, mode (hold/toggle for voice, tap otherwise), allowed
+modes, canChange, clearable and default. whytap_hotkey_set with hotkey sets
+keys and/or mode, clears a tool or resets: it parses exactly what the
+recorder records (any modifiers or none + one key, right_command/right_option
+alone, space alone for Drop), applies FeatureHotkey.assign/setGesture (Space
+is Drop's alone and forces Hold) and saves through HotkeyPreferences.apply,
+so the conflict model and the monitors' published observers are the Settings
+ones and the change is live at once. No agent-only key rule: replies carry
+bound, previous, a one-call undo and a takenEverywhere line for keys taken
+from other apps (a hold Drop on a bare key still types on a quick press). The
+older tool form keeps the ⌃/⌥ link rule. WHY:
+.project-docs/decisions/2026-11-28-agent-all-hotkeys.md
 Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 (whytap_vocab_add, VocabularyCache.add/validate) and Filler
 (whytap_filler_add, FillerTermsStore.add/validate), 1–20 entries each, the
 editors' own stores and rules; open editors reload from the stores'
 notifications and every take reads the lists. One invalid entry adds nothing
 (line breaks and control characters are refused, joiners like U+200C pass);
-an existing entry is reported in its saved form, never rewritten. No read or
-removal, no per-route promise (each route sends what its model supports).
+an existing entry is reported in its saved form, never rewritten.
+whytap_vocab_remove and whytap_filler_remove take 1–20 named entries out
+through the stores' remove (any letter case, request and saved entries both
+trimmed): removed with the saved spelling, missing when not there (no error),
+at most 50 characters each checked before any change, confirmed against the
+whole saved list, no way to clear a list; they alone carry destructiveHint.
+They are for external harnesses only: NativeAgentAppControl.externalOnly
+keeps them out of the built-in Agent's catalog and dispatch. WHY:
+.project-docs/decisions/2026-11-27-drop-list-removal-mcp.md No read, no
+per-route promise (each route sends what its model supports).
 External harnesses need HarnessAccessGate's Yes (gatedOperations), with
 HarnessConsent rechecked right before the write; the built-in Agent adds what
 the current request names. App-owned change lines are escaped as Markdown

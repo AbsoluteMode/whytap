@@ -23,8 +23,10 @@ that the installed application or a host's plugin connection has been updated.
 - Settings and model tools need Whytap running; To-do works while Whytap is
   closed. Island tools and their hotkeys (`whytap_toolbox_*`,
   `whytap_hotkey_set`) come with the next version after 2.2.26, and so do
-  `whytap_vocab_add` and `whytap_filler_add`; they need Whytap running and,
-  from a coding tool, the same one-time Yes as meetings.
+  `whytap_vocab_add` and `whytap_filler_add`; they need Whytap running.
+  `whytap_vocab_add` and `whytap_filler_add` also need, from a coding tool,
+  the same one-time Yes as meetings; island tools and hotkeys
+  (`whytap_hotkeys_get` came later) do not, like settings and models.
 - Meetings are recognized only when Claude Code or Codex started the server
   itself (the helper's direct parent, checked by Apple-vouched signature). A
   new Codex user can use meetings after the Yes but not Case.
@@ -63,8 +65,11 @@ set up with them. Other clients can invoke the CLI directly:
 | `whytap_toolbox_get` | — | The island's tools in order and every tool with its hotkey |
 | `whytap_vocab_add` | — | Add words to Vocab for dictation; existing words are reported, not duplicated (needs the Yes) |
 | `whytap_filler_add` | — | Add words Drop removes from dictation (Filler; needs the Yes) |
+| `whytap_vocab_remove` | — | Coding tools only (not the built-in Agent): remove named Vocab entries (needs the Yes) |
+| `whytap_filler_remove` | — | Coding tools only (not the built-in Agent): remove named Filler entries so Drop keeps them (needs the Yes) |
 | `whytap_toolbox_set` | — | Show a tool in the island (optionally at a place) or remove it, as Settings → Toolbox |
-| `whytap_hotkey_set` | — | Assign, change or clear one tool's hotkey, as Settings → Hotkeys → Tools |
+| `whytap_hotkeys_get` | — | Every hotkey: Drop (dictation), Agent, Google search, meeting recording, link keys, Agent close, each tool, fixed keys; keys, mode, allowed modes, default |
+| `whytap_hotkey_set` | — | Change one hotkey's keys and/or Hold or Toggle mode, or reset it; assign or clear a tool's hotkey; as Settings → Hotkeys |
 | `whytap_todo_add` | `whytap todo add` | Add a batch or a tree of To-do tasks (statuses, parentID); confirms what was saved, retry-safe |
 | `whytap_todo_update` | `whytap todo set/done/reopen` | Edit title, status, parent or completion of one task (closing cascades to subtasks) |
 | `whytap_todo_list` | `whytap todo list` | List To-do tasks (active unless `includeCompleted`) |
@@ -84,8 +89,8 @@ no arbitrary UserDefaults operation.
 
 These are Drop's hand-filled lists, the ones the island's Vocab and Filler
 editors fill. Each operation adds through that list's own store and checks,
-so an open editor shows the entry and the next dictation reads it. Neither
-reads a list back or removes an entry; remove entries in the island. An
+so an open editor shows the entry and the next dictation reads it. Nothing
+reads a list back. An
 entry already there is reported and left as it is, so a retry is safe. One
 invalid entry (empty, too long, a line break or control character) adds
 nothing (`invalid_term`); joiners such as the Persian zero-width non-joiner
@@ -104,6 +109,18 @@ shows `Vocab + whytap` above its answer, with the spelling exactly as saved.
 holds 100): words Drop removes from dictation, Fast and Smart (`um`, `ну`).
 When removing them would leave a Fast take empty, Drop pastes the take
 unfiltered. The Agent shows `Filler + ну`.
+
+`whytap_vocab_remove` and `whytap_filler_remove` take `terms` (1–20) and
+remove exactly those entries, matched in any letter case and without
+surrounding spaces on either side (a restored backup can hold `"  Word  "`).
+A removed entry comes back as `removed` with its saved spelling, trimmed; a
+term that is not in the list is `missing`, which changes nothing and is not
+an error. One invalid entry (empty, more than one line or longer than 50
+characters) removes nothing, and there is no way to clear a whole list.
+Only Claude Code, Codex and other connected coding tools get them; the
+built-in Agent can add entries but not remove them. `whytap_filler_remove` makes Drop keep a word
+again; to cut a word from dictation use `whytap_filler_add`. Coding tools
+need the same one-time Yes.
 
 There is no Replace list: it came with Drop learning, which was shelved on
 2026-11-23.
@@ -132,9 +149,89 @@ the nearest free keys (the same key with ⌥, ⌥⇧, ⌃⌥, ⌃⇧ or ⌃). An
 that types a character in text fields (⌥F is ƒ on US) is assigned and the
 reply's `typesInTextFields` names that character; the Hotkeys pane,
 Help and the registered shortcut update at once. A repeated identical request
-answers `changed: false`. Unknown tool ids answer `unknown_tool`. Keys, permissions, security controls,
+answers `changed: false`. Unknown tool ids answer `unknown_tool`. Provider keys, permissions, security controls,
 Case contents, history, clipboard, recording, shell execution,
 installation and quit are outside the application-control server.
+
+## Every hotkey
+
+`whytap_hotkeys_get` returns `hotkeys`: every Settings → Hotkeys row, every
+tool and the fixed global keys, and `keysAccepted`, the keys
+`whytap_hotkey_set` takes. Each hotkey has `id`, `title`, `does`, `keys`,
+`display`, `mode`, `modes`, `canChange`, `clearable`, `default`
+(`{keys, display, mode}`) and sometimes `note`.
+
+| id | Settings row | Default |
+| --- | --- | --- |
+| `dropVoice` | Drop voice (dictation) | `space`, hold |
+| `agentText` / `agentVoice` | Agent text / voice | `right_command`, tap / hold |
+| `googleText` / `googleVoice` | Google text / voice | `right_option`, tap / hold |
+| `meetingRecord` | Meeting record | `option+m` |
+| `linkInsert`, `linkOpen`, `linkNext`, `linkPrevious` | Links insert / open / next / previous | `left`, `right`, `down`, `up` |
+| `agentClose` | Agent close | `option+q` |
+| `tool.<tool id>` | Tools | none |
+| `help`, `answerEscape` | — (fixed: ⌥H, Esc) | `canChange: false` |
+
+`mode` is `hold` or `toggle` for the voice rows (Drop, Agent voice, Google
+voice; Settings shows Hold / Toggle) and `tap` for the rest. `modes` is what
+the row accepts now: on Space only `hold`. Keys a Whytap window takes only
+while it is open (screenshot editor, Case prompt, History) are not listed.
+
+`whytap_hotkey_set` with `hotkey` takes `keys` (optional), `mode` (optional),
+`keys: null` (tools only) or `reset: true` (default keys and mode), and
+`expected`, the current `keys`. "Put dictation back on hold Space" is
+`{"hotkey":"dropVoice","keys":"space","mode":"hold","expected":"`"}`;
+"set Drop to `" is `{"hotkey":"dropVoice","keys":"`","expected":"space"}`
+(the mode stays Hold unless `mode` says `toggle`).
+
+It accepts exactly what the Settings recorder accepts for that row and makes
+the change Settings → Features makes (`FeatureHotkey.assign` /
+`setGesture`), saved through `HotkeyPreferences.apply`, the Hotkeys Save
+path: the monitors re-register at once and Settings, Help and the island
+hints follow. There is no rule for the agent that Settings does not have.
+
+- Keys are written as the recorder would record them: any modifiers
+  (`control`, `option`, `shift`, `command`, or none) then one key, joined by
+  `+`: letters, digits, US punctuation (`` ` ``, `-`, `/`…), `f1`–`f20`,
+  `space`, `tab`, `delete`, `forward delete`, `home`, `end`, `page up`,
+  `page down`, `left`/`right`/`up`/`down`; or `right_command` /
+  `right_option` alone. Escape and Return cannot be recorded
+  (`invalid_hotkey`), as in Settings.
+- Space alone is Drop's (`hotkey_not_allowed` elsewhere) and hold-only:
+  Toggle on Space is `invalid_mode`. Space with a modifier is an ordinary
+  combination. Other keys keep the current mode unless `mode` is given;
+  one-shot rows accept only `tap`.
+- One physical key = one action: keys or a mode another action uses (⌥M is
+  Meeting record, ← is Links insert, Toggle on Right ⌘ is Agent text's tap)
+  answer `hotkey_conflict`, naming that action and the nearest free keys.
+  Nothing is taken over.
+- Only tool hotkeys clear; other rows answer `not_clearable`. `help` and
+  `answerEscape` answer `hotkey_not_allowed`; unknown ids answer
+  `unknown_hotkey`; stale `expected` answers `conflict`. A repeated request
+  answers `changed: false`.
+
+A mistaken request is cheap to undo rather than forbidden. The reply has
+`bound` ("Drop voice is Hold `."), `keys` (`{keys, display}`), `mode`,
+`previous` (`{keys, display, mode}`), `undo` (the `whytap_hotkey_set`
+arguments that put the previous keys and mode back in one call) and
+`changed`. When the new keys take something from other apps, `takenEverywhere`
+says so in one line for the agent to tell the user:
+
+- Hold Drop on a bare key keeps typing (`SpaceHoldMonitor` passes the key
+  through and erases it when the hold arms): "A quick press of ` still types
+  “`”; holding it about 0.3 s in a text field starts dictation and erases the
+  typed “`”."
+- Any other bare typing key, Tab or Delete is grabbed globally (Carbon): "` is
+  now taken by Whytap in every app: it no longer types “`” there." Agent close
+  and the link keys say "while an Agent answer is on screen" instead.
+- Shift-only and Command(+Shift) combinations: "⇧⌘D is now taken by Whytap in
+  every app: apps or macOS that use ⇧⌘D no longer get it." An Option
+  combination that types a character also has `typesInTextFields`.
+
+The older form with `tool` instead of `hotkey` keeps its Control-or-Option
+rule above for existing callers; its refusals point to `hotkey: "tool.<id>"`,
+which takes any key Settings accepts for a tool (Quit and coming-soon tools
+included, as in Settings → Hotkeys → Tools).
 
 ## Meetings and access
 

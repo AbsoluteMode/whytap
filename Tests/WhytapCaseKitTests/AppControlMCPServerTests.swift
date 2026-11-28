@@ -135,14 +135,38 @@ final class AppControlMCPServerTests: XCTestCase {
         let tools = try JSONDecoder().decode(AppControlValue.self, from: Data(listing.utf8))
             .object?["result"]?.object?["tools"]?.array?.compactMap(\.object) ?? []
         for (name, required) in [("whytap_toolbox_get", [String]()), ("whytap_toolbox_set", ["tool", "pinned", "expected"]),
-                                 ("whytap_hotkey_set", ["tool", "keys", "expected"])] {
+                                 ("whytap_hotkeys_get", [String]()), ("whytap_hotkey_set", ["expected"])] {
             let tool = try XCTUnwrap(tools.first { $0["name"] == .string(name) }, name)
             XCTAssertEqual(tool["inputSchema"]?.object?["required"], .array(required.map(AppControlValue.string)), name)
-            XCTAssertEqual(tool["annotations"]?.object?["readOnlyHint"], .bool(name == "whytap_toolbox_get"), name)
+            XCTAssertEqual(tool["annotations"]?.object?["readOnlyHint"],
+                           .bool(["whytap_toolbox_get", "whytap_hotkeys_get"].contains(name)), name)
         }
+        let set = try XCTUnwrap(tools.first { $0["name"] == .string("whytap_hotkey_set") })
+        let properties = set["inputSchema"]?.object?["properties"]?.object ?? [:]
+        XCTAssertEqual(Set(properties.keys), ["hotkey", "tool", "keys", "mode", "reset", "expected"])
+        XCTAssertTrue(set["description"]?.string?.contains("{hotkey: dropVoice, keys: space, mode: hold}") == true)
+        XCTAssertTrue(set["description"]?.string?.contains(#"{hotkey: dropVoice, keys: "`"}"#) == true)
+        XCTAssertFalse(set["description"]?.string?.contains("bare typing keys are refused") == true)
+        XCTAssertTrue(AppControlMCPServer.appInstructions.contains("bare keys such as ` and Command shortcuts included"))
         let arguments: AppControlValue = .object(["tool": .string("screenshot"), "keys": .string("option+s"), "expected": .null])
         XCTAssertEqual(try toolCall(server, "whytap_hotkey_set", arguments)["isError"], .bool(false))
         XCTAssertEqual(sent, [AppControlRequest("hotkey_set", arguments: arguments.object!)])
+        let drop: AppControlValue = .object(["hotkey": .string("dropVoice"), "keys": .string("space"),
+                                             "mode": .string("hold"), "expected": .string("`")])
+        XCTAssertEqual(try toolCall(server, "whytap_hotkey_set", drop)["isError"], .bool(false))
+        XCTAssertEqual(try toolCall(server, "whytap_hotkeys_get", .object([:]))["isError"], .bool(false))
+        XCTAssertEqual(sent.suffix(2), [AppControlRequest("hotkey_set", arguments: drop.object!),
+                                        AppControlRequest("hotkeys_get", arguments: [:])])
+    }
+
+    /// Whytap closed: a hotkey change is not confirmed and nothing claims it was.
+    func test_hotkey_change_without_the_running_app_is_unavailable() throws {
+        let server = AppControlMCPServer(call: AppControlCommand(client: TodoClient(running: false)).call)
+        let result = try toolCall(server, "whytap_hotkey_set", .object(["hotkey": .string("dropVoice"), "keys": .string("space"),
+                                                                       "expected": .string("`")]))
+        XCTAssertEqual(result["isError"], .bool(true))
+        let text = result["content"]?.array?.first?.object?["text"]?.string ?? ""
+        XCTAssertTrue(text.contains("unavailable"), text)
     }
 
     // MARK: Dictation lists
@@ -152,7 +176,17 @@ final class AppControlMCPServerTests: XCTestCase {
         let names = tools.compactMap { $0["name"]?.string }
         XCTAssertTrue(names.contains("whytap_vocab_add") && names.contains("whytap_filler_add"))
         XCTAssertFalse(names.contains("whytap_replace_add"), "Replace left the app with Drop learning")
-        for name in ["whytap_vocab_add", "whytap_filler_add"] {
+        for name in ["whytap_vocab_remove", "whytap_filler_remove"] {
+            let tool = try XCTUnwrap(tools.first { $0["name"] == .string(name) })
+            XCTAssertEqual(tool["annotations"]?.object?["destructiveHint"], .bool(true), name)
+            XCTAssertEqual(tool["annotations"]?.object?["readOnlyHint"], .bool(false), name)
+            XCTAssertTrue(tool["description"]?.string?.contains("reported as missing") == true, name)
+        }
+        XCTAssertEqual(tools.filter { $0["annotations"]?.object?["destructiveHint"] == .bool(true) }.compactMap { $0["name"]?.string }.sorted(),
+                       ["whytap_filler_remove", "whytap_vocab_remove"], "nothing else deletes")
+        XCTAssertTrue(tools.first { $0["name"] == .string("whytap_filler_remove") }?["description"]?.string?
+            .contains("that is whytap_filler_add") == true, "which of the two a word to cut needs")
+        for name in ["whytap_vocab_add", "whytap_filler_add", "whytap_vocab_remove", "whytap_filler_remove"] {
             let description = try XCTUnwrap(tools.first { $0["name"] == .string(name) }?["description"]?.string)
             XCTAssertTrue(description.contains("Needs the user's one-time Yes for this harness"), name)
             XCTAssertFalse(description.contains("sentByCurrentDrop"), name)

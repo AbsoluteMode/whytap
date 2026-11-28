@@ -153,6 +153,11 @@ final class AppState: ObservableObject {
     /// stays latched.
     @Published var programmaticHoverExpansion: Bool = false
 
+    /// A tap on a touch display started an island touch session
+    /// (`IslandTouchSession`): a drawer it opened stays open without hover
+    /// until the session ends, so the ⌥N auto-collapse timer leaves it alone.
+    @Published var islandTouchSessionActive: Bool = false
+
     /// One-shot request from a Hover-slot hotkey to open a specific inline
     /// sub-panel (for `.inlinePanel` tools). `IslandView` observes this, maps it
     /// onto its private panel-mode state, then the request is cleared. `nil`

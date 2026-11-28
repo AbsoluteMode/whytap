@@ -9,6 +9,21 @@ struct IslandScreenDescriptor: Equatable {
     let safeAreaTopInset: CGFloat
     let auxiliaryTopLeftArea: NSRect?
     let auxiliaryTopRightArea: NSRect?
+    /// The Mac's own display (not an external monitor or Sidecar iPad).
+    let isBuiltIn: Bool
+    /// `NSScreen.touchCapabilities` reports touch (macOS 27).
+    let isTouchCapable: Bool
+    /// Resolved placement: the island sits beside the system Dynamic Island
+    /// instead of around the camera. Set by `IslandScreenResolver` from the
+    /// user's choice and `IslandSystemIslandPolicy`; false for raw screens.
+    let besideSystemIsland: Bool
+    /// Width kept free for the system island, centered on the camera.
+    let systemIslandReservedWidth: CGFloat
+    /// The island on this screen gets touch targets: it reports touch and the
+    /// report is not Apple's Sidecar caveat. Set by `IslandScreenResolver`;
+    /// false for raw screens. WHY:
+    /// .project-docs/decisions/2026-11-22-island-touch-tap.md
+    let acceptsTouchInput: Bool
 
     init(
         uuid: String?,
@@ -16,8 +31,18 @@ struct IslandScreenDescriptor: Equatable {
         visibleFrame: NSRect,
         safeAreaTopInset: CGFloat,
         auxiliaryTopLeftArea: NSRect?,
-        auxiliaryTopRightArea: NSRect?
+        auxiliaryTopRightArea: NSRect?,
+        isBuiltIn: Bool = false,
+        isTouchCapable: Bool = false,
+        besideSystemIsland: Bool = false,
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
+        acceptsTouchInput: Bool = false
     ) {
+        self.acceptsTouchInput = acceptsTouchInput
+        self.isBuiltIn = isBuiltIn
+        self.isTouchCapable = isTouchCapable
+        self.besideSystemIsland = besideSystemIsland
+        self.systemIslandReservedWidth = systemIslandReservedWidth
         self.uuid = uuid
         self.frame = frame
         self.visibleFrame = visibleFrame
@@ -38,12 +63,39 @@ struct IslandScreenDescriptor: Equatable {
             visibleFrame: screen.visibleFrame,
             safeAreaTopInset: screen.safeAreaInsets.top,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: screen.auxiliaryTopRightArea
+            auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
+            isBuiltIn: screen.sidekeyIsBuiltIn,
+            isTouchCapable: screen.sidekeyIsTouchCapable
         )
     }
 
     var hasRealNotch: Bool {
         IslandFrameLayout.notchMetrics(on: self).isRealNotch
+    }
+
+    /// A built-in touch display: the MacBook Pro whose camera area holds the
+    /// system Dynamic Island. Used only to rank screens; placement is decided
+    /// by `IslandSystemIslandPolicy`.
+    var isBuiltInTouchDisplay: Bool { isBuiltIn && isTouchCapable }
+
+    func placing(
+        besideSystemIsland: Bool,
+        reservedWidth: CGFloat,
+        acceptsTouchInput: Bool = false
+    ) -> IslandScreenDescriptor {
+        IslandScreenDescriptor(
+            uuid: uuid,
+            frame: frame,
+            visibleFrame: visibleFrame,
+            safeAreaTopInset: safeAreaTopInset,
+            auxiliaryTopLeftArea: auxiliaryTopLeftArea,
+            auxiliaryTopRightArea: auxiliaryTopRightArea,
+            isBuiltIn: isBuiltIn,
+            isTouchCapable: isTouchCapable,
+            besideSystemIsland: besideSystemIsland,
+            systemIslandReservedWidth: reservedWidth,
+            acceptsTouchInput: acceptsTouchInput
+        )
     }
 }
 
@@ -134,6 +186,28 @@ enum IslandScreenResolver {
     /// docs/decisions/2026-07-07-island-display-selection-not-nsscreen-main.md
     static func selectDescriptor(
         preferredUUID: String?,
+        descriptors: [IslandScreenDescriptor],
+        placement: IslandSystemIslandPlacement,
+        reservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
+    ) -> IslandScreenDescriptor {
+        let selected = selectDescriptor(preferredUUID: preferredUUID, descriptors: descriptors)
+        return selected.placing(
+            besideSystemIsland: IslandSystemIslandPolicy.placesBesideSystemIsland(
+                placement: placement,
+                screen: selected,
+                allScreens: descriptors
+            ),
+            reservedWidth: reservedWidth,
+            acceptsTouchInput: IslandTouchRouting.acceptsTouch(
+                screenReportsTouch: selected.isTouchCapable,
+                allScreensReportTouch: descriptors.allSatisfy(\.isTouchCapable),
+                screenCount: descriptors.count
+            )
+        )
+    }
+
+    static func selectDescriptor(
+        preferredUUID: String?,
         descriptors: [IslandScreenDescriptor]
     ) -> IslandScreenDescriptor {
         let normalizedPreferred = preferredUUID?
@@ -149,6 +223,15 @@ enum IslandScreenResolver {
 
         if let notched = descriptors.first(where: \.hasRealNotch) {
             return notched
+        }
+
+        // A touch MacBook may report no camera housing at all; its own
+        // display still holds the camera, so it wins over the primary one.
+        if
+            !IslandSystemIslandPolicy.touchReportIsAmbiguous(allScreens: descriptors),
+            let builtInTouch = descriptors.first(where: \.isBuiltInTouchDisplay)
+        {
+            return builtInTouch
         }
 
         if let primary = descriptors.first(where: { $0.frame.contains(NSPoint.zero) }) {
@@ -223,7 +306,9 @@ final class IslandScreenCache {
     func selectedDescriptor(preferredUUID: String?) -> IslandScreenDescriptor {
         IslandScreenResolver.selectDescriptor(
             preferredUUID: preferredUUID,
-            descriptors: descriptors
+            descriptors: descriptors,
+            placement: IslandSystemIslandPlacement.current(),
+            reservedWidth: IslandSystemIslandPlacement.reservedWidth()
         )
     }
 }

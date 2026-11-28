@@ -25,6 +25,40 @@ window belongs to the app's ordinary surfaces, with the serif headline as
 the one thing shared with the first launch. See
 `.project-docs/decisions/2026-11-24-whats-new-window.md`.
 
+## Island by touch — 2026-11-22
+
+- On a touch display a tap on the capsule opens the drawer, the way hovering
+  does; a second tap on the capsule closes it, and so do eight seconds without
+  a tap or moving the pointer.
+- Everything the island shows takes the first tap: the drawer (also one a
+  hotkey opened), the music strip, the agent wing and answer card.
+- A tap anywhere else goes to what is there, including the system Dynamic
+  Island next to the capsule; it does not close the drawer.
+- A long press does nothing on the island (it has no context menu).
+- An idle-hidden island is not tappable; a hotkey or the pointer wakes it.
+- With a touch Sidecar connected every display reports touch, so no display
+  gets taps; the pointer works as before.
+- Verified with routing tests and target windows that were never shown. See
+  the [decision](../.project-docs/decisions/2026-11-22-island-touch-tap.md).
+
+## Island beside the system Dynamic Island — 2026-11-22
+
+- On a touch MacBook Pro macOS draws its own Dynamic Island around the camera
+  (Live Activities, calls, Siri, the microphone and camera indicators). Whytap
+  never covers it: the capsule keeps its external-monitor shape (orb, 170 pt
+  black middle, hints; 310 pt) and sits 8 pt right of a band of at least
+  260 pt centered on the camera.
+- The drawer, tiles (90 pt), music strip and agent faces keep the capsule's
+  width and grow the way they always did; only the capsule's position changes.
+- Notification cards appear left of the band, on the other side of the camera,
+  not left of the capsule.
+- Settings -> General -> Display -> Island position: Automatic, Beside the camera
+  (a preview of this layout on a notched Mac) and Around the camera.
+- Verified with scenario tests and offscreen schematic renders only. The real
+  band width, whether the system island draws above Whytap and how taps behave
+  next to it need the MacBook. See the
+  [decision](../.project-docs/decisions/2026-11-22-island-beside-system-island.md).
+
 ## Server window — 2026-11-22
 
 The person comes to connect their own server and say what runs on it. First

@@ -640,6 +640,14 @@ final class IslandPanel: NSPanel {
     private var idleHidden = false
     private var idleVisibilityCancellable: AnyCancellable?
 
+    /// Touch on a touch display: targets over the visible surfaces while the
+    /// window ignores the mouse, and the session a tap starts. Never created
+    /// on a screen without touch. WHY:
+    /// .project-docs/decisions/2026-11-22-island-touch-tap.md
+    private var touchSession = IslandTouchSession()
+    private let touchTargets = IslandTouchTargets()
+    private var touchSessionCheck: DispatchWorkItem?
+
     /// Fired when a mouse event lands inside the island's window frame — the
     /// broad wake-zone (spec §4.1). Wired by `AppDelegate` to the idle
     /// controller's `registerActivity()`, which wakes `.hiddenIdle → .active`
@@ -778,6 +786,13 @@ final class IslandPanel: NSPanel {
         // CGWindowListCopyWindowInfo — before this reorder our level
         // was reported as 3 regardless of what we assigned earlier.
         self.level = .screenSaver
+        touchTargets.onTap = { [weak self] point in self?.handleTouchTap(at: point) }
+        touchTargets.onScroll = { [weak self] event, point in self?.forwardTouchScroll(event, at: point) }
+        touchTargets.onPointer = { [weak self] in
+            self?.endTouchSession(refresh: false)
+            self?.refreshMouseEventRouting()
+            self?.handleIslandMouseActivity()
+        }
 
         let rootView = self.makeRootView(layout: layout)
         let host = ClickThroughHostingView(rootView: rootView)
@@ -1299,6 +1314,9 @@ final class IslandPanel: NSPanel {
         refreshMouseEventRouting()
         orderFrontRegardless()
         isShown = true
+        // Touch targets exist only while shown: place them now, not on the
+        // next pointer move (a finger sends none).
+        refreshMouseEventRouting()
     }
 
     func hide() {
@@ -1307,6 +1325,8 @@ final class IslandPanel: NSPanel {
         hoverHitBridge.discardSequence()
         stopMouseEventRouting()
         agentComposerPanel.hide()
+        endTouchSession(refresh: false)
+        touchTargets.update(frames: [], level: level, sharingType: sharingType)
         ignoresMouseEvents = true
         orderOut(nil)
         isShown = false
@@ -1341,6 +1361,8 @@ final class IslandPanel: NSPanel {
         let compactHeight: CGFloat
         let compactSize: CGSize
         let notchWidth: CGFloat
+        /// The island's screen reports touch (macOS 27): taps get targets.
+        let touchCapable: Bool
 
         /// Window frame for the current hover state. The base is the
         /// (stable) expanded host frame; the leftward notification morph
@@ -1408,7 +1430,6 @@ final class IslandPanel: NSPanel {
             agentActive: true
         )
         let leftNotificationFrame = IslandFrameLayout.leftNotificationFrame(on: screen, expanded: true)
-        let metrics = IslandFrameLayout.notchMetrics(on: screen)
         return Layout(
             compactFrame: compactFrame,
             expandedHostFrame: expandedHostFrame,
@@ -1416,7 +1437,8 @@ final class IslandPanel: NSPanel {
             leftNotificationFrame: leftNotificationFrame,
             compactHeight: compactFrame.height,
             compactSize: compactFrame.size,
-            notchWidth: metrics.width
+            notchWidth: IslandFrameLayout.capsuleGapWidth(on: screen),
+            touchCapable: screen.acceptsTouchInput
         )
     }
 
@@ -1483,6 +1505,11 @@ final class IslandPanel: NSPanel {
     private func setHoverExpanded(_ expanded: Bool) {
         guard host?.acceptsExpandedHitTesting != expanded else { return }
         host?.acceptsExpandedHitTesting = expanded
+        // A drawer a tap opened and something else closed (a tool, Escape):
+        // the session has nothing left to hold.
+        if !expanded, touchSession.openedDrawer {
+            endTouchSession(refresh: false)
+        }
 
         let layout = Self.computeLayout()
         apply(layout: layout, display: true, expanded: expanded)
@@ -1700,13 +1727,16 @@ final class IslandPanel: NSPanel {
         if globalMouseMonitor == nil {
             globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(
                 matching: Self.mouseRoutingEvents
-            ) { [weak self] _ in
+            ) { [weak self] event in
                 // Synchronous: global-monitor callbacks already arrive on the
                 // main thread, and the old `DispatchQueue.main.async` hop left
                 // the flag one frame stale — a click in that frame hit the
                 // still-opaque window and was eaten. `assumeIsolated` calls the
                 // @MainActor method inline without re-introducing that lag.
                 MainActor.assumeIsolated {
+                    // A finger sends no mouseMoved: real pointer movement
+                    // hands the island back to the pointer rules.
+                    if event.type == .mouseMoved { self?.endTouchSession(refresh: false) }
                     self?.refreshMouseEventRouting()
                     // Real mouse event → feed the idle wake (see
                     // `handleIslandMouseActivity`). Kept out of
@@ -1720,6 +1750,7 @@ final class IslandPanel: NSPanel {
             localMouseMonitor = NSEvent.addLocalMonitorForEvents(
                 matching: Self.mouseRoutingEvents
             ) { [weak self] event in
+                if event.type == .mouseMoved { self?.endTouchSession(refresh: false) }
                 self?.refreshMouseEventRouting()
                 self?.handleIslandMouseActivity()
                 return event
@@ -1750,19 +1781,7 @@ final class IslandPanel: NSPanel {
         // scroll" bug that lasted the whole drop/agent cycle. The precise per-rect
         // gating mirrors `acceptsEvent` / `hitTest`, so routing claims exactly
         // what hit-testing accepts.
-        let expanded = host?.acceptsExpandedHitTesting ?? false
-        let activeFrames = IslandPanelMouseEventPolicy.activeFrames(
-            compactFrame: layout.compactFrame,
-            expandedFrame: expandedMouseFrame(layout: layout),
-            leftNotificationFrame: layout.leftNotificationFrame,
-            musicStripFrame: musicStripScreenFrame(layout: layout),
-            agentSurfaceFrames: agentSurfaceScreenFrames(),
-            idleHidden: idleHidden,
-            expanded: expanded,
-            notificationActive: notificationActive,
-            musicStripActive: musicStripActive,
-            hoverFrames: hoverPanelHitZone(layout: layout).activeFrames
-        )
+        let activeFrames = currentActiveFrames(layout: layout)
 
         // Keep delivery of the mouse-up we own even after a drag leaves the
         // control. The bridge cancels activation on that first exit.
@@ -1807,7 +1826,114 @@ final class IslandPanel: NSPanel {
         if ignoresMouseEvents != shouldIgnore {
             ignoresMouseEvents = shouldIgnore
         }
+        touchTargets.update(
+            frames: IslandTouchRouting.targetFrames(
+                touchCapable: layout.touchCapable,
+                shown: isShown,
+                islandIgnoresMouse: shouldIgnore,
+                activeFrames: activeFrames
+            ),
+            level: level,
+            sharingType: sharingType
+        )
         refreshMusicTransportHover()
+    }
+
+    /// Screen rects of every rendered island surface (see
+    /// `IslandPanelMouseEventPolicy.activeFrames`).
+    private func currentActiveFrames(layout: Layout) -> [NSRect] {
+        IslandPanelMouseEventPolicy.activeFrames(
+            compactFrame: layout.compactFrame,
+            expandedFrame: expandedMouseFrame(layout: layout),
+            leftNotificationFrame: layout.leftNotificationFrame,
+            musicStripFrame: musicStripScreenFrame(layout: layout),
+            agentSurfaceFrames: agentSurfaceScreenFrames(),
+            idleHidden: idleHidden,
+            expanded: host?.acceptsExpandedHitTesting ?? false,
+            notificationActive: notificationActive,
+            musicStripActive: musicStripActive,
+            hoverFrames: hoverPanelHitZone(layout: layout).activeFrames
+        )
+    }
+
+    // MARK: - Touch
+
+    /// A tap on a touch target. The capsule reveals the drawer the way hover
+    /// does; any other surface (agent wing, answer card) gets the tap itself,
+    /// replayed through `sendEvent`, the same measured dispatch a click uses.
+    /// If the replay misses, the session already lets the next tap through.
+    private func handleTouchTap(at point: NSPoint) {
+        let layout = Self.computeLayout()
+        let action = IslandTouchRouting.action(
+            for: point,
+            compactFrame: layout.compactFrame,
+            drawerExpanded: host?.acceptsExpandedHitTesting ?? false,
+            sessionOpenedDrawer: touchSession.openedDrawer
+        )
+        if action == .closeDrawer {
+            endTouchSession(refresh: true)
+            return
+        }
+        touchSession.begin(at: ProcessInfo.processInfo.systemUptime, openedDrawer: action == .openDrawer)
+        AppState.shared.islandTouchSessionActive = true
+        onIslandMouseActivity()
+        scheduleTouchSessionCheck()
+        switch action {
+        case .openDrawer:
+            AppState.shared.programmaticHoverExpansion = true
+        case .deliver:
+            replayTap(at: point)
+        case .closeDrawer:
+            break
+        }
+        refreshMouseEventRouting(layout: layout)
+    }
+
+    /// A finger panning over a target: hand the scroll to the island view
+    /// under it (History and other lists in the drawer).
+    private func forwardTouchScroll(_ event: NSEvent, at screenPoint: NSPoint) {
+        guard let contentView, let view = contentView.hitTest(convertPoint(fromScreen: screenPoint)) else { return }
+        touchSession.noteTouch(at: ProcessInfo.processInfo.systemUptime)
+        view.scrollWheel(with: event)
+    }
+
+    private func replayTap(at screenPoint: NSPoint) {
+        let location = convertPoint(fromScreen: screenPoint)
+        let time = ProcessInfo.processInfo.systemUptime
+        for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+            guard let event = NSEvent.mouseEvent(
+                with: type, location: location, modifierFlags: [], timestamp: time,
+                windowNumber: windowNumber, context: nil, eventNumber: 0, clickCount: 1,
+                pressure: type == .leftMouseDown ? 1 : 0
+            ) else { return }
+            sendEvent(event)
+        }
+    }
+
+    private func scheduleTouchSessionCheck() {
+        touchSessionCheck?.cancel()
+        let check = DispatchWorkItem { [weak self] in
+            guard let self, self.touchSession.isActive else { return }
+            if self.touchSession.hasExpired(now: ProcessInfo.processInfo.systemUptime) {
+                self.endTouchSession(refresh: true)
+            } else {
+                self.scheduleTouchSessionCheck()
+            }
+        }
+        touchSessionCheck = check
+        DispatchQueue.main.asyncAfter(deadline: .now() + IslandTouchSession.idleTimeout / 4, execute: check)
+    }
+
+    private func endTouchSession(refresh: Bool) {
+        guard touchSession.isActive else { return }
+        touchSessionCheck?.cancel()
+        touchSessionCheck = nil
+        let closeDrawer = touchSession.end()
+        AppState.shared.islandTouchSessionActive = false
+        if closeDrawer {
+            AppState.shared.programmaticHoverExpansion = false
+        }
+        if refresh { refreshMouseEventRouting() }
     }
 
     /// Resolve which transport button the cursor is over and publish it for the
@@ -1868,7 +1994,11 @@ final class IslandPanel: NSPanel {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
             IslandScreenCache.shared.rebuild()
+            // A touch session belongs to the display it started on; the
+            // targets follow the island (or go away on a mouse-only screen).
+            self.endTouchSession(refresh: false)
             self.applyCurrentLayout(display: true)
+            self.refreshMouseEventRouting()
         }
     }
 }

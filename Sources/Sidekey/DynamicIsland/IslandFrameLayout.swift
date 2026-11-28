@@ -324,6 +324,51 @@ enum IslandFrameLayout {
         )
     }
 
+    // MARK: - System Dynamic Island (touch MacBook Pro)
+
+    /// Gap between the area kept for the system island and Whytap's capsule
+    /// or notification card.
+    static let systemIslandGap: CGFloat = 8
+
+    /// Room kept on the right for the widest agent face once the capsule sits
+    /// beside the system island (the face grows only by its overflow).
+    static let besideWingReserve: CGFloat = agentWingExtension(faceWidth: agentWingComposingWidth)
+
+    /// The top-edge band macOS keeps for its own Dynamic Island: centered on
+    /// the camera (the reported cutout, else the screen's middle), at least
+    /// `reservedWidth` wide and never narrower than the reported cutout.
+    static func systemIslandZone(
+        frame: NSRect,
+        metrics: NotchMetrics,
+        reservedWidth: CGFloat
+    ) -> NSRect {
+        let centerX: CGFloat
+        let width: CGFloat
+        if metrics.isRealNotch, let notchLeft = metrics.leftEdgeX {
+            centerX = notchLeft + metrics.width / 2
+            width = max(reservedWidth, metrics.width)
+        } else {
+            centerX = frame.midX
+            width = reservedWidth
+        }
+        return NSRect(x: centerX - width / 2, y: frame.minY, width: width, height: frame.height)
+    }
+
+    static func systemIslandZone(on screen: IslandScreenDescriptor) -> NSRect {
+        systemIslandZone(
+            frame: screen.frame,
+            metrics: notchMetrics(on: screen),
+            reservedWidth: screen.systemIslandReservedWidth
+        )
+    }
+
+    /// Width of the capsule's middle gap the view draws between the orb and
+    /// the right band: the camera cutout when the capsule wraps it, the
+    /// synthetic gap when it sits beside the system island.
+    static func capsuleGapWidth(on screen: IslandScreenDescriptor) -> CGFloat {
+        screen.besideSystemIsland ? syntheticNotchWidth : notchMetrics(on: screen).width
+    }
+
     // MARK: - Frame computation
 
     /// Computes the screen-space frame for the Dynamic Island panel.
@@ -344,7 +389,9 @@ enum IslandFrameLayout {
         visibleFrame: NSRect,
         safeAreaTopInset: CGFloat,
         auxiliaryTopLeftArea: NSRect?,
-        auxiliaryTopRightArea: NSRect?
+        auxiliaryTopRightArea: NSRect?,
+        besideSystemIsland: Bool = false,
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
     ) -> NSRect {
         let metrics = notchMetrics(
             safeAreaTopInset: safeAreaTopInset,
@@ -354,7 +401,6 @@ enum IslandFrameLayout {
 
         let menuBar = menuBarHeight(frame: frame, visibleFrame: visibleFrame)
 
-        let width = leftSideWidth + metrics.width + rightSideWidth
         let height = compactHeight(
             menuBarHeight: menuBar,
             safeAreaTopInset: safeAreaTopInset,
@@ -363,6 +409,31 @@ enum IslandFrameLayout {
 
         let topEdge = frame.maxY
         let originY = topEdge - height
+
+        if besideSystemIsland {
+            // The capsule keeps the external-monitor shape (synthetic middle
+            // gap, so the drawer keeps its full width) and moves right of the
+            // area macOS keeps for its own island. WHY:
+            // .project-docs/decisions/2026-11-22-island-beside-system-island.md
+            let width = leftSideWidth + syntheticNotchWidth + rightSideWidth
+            let zone = systemIslandZone(
+                frame: frame,
+                metrics: metrics,
+                reservedWidth: systemIslandReservedWidth
+            )
+            let preferredX = zone.maxX + systemIslandGap
+            // On a narrow scaled screen keep the widest agent face on screen
+            // even if the capsule then touches the reserved zone.
+            let rightmostX = frame.maxX - width - besideWingReserve
+            return NSRect(
+                x: max(frame.minX, min(preferredX, rightmostX)),
+                y: originY,
+                width: width,
+                height: height
+            )
+        }
+
+        let width = leftSideWidth + metrics.width + rightSideWidth
 
         let originX: CGFloat
         if metrics.isRealNotch, let notchLeft = metrics.leftEdgeX {
@@ -389,7 +460,9 @@ enum IslandFrameLayout {
             visibleFrame: screen.visibleFrame,
             safeAreaTopInset: screen.safeAreaTopInset,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: screen.auxiliaryTopRightArea
+            auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
+            besideSystemIsland: screen.besideSystemIsland,
+            systemIslandReservedWidth: screen.systemIslandReservedWidth
         )
     }
 
@@ -411,6 +484,8 @@ enum IslandFrameLayout {
         safeAreaTopInset: CGFloat,
         auxiliaryTopLeftArea: NSRect?,
         auxiliaryTopRightArea: NSRect?,
+        besideSystemIsland: Bool = false,
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
         expanded: Bool = true,
         agentActive: Bool = false
     ) -> NSRect {
@@ -419,7 +494,9 @@ enum IslandFrameLayout {
             visibleFrame: visibleFrame,
             safeAreaTopInset: safeAreaTopInset,
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: auxiliaryTopRightArea
+            auxiliaryTopRightArea: auxiliaryTopRightArea,
+            besideSystemIsland: besideSystemIsland,
+            systemIslandReservedWidth: systemIslandReservedWidth
         )
         var result = compactFrame
         if expanded {
@@ -451,6 +528,8 @@ enum IslandFrameLayout {
             safeAreaTopInset: screen.safeAreaTopInset,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
+            besideSystemIsland: screen.besideSystemIsland,
+            systemIslandReservedWidth: screen.systemIslandReservedWidth,
             expanded: expanded,
             agentActive: agentActive
         )
@@ -470,6 +549,8 @@ enum IslandFrameLayout {
         safeAreaTopInset: CGFloat,
         auxiliaryTopLeftArea: NSRect?,
         auxiliaryTopRightArea: NSRect?,
+        besideSystemIsland: Bool = false,
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth,
         expanded: Bool = true
     ) -> NSRect {
         let compactFrame = islandFrame(
@@ -477,7 +558,9 @@ enum IslandFrameLayout {
             visibleFrame: visibleFrame,
             safeAreaTopInset: safeAreaTopInset,
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: auxiliaryTopRightArea
+            auxiliaryTopRightArea: auxiliaryTopRightArea,
+            besideSystemIsland: besideSystemIsland,
+            systemIslandReservedWidth: systemIslandReservedWidth
         )
         guard expanded else {
             return compactFrame
@@ -505,6 +588,8 @@ enum IslandFrameLayout {
             safeAreaTopInset: screen.safeAreaTopInset,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
             auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
+            besideSystemIsland: screen.besideSystemIsland,
+            systemIslandReservedWidth: screen.systemIslandReservedWidth,
             expanded: expanded
         )
     }
@@ -520,20 +605,41 @@ enum IslandFrameLayout {
         visibleFrame: NSRect,
         safeAreaTopInset: CGFloat,
         auxiliaryTopLeftArea: NSRect?,
-        auxiliaryTopRightArea: NSRect?
+        auxiliaryTopRightArea: NSRect?,
+        besideSystemIsland: Bool = false,
+        systemIslandReservedWidth: CGFloat = IslandSystemIslandPlacement.defaultReservedWidth
     ) -> NSRect {
         let island = islandFrame(
             frame: frame,
             visibleFrame: visibleFrame,
             safeAreaTopInset: safeAreaTopInset,
             auxiliaryTopLeftArea: auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: auxiliaryTopRightArea
+            auxiliaryTopRightArea: auxiliaryTopRightArea,
+            besideSystemIsland: besideSystemIsland,
+            systemIslandReservedWidth: systemIslandReservedWidth
         )
         let height = max(island.height, IslandNotificationPill.pillHeight)
         let leading = IslandNotificationPill.panelLeadingOverflow
         let bottom = IslandNotificationPill.panelBottomOverflow
+        // Beside the system island the card goes to the OTHER side of the
+        // camera: left of the system zone, not over it. The pill's own 8pt
+        // trailing gap keeps it off the zone's edge.
+        let trailingEdge: CGFloat
+        if besideSystemIsland {
+            trailingEdge = systemIslandZone(
+                frame: frame,
+                metrics: notchMetrics(
+                    safeAreaTopInset: safeAreaTopInset,
+                    auxiliaryTopLeftArea: auxiliaryTopLeftArea,
+                    auxiliaryTopRightArea: auxiliaryTopRightArea
+                ),
+                reservedWidth: systemIslandReservedWidth
+            ).minX
+        } else {
+            trailingEdge = island.minX
+        }
         return NSRect(
-            x: island.minX - leftNotificationWidth - leading,
+            x: trailingEdge - leftNotificationWidth - leading,
             y: island.maxY - height - bottom,
             width: leftNotificationWidth + leading,
             height: height + bottom
@@ -546,7 +652,9 @@ enum IslandFrameLayout {
             visibleFrame: screen.visibleFrame,
             safeAreaTopInset: screen.safeAreaTopInset,
             auxiliaryTopLeftArea: screen.auxiliaryTopLeftArea,
-            auxiliaryTopRightArea: screen.auxiliaryTopRightArea
+            auxiliaryTopRightArea: screen.auxiliaryTopRightArea,
+            besideSystemIsland: screen.besideSystemIsland,
+            systemIslandReservedWidth: screen.systemIslandReservedWidth
         )
     }
 }

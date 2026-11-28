@@ -1703,7 +1703,8 @@ struct IslandView: View {
         let generation = programmaticExpansionCollapseGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.programmaticCollapseDelay(glance: hoverPanelGlance)) {
             guard programmaticExpansionCollapseGeneration == generation, !appState.screenshotPreparing else { return }
-            if !isHovering && !hoverSearchFocused && !hoverVocabularyFocused && !holdsHoverMenu {
+            if !isHovering && !hoverSearchFocused && !hoverVocabularyFocused && !holdsHoverMenu
+                && !appState.islandTouchSessionActive {
                 appState.programmaticHoverExpansion = false
             }
         }

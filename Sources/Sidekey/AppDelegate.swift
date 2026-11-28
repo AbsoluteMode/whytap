@@ -554,6 +554,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.openSettingsWindow(tab: tab)
         }
         WhatsNewPresenter.shared.presentAfterLaunch(isFirstLaunch: opensOnboarding, defaults: .standard)
+        ScreenshotTextDetector.warmUp()
     }
 
     private func presentOnboarding() {

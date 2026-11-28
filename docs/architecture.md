@@ -2677,8 +2677,13 @@ Spotlight, Pin above windows and
 Output size are removed, including their commands/shortcuts. Copy text uses accurate
 on-device Vision recognition on the flattened, edited crop, including Blur,
 then copies plain text and closes. Empty/error results keep the editor open;
-Escape cancels and generation checks reject late results. Rendering and OCR
-run off the UI thread. Copy text can also be assigned to an arrow without
+Escape cancels the Vision request and generation checks reject late results.
+Rendering and OCR run off the UI thread. Whytap starts one utility-priority
+Vision preparation request on generated text at launch. An early Copy text
+waits for that same task off the UI thread. The local Screenshot log records
+only the OCR phase, crop dimensions, and Vision duration.
+WHY: `.project-docs/decisions/2026-11-28-shot-ocr-warmup.md`.
+Copy text can also be assigned to an arrow without
 changing existing bindings. Cmd-Z / Shift-Cmd-Z undo/redo screenshot edits
 from every screenshot panel through both key-equivalent and direct window dispatch,
 using physical Z so Russian input works; focused text fields retain native text undo.

@@ -1,6 +1,8 @@
 import AppKit
 import CoreImage
+import CoreText
 import Vision
+import os.log
 
 enum ScreenshotTool: String, CaseIterable {
     case select, arrow, rectangle, ellipse, pen, text, blur, counter
@@ -232,10 +234,34 @@ enum ScreenshotRenderer {
 }
 
 enum ScreenshotTextDetector {
-    /// Accurate system OCR is used only for an explicit Copy text action.
+    private static let log = OSLog(subsystem: "com.rootwise.sidekey", category: "Screenshot")
+
+    // Compile Vision's recognizer on generated text ahead of the first Copy text.
+    // WHY: .project-docs/decisions/2026-11-28-shot-ocr-warmup.md
+    private static let preparation = Task.detached(priority: .utility) {
+        guard let context = CGContext(data: nil, width: 256, height: 96, bitsPerComponent: 8, bytesPerRow: 0,
+            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return }
+        context.setFillColor(CGColor(gray: 1, alpha: 1))
+        context.fill(CGRect(x: 0, y: 0, width: context.width, height: context.height))
+        let attributes: [NSAttributedString.Key: Any] = [
+            NSAttributedString.Key(kCTFontAttributeName as String): CTFontCreateWithName("Menlo" as CFString, 24, nil),
+            NSAttributedString.Key(kCTForegroundColorAttributeName as String): CGColor(gray: 0, alpha: 1)
+        ]
+        for (line, y) in [("Ready 123", 56), ("Готово 456", 20)] {
+            context.textPosition = CGPoint(x: 8, y: y)
+            CTLineDraw(CTLineCreateWithAttributedString(NSAttributedString(string: line, attributes: attributes)), context)
+        }
+        guard let sample = context.makeImage() else { return }
+        _ = try? await text(sample, phase: "warmup")
+    }
+
+    @discardableResult
+    static func warmUp() -> Task<Void, Never> { preparation }
+
+    /// Accurate system OCR reads user pixels only for an explicit Copy text action.
     /// Keep correction off so numbers and codes are not rewritten.
     // WHY: .project-docs/decisions/2026-10-20-screenshot-toolbar.md
-    static func text(_ image: CGImage) throws -> String {
+    static func text(_ image: CGImage, phase: StaticString = "copy") async throws -> String {
         try Task.checkCancellation()
         let recognition = VNRecognizeTextRequest()
         recognition.recognitionLevel = .accurate
@@ -247,10 +273,21 @@ enum ScreenshotTextDetector {
         if !languages.isEmpty { recognition.recognitionLanguages = languages }
         try useCPU(recognition)
         let input = try recognitionImage(image)
-        try Task.checkCancellation()
-        try VNImageRequestHandler(cgImage: input, options: [:]).perform([recognition])
-        try Task.checkCancellation()
-        return (recognition.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            let start = ContinuousClock.now
+            defer {
+                let elapsed = start.duration(to: .now).components
+                let milliseconds = Double(elapsed.seconds) * 1_000 + Double(elapsed.attoseconds) / 1e15
+                os_log("screenshot_ocr phase=%{public}@ width=%{public}d height=%{public}d vision_ms=%{public}.1f",
+                       log: log, type: .info, String(describing: phase), Int32(input.width), Int32(input.height), milliseconds)
+            }
+            try VNImageRequestHandler(cgImage: input, options: [:]).perform([recognition])
+            try Task.checkCancellation()
+            return (recognition.results ?? []).compactMap { $0.topCandidates(1).first?.string }.joined(separator: "\n")
+        } onCancel: {
+            recognition.cancel()
+        }
     }
 
     /// Avoid the accurate recognizer's per-build cold start. An isolated-glyph pass

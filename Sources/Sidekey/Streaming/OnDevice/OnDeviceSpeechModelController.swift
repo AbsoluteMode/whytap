@@ -6,12 +6,69 @@ import Foundation
 final class OnDeviceSpeechModelController: ObservableObject {
     static let shared = OnDeviceSpeechModelController()
 
-    @Published private(set) var status: OnDeviceSpeechModelStatus = .notDownloaded
+    @Published private(set) var status: OnDeviceSpeechModelStatus = .notDownloaded {
+        didSet { if status != oldValue { statusChanged() } }
+    }
+    /// Time left while downloading or preparing; nil otherwise. Settings and
+    /// onboarding show the same value.
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+    @Published private(set) var timeLeft: OnDeviceSpeechTimeLeft?
 
     private let store: any OnDeviceSpeechModelManaging
+    private let now: @MainActor () -> TimeInterval
+    private let tickInterval: Duration?
+    private var rate = OnDeviceDownloadRateEstimator()
+    private var ticker: Task<Void, Never>?
 
-    init(store: any OnDeviceSpeechModelManaging = OnDeviceSpeechModelStore.shared) {
+    /// `tickInterval` nil: no timer; tests call `tick()`.
+    init(
+        store: any OnDeviceSpeechModelManaging = OnDeviceSpeechModelStore.shared,
+        now: @escaping @MainActor () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        tickInterval: Duration? = .seconds(1)
+    ) {
         self.store = store
+        self.now = now
+        self.tickInterval = tickInterval
+    }
+
+    /// Recomputes `timeLeft` from the clock: a stalled download or a long
+    /// preparation changes the copy without any new event.
+    func tick() async {
+        switch status {
+        case .downloading:
+            timeLeft = rate.timeLeft(at: now())
+        case .preparing:
+            timeLeft = await store.preparationTimeLeft() ?? .estimating
+        case .notDownloaded, .ready, .failed, .loadFailed:
+            timeLeft = nil
+        }
+    }
+
+    private func statusChanged() {
+        switch status {
+        case .downloading:
+            if timeLeft == nil { timeLeft = .estimating }
+            startTicker()
+        case .preparing:
+            if timeLeft == nil || timeLeft == .stalled { timeLeft = .estimating }
+            startTicker()
+            Task { await tick() }
+        case .notDownloaded, .ready, .failed, .loadFailed:
+            timeLeft = nil
+            ticker?.cancel()
+            ticker = nil
+        }
+    }
+
+    private func startTicker() {
+        guard ticker == nil, let interval = tickInterval else { return }
+        ticker = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: interval)
+                guard let self, !Task.isCancelled else { return }
+                await self.tick()
+            }
+        }
     }
 
     /// Reads the state and, when the files are in place but the model is not
@@ -26,6 +83,7 @@ final class OnDeviceSpeechModelController: ObservableObject {
     /// loaded afterwards.
     @discardableResult
     func prepare() async -> Bool {
+        if status == .loadFailed { status = .preparing }
         let loaded = await store.prepare()
         status = await store.status()
         return loaded
@@ -37,7 +95,11 @@ final class OnDeviceSpeechModelController: ObservableObject {
     // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
     @discardableResult
     func download() async -> Bool {
-        if case .downloading = status {} else { status = .downloading(0) }
+        if case .downloading = status {} else {
+            rate = OnDeviceDownloadRateEstimator()
+            rate.record(fraction: 0, at: now())
+            status = .downloading(0)
+        }
         do {
             try await store.download { [weak self] fraction in
                 Task { @MainActor in self?.advance(to: fraction) }
@@ -74,6 +136,8 @@ final class OnDeviceSpeechModelController: ObservableObject {
     /// bar back or reopens a finished download.
     private func advance(to fraction: Double) {
         guard case .downloading(let current) = status, fraction > current else { return }
+        rate.record(fraction: fraction, at: now())
         status = .downloading(fraction)
+        timeLeft = rate.timeLeft(at: now())
     }
 }

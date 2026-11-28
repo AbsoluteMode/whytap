@@ -147,6 +147,9 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
     private var drainTask: Task<Void, Never>?
     private var finalTask: Task<String, Error>?
     private var cancelRequested = false
+    /// Whether the model was in memory when the take began. An empty result
+    /// from a model that loaded during the take is not trusted as silence.
+    private var modelLoadedAtStart = true
     private var failureWatchTask: Task<Void, Never>?
     private var signalContinuation: CheckedContinuation<Signal, Never>?
     private var pendingSignal: Signal?
@@ -193,6 +196,7 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
         // Load the model while the user speaks: after a launch, an idle
         // unload or a fresh download it is not in memory yet.
         let decoder = self.decoder
+        modelLoadedAtStart = await decoder.modelIsLoaded()
         Task { await decoder.prepareModel() }
 
         // Keep every chunk and, about every 0.8 s, re-decode a bounded trailing
@@ -247,6 +251,13 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
                     await teardown()
                     return .cancelled
                 }
+                // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+                if text.isEmpty, !modelLoadedAtStart, Self.hasSpeechLevelAudio(pcm) {
+                    os_log("on-device take: no text from a model loaded during the take",
+                           log: Self.log, type: .error)
+                    await teardown()
+                    return .failed(.localModelNoText)
+                }
                 onTranscriptUpdate?(text)
                 await teardown()
                 return .transcript(text)
@@ -267,10 +278,27 @@ final class OnDeviceTranscriptionSession: StreamingSessionRunning {
 
     /// A model that is still loading or did not load is named, so the take
     /// ends with that reason and Retry instead of a generic failure.
+    /// Any 100 ms of the take louder than about -34 dBFS: speech, not a
+    /// silent room or digital silence.
+    nonisolated static func hasSpeechLevelAudio(_ pcm: Data, threshold: Float = 0.02) -> Bool {
+        let window = 1_600
+        let samples = floatSamples(fromPCM16LittleEndian: pcm)
+        guard samples.count >= window else { return false }
+        var start = 0
+        while start + window <= samples.count {
+            var sum: Float = 0
+            for index in start..<(start + window) { sum += samples[index] * samples[index] }
+            if (sum / Float(window)).squareRoot() > threshold { return true }
+            start += window
+        }
+        return false
+    }
+
     nonisolated static func sessionError(for error: Error) -> StreamingSessionError {
         switch error as? OnDeviceSpeechError {
         case .modelPreparing: return .localModelPreparing
         case .modelLoadFailed, .modelNotDownloaded: return .localModelFailed
+        case .modelNoText: return .localModelNoText
         case .noAudio, .none: return .transportFailed
         }
     }
@@ -414,6 +442,7 @@ extension StreamingSessionError {
         switch self {
         case .localModelPreparing: return .modelPreparing
         case .localModelFailed: return .modelLoadFailed
+        case .localModelNoText: return .modelNoText
         default: return nil
         }
     }

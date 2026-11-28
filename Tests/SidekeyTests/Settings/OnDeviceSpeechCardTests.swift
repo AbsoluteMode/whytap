@@ -19,6 +19,7 @@ final class OnDeviceSpeechCardTests: XCTestCase {
         func delete() async throws {}
         func acquire() async throws -> AsrManager { throw NoModel() }
         func release() {}
+        func preparationTimeLeft() async -> OnDeviceSpeechTimeLeft? { fixed == .preparing ? .seconds(170) : nil }
     }
 
     private struct Offline: ModelCatalogFetching, ProviderKeyChecking, ModelProbing, OpenRouterEndpointsFetching {
@@ -131,11 +132,13 @@ final class OnDeviceSpeechCardTests: XCTestCase {
         let viewModel = try makeViewModel()
         let states: [(String, OnDeviceSpeechModelStatus)] = [
             ("1-fresh", .notDownloaded), ("2-downloading", .downloading(0.42)), ("3-ready", .ready), ("4-failed", .failed),
+            ("5-preparing", .preparing), ("6-load-failed", .loadFailed),
         ]
         for dark in [false, true] {
             for (name, status) in states {
-                let controller = OnDeviceSpeechModelController(store: FixedStore(status))
+                let controller = OnDeviceSpeechModelController(store: FixedStore(status), tickInterval: nil)
                 await controller.refresh()
+                await controller.tick()
                 let content = VStack(alignment: .leading, spacing: 22) {
                     VStack(alignment: .leading, spacing: 0) {
                         MacGroupTitle(title: "On this Mac")

@@ -206,3 +206,64 @@ struct OnboardingBadge: View {
             .background(Capsule().fill(tint.opacity(0.12)))
     }
 }
+
+/// The model on this Mac while the person goes on through onboarding: one
+/// line with the percent or the preparation and the time left, a thin line
+/// under it, and a Ready moment when Drop works. Its height never changes
+/// between the states, so the footer does not jump.
+// WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
+struct OnboardingModelProgressStrip: View {
+    @ObservedObject var onDevice: OnDeviceSpeechModelController
+
+    /// The strip's line for a state; nil hides the strip.
+    static func line(_ status: OnDeviceSpeechModelStatus, timeLeft: OnDeviceSpeechTimeLeft?) -> String? {
+        let left = OnDeviceSpeechProgressText.timeLeft(timeLeft ?? .estimating)
+        switch status {
+        case .downloading(let fraction):
+            return OnDeviceSpeechCard.Presentation.isStarting(fraction)
+                ? "Speech model · starting the download"
+                : "Speech model · \(OnDeviceSpeechCard.Presentation.percent(fraction))% · \(left)"
+        case .preparing: return "Speech model · preparing · \(left)"
+        case .ready: return "Speech model ready · Drop works now"
+        case .loadFailed: return "Speech model didn't load · try again in Settings"
+        case .notDownloaded, .failed: return nil
+        }
+    }
+
+    var body: some View {
+        if let line = Self.line(onDevice.status, timeLeft: onDevice.timeLeft) {
+            HStack(spacing: 7) {
+                // The slot stays when hidden, so Ready does not move the text.
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(OnboardingTheme.green)
+                    .opacity(onDevice.status == .ready ? 1 : 0)
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(line)
+                        .font(OnboardingTheme.sans(11))
+                        .foregroundColor(onDevice.status == .ready ? OnboardingTheme.ink2 : OnboardingTheme.faint)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                    bar
+                        .frame(width: 150)
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Speech model")
+            .accessibilityValue(line)
+        }
+    }
+
+    @ViewBuilder private var bar: some View {
+        switch onDevice.status {
+        case .downloading(let fraction):
+            OnboardingProgressLine(fraction: fraction, indeterminate: OnDeviceSpeechCard.Presentation.isStarting(fraction))
+        case .preparing:
+            OnboardingProgressLine(fraction: 0, indeterminate: true)
+        default:
+            // Keeps the height of the line it replaces.
+            OnboardingProgressLine(fraction: 1).opacity(0)
+        }
+    }
+}

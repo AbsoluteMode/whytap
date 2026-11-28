@@ -31,6 +31,9 @@ enum StreamingSessionError: Error, Equatable {
     case localModelPreparing
     /// On this Mac: the model did not load.
     case localModelFailed
+    /// On this Mac: the model loaded during the take and gave no text for
+    /// audio at speech level. Not trusted as silence.
+    case localModelNoText
 }
 
 /// Outcome of one streaming session, surfaced to the AppDelegate so the

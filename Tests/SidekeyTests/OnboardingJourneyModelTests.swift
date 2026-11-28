@@ -47,6 +47,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         init(present: Box<Bool>, held: Box<Bool> = Box(false)) { self.present = present; self.held = held }
         func status() -> OnDeviceSpeechModelStatus { present.value ? .ready : .notDownloaded }
         func download(progress: (@Sendable (Double) -> Void)?) async throws {
+            if held.value { progress?(0.42) }
             while held.value { try await Task.sleep(nanoseconds: 5_000_000) }
             present.value = true
         }
@@ -1306,6 +1307,42 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await snap("speech-deepgram-without-key")
         XCTAssertTrue(model.keySaved(.elevenLabs))
         XCTAssertFalse(model.keySaved(.deepgram))
+    }
+
+    /// The model on this Mac while the person goes on: the footer strip with
+    /// its percent and time left, then its Ready moment.
+    func testRenderModelProgressStrip() async throws {
+        guard let output = ProcessInfo.processInfo.environment["WHYTAP_ONBOARDING_RENDER_DIR"] else {
+            throw XCTSkip("Set WHYTAP_ONBOARDING_RENDER_DIR to save offscreen review images")
+        }
+        _ = NSApplication.shared
+        let directory = URL(fileURLWithPath: output, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let resources = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .deletingLastPathComponent().appendingPathComponent("Resources")
+        for font in ["InstrumentSerif-Regular", "InstrumentSerif-Italic"] {
+            CTFontManagerRegisterFontsForURL(resources.appendingPathComponent("Fonts/\(font).ttf") as CFURL, .process, nil)
+        }
+        let env = try makeEnv()
+        env.downloadHeld.value = true
+        let model = try makeModel(env, isPreview: true)
+        let controller = OnboardingJourneyWindowController(model: model, onClosed: {})
+        let window = try XCTUnwrap(controller.window)
+        window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        defer { window.contentViewController = nil; window.close() }
+        func snap(_ name: String) async throws {
+            try await Task.sleep(for: .milliseconds(700))
+            let frameView = try XCTUnwrap(window.contentView?.superview)
+            frameView.layoutSubtreeIfNeeded()
+            let bitmap = try XCTUnwrap(frameView.bitmapImageRepForCachingDisplay(in: frameView.bounds))
+            frameView.cacheDisplay(in: frameView.bounds, to: bitmap)
+            try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+                .write(to: directory.appendingPathComponent("model-strip-\(name).png"))
+        }
+        model.chooseOnThisMac()
+        try await snap("downloading")
+        env.downloadHeld.value = false
+        try await snap("ready")
     }
 
     /// Offscreen PNGs of every step of the frame, walked the way a new Mac

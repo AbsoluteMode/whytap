@@ -129,7 +129,17 @@ Voice flow (Drop / dictation):
             take is decoded, or the take ends without the batch rung as
             .localModelPreparing ("Local model still preparing, retry soon")
             or .localModelFailed ("Local model didn't load", opens Settings)
-            with Retry (20 s wait). Meeting phrases wait without a limit.
+            with Retry (20 s wait). A model loaded during the take that gives
+            no text for speech-level audio ends as .localModelNoText ("No
+            text from local model, Retry"), not silence. Meeting phrases wait
+            without a limit. Time left (OnDeviceSpeechProgress.swift):
+            download from the measured rate (OnDeviceDownloadRateEstimator,
+            Stalled after 10 s), preparation from the expected duration by
+            chip/RAM or the last one measured on this Mac
+            (OnDeviceSpeechPreparationEstimator, "Taking longer than usual,
+            still working" past it); OnDeviceSpeechModelController.timeLeft
+            feeds the Settings card, onboarding (OnboardingModelProgressStrip
+            in the Journey footer) and the island's Retry message.
             WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
             Meetings use OnDeviceStreamingAdapter (from RealtimeAdapterFactory,
             unmetered): OnDevicePhraseSegmenter cuts the stream at 700 ms

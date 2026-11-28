@@ -52,6 +52,21 @@ final class OnDeviceModelPreparationTests: XCTestCase {
 
     private struct LoadFailure: Error {}
 
+    /// Preparation history in memory: tests never write the user's defaults.
+    final class MemoryHistory: OnDeviceSpeechPreparationHistory, @unchecked Sendable {
+        private let lock = NSLock()
+        private var compiled = false
+        private var durations: [OnDeviceSpeechPreparationKind: TimeInterval] = [:]
+        var hasCompiled: Bool { lock.lock(); defer { lock.unlock() }; return compiled }
+        func setCompiled(_ value: Bool) { lock.lock(); compiled = value; lock.unlock() }
+        func lastDuration(_ kind: OnDeviceSpeechPreparationKind) -> TimeInterval? {
+            lock.lock(); defer { lock.unlock() }; return durations[kind]
+        }
+        func record(_ kind: OnDeviceSpeechPreparationKind, seconds: TimeInterval) {
+            lock.lock(); durations[kind] = seconds; lock.unlock()
+        }
+    }
+
     /// The take's wait (45 s) and the batch wait (20 s) expire at once when
     /// `expireWaits` is set; idle eviction (an hour here) never fires.
     private static func sleep(expireWaits: Flag) -> OnDeviceSpeechModelStore.Sleep {
@@ -87,6 +102,8 @@ final class OnDeviceModelPreparationTests: XCTestCase {
             idleEviction: .seconds(3600),
             filesPresent: { files.isSet },
             sleep: Self.sleep(expireWaits: expireWaits),
+            machine: OnDeviceSpeechMachine(generation: 1, isHighEnd: false, memoryGB: 8),
+            history: MemoryHistory(),
             downloadFiles: { _, _, progress in
                 // FluidAudio moves files in one by one: every folder can
                 // exist before the download has finished.
@@ -144,7 +161,7 @@ final class OnDeviceModelPreparationTests: XCTestCase {
 
     func test_settings_shows_downloading_then_preparing_then_ready_only_when_loaded() async {
         let fixture = await makeStore(filesPresent: false)
-        let controller = OnDeviceSpeechModelController(store: fixture.store)
+        let controller = OnDeviceSpeechModelController(store: fixture.store, tickInterval: nil)
 
         let download = Task { await controller.download() }
         await eventually("download started") { await fixture.downloadGate.entered == 1 }
@@ -222,7 +239,7 @@ final class OnDeviceModelPreparationTests: XCTestCase {
 
     func test_cold_launch_shows_preparing_and_settings_prepares_the_model() async {
         let fixture = await makeStore(filesPresent: true)
-        let controller = OnDeviceSpeechModelController(store: fixture.store)
+        let controller = OnDeviceSpeechModelController(store: fixture.store, tickInterval: nil)
 
         let refresh = Task { await controller.refresh() }
         await eventually("preparing at launch") { controller.status == .preparing }
@@ -288,7 +305,7 @@ final class OnDeviceModelPreparationTests: XCTestCase {
 
     /// A decoder over a model that is loaded when the test says so.
     private actor PreparingDecoder: OnDeviceSpeechDecoding {
-        enum Outcome { case text(String), stillPreparing, loadFailed }
+        enum Outcome { case text(String), stillPreparing, loadFailed, emptyAfterLoad }
 
         private var loaded: Bool
         private let gate: Gate
@@ -311,7 +328,7 @@ final class OnDeviceModelPreparationTests: XCTestCase {
                 switch outcome {
                 case .stillPreparing: throw OnDeviceSpeechError.modelPreparing
                 case .loadFailed: throw OnDeviceSpeechError.modelLoadFailed
-                case .text:
+                case .text, .emptyAfterLoad:
                     // Like the store's wait: cancelling the take ends it at once.
                     while !(await gate.isOpen) { try await Task.sleep(nanoseconds: 1_000_000) }
                     loaded = true

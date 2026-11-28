@@ -3584,7 +3584,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         let provider = TranscriptionProviderBrand.brand(for: route.account, in: .shared).label
-        AppState.shared.dropDeliveryFailureMessage = failure.dropMessage(provider: provider)
+        AppState.shared.dropDeliveryFailureMessage = failure == .localModelPreparing
+            ? ProviderFailure.localModelPreparingMessage(OnDeviceSpeechModelStore.shared.currentPreparationTimeLeft())
+            : failure.dropMessage(provider: provider)
         if let status = failure.keyStatus {
             KeyStatusStore.shared.set(status, for: route.account, at: Date())
         }
@@ -3916,7 +3918,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 pcm: capturedPCM, lastPartial: lastPartial,
                 hasBatchTranscriber: hasBatchTranscriber,
                 deadline: deadline,
-                skipBatchReason: error == .localModelPreparing ? "local_model_preparing" : "local_model_failed",
+                skipBatchReason: Self.localModelFailureReason(error),
                 transcribe: transcribe, sink: sink)
         case .failed, .degraded:
             await recoverOrSalvage(
@@ -3924,6 +3926,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 hasBatchTranscriber: hasBatchTranscriber,
                 deadline: deadline,
                 transcribe: transcribe, sink: sink)
+        }
+    }
+
+    static func localModelFailureReason(_ error: StreamingSessionError) -> String {
+        switch error {
+        case .localModelPreparing: return "local_model_preparing"
+        case .localModelNoText: return "local_model_no_text"
+        default: return "local_model_failed"
         }
     }
 

@@ -19,7 +19,22 @@ struct OnDeviceSpeechCard: View {
         let detail: String
         let action: String
 
-        init(_ status: OnDeviceSpeechModelStatus, model: OnDeviceSpeechModel = .parakeetTdtV3) {
+        /// What the bar's VoiceOver value says.
+        let accessibilityValue: String
+
+        init(_ status: OnDeviceSpeechModelStatus, timeLeft: OnDeviceSpeechTimeLeft? = nil,
+             model: OnDeviceSpeechModel = .parakeetTdtV3) {
+            let left = timeLeft ?? .estimating
+            switch status {
+            case .downloading(let fraction) where !Self.isStarting(fraction):
+                accessibilityValue = "\(Self.percent(fraction)) percent, \(OnDeviceSpeechProgressText.accessibilityTimeLeft(left))"
+            case .downloading:
+                accessibilityValue = "Starting"
+            case .preparing:
+                accessibilityValue = OnDeviceSpeechProgressText.accessibilityTimeLeft(left)
+            case .notDownloaded, .ready, .failed, .loadFailed:
+                accessibilityValue = ""
+            }
             switch status {
             case .notDownloaded:
                 symbol = "laptopcomputer"
@@ -34,12 +49,14 @@ struct OnDeviceSpeechCard: View {
                 // read as a stalled download.
                 detail = Self.isStarting(fraction)
                     ? "Starting… \(model.approximateSize). You can leave this tab."
-                    : "\(Self.percent(fraction))% of \(model.approximateSize). You can leave this tab."
+                    : "\(Self.percent(fraction))% of \(model.approximateSize) · \(OnDeviceSpeechProgressText.timeLeft(left))"
                 action = "Cancel"
             case .preparing:
                 symbol = "cpu"
                 title = "Preparing \(model.displayName)"
-                detail = "Getting the model ready to dictate. The first time can take a few minutes."
+                // No progress signal exists: the time left is an estimate,
+                // never a percentage.
+                detail = "\(OnDeviceSpeechProgressText.timeLeft(left)). You can leave this tab."
                 action = "Remove"
             case .ready:
                 symbol = "checkmark"
@@ -68,7 +85,7 @@ struct OnDeviceSpeechCard: View {
         static func isStarting(_ fraction: Double) -> Bool { percent(fraction) == 0 }
     }
 
-    private var presentation: Presentation { Presentation(model.status) }
+    private var presentation: Presentation { Presentation(model.status, timeLeft: model.timeLeft) }
 
     private var tint: Color {
         switch model.status {
@@ -78,9 +95,17 @@ struct OnDeviceSpeechCard: View {
         }
     }
 
+    /// The bar's fill; the preparation has none and shows a moving
+    /// highlight instead, so the bar never freezes at 99%.
     private var fraction: Double? {
         if case .downloading(let fraction) = model.status { return fraction }
+        if model.status == .preparing { return 0 }
         return nil
+    }
+
+    private var barIsIndeterminate: Bool {
+        if case .downloading(let fraction) = model.status { return Presentation.isStarting(fraction) }
+        return model.status == .preparing
     }
 
     /// The kind of state, without the download fraction: what the card
@@ -115,11 +140,10 @@ struct OnDeviceSpeechCard: View {
             }
             if let fraction {
                 OnDeviceDownloadBar(
-                    fraction: fraction, starting: Presentation.isStarting(fraction), animated: !reduceMotion)
+                    fraction: fraction, starting: barIsIndeterminate, animated: !reduceMotion)
                     .transition(.opacity.combined(with: .move(edge: .top)))
-                    .accessibilityLabel("Download progress")
-                    .accessibilityValue(Presentation.isStarting(fraction)
-                        ? "Starting" : "\(Presentation.percent(fraction)) percent")
+                    .accessibilityLabel(model.status == .preparing ? "Preparation progress" : "Download progress")
+                    .accessibilityValue(presentation.accessibilityValue)
             }
         }
         .padding(16)

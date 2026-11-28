@@ -8,7 +8,7 @@ tags: [local, drop, models, settings, reliability]
 canonical_for: [on-device-model-preparation]
 verified_at: 2026-11-28
 sources:
-  - type: user-report
+  - type: user-confirmed
     reference: On 2026-11-28 the owner installed 2.2.27 on a clean M1 MacBook and chose On this Mac for Drop, no keys. Every take said it was listening and pasted nothing; tens of minutes later, without changes, dictation started working. No log from the failing period.
     confirmed_at: 2026-11-28
   - type: repository
@@ -52,8 +52,8 @@ by deleting the folder and downloading it again.
   or on cancellation; the load goes on and its model is kept.
 - The download fetches files only (`DownloadUtils.downloadRepo`); the Core
   ML load is the visible Preparing step. Settings and onboarding show
-  Downloading, then Preparing ("Getting the model ready to dictate. The
-  first time can take a few minutes."), then Ready, which means loaded in
+  Downloading, then Preparing with its time left (see the follow-up
+  below), then Ready, which means loaded in
   this launch, or "didn't load" with Try Again.
 - Route readiness is files in place and no download running.
 - Partials skip an unloaded model. On release, a take whose model is not
@@ -68,6 +68,48 @@ by deleting the folder and downloading it again.
   ms with error type and code, wait ended still preparing, waiting for the
   model, unloaded after idle, files in place ms. FluidAudio's own lines
   (`com.fluidinference`) name its compile and re-download steps.
+
+### Follow-up the same day: never silent, and time left everywhere
+
+- The field detail (Listening while held; after release the label went
+  away, nothing pasted, no error) has its own scenario tests. With the
+  model not ready a take ends only with text or a reason and Retry. One
+  more empty path is closed: a model that loaded during the take and
+  returns no text for audio at speech level (any 100 ms above about
+  -34 dBFS) ends with "No text from local model, Retry" instead of
+  silence. A quiet take stays silence (2026-07-26 decision unchanged).
+- Download: percent from bytes plus a time left from the rate over the
+  last 15 s, smoothed; shown after 4 s of data ("Estimating time left…"
+  before), "Stalled. Check your connection." after 10 s without progress.
+  A failed download keeps "Check your connection and try again." with
+  Download.
+- Preparation: no progress signal exists, so the time left is the expected
+  duration minus the elapsed time, with a moving bar and no percentage.
+  Under a minute it says "Less than a minute left"; past the expectation
+  "Taking longer than usual, still working". A preparation measured on this
+  Mac replaces the table (x1.25 headroom); the first load after each
+  download is a compile, later ones are reloads.
+- Settings card, the onboarding source caption, a footer strip on every
+  onboarding step ("You can continue; Drop works as soon as it's ready",
+  then "Speech model ready · Drop works now"), the try step's message and
+  the island's Retry message ("Local model: about N min left") read the
+  same value. The island's wait label stays "preparing local model…": the
+  take waits at most 45 s, so minutes there would mislead.
+
+Proposed expected durations (seconds). One measurement exists (M4 Pro,
+download plus first load 74 s, mostly download). The rest follows Neural
+Engine compile reports and memory pressure on 8 GB Macs. **Needs a real
+clean M1 measurement**; `on-device model: ready ms=` in the log gives it.
+
+| Chip | 8 GB first compile | 16 GB+ first compile |
+|---|---|---|
+| M1 | 240 | 150 |
+| M2 | 180 | 120 |
+| M3 | 120 | 90 |
+| M4 and later | 90 | 60 |
+| unknown | 180 | 180 |
+
+Pro, Max and Ultra: x0.75. Reload: 15 s on 8 GB, 8 s otherwise.
 
 ## Why
 
@@ -98,6 +140,10 @@ by deleting the folder and downloading it again.
   covers it.
 
 ## Rejected
+
+- A percentage for the preparation: Core ML gives none, a made-up one
+  freezes at 99%.
+- Minutes in the island's wait label: the take stops waiting at 45 s.
 
 - A longer or no deadline on the take: the island would wait for minutes
   with no way out after release.

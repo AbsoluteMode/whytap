@@ -20,7 +20,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/Streaming/OnDevice/OnDeviceEverywhereTests.swift
     confirmed_at: 2026-11-21
-related: [2026-11-19-on-device-dictation.md]
+related: [2026-11-19-on-device-dictation.md, 2026-11-28-on-device-model-preparation.md]
 ---
 
 ## Context

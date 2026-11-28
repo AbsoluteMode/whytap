@@ -41,6 +41,9 @@ enum OnDeviceSpeechError: Error, Equatable {
     case modelPreparing
     /// The model's files are in place but it did not load.
     case modelLoadFailed
+    /// A model that loaded during the take returned no text for audio at
+    /// speech level.
+    case modelNoText
 }
 
 /// Whether the on-device model can run right now. The route resolver, the
@@ -88,9 +91,12 @@ protocol OnDeviceSpeechModelManaging: Sendable {
     func prepare() async -> Bool
     /// Whether a decode can start without loading the model first.
     func isLoaded() async -> Bool
+    /// Time left for the running preparation; nil when none runs.
+    func preparationTimeLeft() async -> OnDeviceSpeechTimeLeft?
 }
 
 extension OnDeviceSpeechModelManaging {
+    func preparationTimeLeft() async -> OnDeviceSpeechTimeLeft? { nil }
     func acquire(within limit: Duration?) async throws -> AsrManager { try await acquire() }
     @discardableResult
     func prepare() async -> Bool { await status() == .ready }
@@ -101,6 +107,18 @@ extension OnDeviceSpeechModelManaging {
 final class OnDeviceSpeechStoreSnapshot: @unchecked Sendable {
     private let lock = NSLock()
     private var downloading = false
+    private var preparation: (startedAt: TimeInterval, kind: OnDeviceSpeechPreparationKind)?
+
+    /// When the running preparation started (`uptime` clock) and its kind.
+    var runningPreparation: (startedAt: TimeInterval, kind: OnDeviceSpeechPreparationKind)? {
+        lock.lock(); defer { lock.unlock() }
+        return preparation
+    }
+
+    func setPreparation(_ value: (startedAt: TimeInterval, kind: OnDeviceSpeechPreparationKind)?) {
+        lock.lock(); defer { lock.unlock() }
+        preparation = value
+    }
 
     var isDownloading: Bool {
         lock.lock(); defer { lock.unlock() }
@@ -145,6 +163,8 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
     private let loadModel: LoadModel
     private let sleep: Sleep
     private let filesPresent: (@Sendable () -> Bool)?
+    private let uptime: @Sendable () -> TimeInterval
+    nonisolated let estimator: OnDeviceSpeechPreparationEstimator
     private let idleEviction: Duration
     private var cachedManager: AsrManager?
     private var downloadTask: Task<Void, Error>?
@@ -168,6 +188,9 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         idleEviction: Duration = .seconds(300),
         filesPresent: (@Sendable () -> Bool)? = nil,
         sleep: @escaping Sleep = { try await Task.sleep(for: $0) },
+        uptime: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        machine: OnDeviceSpeechMachine = .current,
+        history: any OnDeviceSpeechPreparationHistory = UserDefaultsPreparationHistory(),
         downloadFiles: @escaping DownloadFiles = OnDeviceSpeechModelStore.defaultDownloadFiles,
         loadModel: @escaping LoadModel = OnDeviceSpeechModelStore.defaultLoad
     ) {
@@ -176,6 +199,8 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         self.idleEviction = idleEviction
         self.filesPresent = filesPresent
         self.sleep = sleep
+        self.uptime = uptime
+        self.estimator = OnDeviceSpeechPreparationEstimator(machine: machine, history: history)
         self.downloadFiles = downloadFiles
         self.loadModel = loadModel
     }
@@ -214,7 +239,16 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         return .preparing
     }
 
-    func isLoaded() -> Bool { cachedManager != nil }
+    func isLoaded() async -> Bool { cachedManager != nil }
+
+    func preparationTimeLeft() async -> OnDeviceSpeechTimeLeft? { currentPreparationTimeLeft() }
+
+    /// For synchronous readers (the island's message when a take stops
+    /// waiting).
+    nonisolated func currentPreparationTimeLeft() -> OnDeviceSpeechTimeLeft? {
+        guard let running = snapshot.runningPreparation else { return nil }
+        return estimator.timeLeft(elapsed: uptime() - running.startedAt, kind: running.kind)
+    }
 
     /// A second call while a download runs joins it.
     func download(progress: (@Sendable (Double) -> Void)? = nil) async throws {
@@ -244,6 +278,8 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
             }
             downloadTask = task
             snapshot.setDownloading(true)
+            // New files: their first load compiles again.
+            estimator.history.setCompiled(false)
         }
         let started = ContinuousClock.now
         do {
@@ -285,6 +321,8 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         // stop it) but its model is discarded; its waiters learn it now.
         preparationGeneration += 1
         preparationTask = nil
+        snapshot.setPreparation(nil)
+        estimator.history.setCompiled(false)
         finishWaiters(loaded: false)
         preparedOnce = false
         lastLoadFailed = false
@@ -350,8 +388,11 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
         let model = self.model
         let loadModel = self.loadModel
         let started = ContinuousClock.now
-        os_log("on-device model: preparing reason=%{public}@ first_in_launch=%{public}@",
-               log: Self.log, type: .info, reason, preparedOnce ? "false" : "true")
+        let kind: OnDeviceSpeechPreparationKind = estimator.history.hasCompiled ? .reload : .firstCompile
+        snapshot.setPreparation((uptime(), kind))
+        os_log("on-device model: preparing reason=%{public}@ first_in_launch=%{public}@ kind=%{public}@ expected_s=%{public}d",
+               log: Self.log, type: .info, reason, preparedOnce ? "false" : "true", kind.rawValue,
+               Int(estimator.expectedSeconds(kind)))
         preparationTask = Task(priority: .userInitiated) { [weak self] in
             let result: Result<AsrManager, Error>
             do {
@@ -359,12 +400,13 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
             } catch {
                 result = .failure(error)
             }
-            await self?.finishPreparation(result, generation: generation, started: started)
+            await self?.finishPreparation(result, generation: generation, started: started, kind: kind)
         }
     }
 
     private func finishPreparation(
-        _ result: Result<AsrManager, Error>, generation: Int, started: ContinuousClock.Instant
+        _ result: Result<AsrManager, Error>, generation: Int, started: ContinuousClock.Instant,
+        kind: OnDeviceSpeechPreparationKind
     ) async {
         let elapsed = Self.milliseconds(since: started)
         guard generation == preparationGeneration else {
@@ -373,9 +415,12 @@ actor OnDeviceSpeechModelStore: OnDeviceSpeechModelManaging {
             return
         }
         preparationTask = nil
+        snapshot.setPreparation(nil)
         switch result {
         case .success(let manager):
             cachedManager = manager
+            estimator.history.record(kind, seconds: Double(elapsed) / 1000)
+            estimator.history.setCompiled(true)
             preparedOnce = true
             lastLoadFailed = false
             os_log("on-device model: ready ms=%{public}d", log: Self.log, type: .info, elapsed)

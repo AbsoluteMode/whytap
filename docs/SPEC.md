@@ -650,7 +650,15 @@ Preparing — Core ML загружает модель, первый раз на 
 показывает «preparing local model…» до 45 с и затем вставляет весь записанный
 дубль; если не успела — «Local model still preparing, retry soon» с Retry, если
 не загрузилась — «Local model didn't load» с Retry и открытыми Settings → Models.
-Пустого исхода нет.
+Если модель загрузилась во время дубля и вернула пусто при речи в аудио —
+«No text from local model, Retry». Пустого исхода нет. Везде, где модель
+качается или готовится (карточка, онбординг — строка в футере на каждом шаге,
+сообщение Retry в острове), показано примерное оставшееся время: при скачивании
+— по измеренной скорости («About 3 min left», «Stalled. Check your connection.»),
+при подготовке — по ожидаемой длительности для чипа/памяти или прошлой
+подготовке на этом Маке, без процентов; дольше ожидаемого — «Taking longer than
+usual, still working». В онбординге: «You can continue; Drop works as soon as
+it's ready.», затем «Speech model ready · Drop works now».
 
 **Batch-распознавание** — только запасной путь: деградировавший поток, Retry
 после «Couldn't deliver», fallback рекордера и batch-голос агента. Весь take

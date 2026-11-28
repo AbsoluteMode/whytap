@@ -712,15 +712,16 @@ final class OnboardingJourneyModel: ObservableObject {
 
     // MARK: - 3. Language model key
 
-    /// The model the LLM step preselects for `provider`: the Agent's
-    /// recommended one when the registry has it (so the pick also serves the
-    /// Agent's tools), otherwise the newest catalog model the Agent can use.
-    /// OpenAI has no registry default: its live catalog is the source.
+    /// The model the LLM step preselects for `provider`: the recommended one
+    /// for the shared LLM row's features when the registry has it, otherwise
+    /// the newest catalog model they can use. OpenAI has no registry default:
+    /// its live catalog is the source. The Agent runs on the user's Claude Code
+    /// or Codex and takes no model from here.
     func preselectedModel(_ provider: AIProviderKind) -> String? {
         // The provider's current catalog decides (its recommended family's
         // newest model); the registry only before the catalog is there.
         // WHY: .project-docs/decisions/2026-11-22-onboarding-journey.md
-        recommendedModel(.llmKey, provider: provider) ?? ModelRegistry.recommended(for: .agent, kind: provider)
+        recommendedModel(.llmKey, provider: provider) ?? ModelRegistry.recommended(for: SharedModelKind.llm.pickerFeature, kind: provider)
     }
 
     /// The model a key step marks "Recommended": the language model step's
@@ -776,7 +777,7 @@ final class OnboardingJourneyModel: ObservableObject {
     private func allChoices(for provider: AIProviderKind, speech: Bool) -> [OnboardingModelChoice] {
         _ = revision
         guard let account = APIAndModelsViewModel.builtInAccount(for: provider) else { return [] }
-        let options = models.sections(for: speech ? .dropFast : .agent).filter { $0.account == account }.flatMap(\.options)
+        let options = models.sections(for: speech ? .dropFast : SharedModelKind.llm.pickerFeature).filter { $0.account == account }.flatMap(\.options)
         let usable = options.filter { if case .notSupported = $0.state { return false } else { return true } }
         let all = usable.map { option -> OnboardingModelChoice in
             let perMinute = provider == .openAI ? ModelRegistry.openAISpeechUSDPerMinute(option.model) : nil
@@ -1014,7 +1015,7 @@ final class OnboardingJourneyModel: ObservableObject {
         }
         // Saving the key loaded its catalog, so a catalog-only provider has a model now.
         guard let model = llmModel ?? preselectedModel(provider) else {
-            outcomes[.llmKey] = .failed("\(provider.displayName) lists no model the Agent can use")
+            outcomes[.llmKey] = .failed("\(provider.displayName) lists no model Whytap can use")
             return
         }
         let applied = await models.selectShared(model: model, account: account, kind: .llm, replaceCustom: false,

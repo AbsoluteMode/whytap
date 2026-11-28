@@ -96,7 +96,7 @@ change the tool's settings below.
 ## Shared Speech and LLM rows — 2026-11-22
 
 - Models opens with two cards, Speech ("Drop, voice, Meetings") and LLM
-  ("Cleanup, notes, Agent"), each a single model menu that sets every feature
+  ("Text features"), each a single model menu that sets every feature
   of its kind. Subtitles keeps its own card below them.
 - The menu label tells the whole state in one line: "Choose a model",
   "ElevenLabs · scribe_v3_live", "Anthropic · claude-opus-5 · 1 custom",

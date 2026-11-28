@@ -1051,23 +1051,6 @@ final class NativeAgentTests: XCTestCase {
         XCTAssertEqual(result.first?["text"] as? String, "[Empty tool result]")
     }
 
-    func testNativeMigrationPreservesDisconnectedStateAndModelPreferences() throws {
-        let suite = "NativeMigration-\(UUID())"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        XCTAssertNil(AgentProviderStore(defaults: defaults).activeProvider)
-        defaults.set("opencode", forKey: "agent.activeProvider")
-        defaults.set("vendor/model", forKey: "agent.opencode.model")
-        XCTAssertEqual(AgentProviderStore(defaults: defaults).activeProvider, .native)
-        XCTAssertEqual(defaults.string(forKey: "agent.activeProvider"), "opencode", "Keep the rollback app’s persisted provider ID")
-        let connected = AgentProviderStore(defaults: defaults)
-        connected.markConnected(.native)
-        XCTAssertEqual(defaults.string(forKey: "agent.preferredProvider"), "opencode")
-        XCTAssertEqual(AgentProviderStore(defaults: defaults).preferredProvider, .native)
-        XCTAssertEqual(defaults.string(forKey: "agent.opencode.model"), "vendor/model")
-        AgentProviderStore(defaults: defaults).disconnect()
-        XCTAssertNil(AgentProviderStore(defaults: defaults).activeProvider)
-    }
     func testSyntheticScreenshotIsReturnedAsMediaAndNeverWritten() async throws {
         let (directory, keys, _) = try fixture()
         var captures = 0

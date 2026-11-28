@@ -4,10 +4,13 @@ import XCTest
 /// The Agent's switch and words, shared by its Features screen and onboarding.
 @MainActor
 final class AgentOtherSectionTests: XCTestCase {
-    func test_switch_is_on_only_when_enabled_and_connected() {
-        XCTAssertTrue(AgentOtherSection.isOn(enabled: true, activeProvider: .native))
+    func test_switch_is_on_only_when_enabled_with_a_harness() {
+        XCTAssertTrue(AgentOtherSection.isOn(enabled: true, activeProvider: .claude))
+        XCTAssertTrue(AgentOtherSection.isOn(enabled: true, activeProvider: .codex))
+        XCTAssertFalse(AgentOtherSection.isOn(enabled: true, activeProvider: .native), "the in-app agent no longer runs")
+        XCTAssertFalse(AgentOtherSection.isOn(enabled: true, activeProvider: .opencode))
         XCTAssertFalse(AgentOtherSection.isOn(enabled: true, activeProvider: nil))
-        XCTAssertFalse(AgentOtherSection.isOn(enabled: false, activeProvider: .native))
+        XCTAssertFalse(AgentOtherSection.isOn(enabled: false, activeProvider: .claude))
         XCTAssertFalse(AgentOtherSection.isOn(enabled: false, activeProvider: nil))
     }
 

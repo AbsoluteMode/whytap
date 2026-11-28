@@ -173,21 +173,6 @@ final class AgentSettingsStoreTests: XCTestCase {
         AIRoutingStore(defaults: freshDefaults(name))
     }
 
-    func test_opencode_model_comes_from_the_agent_route() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.options(for: .opencode).model, "anthropic/claude-sonnet-5.5")
-        XCTAssertEqual(s.selectedOpenCodeModel, "anthropic/claude-sonnet-5.5")
-    }
-
-    func test_model_label_names_the_route_provider_and_model() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.selectedOpenCodeModelLabel, "OpenRouter · anthropic/claude-sonnet-5.5")
-    }
-
     func test_model_label_is_nil_without_a_usable_agent_model() {
         let r = routing(#function)
         let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
@@ -208,12 +193,6 @@ final class AgentSettingsStoreTests: XCTestCase {
         XCTAssertNil(s.selectedOpenCodeModel)
     }
 
-    func test_agent_route_model_is_normalized_for_opencode() {
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .openRouter, model: "openrouter/anthropic/claude-sonnet-5.5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r)
-        XCTAssertEqual(s.selectedOpenCodeModel, "anthropic/claude-sonnet-5.5")
-    }
     // MARK: - OpenCode model limits from the OpenRouter catalog
 
     private func catalogs(_ models: [CatalogModel]) throws -> ModelCatalogStore {
@@ -229,45 +208,6 @@ final class AgentSettingsStoreTests: XCTestCase {
         r.setRoute(FeatureRoute(account: .openRouter, model: model), for: .agent)
         return AgentSettingsStore(defaults: freshDefaults(name + ".settings"), codexConfig: .init(), routing: r,
                                   catalogs: try catalogs(catalog))
-    }
-
-    func test_agent_options_carry_the_catalog_spec() throws {
-        let s = try agentOnOpenRouter(#function, model: "anthropic/claude-sonnet-5.5", catalog: [
-            CatalogModel(id: "anthropic/claude-sonnet-5.5", contextLength: 1_000_000, maxOutputTokens: 128_000,
-                         supportsTools: true, supportsReasoning: true)])
-        XCTAssertEqual(s.options(for: .opencode).openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000))
-    }
-
-    func test_spec_falls_back_for_fields_the_catalog_omits() throws {
-        let s = try agentOnOpenRouter(#function, model: "vendor/model", catalog: [
-            CatalogModel(id: "vendor/model", contextLength: 200_000)])
-        XCTAssertEqual(s.options(for: .opencode).openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: false, contextLimit: 200_000, outputLimit: 16_384))
-    }
-
-    /// An Agent route on Anthropic runs OpenCode's `anthropic` provider with
-    /// the plain model id and the limits of the Anthropic catalog.
-    func test_agent_route_on_anthropic_runs_the_anthropic_provider() throws {
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(UUID().uuidString).json")
-        addTeardownBlock { try? FileManager.default.removeItem(at: file) }
-        let stored = [ProviderAccount.anthropic.storageID: CatalogSnapshot(models: [
-            CatalogModel(id: "claude-sonnet-5-5", uses: [.chat, .chatWithTools], contextLength: 1_000_000,
-                         maxOutputTokens: 128_000, supportsTools: true, supportsReasoning: true)], fetchedAt: Date())]
-        try JSONEncoder().encode(stored).write(to: file)
-        let r = routing(#function)
-        r.setRoute(FeatureRoute(account: .anthropic, model: "claude-sonnet-5-5"), for: .agent)
-        let s = AgentSettingsStore(defaults: freshDefaults(#function + ".settings"), codexConfig: .init(), routing: r,
-                                   catalogs: ModelCatalogStore(fileURL: file))
-        let options = s.options(for: .opencode)
-        XCTAssertEqual(options.model, "claude-sonnet-5-5")
-        XCTAssertEqual(options.openCodeProvider, .anthropic)
-        XCTAssertEqual(options.openCodeModelSpec,
-                       OpenCodeModelSpec(toolCall: true, reasoning: true, contextLimit: 1_000_000, outputLimit: 128_000))
-        XCTAssertEqual(s.selectedOpenCodeModelLabel, "Anthropic · claude-sonnet-5-5")
-
-        r.setRoute(FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5"), for: .agent)
-        XCTAssertEqual(s.options(for: .opencode).openCodeProvider, .openRouter)
     }
 
     func test_no_spec_without_context_length_or_catalog_entry() throws {

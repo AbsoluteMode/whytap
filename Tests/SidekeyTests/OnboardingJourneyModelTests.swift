@@ -232,7 +232,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
     }
 
     private let speechFeatures: [AIFeature] = [.dropFast, .dropSmart, .agentVoice, .voiceSearch, .meetings]
-    private let llmFeatures: [AIFeature] = [.dropSmartCleanup, .meetingNotes, .agent, .translation]
+    private let llmFeatures: [AIFeature] = [.dropSmartCleanup, .meetingNotes, .translation]
 
     // MARK: - Your own server
 
@@ -789,7 +789,7 @@ final class OnboardingJourneyModelTests: XCTestCase {
         try await endBeat(env, until: .llmKey, in: model)
         XCTAssertEqual(model.savedKeyProviders(.languageModel), [.anthropic])
         await model.useSavedKey(on: .languageModel)
-        XCTAssertEqual(env.routing.route(for: .agent)?.account, .anthropic)
+        XCTAssertEqual(env.routing.route(for: .dropSmartCleanup)?.account, .anthropic)
     }
 
     func testAnEarlierKeyThatFinishesLastDoesNotReplaceTheLaterChoice() async throws {

@@ -114,7 +114,7 @@ final class SmartEditorPassTests: XCTestCase {
         XCTAssertNil(restored.state.routes[AIFeature.dropSmartDecision.rawValue])
         XCTAssertNil(restored.state.migratedRoutes[AIFeature.dropSmartDecision.rawValue])
         XCTAssertEqual(restored.route(for: .dropSmartCleanup), cleanup)
-        XCTAssertEqual(restored.route(for: .agent), state.routes[AIFeature.agent.rawValue])
+        XCTAssertEqual(restored.state.routes[AIFeature.agent.rawValue], state.routes[AIFeature.agent.rawValue], "the inactive Agent route stays stored")
         let saved = defaults.data(forKey: AIRoutingStore.defaultsKey)
         restored.retireSmartDecisionIfNeeded()
         XCTAssertEqual(defaults.data(forKey: AIRoutingStore.defaultsKey), saved)

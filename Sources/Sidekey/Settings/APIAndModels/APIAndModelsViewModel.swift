@@ -40,20 +40,29 @@ struct FeatureRow: Equatable, Identifiable {
     var id: AIFeature { feature }
 }
 
-/// Subtitles' row: the engine the keys give, preselected. Soniox live
-/// translation with the Soniox key, otherwise OpenAI gpt-realtime-translate
-/// with the OpenAI key; no engine choice.
-// WHY: .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md
+/// Subtitles' row: Soniox live translation or OpenAI gpt-realtime-translate.
+/// Without a choice the keys decide (Soniox first); a chosen engine needs its
+/// own key and never falls back to the other.
+// WHY: .project-docs/decisions/2026-11-27-subtitle-engine-choice.md
 // WHY: .project-docs/decisions/2026-11-22-subtitle-audio-translate-slot.md
 struct AudioTranslateSlot: Equatable {
     var soniox: SubtitleAudioTranslate.KeyState
     var openAI: SubtitleAudioTranslate.KeyState
+    var choice: SubtitleAudioTranslate.Engine? = nil
 
-    var engine: SubtitleAudioTranslate.Engine? { SubtitleAudioTranslate.engine(soniox: soniox, openAI: openAI) }
-    /// Subtitles can run: one of the keys can be read.
+    /// The engine that runs now, or nil when its key is missing.
+    var engine: SubtitleAudioTranslate.Engine? {
+        SubtitleAudioTranslate.engine(choice: choice, soniox: soniox, openAI: openAI)
+    }
+    /// The engine the row shows: the choice, else what the keys give, else Soniox.
+    var selected: SubtitleAudioTranslate.Engine { choice ?? engine ?? .soniox }
+    /// Subtitles can run: the selected engine's key can be read.
     var isActive: Bool { engine != nil }
-    /// Without a key, the engine a Soniox key would give.
-    var label: String { (engine ?? .soniox).label }
+    var label: String { selected.label }
+
+    func keyState(_ engine: SubtitleAudioTranslate.Engine) -> SubtitleAudioTranslate.KeyState {
+        engine == .soniox ? soniox : openAI
+    }
 }
 
 /// One line of the Models card: what the user turns on (Drop Smart, Meetings)
@@ -68,7 +77,7 @@ struct FeatureGroup: Equatable, Identifiable {
     /// What the collapsed line names: Subtitles' one model, otherwise every
     /// route's model.
     var summaryParts: [String] {
-        if let slot = audioTranslate { return [(slot.engine ?? .soniox).model] }
+        if let slot = audioTranslate { return [slot.selected.model] }
         return rows.map(\.modelSummary)
     }
     var summary: String { summaryParts.joined(separator: " · ") }
@@ -85,17 +94,17 @@ struct FeatureGroup: Equatable, Identifiable {
         return rows.contains { $0.status == .notSet }
     }
 
-    /// Every feature exactly once (Costs groups usage by it too). Paired
-    /// functions keep their speech route beside the LLM route that processes
-    /// its text, speech first: the Agent's card holds its voice model and its
-    /// answer model, and there is no separate "Agent voice" card. Subtitles'
+    /// Every active feature exactly once. Paired functions keep their speech
+    /// route beside the LLM route that processes its text, speech first. The
+    /// Agent has no text model here: its harness (Claude Code or Codex) is the
+    /// Harness row; only its voice input is a Speech route. Subtitles'
     /// features are retired: the card shows the Audio translate slot instead
     /// of rows.
     static let layout: [(title: String, features: [AIFeature])] = [
         ("Drop Fast", [.dropFast]),
         ("Drop Smart", [.dropSmart, .dropSmartCleanup]),
         ("Meetings", [.meetings, .meetingNotes]),
-        ("Agent", [.agentVoice, .agent]),
+        ("Agent voice", [.agentVoice]),
         ("Voice search", [.voiceSearch]),
         ("Translation", [.translation]),
         ("Subtitles", [.subtitlesAudio, .subtitlesTranslation]),
@@ -167,8 +176,10 @@ final class APIAndModelsViewModel: ObservableObject {
     /// Speech and LLM, read from the per-feature routes.
     // WHY: .project-docs/decisions/2026-11-22-shared-model-rows.md
     @Published private(set) var sharedRows: [SharedModelRow] = []
-    /// The Agent's web search, shown under Speech and LLM.
-    @Published private(set) var searchRow = AgentSearchRow(options: AgentRunOptions(), tavilyConnected: false)
+    /// Harness: which of the user's coding tools runs the Agent, under Speech and LLM.
+    let harness: HarnessSettingsModel
+    /// Where the Subtitles engine choice is stored.
+    private let subtitleDefaults: UserDefaults
     @Published private(set) var aliasGroups: [AliasGroupAction] = []
     @Published private(set) var unsetBanner: String?
     @Published var proposal: AssignProposal?
@@ -183,6 +194,12 @@ final class APIAndModelsViewModel: ObservableObject {
     private let agentSettings: AgentSettingsStore
 
     func makeTavilySettings() -> TavilySettings { TavilySettings(keys: keys) }
+
+    /// Keys & models → Models → Subtitles: the engine, kept even before its key exists.
+    func selectSubtitlesEngine(_ engine: SubtitleAudioTranslate.Engine) {
+        subtitleDefaults.set(engine.rawValue, forKey: SubtitleAudioTranslate.engineChoiceKey)
+        recompute()
+    }
     private let catalogs: ModelCatalogStore
     private let checks: ModelCheckStore
     private let keyStatuses: KeyStatusStore
@@ -223,10 +240,14 @@ final class APIAndModelsViewModel: ObservableObject {
         now: @escaping () -> Date = Date.init,
         inputLanguage: (@MainActor () -> String?)? = nil,
         onDevice: OnDeviceSpeechReadiness = .live,
-        agentSettings: AgentSettingsStore? = nil
+        agentSettings: AgentSettingsStore? = nil,
+        harness: HarnessSettingsModel? = nil,
+        subtitleDefaults: UserDefaults = .standard
     ) {
+        self.subtitleDefaults = subtitleDefaults
         self.onDevice = onDevice
         self.agentSettings = agentSettings ?? .shared
+        self.harness = harness ?? HarnessSettingsModel(store: .shared, settings: agentSettings ?? .shared)
         let routing = routing ?? .shared
         let catalogs = catalogs ?? .shared
         let checks = checks ?? .shared
@@ -260,11 +281,6 @@ final class APIAndModelsViewModel: ObservableObject {
             .store(in: &observers)
     }
 
-    /// Keys & models → Models → Search: the Agent model's search (`.auto`) or Tavily.
-    func selectSearch(_ choice: AgentWebSearchChoice) {
-        agentSettings.webSearchChoice = choice
-        recompute()
-    }
 
     /// Kinds the Add key menu offers: built-in providers without a key (an
     /// unreadable one already has a chip), and always a server.
@@ -1129,7 +1145,8 @@ final class APIAndModelsViewModel: ObservableObject {
 
     private func recompute() {
         let chips = keyedAccounts().map(chip(for:))
-        let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)))
+        let slot = AudioTranslateSlot(soniox: .init(lookup(.soniox)), openAI: .init(lookup(SubtitleAudioTranslate.account)),
+                                      choice: SubtitleAudioTranslate.storedChoice(subtitleDefaults))
         if audioTranslate != slot { audioTranslate = slot }
         let rows = AIFeature.activeCases.map(row(for:))
         let groups = resolver.aliasGroups()
@@ -1152,14 +1169,7 @@ final class APIAndModelsViewModel: ObservableObject {
             return row
         }
         if self.sharedRows != shared { self.sharedRows = shared }
-        let search = makeSearchRow()
-        if self.searchRow != search { self.searchRow = search }
         if self.unsetBanner != banner { self.unsetBanner = banner }
-    }
-
-    private func makeSearchRow() -> AgentSearchRow {
-        AgentSearchRow(options: agentSettings.options(for: .native),
-                       tavilyConnected: keys.read(account: TavilySearch.keychainAccount) != nil)
     }
 
     private func row(for feature: AIFeature) -> FeatureRow {

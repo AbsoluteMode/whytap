@@ -49,7 +49,11 @@ enum AIFeature: String, CaseIterable, Codable, Sendable {
 
     var isActive: Bool {
         switch self {
-        case .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio,
+        // The Agent runs on the user's Claude Code or Codex: its text route is
+        // kept (rollback build, Costs history) but nothing assigns or reads it.
+        // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+        case .agent,
+             .dropSmartDecision, .retiredMeetingText, .retiredMeetingAudio,
              .subtitlesAudio, .subtitlesTranslation: return false
         default: return true
         }

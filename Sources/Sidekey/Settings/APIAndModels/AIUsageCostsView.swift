@@ -86,8 +86,16 @@ struct AIUsageCostRow: Identifiable, Equatable {
             .map { AIUsageModelRow(id: $0.key, events: $0.value) }
             .sorted { $0.model.localizedStandardCompare($1.model) == .orderedAscending }
     }
+    /// Models' rows, except that the Agent's row also keeps what earlier
+    /// builds' in-app agent spent on answers (the inactive `.agent` route):
+    /// spending already recorded is never dropped from Costs.
+    // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
+    static let layout: [(title: String, features: [AIFeature])] = FeatureGroup.layout.map { group in
+        group.features == [.agentVoice] ? ("Agent", [.agent, .agentVoice]) : group
+    }
+
     static func grouped(_ events: [AIUsageEvent]) -> [Self] {
-        FeatureGroup.layout.compactMap { group in
+        layout.compactMap { group in
             let used = events.filter { group.features.contains($0.context.feature) }
             return used.isEmpty ? nil : Self(title: group.title, events: used)
         }

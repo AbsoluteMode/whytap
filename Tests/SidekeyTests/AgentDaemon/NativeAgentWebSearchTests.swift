@@ -159,42 +159,6 @@ final class NativeAgentWebSearchTests: XCTestCase {
         }
     }
 
-    func testModelsScreenSearchRowFollowsTheAgentRouteTavilyKeyAndPick() throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
-        let snapshot = CatalogSnapshot(models: [CatalogModel(id: "claude-legacy", supportsWebSearch: false),
-                                                CatalogModel(id: "claude-opus-5-5", supportsWebSearch: true)],
-                                       fetchedAt: Date(), lastRefreshFailed: false, limited: false)
-        try JSONEncoder().encode([ProviderAccount.anthropic.storageID: snapshot]).write(to: file)
-        let box = InMemoryTokenStore.Box()
-        let keys = ProviderKeyStore(makeStore: { InMemoryTokenStore(account: $0, box: box) })
-        let routing = AIRoutingStore(defaults: defaults)
-        let catalogs = ModelCatalogStore(fileURL: file)
-        let agent = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs)
-        routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-legacy"), for: .agent)
-        let vm = APIAndModelsViewModel(routing: routing, keys: keys, catalogs: catalogs, checks: ModelCheckStore(defaults: defaults),
-                                       keyStatuses: KeyStatusStore(defaults: defaults), agentSettings: agent)
-        XCTAssertEqual(vm.searchRow.current.label, "Off — add a Tavily key", "Catalog: this model has no search")
-
-        try keys.save("tavily-key", account: TavilySearch.keychainAccount)
-        NotificationCenter.default.post(name: .whytapTavilyKeyChanged, object: nil)
-        XCTAssertEqual(vm.searchRow.current.label, "Tavily")
-
-        routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-opus-5-5"), for: .agent)
-        vm.selectSearch(.auto)
-        XCTAssertEqual(vm.searchRow.current.label, "Anthropic · built-in", "Built-in is the default even with a Tavily key")
-        XCTAssertEqual(agent.options(for: .native).preferTavilySearch, false)
-
-        vm.selectSearch(.tavily)
-        XCTAssertEqual(vm.searchRow.current.label, "Tavily")
-        XCTAssertEqual(defaults.string(forKey: "agent.native.webSearch"), "tavily")
-        XCTAssertTrue(AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: catalogs)
-            .options(for: .native).preferTavilySearch, "The pick reaches the Agent's run")
-        XCTAssertTrue(ConfigBackupRegistry.entries.keys.contains("agent.native.webSearch"))
-    }
-
     func testTavilyPickedInModelsIsUsedInsteadOfBuiltInSearch() async throws {
         let (directory, keys, http) = try fixture()
         try keys.save("anthropic-key", account: ProviderAccount.anthropicKeychainAccount)

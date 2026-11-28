@@ -2074,7 +2074,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               agentController == nil else { return }
         let claudeProvider: any CLIProvider = ClaudeCodeProvider()
         let codexProvider: any CLIProvider = CodexProvider()
-        let nativeProvider: any CLIProvider = NativeAgentProvider()
         // ONE shared response store backs both the controller's agent stream
         // and the island flow store the answer panel renders from. Building
         // the flow store here (not letting the controller mint its own) lets
@@ -2084,13 +2083,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let islandFlow = IslandAgentFlowStore(responseStore: responseStore)
         let agentController = AgentController(
             resolveProvider: {
-                // nil when nothing is connected (full Disconnect) -> the agent
-                // refuses the turn instead of defaulting to Claude.
+                // nil when no harness is chosen -> the agent refuses the turn
+                // and asks to choose one; it never picks a harness itself.
+                // WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md
                 switch AgentProviderStore.shared.activeProvider {
                 case .claude: return claudeProvider
                 case .codex: return codexProvider
-                case .opencode, .native: return nativeProvider
-                case nil: return nil
+                case .opencode, .native, nil: return nil
                 }
             },
             audioTranscriber: BatchAgentAudioTranscriber(batch: agentBatchTranscriber),
@@ -2100,7 +2099,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // changes in Settings take effect without restarting the controller.
             agentEnabled: { UserPreferencesCache.shared.currentAgentEnabled },
             onAgentSetupRequired: { [weak self] in
-                self?.openSettingsWindow(tab: .agentMode)
+                // Without a harness the missing step is in Keys & models.
+                if AgentProviderStore.shared.activeProvider == nil {
+                    self?.openSettingsWindow(tab: .apiAndModels, feature: .agent)
+                } else {
+                    self?.openSettingsWindow(tab: .agentMode)
+                }
             },
             streamingVoiceEnabled: AgentFeatureGate.streamingVoiceEnabled,
             agentVoiceStreamFactory: { [weak self] in

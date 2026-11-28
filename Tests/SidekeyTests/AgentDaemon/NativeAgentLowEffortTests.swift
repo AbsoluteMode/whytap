@@ -256,35 +256,6 @@ final class NativeAgentLowEffortTests: XCTestCase {
         XCTAssertEqual(small.bodies.first?["max_tokens"] as? Int, 4096)
     }
 
-    /// A catalog entry with an output limit but no context length (no spec):
-    /// its limit wins over the raised cap. A snapshot without a limit, as
-    /// saved before, keeps the cap.
-    func testCatalogOutputLimitWinsWithoutContextLength() async throws {
-        func options(_ entry: CatalogModel) throws -> AgentRunOptions {
-            let suite = UUID().uuidString
-            let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-            let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-            addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
-            let snapshot = CatalogSnapshot(models: [entry], fetchedAt: Date(), lastRefreshFailed: false, limited: false)
-            try JSONEncoder().encode([ProviderAccount.anthropic.storageID: snapshot]).write(to: file)
-            let routing = AIRoutingStore(defaults: defaults)
-            routing.setRoute(FeatureRoute(account: .anthropic, model: entry.id), for: .agent)
-            return AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
-                                      catalogs: ModelCatalogStore(fileURL: file)).options(for: .native)
-        }
-        let partial = try options(CatalogModel(id: "claude-sonnet-5-5", maxOutputTokens: 8192))
-        XCTAssertNil(partial.openCodeModelSpec)
-        XCTAssertEqual(partial.outputTokenLimit, 8192)
-        let sent = try await run("hi", partial, [anthropicFinal("Hello.")])
-        XCTAssertEqual(sent.bodies.first?["max_tokens"] as? Int, 8192)
-        let old = try JSONDecoder().decode(CatalogModel.self, from: Data(#"{"id":"claude-sonnet-5-5","contextLength":200000}"#.utf8))
-        let oldOptions = try options(old)
-        XCTAssertNil(oldOptions.outputTokenLimit)
-        XCTAssertEqual(oldOptions.openCodeModelSpec?.outputLimit, 16_384)
-        let oldSent = try await run("hi", oldOptions, [anthropicFinal("Hello.")])
-        XCTAssertEqual(oldSent.bodies.first?["max_tokens"] as? Int, 16_384)
-    }
-
     /// OpenRouter's HTTP-200 error envelope: the single failed event keeps
     /// the typed envelope and the response's token counts.
     func testOpenRouterHTTP200ErrorKeepsUsageOnTheFailedEvent() async throws {
@@ -337,28 +308,6 @@ final class NativeAgentLowEffortTests: XCTestCase {
         let models = try ModelCatalogFetcher.parseAnthropicPage(Data(page.utf8)).models
         XCTAssertEqual(models.map(\.supportsLowEffort), [true, false, false, nil, nil])
         XCTAssertEqual(models[3].supportsReasoning, true, "an odd effort value costs only that flag")
-    }
-
-    /// The saved catalog's flag reaches the turn's options; a snapshot saved
-    /// before the flag existed still loads, and the family list decides.
-    func testSavedCatalogFlagReachesTheTurnAndOldSnapshotsStillLoad() throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
-        let snapshot = CatalogSnapshot(models: [CatalogModel(id: "claude-sonnet-5-5", supportsLowEffort: false)],
-                                       fetchedAt: Date(), lastRefreshFailed: false, limited: false)
-        try JSONEncoder().encode([ProviderAccount.anthropic.storageID: snapshot]).write(to: file)
-        let routing = AIRoutingStore(defaults: defaults)
-        routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-sonnet-5-5"), for: .agent)
-        let options = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
-                                         catalogs: ModelCatalogStore(fileURL: file)).options(for: .native)
-        XCTAssertEqual(options.lowEffortSupport, false)
-        XCTAssertNil(NativeAgentEffort.request(provider: .anthropic, model: "claude-sonnet-5-5", catalogFlag: options.lowEffortSupport,
-                                               providerSearch: true))
-        let old = try JSONDecoder().decode(CatalogModel.self, from: Data(#"{"id":"claude-sonnet-5-5"}"#.utf8))
-        XCTAssertNil(old.supportsLowEffort)
-        XCTAssertNotNil(NativeAgentEffort.request(provider: .anthropic, model: old.id, catalogFlag: old.supportsLowEffort))
     }
 
     func testUsageReadsEachProvidersTokenFields() {

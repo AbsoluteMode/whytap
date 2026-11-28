@@ -30,11 +30,10 @@ final class ProviderMarkConsistencyTests: XCTestCase {
     func testAnthropicRoutesShowTheAgentsBundledMarkNotASystemSymbol() throws {
         let routing = routing()
         let route = FeatureRoute(account: .anthropic, model: "claude-sonnet-5-5")
-        routing.setRoute(route, for: .agent)
         routing.setRoute(route, for: .dropSmartCleanup)
 
         // The Agent on an Anthropic route: the reference mark.
-        let agent = TranscriptionProviderBrand.agent(.native, route: routing.route(for: .agent))
+        let agent = TranscriptionProviderBrand.agent(.native, route: route)
         XCTAssertEqual(agent.assetName, "model-anthropic")
         XCTAssertNil(agent.systemName)
 

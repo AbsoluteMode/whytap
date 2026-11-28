@@ -15,6 +15,8 @@ enum SettingsSyncLiveReload {
         let keys = Set(items.compactMap(SettingsSyncItem.preferenceKey))
         guard !keys.isEmpty else { return }
         if keys.contains(AgentSettingsStore.webSearchChoiceKey) { AgentSettingsStore.shared.reloadWebSearchChoice() }
+        // A synced harness on a Mac without that CLI says "not installed" at the turn; never the other CLI.
+        if keys.contains(AgentProviderStore.key) { AgentProviderStore.shared.reload() }
         if keys.contains(ConfigBackupRegistry.aiRoutingKey) { AIRoutingStore.shared.reloadFromDefaults() }
         if keys.contains(where: { $0.hasPrefix("hotkeys.") }) { HotkeyPreferences.shared.reloadFromDefaults() }
         if keys.contains(HoverLayoutStore.defaultsKey) { HoverLayoutStore.shared.reloadFromDefaults() }

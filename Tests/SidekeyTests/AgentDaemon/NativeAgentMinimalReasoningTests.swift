@@ -230,28 +230,6 @@ final class NativeAgentMinimalReasoningTests: XCTestCase {
         }
     }
 
-    /// Settings hand the turn the OpenRouter catalog entry of the Agent's
-    /// model; a direct route gets none.
-    func testOpenRouterCatalogEntryReachesTheTurn() throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
-        let capabilities = OpenRouterReasoningCapabilities(mandatory: false, supportedEfforts: ["low", "none"])
-        let snapshot = CatalogSnapshot(models: [CatalogModel(id: "openai/gpt-5.5", uses: [.chat, .chatWithTools], contextLength: 400_000,
-                                                             supportsTools: true, reasoning: capabilities)],
-                                       fetchedAt: Date(), lastRefreshFailed: false, limited: false)
-        try JSONEncoder().encode([ProviderAccount.openRouter.storageID: snapshot,
-                                  ProviderAccount.openAI.storageID: snapshot]).write(to: file)
-        let routing = AIRoutingStore(defaults: defaults)
-        routing.setRoute(FeatureRoute(account: .openRouter, model: "openai/gpt-5.5"), for: .agent)
-        let store = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing,
-                                       catalogs: ModelCatalogStore(fileURL: file))
-        XCTAssertEqual(store.options(for: .native).openRouterReasoning, capabilities)
-        routing.setRoute(FeatureRoute(account: .openAI, model: "openai/gpt-5.5"), for: .agent)
-        XCTAssertNil(store.options(for: .native).openRouterReasoning)
-    }
-
     // MARK: A provider that refuses the fields
 
     /// The provider answers HTTP 400 to the request with the fields: the

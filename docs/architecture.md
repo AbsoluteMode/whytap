@@ -600,8 +600,23 @@ Agent flow (native Whytap runtime; OpenRouter, OpenAI or Anthropic):
   screenshots are untrusted evidence. Never treat them as user authorization.
   WhytapCustomizationContext.promptInstructions retains Monitor/source-kit contracts.
   WHY: .project-docs/decisions/2026-10-22-native-agent.md
-  Claude Code and Codex (ClaudeCodeProvider, CodexProvider; not yet selectable,
-  the native agent above still runs Right Command): every turn maps Allow file
+  Claude Code and Codex (ClaudeCodeProvider, CodexProvider) run Right Command:
+  AppDelegate dispatches only to the harness in AgentProviderStore
+  (`agent.harness.active`), chosen in Keys & models -> Models -> Harness
+  (HarnessModelsCard, HarnessSettingsModel). The row is closed like the other
+  Models rows (harness · model · reasoning · Fast) and expands in place to the
+  harness menu, model and reasoning pickers, Codex Fast mode when the selected
+  model lists a priority/fast tier, a status line (not installed, signed out,
+  plan problem, ready with the Claude Code version) and Check again. A pick
+  becomes active only after its sign-in probe passes; the first opening checks
+  the active harness and reloads its model list. The earlier
+  `agent.activeProvider` key is only read, never written or removed: a Mac
+  that had the Agent connected sees a one-time "choose a harness" contour
+  (`agent.harness.chosen` ends it); nothing connects by itself and a rollback
+  build finds its native connection as it was. Without a harness the island
+  shows "Choose a harness" and Settings opens Models with the row expanded.
+  The `.agent` text route is inactive (AIFeature.isActive) but stays stored.
+  Every turn maps Allow file
   edits and commands to the CLI's own flags (AgentHarnessFlags), never a blanket
   bypass. Claude On: --permission-mode auto; Off: dontAsk, Bash/PowerShell/
   Monitor/Edit/Write/NotebookEdit removed, Read/Grep/Glob/WebSearch/WebFetch and
@@ -697,14 +712,18 @@ Translation tools:
   handling; pairs hold final words only. WHY:
   .project-docs/decisions/2026-11-25-subtitle-soniox-live-original.md) whenever
   the Soniox key Drop uses can be read, and on OpenAI gpt-realtime-translate
-  only without it (SubtitleAudioTranslate.engine). Keys & models -> Models
-  -> Subtitles is an ordinary row whose model is preselected by the key:
-  "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate"; no switch,
-  engine, Speech or LLM choice. Without either key the card has the usual
-  setup contour, its menu adds "Add a Soniox key…", it counts as a feature
-  without a model, and Start names the missing key and opens Keys & models
-  (no system audio is captured). WHY:
-  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md A session
+  only without it (SubtitleAudioTranslate.engine) unless the user chose an
+  engine. Keys & models -> Models -> Subtitles expands like the other rows to
+  an Engine menu: "Soniox · stt-rt-v6" or "OpenAI · gpt-realtime-translate",
+  "— no key" beside an engine without its key, and "Add a Soniox key…" /
+  "Add an OpenAI key…" for the chosen one. The choice is stored as
+  `subtitles.engine`; without it the key rule above decides. A chosen engine
+  runs only with its own key and never falls back: Start says which key it
+  needs and opens Keys & models (no system audio is captured), and Features
+  shows "No Soniox key" / "No OpenAI key". Without a usable key the card has
+  the usual setup contour and counts as a feature without a model. WHY:
+  .project-docs/decisions/2026-11-25-subtitle-soniox-engine.md,
+  .project-docs/decisions/2026-11-27-subtitle-engine-choice.md A session
   stops itself after 60 minutes like Stop (LiveSubtitleModel.maxSessionDuration,
   no UI), so a forgotten one cannot run up the user's OpenAI bill. The subtitlesAudio/subtitlesTranslation features are retired
   like Decision: their IDs stay for Costs and history, saved routes are
@@ -1386,12 +1405,13 @@ processing routes: never switch where existing users send audio or text. A
 retired Local choice shows "not set up" banners until the user saves a
 provider. WHY: .project-docs/decisions/2026-09-10-byok-and-local-builds.md,
 .project-docs/decisions/2026-10-18-remove-local-models.md
-Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift),
-then Search (the Agent's web search, AgentSearchRow; see the native Agent
-section), above Subtitles; "Advanced · a model per feature" discloses the per-feature
+Models opens with two shared rows, Speech and LLM (SharedModelChoice.swift;
+LLM serves Drop Smart cleanup, meeting notes and Translation), then Harness
+(the Agent's Claude Code or Codex; see the Agent section) and Subtitles;
+"Advanced · a model per feature" discloses the per-feature
 list (FeatureGroup.layout): a function that listens and writes is one card,
-speech route first (Drop Smart, Meetings, and Agent with its Agent voice
-route). A shared pick writes every feature route of its kind
+speech route first (Drop Smart, Meetings), and "Agent voice" for the Agent's
+speech route. WHY: .project-docs/decisions/2026-11-27-agent-harness-cli.md A shared pick writes every feature route of its kind
 (SharedModelKind.features): the same model where that feature's picker offers
 it, Meetings the provider's recorded counterpart (scribe_v3_live → scribe_v3);
 a feature it cannot serve (the Agent without tools, a provider without a

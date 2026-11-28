@@ -112,7 +112,7 @@ final class AIRoutingMigrationTests: XCTestCase {
         XCTAssertEqual(env.routing.route(for: .dropSmartCleanup), llm)
         XCTAssertEqual(env.routing.route(for: .meetingNotes), llm)
         XCTAssertEqual(
-            env.routing.route(for: .agent), FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
+            env.routing.state.routes[AIFeature.agent.rawValue], FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
         )
         for feature in AIFeature.allCases where feature != .dropSmartDecision {
             XCTAssertEqual(env.routing.migratedRoute(for: feature), env.routing.route(for: feature), "\(feature)")
@@ -161,7 +161,7 @@ final class AIRoutingMigrationTests: XCTestCase {
         }
         XCTAssertEqual(env.routing.route(for: .meetings), FeatureRoute(account: .soniox, model: "stt-async-v6"))
         XCTAssertNil(env.routing.route(for: .dropSmartCleanup), "no OpenRouter key")
-        XCTAssertNil(env.routing.route(for: .agent), "no agent model")
+        XCTAssertNil(env.routing.state.routes[AIFeature.agent.rawValue], "no agent model")
     }
 
     func test_provider_without_key_stays_not_set() throws {
@@ -219,7 +219,7 @@ final class AIRoutingMigrationTests: XCTestCase {
             env.routing.route(for: .dropSmartCleanup), FeatureRoute(account: .openRouter, model: "google/gemini-3.8-flash")
         )
         XCTAssertEqual(
-            env.routing.route(for: .agent), FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
+            env.routing.state.routes[AIFeature.agent.rawValue], FeatureRoute(account: .openRouter, model: "anthropic/claude-sonnet-5.5")
         )
     }
 
@@ -239,7 +239,7 @@ final class AIRoutingMigrationTests: XCTestCase {
             migrate(env)
 
             XCTAssertEqual(
-                env.routing.route(for: .agent),
+                env.routing.state.routes[AIFeature.agent.rawValue],
                 expected.map { FeatureRoute(account: .openRouter, model: $0) },
                 "stored \(stored.debugDescription)"
             )
@@ -278,7 +278,7 @@ final class AIRoutingMigrationTests: XCTestCase {
         let llmRoute = FeatureRoute(account: .server(llm.id), model: "qwen3-32b")
         XCTAssertEqual(env.routing.route(for: .dropSmartCleanup), llmRoute)
         XCTAssertEqual(env.routing.route(for: .meetingNotes), llmRoute)
-        XCTAssertNil(env.routing.route(for: .agent))
+        XCTAssertNil(env.routing.state.routes[AIFeature.agent.rawValue])
     }
 
     func test_same_url_and_key_become_one_server() throws {
@@ -482,7 +482,7 @@ final class AIRoutingMigrationTests: XCTestCase {
         XCTAssertEqual(oldSettings(in: env.defaults) as NSDictionary, before as NSDictionary)
         // The migration did its work, so "untouched" is not an empty claim.
         XCTAssertNotNil(env.routing.route(for: .dropFast))
-        XCTAssertEqual(env.routing.route(for: .agent)?.model, "anthropic/claude-sonnet-5.5")
+        XCTAssertEqual(env.routing.state.routes[AIFeature.agent.rawValue]?.model, "anthropic/claude-sonnet-5.5")
     }
 
     // MARK: - A stored OpenAI speech choice

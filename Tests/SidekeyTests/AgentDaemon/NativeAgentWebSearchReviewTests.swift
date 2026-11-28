@@ -181,25 +181,6 @@ extension NativeAgentWebSearchTests {
         XCTAssertEqual(page.models.map(\.supportsWebSearch), [nil, nil])
     }
 
-    func testCatalogFlagWithoutTokenLimitsReachesTheTurnAndTheRowAlike() throws {
-        let suite = UUID().uuidString
-        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("catalog-\(suite).json")
-        addTeardownBlock { defaults.removePersistentDomain(forName: suite); try? FileManager.default.removeItem(at: file) }
-        // No max_input_tokens: the old spec path dropped the flag.
-        let snapshot = CatalogSnapshot(models: [CatalogModel(id: "claude-legacy", supportsWebSearch: false)],
-                                       fetchedAt: Date(), lastRefreshFailed: false, limited: false)
-        try JSONEncoder().encode([ProviderAccount.anthropic.storageID: snapshot]).write(to: file)
-        let routing = AIRoutingStore(defaults: defaults)
-        routing.setRoute(FeatureRoute(account: .anthropic, model: "claude-legacy"), for: .agent)
-        let agent = AgentSettingsStore(defaults: defaults, codexConfig: .init(), routing: routing, catalogs: ModelCatalogStore(fileURL: file))
-        let options = agent.options(for: .native)
-        XCTAssertNil(options.openCodeModelSpec)
-        XCTAssertEqual(options.webSearchSupport, false)
-        XCTAssertEqual(NativeAgentWebSearch.resolve(options: options, tavilyConnected: true), .tavily)
-        XCTAssertEqual(AgentSearchRow(options: options, tavilyConnected: true).current, .tavily)
-    }
-
     func testSyncedChoiceAppliesAtOnceAndSyncedTavilyKeyRefreshesTheRow() throws {
         let suite = UUID().uuidString
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

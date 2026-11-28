@@ -119,6 +119,7 @@ final class OnboardingModel: ObservableObject {
     var speechExpected: Bool {
         if dropReady || downloadStarted { return true }
         if case .downloading = onDevice.status { return true }
+        if onDevice.status == .preparing { return true }
         return !speechSkipped && !pages.contains(.speech)
     }
 
@@ -226,7 +227,7 @@ final class OnboardingModel: ObservableObject {
         var choices = OnboardingDropSpeech.keyProviders
             .filter { keyAvailable($0) && keyRefusal($0) == nil }
             .map(OnboardingDropChoice.provider)
-        if supportsOnDevice, onDevice.status == .ready { choices.append(.onThisMac) }
+        if supportsOnDevice, onDevice.status == .ready || onDevice.status == .preparing { choices.append(.onThisMac) }
         return choices
     }
 

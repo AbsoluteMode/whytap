@@ -36,6 +36,11 @@ struct OnDeviceSpeechCard: View {
                     ? "Starting… \(model.approximateSize). You can leave this tab."
                     : "\(Self.percent(fraction))% of \(model.approximateSize). You can leave this tab."
                 action = "Cancel"
+            case .preparing:
+                symbol = "cpu"
+                title = "Preparing \(model.displayName)"
+                detail = "Getting the model ready to dictate. The first time can take a few minutes."
+                action = "Remove"
             case .ready:
                 symbol = "checkmark"
                 title = "\(model.displayName) is on this Mac"
@@ -46,6 +51,11 @@ struct OnDeviceSpeechCard: View {
                 title = "The download didn't finish"
                 detail = "Check your connection and try again."
                 action = "Download"
+            case .loadFailed:
+                symbol = "exclamationmark.triangle"
+                title = "\(model.displayName) didn't load"
+                detail = "Try again. If it keeps failing, remove the model and download it again."
+                action = "Try Again"
             }
         }
 
@@ -62,9 +72,9 @@ struct OnDeviceSpeechCard: View {
 
     private var tint: Color {
         switch model.status {
-        case .notDownloaded, .downloading: return MacSettingsTheme.accent
+        case .notDownloaded, .downloading, .preparing: return MacSettingsTheme.accent
         case .ready: return MacSettingsTheme.green
-        case .failed: return MacSettingsTheme.orange
+        case .failed, .loadFailed: return MacSettingsTheme.orange
         }
     }
 
@@ -81,6 +91,8 @@ struct OnDeviceSpeechCard: View {
         case .downloading: return 1
         case .ready: return 2
         case .failed: return 3
+        case .preparing: return 4
+        case .loadFailed: return 5
         }
     }
 
@@ -144,7 +156,7 @@ struct OnDeviceSpeechCard: View {
         } else {
             image
                 .contentTransition(.symbolEffect(.replace))
-                .symbolEffect(.pulse, options: .repeating, isActive: stage == 1)
+                .symbolEffect(.pulse, options: .repeating, isActive: stage == 1 || stage == 4)
                 .symbolEffect(.bounce, value: stage == 2)
         }
     }
@@ -155,8 +167,10 @@ struct OnDeviceSpeechCard: View {
             MacButton(title: presentation.action, style: .primary, action: download)
         case .downloading:
             MacButton(title: presentation.action, action: remove)
-        case .ready:
+        case .preparing, .ready:
             MacButton(title: presentation.action, style: .danger, action: remove)
+        case .loadFailed:
+            MacButton(title: presentation.action, style: .primary, action: prepare)
         }
     }
 
@@ -164,6 +178,10 @@ struct OnDeviceSpeechCard: View {
         Task {
             if await model.download() { viewModel.onDeviceModelChanged() }
         }
+    }
+
+    private func prepare() {
+        Task { await model.prepare() }
     }
 
     private func remove() {

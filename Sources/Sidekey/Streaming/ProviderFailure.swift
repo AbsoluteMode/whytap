@@ -20,11 +20,23 @@ enum ProviderFailure: Equatable, Sendable {
     case notResponding
     /// The request did not leave this Mac.
     case noConnection
+    /// On this Mac: the model is still loading.
+    case localModelPreparing
+    /// On this Mac: the model did not load.
+    case localModelFailed
 
     /// `nil` for a failure that says nothing about the provider (a cancelled
     /// request, no batch path, a malformed answer): the caller keeps its own
     /// wording.
     init?(_ error: Error) {
+        if let local = error as? OnDeviceSpeechError {
+            switch local {
+            case .modelPreparing: self = .localModelPreparing
+            case .modelLoadFailed, .modelNotDownloaded: self = .localModelFailed
+            case .noAudio: return nil
+            }
+            return
+        }
         if let failure = error as? ProviderBatchTranscriptionError {
             switch failure {
             case .elevenLabs(_, .missingPermissions): self = .missingPermission
@@ -71,6 +83,8 @@ enum ProviderFailure: Equatable, Sendable {
         case .busy: return "\(provider) is busy, try again"
         case .notResponding: return "\(provider) is not responding"
         case .noConnection: return "No connection"
+        case .localModelPreparing: return "Local model still preparing, retry soon"
+        case .localModelFailed: return "Local model didn't load"
         }
     }
 
@@ -81,10 +95,11 @@ enum ProviderFailure: Equatable, Sendable {
         case .keyRefused: return .rejected(.invalidKey)
         case .missingPermission: return .rejected(.missingSpeechPermission)
         case .outOfCredit: return .rejected(.outOfCredit)
-        case .refused, .busy, .notResponding, .noConnection: return nil
+        case .refused, .busy, .notResponding, .noConnection, .localModelPreparing, .localModelFailed: return nil
         }
     }
 
     /// Only the user can fix it, in Keys & models: Retry alone cannot help.
-    var needsSettings: Bool { keyStatus != nil }
+    /// A model that did not load is shown there with Try Again.
+    var needsSettings: Bool { keyStatus != nil || self == .localModelFailed }
 }

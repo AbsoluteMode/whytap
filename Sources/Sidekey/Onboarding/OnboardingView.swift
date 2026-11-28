@@ -257,11 +257,17 @@ struct OnboardingSpeechPage: View {
                     ? "Starting the download…"
                     : "Downloading · \(OnDeviceSpeechCard.Presentation.percent(fraction))% of \(model.approximateSize)"
                 action = "Use for Drop"
+            case .preparing:
+                detail = "Preparing the model · the first time can take a few minutes"
+                action = "Use for Drop"
             case .ready:
                 detail = "Already on this Mac · works offline"
                 action = "Use for Drop"
             case .failed:
                 detail = "The download didn't finish. Try again."
+                action = "Download and use for Drop"
+            case .loadFailed:
+                detail = "The model didn't load. Try again."
                 action = "Download and use for Drop"
             }
         }
@@ -964,11 +970,16 @@ struct OnboardingModelStatusCard: View {
                     .font(OnboardingTheme.sans(11.5))
                     .foregroundColor(OnboardingTheme.faint)
             }
+        case .preparing:
+            card {
+                OnboardingStageStatus(tone: .neutral,
+                                      text: "Preparing the speech model. The first time can take a few minutes.")
+            }
         case .ready:
             card {
                 OnboardingStageStatus(tone: .success, text: "The speech model is on this Mac.")
             }
-        case .notDownloaded, .failed:
+        case .notDownloaded, .failed, .loadFailed:
             EmptyView()
         }
     }
@@ -1071,6 +1082,9 @@ struct OnboardingTryPage: View {
                 OnboardingProgressLine(fraction: fraction)
                     .frame(maxWidth: 260)
             }
+        } else if !model.dropReady, onDevice.status == .preparing {
+            OnboardingStageStatus(tone: .neutral,
+                                  text: "Preparing the speech model. Drop works as soon as it's ready.")
         } else if !model.dropReady || model.dropSetupFailure != nil {
             HStack(spacing: 12) {
                 OnboardingStageStatus(tone: .warning, text: model.dropReady

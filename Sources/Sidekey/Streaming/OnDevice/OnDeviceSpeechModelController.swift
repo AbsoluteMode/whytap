@@ -14,12 +14,27 @@ final class OnDeviceSpeechModelController: ObservableObject {
         self.store = store
     }
 
+    /// Reads the state and, when the files are in place but the model is not
+    /// loaded in this launch, prepares it, so the card never says Ready
+    /// before a take would work.
     func refresh() async {
         status = await store.status()
+        if status == .preparing { await prepare() }
     }
 
-    /// `true` when the model is in place afterwards. A second call while a
-    /// download runs joins it.
+    /// Loads the model (joins a preparation in progress); `true` when it is
+    /// loaded afterwards.
+    @discardableResult
+    func prepare() async -> Bool {
+        let loaded = await store.prepare()
+        status = await store.status()
+        return loaded
+    }
+
+    /// `true` when the model's files are in place afterwards; by then the
+    /// model has also been prepared (Ready), or its load failed. A second
+    /// call while a download runs joins it.
+    // WHY: .project-docs/decisions/2026-11-28-on-device-model-preparation.md
     @discardableResult
     func download() async -> Bool {
         if case .downloading = status {} else { status = .downloading(0) }
@@ -31,7 +46,15 @@ final class OnDeviceSpeechModelController: ObservableObject {
             // The status says the rest: failed, or not downloaded after Cancel.
         }
         status = await store.status()
-        return status == .ready
+        if status == .preparing { await prepare() }
+        return Self.filesInPlace(status)
+    }
+
+    static func filesInPlace(_ status: OnDeviceSpeechModelStatus) -> Bool {
+        switch status {
+        case .preparing, .ready, .loadFailed: return true
+        case .notDownloaded, .downloading, .failed: return false
+        }
     }
 
     /// Cancels a running download and removes the model's files.

@@ -12,7 +12,12 @@ struct OnDeviceBatchTranscriber: BatchTranscribing {
     private let readiness: OnDeviceSpeechReadiness
     private let decoder: any OnDeviceSpeechDecoding
 
-    init(readiness: OnDeviceSpeechReadiness = .live, decoder: any OnDeviceSpeechDecoding = ParakeetSpeechDecoder()) {
+    init(
+        readiness: OnDeviceSpeechReadiness = .live,
+        decoder: any OnDeviceSpeechDecoding = ParakeetSpeechDecoder(
+            preparationWait: ParakeetSpeechDecoder.batchPreparationWait
+        )
+    ) {
         self.readiness = readiness
         self.decoder = decoder
     }

@@ -204,7 +204,7 @@ once and Settings, Help and the island hints follow. Rules:
   answers `changed: false`.
 - The reply has `hotkey` (the row as `whytap_hotkeys_get` lists it), `keys`
   (`{keys, display}`), `mode`, `previous` (`{keys, mode}`) and `changed`; the
-  built-in Agent shows `Hotkey: Drop voice — Space · Hold`.
+  built-in Agent shows `Hotkey: Drop voice — Space`.
 
 `hotkey: "tool.<id>"` is the same as `tool` with the island-tool rules above;
 `reset: true` clears it.

@@ -2368,7 +2368,7 @@ observers are the Settings ones and the change is live at once. Written keys:
 a ⌃/⌥ combo, a bare F1–F20, right_command/right_option alone, space (Drop);
 ⌘/⇧-only combos and bare typing keys stay with the Settings recorder. Only
 tool hotkeys clear; a refused or conflicting change saves nothing. Agent line
-"Hotkey: Drop voice — Space · Hold". WHY:
+"Hotkey: Drop voice — Space". WHY:
 .project-docs/decisions/2026-11-28-agent-all-hotkeys.md
 Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 (whytap_vocab_add, VocabularyCache.add/validate) and Filler

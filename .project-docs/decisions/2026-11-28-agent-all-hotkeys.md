@@ -73,6 +73,14 @@ elements were found that match the criteria", and each key cap alone was
   its value. The key caps form one button "<row> shortcut" with the spoken
   keys as value and Record as action.
 
+- **Built-in agent: catalog only.** The built-in Agent reads its operations
+  from the MCP catalog, so it gets both without its own code. Its file
+  (`NativeAgentAppControl.swift`) is left unchanged: the harness stack
+  (#527–#529, #544) deletes it, and an edit there would block the combined
+  owner-local build. Until that stack lands, its progress label for
+  `whytap_hotkeys_get` falls through to "Reading a meeting" and its change
+  line has no mode (`Hotkey: Drop voice — Space`).
+
 ## Rejected
 
 - A separate `whytap_hotkey_change` tool: duplicates `hotkey_set`'s contract

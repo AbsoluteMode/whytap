@@ -587,27 +587,6 @@ final class NativeAgentAppControlTests: XCTestCase {
         XCTAssertEqual(result.finalText, "Hotkey: Shot — none\n\nСнял.")
     }
 
-    /// The owner's request to Codex that failed on 2026-11-28, here to the
-    /// island's Agent: Drop was Toggle on the ` key; one call puts it back on
-    /// hold Space and the app shows the saved keys and mode.
-    func testPutDictationBackOnHoldSpace() async throws {
-        let e = try env()
-        var start = e.hotkeys.configuration
-        start.setDropShortcut(.combo(HotkeyTapCombo(keyCode: 50, modifiers: 0, keyTitle: "`")))
-        start.dropVoiceGesture = .tap
-        try e.hotkeys.apply(start)
-        let result = try await turn(e, "верни диктовку на удержание пробела", [
-            app("whytap_hotkeys_get", [:], id: "g"),
-            app("whytap_hotkey_set", ["hotkey": "dropVoice", "keys": "space", "mode": "hold", "expected": "`",
-                                       "tool": NSNull(), "reset": NSNull()], id: "h"),
-            final("Готово.")
-        ])
-        XCTAssertEqual(e.hotkeys.dropVoiceShortcut, .holdSpace)
-        XCTAssertEqual(e.hotkeys.dropVoiceGesture, .hold)
-        XCTAssertEqual(result.finalText, "Hotkey: Drop voice — Space · Hold\n\nГотово.")
-        XCTAssertTrue(result.toolResults()[0].contains(#""id":"dropVoice""#), result.toolResults()[0])
-    }
-
     // MARK: Suggesting Whytap's own tools
 
     /// Build 1712: "Можешь сделать скриншот моего экрана?" got ⇧⌘3/⇧⌘4. The
@@ -900,7 +879,7 @@ final class NativeAgentAppControlTests: XCTestCase {
                 let whytap = try XCTUnwrap(strict.first { $0["name"] as? String == NativeAgentAppControl.toolName }, label)
                 let schema = (whytap["input_schema"] ?? whytap["parameters"]) as? [String: Any]
                 let operations = ((schema?["properties"] as? [String: Any])?["operation"] as? [String: Any])?["enum"] as? [String] ?? []
-                XCTAssertTrue(Set(["whytap_toolbox_get", "whytap_toolbox_set", "whytap_hotkeys_get", "whytap_hotkey_set"]).isSubset(of: operations), label)
+                XCTAssertTrue(Set(["whytap_toolbox_get", "whytap_toolbox_set", "whytap_hotkey_set"]).isSubset(of: operations), label)
                 XCTAssertLessThanOrEqual(strict.count, 20, label)
                 var count = SchemaCount()
                 for tool in strict {

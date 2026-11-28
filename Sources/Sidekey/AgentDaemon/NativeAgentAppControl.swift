@@ -70,16 +70,14 @@ enum NativeAgentAppControl {
     /// mention the reply language: the native prompt sets it once.
     static let instructions = """
     The whytap tool reads and changes this app itself: settings, each feature's model route,
-    OpenRouter endpoints, the island's hover tools (quick actions, Toolbox, menu), every hotkey
-    (dictation's included) with its Hold or Toggle mode,
+    OpenRouter endpoints, the island's hover tools (quick actions, Toolbox, menu) and their hotkeys,
     dictation's Vocab (words to spell right) and Filler (words to remove) lists, To-do and meetings. Call it with
     operation (a listed name) and arguments (a JSON object as a string, "{}" when there are none).
-    Before a change read whytap_get_state, whytap_get_settings, whytap_list_models,
-    whytap_toolbox_get or whytap_hotkeys_get and pass the exact current value as expected.
-    Use only features, setting keys, accounts, model IDs, tool ids and hotkey ids those operations return; never invent one.
+    Before a change read whytap_get_state, whytap_get_settings, whytap_list_models or
+    whytap_toolbox_get and pass the exact current value as expected.
+    Use only features, setting keys, accounts, model IDs and tool ids those operations return; never invent one.
     Change settings, models, endpoints, tools, hotkeys or To-do only when the current request asks for that change.
-    "option f" means the keys option+f; "put dictation on hold Space" is whytap_hotkey_set with
-    hotkey dropVoice, keys space, mode hold. A hotkey the rules refuse or another action uses changes nothing:
+    "option f" means the keys option+f. A hotkey the rules refuse or another action uses changes nothing:
     give the reason and the nearest free keys the result names, and ask; never move or clear other keys yourself.
     A conflict or failure leaves the old value: read again and report it; do not retry silently.
     A model change may run a tiny paid check with the user's key. Each confirmed change is shown
@@ -265,9 +263,6 @@ enum NativeAgentAppControl {
         case "hotkey_set":
             guard object["changed"] == .bool(true), let title = object["title"]?.string else { return nil }
             var line = "Hotkey: \(title) — " + (object["hotkey"]?.object?["display"]?.string ?? "none")
-            if object["voice"] == .bool(true), let mode = object["mode"]?.string {
-                line += mode == "hold" ? " · Hold" : " · Toggle"
-            }
             if let typed = object["typesInTextFields"]?.string {
                 line += " (no longer types " + (typed.hasPrefix("its ") ? typed : "“\(typed)”") + " in text fields)"
             }
@@ -324,7 +319,6 @@ enum NativeAgentAppControl {
         case "list_providers": return "Looking up endpoints"
         case "set_model", "set_provider", "set_setting": return "Changing Whytap settings"
         case "toolbox_get": return "Reading Whytap tools"
-        case "hotkeys_get": return "Reading Whytap hotkeys"
         case "toolbox_set": return "Changing Whytap tools"
         case "hotkey_set": return "Changing a hotkey"
         case "vocab_add": return "Updating Vocab"

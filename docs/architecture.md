@@ -1305,6 +1305,18 @@ Now Playing:
   stale results. No Automation prompt is added. WHY:
   .project-docs/decisions/2026-10-19-nowplaying-artwork-recovery.md
 
+Hover eye ("Hide Hover and Music"):
+  DisplayPreferences.hideIslandHoverWidgets hides the hover drawer appearing
+  under the mouse and the music strip; the compact music wing stays. An
+  explicit request still opens its panel: Settings -> Features Open/Edit, a
+  tool's hotkey and a whytap link all set programmaticHoverPanelRequest, and a
+  non-glance request with the eye on sets IslandView.explicitlyOpened. Until
+  that drawer closes (Escape, outside click, the usual collapse), the pointer
+  and keyboard keep it as usual (IslandView.hoverDrawerShown). The eye itself
+  is unchanged; closing it again closes the panel. Brightness keys are not
+  intercepted while the eye is on, so their glance never asks. WHY:
+  .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+
 Island idle-hide:
   ~20s without activity -> the compact pill fades to the bare notch (opacity
   0 + click-through; the window never moves or resizes). IslandIdleController

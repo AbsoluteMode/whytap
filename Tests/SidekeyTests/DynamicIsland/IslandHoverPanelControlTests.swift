@@ -142,9 +142,11 @@ final class IslandHoverPanelControlTests: XCTestCase {
         XCTAssertTrue(source.contains("IslandHideButton("))
         XCTAssertTrue(source.contains("eye.slash.fill"))
         XCTAssertTrue(source.contains("displayPreferences.hideIslandHoverWidgets"))
+        // The closed eye prevents expansion on mouse hover; explicit requests
+        // still open their panel (behaviour: IslandEyeExplicitPanelTests).
         XCTAssertTrue(
-            source.contains("!displayPreferences.hideIslandHoverWidgets"),
-            "Closed eye must prevent hover expansion."
+            source.contains("eyeHidesHover: displayPreferences.hideIslandHoverWidgets"),
+            "Closed eye must gate hover expansion."
         )
         // The compact right-band wing is eye-INDEPENDENT: closing the eye must
         // NOT remove it (only the hover player widget is hidden).

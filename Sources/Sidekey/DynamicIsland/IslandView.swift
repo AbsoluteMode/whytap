@@ -270,6 +270,11 @@ struct IslandView: View {
     @State private var dropModeStatus: TranscriptionMode?
     @State private var dropModeStatusGeneration = 0
     @State private var hoverPanelMode: IslandHoverPanelMode = .controls
+    /// The drawer was opened by an explicit request (Settings -> Features
+    /// Open/Edit, a tool's hotkey, a whytap link) while the eye hides hover.
+    /// Until it closes, the pointer and keyboard keep it as usual.
+    /// WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+    @State private var explicitlyOpened = false
     /// While the pointer is still where the taller panel was, the hover zone keeps
     /// that height so the short Brightness strip does not close the drawer under it.
     @State private var hoverPanelHeightHold: CGFloat?
@@ -610,6 +615,7 @@ struct IslandView: View {
         panelHovering = false
         mouseExpanded = false
         appState.programmaticHoverExpansion = false
+        explicitlyOpened = false
         onKeyboardFocusRequest(false)
     }
 
@@ -617,15 +623,32 @@ struct IslandView: View {
         // Union the mouse-hover signal with programmatic expansion (a Hover-slot
         // ⌥N press — D4), then gate the result on the policy so neither path
         // forces the drawer open during a meeting suggestion / agent flow.
-        !displayPreferences.hideIslandHoverWidgets
-            && (isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
-                || hoverHitBridge.holdsDrawer || appState.programmaticHoverExpansion)
-            && IslandHoverPolicy.allowsExpansion(
+        Self.hoverDrawerShown(
+            eyeHidesHover: displayPreferences.hideIslandHoverWidgets,
+            explicitlyOpened: explicitlyOpened,
+            programmaticExpansion: appState.programmaticHoverExpansion,
+            pointerOrFocusHolds: isHovering || hoverSearchFocused || hoverVocabularyFocused || holdsHoverMenu
+                || hoverHitBridge.holdsDrawer,
+            policyAllows: IslandHoverPolicy.allowsExpansion(
                 meetingSuggestionActive: appState.meetingSuggestionActive,
                 meetingRecordingActive: appState.meetingRecordingActive,
                 agentFlowActive: agentFlow.blocksHoverDrawer(dropTargetsDrawer: appState.dropTargetsHoverEditor),
                 caseApprovalActive: appState.caseApprovalActive
             )
+        )
+    }
+
+    /// Whether the hover drawer shows. The eye ("Hide Hover and Music") hides
+    /// only the drawer appearing under the mouse (and the music strip): an
+    /// explicitly opened drawer shows anyway, and while it is up the pointer and
+    /// keyboard hold it as usual. A brightness glance is not explicit: with the
+    /// eye on the brightness keys are not intercepted at all (`BrightnessKeys`).
+    /// WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+    static func hoverDrawerShown(eyeHidesHover: Bool, explicitlyOpened: Bool, programmaticExpansion: Bool,
+                                 pointerOrFocusHolds: Bool, policyAllows: Bool) -> Bool {
+        guard policyAllows else { return false }
+        if eyeHidesHover && !explicitlyOpened { return false }
+        return pointerOrFocusHolds || programmaticExpansion
     }
 
     private var meetingRecordingSnapshot: IslandMeetingRecordingSnapshot? {
@@ -1531,12 +1554,14 @@ struct IslandView: View {
                 hoverPanelMode = .controls
                 onKeyboardFocusRequest(false)
                 appState.programmaticHoverExpansion = false
+                explicitlyOpened = false
                 appState.hoveredMusicTransport = nil
             }
             onHoverChange(isHoverExpanded)
             onHoverPanelBandHeightChange(activeHoverPanelHeight)
         }
         .onChange(of: isHoverExpanded) { _, expanded in
+            if !expanded { explicitlyOpened = false }
             hoverHitBridge.setEnabled(expanded)
             // The AppKit hit band follows keyboard-held search and inline tools too.
             onHoverChange(expanded)
@@ -1563,10 +1588,20 @@ struct IslandView: View {
         // drawer). Action/navigate tools never set a request — they fire their
         // IslandActions closure directly in `AppDelegate`.
         .onChange(of: appState.programmaticHoverPanelRequest) { _, request in
-            guard let request, isHoverExpanded else { return }
+            guard let request else { return }
             // A closed Calendar ("Soon") never opens its panel, whoever asks.
             if request.panel == .calendar, !CalendarAvailability.isOpen {
                 appState.programmaticHoverExpansion = false
+                return
+            }
+            // An explicit request opens its panel even with the eye on; only a
+            // glance (brightness keys) stays a hover-only appearance.
+            // WHY: .project-docs/decisions/2026-11-28-eye-hides-hover-not-explicit-panels.md
+            if displayPreferences.hideIslandHoverWidgets, !request.isGlance, appState.programmaticHoverExpansion {
+                explicitlyOpened = true
+            }
+            guard isHoverExpanded else {
+                explicitlyOpened = false
                 return
             }
             if request.isGlance, !Self.brightnessGlanceMayOpen(

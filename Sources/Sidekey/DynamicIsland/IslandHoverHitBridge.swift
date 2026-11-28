@@ -291,6 +291,8 @@ final class IslandHoverHitBridge: ObservableObject {
     private var targets: [UUID: WeakTarget] = [:]
     private var regions: [IslandHoverHitTargetID.Surface: WeakRegion] = [:]
     private var enabled = false
+    /// Whether the open drawer takes clicks (for tests).
+    var dispatchEnabled: Bool { enabled }
     private var activeSurface: IslandHoverHitTargetID.Surface = .tile
     @Published private(set) var context = ""
 

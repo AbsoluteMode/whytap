@@ -48,51 +48,110 @@ final class AppControlHotkeysTests: XCTestCase {
         return Dictionary(uniqueKeysWithValues: list.compactMap(\.object).map { ($0["id"]!.string!, $0) })
     }
 
-    /// The owner's case: Drop left on Toggle with the ` key, put back on hold
-    /// Space with one call. Space forces Hold, as the Settings recorder does.
-    func test_dictation_back_to_hold_space_from_toggle_on_grave() throws {
-        var start = preferences.configuration
-        start.setDropShortcut(grave)
-        start.dropVoiceGesture = .tap
-        try preferences.apply(start)
-        let drop = try XCTUnwrap(try rows()["dropVoice"])
-        XCTAssertEqual(drop["keys"], .string("`"))
-        XCTAssertEqual(drop["mode"], .string("toggle"))
-        XCTAssertEqual(drop["modes"], .array([.string("hold"), .string("toggle")]))
-        XCTAssertEqual(drop["changeable"], .bool(true))
-        XCTAssertEqual(drop["default"]?.object?["keys"], .string("space"))
+    private func keys(_ text: String) -> HotkeyShortcut { AppControlHotkeys.shortcut(from: text)! }
 
-        let response = set(["hotkey": .string("dropVoice"), "keys": .string("space"), "expected": .string("`")])
-        XCTAssertTrue(response.ok, "\(response)")
-        XCTAssertEqual(preferences.dropVoiceShortcut, .holdSpace)
-        XCTAssertEqual(preferences.dropVoiceGesture, .hold)
-        XCTAssertEqual(response.data.object?["mode"], .string("hold"))
-        XCTAssertEqual(response.data.object?["changed"], .bool(true))
-        XCTAssertEqual(response.data.object?["previous"], .object(["keys": .string("`"), "mode": .string("toggle")]))
-        XCTAssertEqual(try rows()["dropVoice"]?["modes"], .array([.string("hold")]))
-
-        let again = set(["hotkey": .string("dropVoice"), "keys": .string("space"), "mode": .string("hold"),
-                         "expected": .string("space")])
-        XCTAssertEqual(again.data.object?["changed"], .bool(false))
-    }
-
-    /// The running app re-registers from the published preferences: the
-    /// AppDelegate sinks receive the new Drop shortcut and gesture.
-    func test_a_change_reaches_the_drop_monitor_observers_at_once() throws {
+    /// The owner's request on build with #545 (2026-11-28): "change Drop in
+    /// Whytap to `". Drop on hold Space → hold ` → Toggle on ` → hold Space,
+    /// each saved through the Settings path and seen by the Drop monitor's
+    /// observers at once; every reply says what is bound and how to undo it.
+    func test_owner_sets_drop_to_backquote_then_toggle_then_back_to_hold_space() throws {
         var shortcuts: [HotkeyShortcut] = [], gestures: [HotkeyGesture] = []
         let a = AppDelegate.observeDropShortcut(preferences) { shortcuts.append($0) }
         let b = AppDelegate.observeDropGesture(preferences) { gestures.append($0) }
         defer { a.cancel(); b.cancel() }
-        XCTAssertTrue(set(["hotkey": .string("dropVoice"), "keys": .string("control+option+d"), "mode": .string("toggle"),
-                           "expected": .string("space")]).ok)
-        XCTAssertEqual(shortcuts.last, combo("control+option+d"))
-        XCTAssertEqual(gestures.last, .tap)
 
-        var tools: [[HoverTool: HotkeyShortcut]] = []
-        let c = AppDelegate.observeToolShortcuts(preferences) { tools.append($0) }
-        defer { c.cancel() }
-        XCTAssertTrue(set(["hotkey": .string("tool.screenshot"), "keys": .string("option+s"), "expected": .null]).ok)
-        XCTAssertEqual(tools.last?[.screenshot], combo("option+s"))
+        let toGrave = set(["hotkey": .string("dropVoice"), "keys": .string("`"), "mode": .string("hold"),
+                           "expected": .string("space")])
+        XCTAssertTrue(toGrave.ok, "\(toGrave)")
+        let reply = try XCTUnwrap(toGrave.data.object)
+        XCTAssertEqual(preferences.dropVoiceShortcut, grave)
+        XCTAssertEqual(preferences.dropVoiceGesture, .hold)
+        XCTAssertEqual(shortcuts.last, grave)
+        XCTAssertEqual(reply["bound"], .string("Drop voice is Hold `."))
+        XCTAssertEqual(reply["previous"], .object(["keys": .string("space"), "display": .string("Space"), "mode": .string("hold")]))
+        XCTAssertEqual(reply["undo"], .object(["hotkey": .string("dropVoice"), "keys": .string("space"),
+                                               "mode": .string("hold"), "expected": .string("`")]))
+        XCTAssertEqual(reply["takenEverywhere"], .string("A quick press of ` still types “`”; holding it about 0.3 s in a text field starts dictation and erases the typed “`”."))
+        XCTAssertEqual(try rows()["dropVoice"]?["keys"], .string("`"))
+
+        let toggle = set(["hotkey": .string("dropVoice"), "mode": .string("toggle"), "expected": .string("`")])
+        XCTAssertTrue(toggle.ok, "\(toggle)")
+        XCTAssertEqual(preferences.dropVoiceGesture, .tap)
+        XCTAssertEqual(gestures.last, .tap)
+        XCTAssertEqual(toggle.data.object?["bound"], .string("Drop voice is Toggle `."))
+        XCTAssertEqual(toggle.data.object?["takenEverywhere"],
+                       .string("` is now taken by Whytap in every app: it no longer types “`” there."))
+
+        // The undo of the first reply, sent as is, would now be stale: expected is `.
+        let back = set(["hotkey": .string("dropVoice"), "keys": .string("space"), "mode": .string("hold"), "expected": .string("`")])
+        XCTAssertTrue(back.ok, "\(back)")
+        XCTAssertEqual(preferences.dropVoiceShortcut, .holdSpace)
+        XCTAssertEqual(preferences.dropVoiceGesture, .hold)
+        XCTAssertEqual(shortcuts.last, .holdSpace)
+        XCTAssertEqual(back.data.object?["previous"]?.object?["mode"], .string("toggle"))
+        XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .string("space"), "expected": .string("space")])
+            .data.object?["changed"], .bool(false))
+    }
+
+    /// The hold Drop on a bare key really keeps typing: the monitor passes a
+    /// quick press through and, on a hold in a text field, erases it and arms.
+    func test_hold_drop_on_backquote_types_on_a_quick_press_and_dictates_on_a_hold() {
+        var armed = 0, posted: [CGKeyCode] = []
+        let monitor = SpaceHoldMonitor(
+            triggerKeyCode: CGKeyCode(kVK_ANSI_Grave), requiredModifiers: [],
+            onHotkey: { armed += 1 }, onHotkeyReleased: {}, onCancel: {},
+            makeTap: { _ in OpaquePointer(bitPattern: 0x1) }, enableTap: { _ in },
+            scheduleThreshold: { _ in }, cancelThreshold: {},
+            frontmostApp: { (pid_t(1234), "com.example.app") }, isEditable: { _, _ in true },
+            postEvent: { code, down in if down { posted.append(code) } },
+            runOnDetectorQueue: { $0() }, runEditableCheckOffTapThread: { $0() }, dispatchCallback: { $0() },
+            log: { _, _ in })
+        let grave = CGKeyCode(kVK_ANSI_Grave)
+        XCTAssertEqual(monitor.handleTapEvent(type: .keyDown, keyCode: grave, isRepeat: false, flags: []), .passThrough)
+        XCTAssertEqual(monitor.handleTapEvent(type: .keyUp, keyCode: grave, isRepeat: false, flags: []), .passThrough)
+        XCTAssertEqual(armed, 0, "a quick press types ` and does not dictate")
+
+        XCTAssertEqual(monitor.handleTapEvent(type: .keyDown, keyCode: grave, isRepeat: false, flags: []), .passThrough)
+        monitor.fireThreshold()
+        XCTAssertEqual(armed, 1, "a hold in a text field starts dictation")
+        XCTAssertEqual(posted, [CGKeyCode(kVK_Delete)], "the typed ` is erased")
+    }
+
+    /// Anything the Settings recorder records is accepted on any row: a bare
+    /// letter, a Command+Shift combination, Tab, an arrow; each says what it
+    /// takes from other apps.
+    func test_bare_letter_and_command_shift_combo_are_accepted_with_a_warning() throws {
+        let letter = set(["hotkey": .string("meetingRecord"), "keys": .string("k"), "expected": .string("option+m")])
+        XCTAssertTrue(letter.ok, "\(letter)")
+        XCTAssertEqual(preferences.meetingRecordShortcut, keys("k"))
+        XCTAssertEqual(letter.data.object?["takenEverywhere"],
+                       .string("K is now taken by Whytap in every app: it no longer types “k” there."))
+        XCTAssertEqual(letter.data.object?["undo"]?.object?["keys"], .string("option+m"))
+
+        let command = set(["hotkey": .string("dropVoice"), "keys": .string("command+shift+d"), "mode": .string("toggle"),
+                           "expected": .string("space")])
+        XCTAssertTrue(command.ok, "\(command)")
+        XCTAssertEqual(preferences.dropVoiceShortcut, keys("shift+command+d"))
+        XCTAssertEqual(try rows()["dropVoice"]?["keys"], .string("shift+command+d"))
+        XCTAssertEqual(command.data.object?["takenEverywhere"],
+                       .string("⇧⌘D is now taken by Whytap in every app: apps or macOS that use ⇧⌘D no longer get it."))
+
+        // A tool takes any recorded key through the hotkey form, Quit included,
+        // as Settings → Hotkeys → Tools does.
+        XCTAssertTrue(set(["hotkey": .string("tool.screenshot"), "keys": .string("command+shift+5"), "expected": .null]).ok)
+        XCTAssertTrue(set(["hotkey": .string("tool.quit"), "keys": .string("control+option+command+q"), "expected": .null]).ok)
+        XCTAssertEqual(preferences.toolShortcuts[.quit], keys("control+option+command+q"))
+        // Agent close is scoped to the visible answer; the warning says so.
+        let close = set(["hotkey": .string("agentClose"), "keys": .string("tab"), "expected": .string("option+q")])
+        XCTAssertEqual(close.data.object?["takenEverywhere"],
+                       .string("Tab is now taken by Whytap while an Agent answer is on screen: it no longer works as Tab there."))
+        // An ⌃⌥ combination types nothing and takes nothing obvious.
+        XCTAssertNil(set(["hotkey": .string("googleText"), "keys": .string("control+option+g"), "expected": .string("right_option")])
+            .data.object?["takenEverywhere"])
+        XCTAssertEqual(set(["hotkey": .string("agentClose"), "keys": .string("escape"), "expected": .string("tab")]).error?.code,
+                       "invalid_hotkey")
+        XCTAssertEqual(set(["hotkey": .string("agentClose"), "keys": .string("option"), "expected": .string("tab")]).error?.code,
+                       "invalid_hotkey")
     }
 
     func test_switch_hold_and_toggle_on_a_combo_keeps_the_keys() throws {
@@ -101,7 +160,9 @@ final class AppControlHotkeysTests: XCTestCase {
         XCTAssertTrue(set(["hotkey": .string("dropVoice"), "mode": .string("toggle"), "expected": .string("option+d")]).ok)
         XCTAssertEqual(preferences.dropVoiceShortcut, combo("option+d"))
         XCTAssertEqual(preferences.dropVoiceGesture, .tap)
-        XCTAssertTrue(set(["hotkey": .string("dropVoice"), "mode": .string("hold"), "expected": .string("option+d")]).ok)
+        XCTAssertTrue(set(["hotkey": .string("dropVoice"), "mode": .string("hold"), "expected": .string("d+option")]).ok == false,
+                      "a misspelt expected value is a stale value, not a match")
+        XCTAssertTrue(set(["hotkey": .string("dropVoice"), "mode": .string("hold"), "expected": .string("option d")]).ok)
         XCTAssertEqual(preferences.dropVoiceGesture, .hold)
 
         var gestures: [HotkeyGesture] = []
@@ -112,39 +173,46 @@ final class AppControlHotkeysTests: XCTestCase {
         XCTAssertEqual(gestures, [.tap])
     }
 
-    func test_toggle_on_space_and_space_elsewhere_are_refused_and_change_nothing() throws {
+    func test_space_stays_drops_alone_and_hold_only() throws {
         let before = preferences.configuration
         let toggle = set(["hotkey": .string("dropVoice"), "mode": .string("toggle"), "expected": .string("space")])
         XCTAssertEqual(toggle.error?.code, "invalid_mode")
         XCTAssertTrue(toggle.error?.message.contains("hold-only") == true)
+        XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .string("space"), "mode": .string("toggle"),
+                            "expected": .string("space")]).error?.code, "invalid_mode")
         XCTAssertEqual(set(["hotkey": .string("meetingRecord"), "keys": .string("space"), "expected": .string("option+m")]).error?.code,
+                       "hotkey_not_allowed")
+        XCTAssertEqual(set(["hotkey": .string("tool.translate"), "keys": .string("space"), "expected": .null]).error?.code,
                        "hotkey_not_allowed")
         XCTAssertEqual(set(["hotkey": .string("agentClose"), "mode": .string("hold"), "expected": .string("option+q")]).error?.code,
                        "invalid_mode")
         XCTAssertEqual(preferences.configuration, before)
+        // Space with a modifier is an ordinary combination, as in the recorder.
+        XCTAssertTrue(set(["hotkey": .string("meetingRecord"), "keys": .string("control+space"), "expected": .string("option+m")]).ok)
     }
 
-    /// One physical key = one action: ⌥M is meeting recording. Nothing moves;
-    /// the answer names the owner and free keys.
-    func test_conflict_names_the_owner_and_the_nearest_free_keys() throws {
+    /// One physical key = one action. Nothing moves; the answer names the
+    /// owner and free keys.
+    func test_conflicts_are_refused_and_change_nothing() throws {
         let before = preferences.configuration
         let response = set(["hotkey": .string("dropVoice"), "keys": .string("option+m"), "expected": .string("space")])
         XCTAssertEqual(response.error?.code, "hotkey_conflict")
         let message = try XCTUnwrap(response.error?.message)
         XCTAssertTrue(message.contains("⌥M is already used by Meeting record"), message)
         XCTAssertTrue(message.contains("Nearest free keys: option+shift+m"), message)
-        XCTAssertEqual(preferences.configuration, before)
 
-        // Agent voice toggle on Right Command would be a tap, Agent text's.
         let split = set(["hotkey": .string("agentVoice"), "mode": .string("toggle"), "expected": .string("right_command")])
         XCTAssertEqual(split.error?.code, "hotkey_conflict")
         XCTAssertTrue(split.error?.message.contains("Agent text") == true, "\(split)")
+        // Bare ← is Links insert's.
+        let arrow = set(["hotkey": .string("dropVoice"), "keys": .string("left"), "expected": .string("space")])
+        XCTAssertEqual(arrow.error?.code, "hotkey_conflict")
+        XCTAssertTrue(arrow.error?.message.contains("Useful links insert") == true, "\(arrow)")
         XCTAssertEqual(preferences.configuration, before)
     }
 
     func test_modifier_only_drop_and_reset_to_default() throws {
         let response = set(["hotkey": .string("dropVoice"), "keys": .string("Right Option"), "expected": .string("space")])
-        // Google search holds Right Option: refused.
         XCTAssertEqual(response.error?.code, "hotkey_conflict")
         XCTAssertTrue(response.error?.message.contains("Google") == true, "\(response)")
         XCTAssertTrue(set(["hotkey": .string("googleText"), "keys": .string("option+g"), "expected": .string("right_option")]).ok)
@@ -166,15 +234,14 @@ final class AppControlHotkeysTests: XCTestCase {
     func test_clearing_only_tools_and_unknown_or_fixed_hotkeys() throws {
         XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .null, "expected": .string("space")]).error?.code, "not_clearable")
         XCTAssertTrue(set(["hotkey": .string("tool.translate"), "keys": .string("option+t"), "expected": .null]).ok)
-        XCTAssertTrue(set(["hotkey": .string("tool.translate"), "keys": .null, "expected": .string("option+t")]).ok)
+        let clear = set(["hotkey": .string("tool.translate"), "keys": .null, "expected": .string("option+t")])
+        XCTAssertTrue(clear.ok, "\(clear)")
         XCTAssertNil(preferences.toolShortcuts[.translate])
+        XCTAssertEqual(clear.data.object?["bound"], .string("Translate has no hotkey."))
+        XCTAssertEqual(clear.data.object?["undo"]?.object?["keys"], .string("option+t"))
         XCTAssertEqual(set(["hotkey": .string("help"), "keys": .string("option+j"), "expected": .string("option+h")]).error?.code,
                        "hotkey_not_allowed")
         XCTAssertEqual(set(["hotkey": .string("dictation"), "keys": .string("f5"), "expected": .null]).error?.code, "unknown_hotkey")
-        XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .string("command+c"), "expected": .string("space")]).error?.code,
-                       "invalid_hotkey")
-        XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .string("d"), "expected": .string("space")]).error?.code,
-                       "invalid_hotkey")
         XCTAssertEqual(set(["hotkey": .string("dropVoice"), "keys": .string("f5"), "extra": .bool(true),
                             "expected": .string("space")]).error?.code, "invalid_arguments")
         XCTAssertEqual(preferences.dropVoiceShortcut, .holdSpace)
@@ -185,13 +252,23 @@ final class AppControlHotkeysTests: XCTestCase {
         let response = set(["hotkey": .string("dropVoice"), "keys": .string("f5"), "expected": .string("`")])
         XCTAssertEqual(response.error?.code, "conflict")
         XCTAssertEqual(preferences.configuration, before)
-        // A bare F-key types nothing and is accepted with the right expected value.
         XCTAssertTrue(set(["hotkey": .string("dropVoice"), "keys": .string("F5"), "expected": .string("space")]).ok)
         XCTAssertEqual(try rows()["dropVoice"]?["keys"], .string("f5"))
     }
 
-    /// The read covers every Settings → Hotkeys row, every tool and the
-    /// fixed global keys.
+    /// Every key spelling the read returns is accepted back as expected.
+    func test_keys_round_trip_for_every_recordable_key() {
+        for text in ["`", "option+m", "shift+command+d", "f20", "tab", "left", "page down", "forward delete",
+                     "control+space", "\\", "right_command", "right_option", "space"] {
+            let shortcut = AppControlHotkeys.shortcut(from: text)
+            XCTAssertNotNil(shortcut, text)
+            XCTAssertEqual(AppControlHotkeys.shortcut(from: AppControlHotkeys.keys(shortcut).string ?? ""), shortcut, text)
+        }
+        XCTAssertNil(AppControlHotkeys.shortcut(from: "return"))
+        XCTAssertNil(AppControlHotkeys.shortcut(from: "command"))
+        XCTAssertNil(AppControlHotkeys.shortcut(from: "option+option+m"))
+    }
+
     func test_read_lists_every_hotkey_with_modes_and_defaults() throws {
         let all = try rows()
         for id in AppControlHotkeys.Row.allCases.map(\.rawValue) + HoverTool.allCases.map({ "tool." + $0.rawValue }) + ["help", "answerEscape"] {
@@ -200,10 +277,15 @@ final class AppControlHotkeysTests: XCTestCase {
         XCTAssertEqual(all["agentText"]?["keys"], .string("right_command"))
         XCTAssertEqual(all["agentText"]?["mode"], .string("tap"))
         XCTAssertEqual(all["agentVoice"]?["mode"], .string("hold"))
+        XCTAssertEqual(all["dropVoice"]?["modes"], .array([.string("hold")]))
         XCTAssertEqual(all["meetingRecord"]?["display"], .string("⌥M"))
-        XCTAssertEqual(all["help"]?["changeable"], .bool(false))
-        XCTAssertEqual(all["tool.quit"]?["changeable"], .bool(false))
+        XCTAssertEqual(all["linkInsert"]?["keys"], .string("left"))
+        XCTAssertEqual(all["help"]?["canChange"], .bool(false))
+        XCTAssertEqual(all["tool.quit"]?["canChange"], .bool(true))
         XCTAssertEqual(all["tool.screenshot"]?["clearable"], .bool(true))
+        XCTAssertEqual(all["dropVoice"]?["clearable"], .bool(false))
+        let listing = toolbox.handle("hotkeys_get", [:])
+        XCTAssertTrue(listing.data.object?["keysAccepted"]?.string?.contains("` (backquote alone)") == true)
         XCTAssertEqual(toolbox.handle("hotkeys_get", ["x": .bool(true)]).error?.code, "invalid_arguments")
     }
 }

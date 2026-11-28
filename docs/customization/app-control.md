@@ -156,8 +156,9 @@ installation and quit are outside the application-control server.
 ## Every hotkey
 
 `whytap_hotkeys_get` returns `hotkeys`: every Settings → Hotkeys row, every
-tool and the fixed global keys. Each has `id`, `title`, `does`, `keys`,
-`display`, `mode`, `modes`, `changeable`, `clearable`, `default`
+tool and the fixed global keys, and `keysAccepted`, the keys
+`whytap_hotkey_set` takes. Each hotkey has `id`, `title`, `does`, `keys`,
+`display`, `mode`, `modes`, `canChange`, `clearable`, `default`
 (`{keys, display, mode}`) and sometimes `note`.
 
 | id | Settings row | Default |
@@ -166,10 +167,10 @@ tool and the fixed global keys. Each has `id`, `title`, `does`, `keys`,
 | `agentText` / `agentVoice` | Agent text / voice | `right_command`, tap / hold |
 | `googleText` / `googleVoice` | Google text / voice | `right_option`, tap / hold |
 | `meetingRecord` | Meeting record | `option+m` |
-| `linkInsert`, `linkOpen`, `linkNext`, `linkPrevious` | Links insert / open / next / previous | ← → ↓ ↑ |
+| `linkInsert`, `linkOpen`, `linkNext`, `linkPrevious` | Links insert / open / next / previous | `left`, `right`, `down`, `up` |
 | `agentClose` | Agent close | `option+q` |
 | `tool.<tool id>` | Tools | none |
-| `help`, `answerEscape` | — (fixed: ⌥H, Esc) | not changeable |
+| `help`, `answerEscape` | — (fixed: ⌥H, Esc) | `canChange: false` |
 
 `mode` is `hold` or `toggle` for the voice rows (Drop, Agent voice, Google
 voice; Settings shows Hold / Toggle) and `tap` for the rest. `modes` is what
@@ -177,37 +178,60 @@ the row accepts now: on Space only `hold`. Keys a Whytap window takes only
 while it is open (screenshot editor, Case prompt, History) are not listed.
 
 `whytap_hotkey_set` with `hotkey` takes `keys` (optional), `mode` (optional),
-or `reset: true` (default keys and mode), and `expected`, the row's current
-`keys`. "Put dictation back on hold Space" is
-`{"hotkey":"dropVoice","keys":"space","mode":"hold","expected":"`"}`.
-It makes the change Settings → Features makes for that row
-(`FeatureHotkey.assign` / `setGesture`) and saves it through
-`HotkeyPreferences.apply`, the Hotkeys Save path: the monitors re-register at
-once and Settings, Help and the island hints follow. Rules:
+`keys: null` (tools only) or `reset: true` (default keys and mode), and
+`expected`, the current `keys`. "Put dictation back on hold Space" is
+`{"hotkey":"dropVoice","keys":"space","mode":"hold","expected":"`"}`;
+"set Drop to `" is `{"hotkey":"dropVoice","keys":"`","expected":"space"}`
+(the mode stays Hold unless `mode` says `toggle`).
 
-- Keys are written, not pressed: a combo with Control or Option
-  (`option+m`, `control+command+d`), a bare `f1`–`f20`, `right_command` or
-  `right_option` alone, or `space` (Drop only). Other keys answer
-  `invalid_hotkey`; Command- or Shift-only combos and bare typing keys
-  (`` ` ``, letters) can be recorded only in Settings, so a misread request
-  cannot take ⌘C or a letter from every app.
-- Space is Drop's alone (`hotkey_not_allowed` elsewhere) and hold-only:
-  `space` sets Hold, and Toggle on Space is `invalid_mode`. Other keys keep the
-  current mode unless `mode` is given. One-shot rows accept only `tap`.
+It accepts exactly what the Settings recorder accepts for that row and makes
+the change Settings → Features makes (`FeatureHotkey.assign` /
+`setGesture`), saved through `HotkeyPreferences.apply`, the Hotkeys Save
+path: the monitors re-register at once and Settings, Help and the island
+hints follow. There is no rule for the agent that Settings does not have.
+
+- Keys are written as the recorder would record them: any modifiers
+  (`control`, `option`, `shift`, `command`, or none) then one key, joined by
+  `+`: letters, digits, US punctuation (`` ` ``, `-`, `/`…), `f1`–`f20`,
+  `space`, `tab`, `delete`, `forward delete`, `home`, `end`, `page up`,
+  `page down`, `left`/`right`/`up`/`down`; or `right_command` /
+  `right_option` alone. Escape and Return cannot be recorded
+  (`invalid_hotkey`), as in Settings.
+- Space alone is Drop's (`hotkey_not_allowed` elsewhere) and hold-only:
+  Toggle on Space is `invalid_mode`. Space with a modifier is an ordinary
+  combination. Other keys keep the current mode unless `mode` is given;
+  one-shot rows accept only `tap`.
 - One physical key = one action: keys or a mode another action uses (⌥M is
-  Meeting record; Toggle on Right ⌘ is Agent text's tap) answer
-  `hotkey_conflict`, naming that action and the nearest free keys. Nothing is
-  taken over.
-- Only tool hotkeys clear (`keys: null`); other rows answer `not_clearable`.
-  `help` and `answerEscape` answer `hotkey_not_allowed`; unknown ids answer
+  Meeting record, ← is Links insert, Toggle on Right ⌘ is Agent text's tap)
+  answer `hotkey_conflict`, naming that action and the nearest free keys.
+  Nothing is taken over.
+- Only tool hotkeys clear; other rows answer `not_clearable`. `help` and
+  `answerEscape` answer `hotkey_not_allowed`; unknown ids answer
   `unknown_hotkey`; stale `expected` answers `conflict`. A repeated request
   answers `changed: false`.
-- The reply has `hotkey` (the row as `whytap_hotkeys_get` lists it), `keys`
-  (`{keys, display}`), `mode`, `previous` (`{keys, mode}`) and `changed`; the
-  built-in Agent shows `Hotkey: Drop voice — Space`.
 
-`hotkey: "tool.<id>"` is the same as `tool` with the island-tool rules above;
-`reset: true` clears it.
+A mistaken request is cheap to undo rather than forbidden. The reply has
+`bound` ("Drop voice is Hold `."), `keys` (`{keys, display}`), `mode`,
+`previous` (`{keys, display, mode}`), `undo` (the `whytap_hotkey_set`
+arguments that put the previous keys and mode back in one call) and
+`changed`. When the new keys take something from other apps, `takenEverywhere`
+says so in one line for the agent to tell the user:
+
+- Hold Drop on a bare key keeps typing (`SpaceHoldMonitor` passes the key
+  through and erases it when the hold arms): "A quick press of ` still types
+  “`”; holding it about 0.3 s in a text field starts dictation and erases the
+  typed “`”."
+- Any other bare typing key, Tab or Delete is grabbed globally (Carbon): "` is
+  now taken by Whytap in every app: it no longer types “`” there." Agent close
+  and the link keys say "while an Agent answer is on screen" instead.
+- Shift-only and Command(+Shift) combinations: "⇧⌘D is now taken by Whytap in
+  every app: apps or macOS that use ⇧⌘D no longer get it." An Option
+  combination that types a character also has `typesInTextFields`.
+
+The older form with `tool` instead of `hotkey` keeps its Control-or-Option
+rule above for existing callers; its refusals point to `hotkey: "tool.<id>"`,
+which takes any key Settings accepts for a tool (Quit and coming-soon tools
+included, as in Settings → Hotkeys → Tools).
 
 ## Meetings and access
 

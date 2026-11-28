@@ -2360,15 +2360,16 @@ lists each Settings → Hotkeys row (dropVoice, agentText, agentVoice,
 googleText, googleVoice, meetingRecord, linkInsert/Open/Next/Previous,
 agentClose), every tool as tool.<id> and the fixed Help ⌥H / Escape close,
 with keys, display, mode (hold/toggle for voice, tap otherwise), allowed
-modes, changeable, clearable and default. whytap_hotkey_set with hotkey sets
-keys and/or mode or reset: FeatureHotkey.assign/setGesture (the Features
-screen's rules: Space is Drop's alone and forces Hold) saved through
-HotkeyPreferences.apply, so the conflict model and the monitors' published
-observers are the Settings ones and the change is live at once. Written keys:
-a ⌃/⌥ combo, a bare F1–F20, right_command/right_option alone, space (Drop);
-⌘/⇧-only combos and bare typing keys stay with the Settings recorder. Only
-tool hotkeys clear; a refused or conflicting change saves nothing. Agent line
-"Hotkey: Drop voice — Space". WHY:
+modes, canChange, clearable and default. whytap_hotkey_set with hotkey sets
+keys and/or mode, clears a tool or resets: it parses exactly what the
+recorder records (any modifiers or none + one key, right_command/right_option
+alone, space alone for Drop), applies FeatureHotkey.assign/setGesture (Space
+is Drop's alone and forces Hold) and saves through HotkeyPreferences.apply,
+so the conflict model and the monitors' published observers are the Settings
+ones and the change is live at once. No agent-only key rule: replies carry
+bound, previous, a one-call undo and a takenEverywhere line for keys taken
+from other apps (a hold Drop on a bare key still types on a quick press). The
+older tool form keeps the ⌃/⌥ link rule. WHY:
 .project-docs/decisions/2026-11-28-agent-all-hotkeys.md
 Drop lists from the Agent and `whytap mcp` (AppControlDropLists): Vocab
 (whytap_vocab_add, VocabularyCache.add/validate) and Filler

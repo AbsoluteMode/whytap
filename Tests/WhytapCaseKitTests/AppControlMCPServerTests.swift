@@ -145,6 +145,9 @@ final class AppControlMCPServerTests: XCTestCase {
         let properties = set["inputSchema"]?.object?["properties"]?.object ?? [:]
         XCTAssertEqual(Set(properties.keys), ["hotkey", "tool", "keys", "mode", "reset", "expected"])
         XCTAssertTrue(set["description"]?.string?.contains("{hotkey: dropVoice, keys: space, mode: hold}") == true)
+        XCTAssertTrue(set["description"]?.string?.contains(#"{hotkey: dropVoice, keys: "`"}"#) == true)
+        XCTAssertFalse(set["description"]?.string?.contains("bare typing keys are refused") == true)
+        XCTAssertTrue(AppControlMCPServer.appInstructions.contains("bare keys such as ` and Command shortcuts included"))
         let arguments: AppControlValue = .object(["tool": .string("screenshot"), "keys": .string("option+s"), "expected": .null])
         XCTAssertEqual(try toolCall(server, "whytap_hotkey_set", arguments)["isError"], .bool(false))
         XCTAssertEqual(sent, [AppControlRequest("hotkey_set", arguments: arguments.object!)])

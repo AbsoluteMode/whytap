@@ -27,7 +27,7 @@ struct AppControlToolbox {
         // Agent close) by `hotkey` id. WHY: .project-docs/decisions/2026-11-28-agent-all-hotkeys.md
         case "hotkeys_get": return AppControlHotkeys(hotkeys: hotkeys).list(args)
         case "hotkey_set" where args["hotkey"] != nil:
-            return AppControlHotkeys(hotkeys: hotkeys).set(args, tool: assign)
+            return AppControlHotkeys(hotkeys: hotkeys).set(args)
         case "hotkey_set": return assign(args)
         default: return .failure("unknown_operation", "Unknown application-control operation.")
         }
@@ -87,14 +87,14 @@ struct AppControlToolbox {
         guard WhytapLink.acceptsLinkHotkey(tool) else {
             return .failure("hotkey_not_allowed", tool.isComingSoon
                 ? "\(Self.title(tool)) is coming soon; it cannot get a hotkey yet."
-                : "\(Self.title(tool)) cannot get a hotkey here: a stray press would end a dictation or recording. The user can set it in Settings → Hotkeys.")
+                : "\(Self.title(tool)) cannot get a hotkey through the older tool form. Use whytap_hotkey_set with hotkey tool.\(tool.rawValue), which takes any key Settings accepts.")
         }
         let preferences = hotkeys()
         guard Self.sameKeys(expected, Self.keysValue(preferences.toolShortcuts[tool])) else { return Self.conflict() }
         var shortcut: HotkeyShortcut?
         if let text = keys.string {
             guard text.count <= 64, let combo = WhytapLink.linkCombo(from: text) else {
-                return .failure("invalid_hotkey", "Write keys as modifiers then one key joined by +, with Control or Option: option+s, control+shift+f5. Keys: A–Z, 0–9, F1–F20 and US punctuation. Command or Shift alone, Space, Return, Tab, Escape, Delete and arrows are not accepted, so system and app shortcuts stay free."
+                return .failure("invalid_hotkey", "Write keys as modifiers then one key joined by +, with Control or Option: option+s, control+shift+f5. Keys: A–Z, 0–9, F1–F20 and US punctuation. The older tool form takes only these; for any other key Settings accepts (command+shift+s, a bare key, arrows), use whytap_hotkey_set with hotkey tool.\(tool.rawValue)."
                     + Self.suggestion(nearest: text, for: tool, in: preferences.configuration))
             }
             shortcut = .combo(combo)

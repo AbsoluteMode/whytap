@@ -2,7 +2,7 @@
 id: agent-all-hotkeys-2026-11-28
 type: decision
 title: The Agent and coding tools read and change every Whytap hotkey and its mode
-summary: whytap_hotkeys_get lists every hotkey; whytap_hotkey_set with a hotkey id changes keys, Hold/Toggle or resets it through the Features rules and HotkeyPreferences.apply. Settings rows no longer share one accessibility name.
+summary: whytap_hotkeys_get lists every hotkey; whytap_hotkey_set with a hotkey id sets any key Settings accepts, Hold/Toggle or a reset, and returns bound/previous/undo/takenEverywhere through the Features rules and HotkeyPreferences.apply. Settings rows no longer share one accessibility name.
 status: confirmed
 tags: [agent, native-agent, app-control, hotkeys, mcp, accessibility]
 canonical_for: [agent-all-hotkeys]
@@ -17,7 +17,7 @@ sources:
   - type: repository
     reference: Tests/SidekeyTests/AppControl/AppControlHotkeysTests.swift
     confirmed_at: 2026-11-28
-related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-24-settings-around-features.md, 2026-11-22-native-agent-app-control.md]
+related: [2026-11-22-agent-toolbox-hotkeys.md, 2026-11-24-settings-around-features.md]
 ---
 
 # Every hotkey from the Agent and coding tools
@@ -54,13 +54,34 @@ elements were found that match the criteria", and each key cap alone was
   (one physical key = one action, the modifier tap/hold split) refuses
   conflicts, and the monitors re-register from the published preferences as
   after Save. A refusal names the other action and the nearest free ⌃/⌥ keys.
-- **Written keys stay narrow.** The tool rule from 2026-11-22 extends here: a
-  model writes key names, it does not press them. It may write ⌃/⌥ combos, a
-  bare F1–F20 (types nothing), `right_command` / `right_option` alone and
-  `space` for Drop. Command- or Shift-only combos and bare typing keys
-  (`` ` ``, letters) stay with the Settings recorder: a misread "set
-  dictation to C" must not take ⌘C or a letter from every app. Reading
-  shows such keys and `reset` restores defaults.
+- **Any key Settings accepts (owner's correction, same day).** The first
+  version kept the 2026-11-22 tool rule for every row: only ⌃/⌥
+  combinations, bare F-keys, the right modifiers and Space, so a misread
+  request could not take ⌘C or a letter. The maintainer's first real request
+  on that build, "change Drop in Whytap to `", was refused: a bare backquote
+  was not available over MCP, the agent could not finish it in Settings, and
+  it sent him to Settings → Hotkeys himself. He had used ` for Drop before.
+  His requirement: the agent changes every hotkey to any available key and
+  switches its mode, and "available" means what Settings itself accepts. So
+  `whytap_hotkey_set` with `hotkey` parses exactly what the recorder records
+  (any modifiers or none + one recorder key, a right modifier alone, Space
+  alone for Drop) and applies Settings' own per-row gates and conflicts; it
+  has no rule of its own. Tools too, through `hotkey: tool.<id>` (Quit and
+  coming-soon tools, as Settings → Hotkeys → Tools allows).
+- **A mistake is cheap instead of forbidden.** The reply states `bound` (keys
+  and mode now), `previous` and `undo` (the arguments that restore them in
+  one call), and `takenEverywhere` for keys other apps lose: a bare typing
+  key, Tab or Delete grabbed through Carbon ("` … no longer types “`”"),
+  Shift-only and Command(+Shift) combinations. A hold Drop on a bare key is
+  the exception and says so: `SpaceHoldMonitor` without required modifiers
+  uses the Space policy, passing the key through and erasing it when the hold
+  arms in a text field, so a quick press still types it (checked in code and
+  by a monitor test). The descriptions tell the model to relay that line.
+- **The older `tool` form keeps its rule for now.** `whytap_hotkey_set` with
+  `tool` still takes only ⌃/⌥ combinations; its refusals point to
+  `hotkey: tool.<id>`. The built-in agent's tests pin that form, and their
+  file is deleted by the harness stack (#529, #544); changing them here would
+  block the combined owner-local build. Drop the rule once that stack lands.
 - **No clear for actions that must have keys.** Settings has no clear button
   on these rows; only tool hotkeys clear. `reset` restores the default keys
   and mode.
@@ -85,8 +106,8 @@ elements were found that match the criteria", and each key cap alone was
 
 - A separate `whytap_hotkey_change` tool: duplicates `hotkey_set`'s contract
   and adds a catalog entry for the same Settings action.
-- Accepting every key the recorder accepts: a written request is not a key
-  press, and ⌘/letter grabs break typing and app shortcuts for every app.
+- An agent-only key rule (⌃/⌥ only, no bare typing keys): shipped first and
+  dropped the same day after it refused the maintainer's "set Drop to `".
 - Pairing `expected` with the mode: the keys guard catches a concurrent
   rebind, and the mode is an absolute value that is safe to repeat.
 - Listing window-local keys (screenshot editor, Case prompt, History): they

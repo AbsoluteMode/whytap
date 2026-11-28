@@ -820,8 +820,12 @@ final class NativeAgentAppControlTests: XCTestCase {
     // MARK: Catalog contract
 
     func testOneToolCarriesEveryMCPOperationWithItsDescriptionAndSchema() throws {
-        let mcp = AppControlMCPServer.tools.compactMap(\.object)
+        // Removing Vocab/Filler entries is for external harnesses only.
+        let mcp = AppControlMCPServer.tools.compactMap(\.object).filter {
+            !NativeAgentAppControl.externalOnly.contains($0["name"]?.string ?? "")
+        }
         XCTAssertEqual(NativeAgentAppControl.tools.count, mcp.count)
+        XCTAssertEqual(AppControlMCPServer.tools.count, mcp.count + 2)
         let native = NativeAgentTools.structuredDefinitions(allowActions: false, appControl: true)
         XCTAssertFalse(native.contains { ($0["name"] as? String)?.hasPrefix("whytap_") == true })
         let tool = try XCTUnwrap(native.first { $0["name"] as? String == NativeAgentAppControl.toolName })
@@ -834,7 +838,9 @@ final class NativeAgentAppControlTests: XCTestCase {
         encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
         for entry in mcp {
             let name = try XCTUnwrap(entry["name"]?.string)
-            XCTAssertTrue(description.contains(name + ": " + (entry["description"]?.string ?? "-")), name)
+            let expected = NativeAgentAppControl.nativeDescription(entry["description"]?.string ?? "-")
+            XCTAssertTrue(description.contains(name + ": " + expected), name)
+            XCTAssertFalse(expected.contains("_remove"), name)
             let schema = String(decoding: try encoder.encode(try XCTUnwrap(entry["inputSchema"])), as: UTF8.self)
             XCTAssertTrue(description.contains("Arguments schema: " + schema), name)
         }

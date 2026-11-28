@@ -10,6 +10,8 @@
     <string>__BUNDLE_DISPLAY_NAME__</string>
     <key>CFBundleVersion</key>
     <string>__BUILD_VERSION__</string>
+    <key>ExodiaRestorePointVersion</key>
+    <integer>1</integer>
     <key>CFBundleShortVersionString</key>
     <string>__SHORT_VERSION__</string>
     <key>CFBundlePackageType</key>

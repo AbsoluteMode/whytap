@@ -106,16 +106,20 @@ struct ApplicationInstanceConflict: Equatable {
 
 @MainActor
 final class ApplicationInstanceCoordinator {
+    /// Shared by every flavor and by the headless restore point commands.
+    nonisolated static let leaseDirectory = FileManager.default.urls(
+        for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        .appendingPathComponent("whytap/instance", isDirectory: true)
+
     static let shared = ApplicationInstanceCoordinator(
-        directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("whytap/instance", isDirectory: true),
+        directory: leaseDirectory,
         currentPID: getpid(),
         identity: .current,
         runningInstances: liveRunningInstances,
         presentConflict: presentLiveConflict
     )
 
-    private static let bundleIdentifiers: Set<String> = [
+    nonisolated static let bundleIdentifiers: Set<String> = [
         "com.rootwise.sidekey", "com.rootwise.sidekey.beta"
     ]
 

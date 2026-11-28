@@ -63,6 +63,10 @@ struct ArtifactRestorePlan: Codable, Equatable {
     var manifestCreatedAt: Date
     var attempts: Int = 0
     var restoreWarnings: [String]?
+    /// Set only for a same-Mac restore point (`LocalRestoreSnapshot`): the
+    /// snapshot directory applied verbatim instead of an archive.
+    /// WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+    var localSnapshot: String? = nil
 }
 
 /// What the UI can tell the user after the app restarts. Durable, because the
@@ -399,6 +403,8 @@ struct ArtifactRestoreTransaction {
     let pendingKeyStore: TokenStore
     let recoveryKeyStore: TokenStore
     var faults = ArtifactBackupFaults()
+    /// The preferences domain a same-Mac restore captures and replaces.
+    var defaultsDomain: String = BuildConfig.bundleID
 
     static let maxAttempts = 3
     private static let archiveName = "pending.exodiabackup"
@@ -471,6 +477,43 @@ struct ArtifactRestoreTransaction {
             archiveSHA256: archiveDigest, archiveBytes: archiveBytes,
             manifestID: manifest.id, manifestCreatedAt: manifest.createdAt)
         try writePrivate(try JSONEncoder.artifactBackup.encode(plan), to: planURL)
+    }
+
+    /// Parks a same-Mac restore of a verified restore point. Unlike `arm`, it never
+    /// displaces anything: an armed plan, an unfinished apply or the evidence a
+    /// previous restore preserved must be resolved first (Settings → Backup or the
+    /// next launch). The key only seals this transaction's before-state.
+    func armLocal(snapshot: URL, manifest: LocalRestoreSnapshot.Manifest,
+                  sections: Set<ArtifactBackupSection>) throws {
+        guard !sections.isEmpty else { throw ArtifactBackupError.nothingSelected }
+        guard sections.isSubset(of: Set(manifest.sections)) else { throw ArtifactBackupError.missingSection }
+        guard Self.isLocalSnapshot(snapshot, in: locations) else { throw ArtifactBackupError.unsafeContent }
+        guard !hasPendingWork else { throw ArtifactBackupError.applyInProgress }
+        try createPrivateDirectory(root)
+        let key = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+        do { try pendingKeyStore.save(key.base64EncodedString()) }
+        catch { throw ArtifactBackupError.keyUnavailable }
+        let plan = ArtifactRestorePlan(
+            id: UUID(), createdAt: Date(), sections: sections.sorted { $0.rawValue < $1.rawValue },
+            archiveSHA256: try Self.localDigest(snapshot), archiveBytes: manifest.totalBytes,
+            manifestID: manifest.id, manifestCreatedAt: manifest.createdAt,
+            localSnapshot: snapshot.standardizedFileURL.path)
+        try writePrivate(try JSONEncoder.artifactBackup.encode(plan), to: planURL)
+    }
+
+    /// Anything a new restore would displace: a parked plan, an apply journal, or
+    /// the records a failed restore preserved.
+    var hasPendingWork: Bool {
+        [planURL, journalURL, archiveURL, beforeStateURL, rollbackRoot]
+            .contains { FileManager.default.fileExists(atPath: $0.path) }
+    }
+
+    static func isLocalSnapshot(_ url: URL, in locations: ArtifactBackupLocations) -> Bool {
+        url.standardizedFileURL.path.hasPrefix(locations.restorePointsRoot.standardizedFileURL.path + "/")
+    }
+
+    static func localDigest(_ snapshot: URL) throws -> String {
+        try ArtifactBackupDigest.ofFile(snapshot.appendingPathComponent(LocalRestoreSnapshot.manifestName)).digest
     }
 
     /// Cancels a parked restore that has not started applying. Refuses while
@@ -617,6 +660,7 @@ struct ArtifactRestoreTransaction {
     }
 
     private func apply(plan: ArtifactRestorePlan, key: Data) throws -> ArtifactRestoreOutcome {
+        if plan.localSnapshot != nil { return try applyLocal(plan: plan, key: key) }
         let digest = try ArtifactBackupDigest.ofFile(archiveURL)
         guard digest.digest == plan.archiveSHA256, digest.bytes == plan.archiveBytes else {
             throw ArtifactBackupError.damaged
@@ -647,43 +691,11 @@ struct ArtifactRestoreTransaction {
             plan: plan, sections: sections,
             incomingCredentials: head.verification.inline[.credentials],
             mintsVaultKey: sections.contains(.caseVault) && targetCaseKey == nil)
-        try writePrivate(try ArtifactBeforeStateBox.seal(beforeState, key: key), to: beforeStateURL)
-        if faults.interruptAfter?(.beforeState) == true {
-            throw ArtifactRestoreInterruption(stage: .beforeState)
-        }
-
-        var journal = ArtifactRestoreJournal(id: plan.id, startedAt: Date(), steps: [])
-        try write(journal: journal)
-        var warnings = head.verification.warnings
-        do {
-            try createPrivateDirectory(rollbackRoot)
-            let includesUsage = sections.contains(.history) && manifest.entries.contains { $0.path == ArtifactUsageBackup.archivePath }
-            for target in Self.checkpointTargets(for: sections, locations: locations, includesUsage: includesUsage,
-                                                 carried: Self.carriedStores(in: manifest)) {
-                let existed = FileManager.default.fileExists(atPath: target.path)
-                guard existed else {
-                    // Recorded anyway: a failure must also remove what the
-                    // restore created where the user had nothing before.
-                    journal.steps.append(.init(target: target.path, backup: "", movedAside: false,
-                                               existedBefore: false))
-                    try write(journal: journal)
-                    continue
-                }
-                let backup = rollbackRoot.appendingPathComponent(
-                    "\(journal.steps.count)-" + target.lastPathComponent, isDirectory: false)
-                let identity = try Self.identity(target)
-                journal.steps.append(.init(target: target.path, backup: backup.path, movedAside: false,
-                                           existedBefore: true, originalDevice: identity.device, originalInode: identity.inode))
-                try write(journal: journal)
-                do { try durableMove(from: target, to: backup) }
-                catch { throw ArtifactBackupError.restoreFailed }
-                journal.steps[journal.steps.count - 1].movedAside = true
-                try write(journal: journal)
-            }
-            if faults.interruptAfter?(.checkpoint) == true {
-                throw ArtifactRestoreInterruption(stage: .checkpoint)
-            }
-
+        let includesUsage = sections.contains(.history) && manifest.entries.contains { $0.path == ArtifactUsageBackup.archivePath }
+        let targets = Self.checkpointTargets(for: sections, locations: locations, includesUsage: includesUsage,
+                                             carried: Self.carriedStores(in: manifest))
+        return try run(plan: plan, key: key, beforeState: beforeState, targets: targets,
+                       warnings: head.verification.warnings, files: { journal in
             // 4. Stream the archive into place, verifying every entry's digest
             //    as it is written.
             let reader = try ArtifactArchiveReader(url: archiveURL, archiveKey: key)
@@ -724,23 +736,8 @@ struct ArtifactRestoreTransaction {
                 }
             }
             try reader.verifyEnd()
-            if includesUsage {
-                func prior(_ target: URL) -> URL? {
-                    guard let step = journal.steps.first(where: { $0.target == target.path }), step.movedAside else { return nil }
-                    return URL(fileURLWithPath: step.backup)
-                }
-                let priorJournal = locations.usageDatabase.deletingLastPathComponent()
-                    .appendingPathComponent(ArtifactUsageBackup.fileName + "-journal")
-                let priorWAL = locations.usageDatabase.deletingLastPathComponent()
-                    .appendingPathComponent(ArtifactUsageBackup.fileName + "-wal")
-                if let warning = try ArtifactUsageBackup.mergePrior(database: prior(locations.usageDatabase), rollbackJournal: prior(priorJournal),
-                    writeAheadLog: prior(priorWAL), into: locations.usageDatabase, scratch: rollbackRoot) { warnings.append(warning) }
-            }
-            if faults.interruptAfter?(.files) == true {
-                throw ArtifactRestoreInterruption(stage: .files)
-            }
-            try faults.beforeCommit?()
-
+            return includesUsage ? try mergeUsage(journal).map { [$0] } ?? [] : []
+        }, metadata: {
             // 5. Metadata last, in a fixed order, each with its before-state
             //    already on disk.
             if sections.contains(.settings) { try applySettings(head.verification.inline[.settings]) }
@@ -754,10 +751,114 @@ struct ArtifactRestoreTransaction {
                               targetPayload: targetCase, targetKey: targetCaseKey)
             }
             if sections.contains(.workspace) {
-                warnings.append(contentsOf: try applyNotifySources(
+                return try applyNotifySources(
                     head.verification.inline,
-                    unreadable: Set(head.verification.unreadableNotifySources)))
+                    unreadable: Set(head.verification.unreadableNotifySources))
             }
+            return []
+        })
+    }
+
+    /// A same-Mac restore point: the snapshot is verified whole, the covered
+    /// roots are moved aside into the same checkpoint and put back verbatim, the
+    /// settings domain is replaced key by key (preserved prefixes aside), and
+    /// Costs keep what was spent meanwhile. Nothing is parked or filtered.
+    /// WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+    private func applyLocal(plan: ArtifactRestorePlan, key: Data) throws -> ArtifactRestoreOutcome {
+        guard let path = plan.localSnapshot else { throw ArtifactBackupError.damaged }
+        let snapshot = URL(fileURLWithPath: path)
+        guard Self.isLocalSnapshot(snapshot, in: locations) else { throw ArtifactBackupError.unsafeContent }
+        let manifest = try LocalRestoreSnapshot.verify(snapshot, locations: locations)
+        guard manifest.id == plan.manifestID, try Self.localDigest(snapshot) == plan.archiveSHA256 else {
+            throw ArtifactBackupError.damaged
+        }
+        let sections = Set(plan.sections)
+        guard sections.isSubset(of: Set(manifest.sections)) else { throw ArtifactBackupError.missingSection }
+        let incoming = sections.contains(.settings) ? try LocalRestoreSnapshot.preferences(in: snapshot) : nil
+        let beforeState = try captureLocalBeforeState(plan: plan, sections: sections, incoming: incoming)
+        let usage = manifest.presentRoots.contains("usage")
+        // Without a captured Costs database the current one stays as it is.
+        let roots = LocalRestoreSnapshot.roots(locations).filter {
+            sections.contains($0.section) && ($0.section != .history || usage)
+        }
+        return try run(plan: plan, key: key, beforeState: beforeState, targets: roots.map(\.url),
+                       warnings: manifest.warnings, files: { journal in
+            for root in roots where manifest.presentRoots.contains(root.id) {
+                try faults.beforeFileEntry?(root.id)
+                try LocalRestoreSnapshot.install(root, from: snapshot, manifest: manifest)
+            }
+            return usage && sections.contains(.history) ? try mergeUsage(journal).map { [$0] } ?? [] : []
+        }, metadata: {
+            if let incoming { try applyLocalSettings(incoming, keys: beforeState.preferenceKeys) }
+            if faults.interruptAfter?(.metadata) == true {
+                throw ArtifactRestoreInterruption(stage: .metadata)
+            }
+            return []
+        })
+    }
+
+    /// Costs record real spending: the rows written while the replaced database
+    /// was live are merged into the restored one.
+    private func mergeUsage(_ journal: ArtifactRestoreJournal) throws -> String? {
+        func prior(_ target: URL) -> URL? {
+            guard let step = journal.steps.first(where: { $0.target == target.path }), step.movedAside else { return nil }
+            return URL(fileURLWithPath: step.backup)
+        }
+        let priorJournal = locations.usageDatabase.deletingLastPathComponent()
+            .appendingPathComponent(ArtifactUsageBackup.fileName + "-journal")
+        let priorWAL = locations.usageDatabase.deletingLastPathComponent()
+            .appendingPathComponent(ArtifactUsageBackup.fileName + "-wal")
+        return try ArtifactUsageBackup.mergePrior(database: prior(locations.usageDatabase), rollbackJournal: prior(priorJournal),
+            writeAheadLog: prior(priorWAL), into: locations.usageDatabase, scratch: rollbackRoot)
+    }
+
+    /// The transaction both restores share: the sealed before-state, the journal,
+    /// every target moved aside into the checkpoint, the new files, the metadata,
+    /// then the commit; any failure rolls back files and metadata.
+    private func run(plan: ArtifactRestorePlan, key: Data, beforeState: ArtifactRestoreBeforeState,
+                     targets: [URL], warnings initial: [String],
+                     files: (ArtifactRestoreJournal) throws -> [String],
+                     metadata: () throws -> [String]) throws -> ArtifactRestoreOutcome {
+        try writePrivate(try ArtifactBeforeStateBox.seal(beforeState, key: key), to: beforeStateURL)
+        if faults.interruptAfter?(.beforeState) == true {
+            throw ArtifactRestoreInterruption(stage: .beforeState)
+        }
+
+        var journal = ArtifactRestoreJournal(id: plan.id, startedAt: Date(), steps: [])
+        try write(journal: journal)
+        var warnings = initial
+        do {
+            try createPrivateDirectory(rollbackRoot)
+            for target in targets {
+                let existed = Self.entryExists(target)
+                guard existed else {
+                    // Recorded anyway: a failure must also remove what the
+                    // restore created where the user had nothing before.
+                    journal.steps.append(.init(target: target.path, backup: "", movedAside: false,
+                                               existedBefore: false))
+                    try write(journal: journal)
+                    continue
+                }
+                let backup = rollbackRoot.appendingPathComponent(
+                    "\(journal.steps.count)-" + target.lastPathComponent, isDirectory: false)
+                let identity = try Self.identity(target)
+                journal.steps.append(.init(target: target.path, backup: backup.path, movedAside: false,
+                                           existedBefore: true, originalDevice: identity.device, originalInode: identity.inode))
+                try write(journal: journal)
+                do { try durableMove(from: target, to: backup) }
+                catch { throw ArtifactBackupError.restoreFailed }
+                journal.steps[journal.steps.count - 1].movedAside = true
+                try write(journal: journal)
+            }
+            if faults.interruptAfter?(.checkpoint) == true {
+                throw ArtifactRestoreInterruption(stage: .checkpoint)
+            }
+            warnings.append(contentsOf: try files(journal))
+            if faults.interruptAfter?(.files) == true {
+                throw ArtifactRestoreInterruption(stage: .files)
+            }
+            try faults.beforeCommit?()
+            warnings.append(contentsOf: try metadata())
         } catch let interruption as ArtifactRestoreInterruption {
             throw interruption
         } catch {
@@ -958,8 +1059,10 @@ struct ArtifactRestoreTransaction {
     /// transaction's own checkpoint directory.
     private static func validate(_ journal: ArtifactRestoreJournal, plan: ArtifactRestorePlan,
                                  locations: ArtifactBackupLocations, rollbackRoot: URL) -> Bool {
-        let allowed = Set(checkpointTargets(for: Set(plan.sections), locations: locations, includesUsage: true)
-            .map { $0.standardizedFileURL.path })
+        let targets = plan.localSnapshot == nil
+            ? checkpointTargets(for: Set(plan.sections), locations: locations, includesUsage: true)
+            : LocalRestoreSnapshot.checkpointTargets(for: Set(plan.sections), locations: locations)
+        let allowed = Set(targets.map { $0.standardizedFileURL.path })
         let prefix = rollbackRoot.standardizedFileURL.path + "/"
         guard journal.id == plan.id, journal.steps.count <= 64 else { return false }
         for step in journal.steps {
@@ -983,10 +1086,10 @@ struct ArtifactRestoreTransaction {
         var failures: [String] = []
         for step in journal.steps.reversed() {
             let target = URL(fileURLWithPath: step.target)
-            if !step.backup.isEmpty, FileManager.default.fileExists(atPath: step.backup) {
+            if !step.backup.isEmpty, Self.entryExists(URL(fileURLWithPath: step.backup)) {
                 let backup = URL(fileURLWithPath: step.backup)
                 do {
-                    if FileManager.default.fileExists(atPath: target.path) {
+                    if Self.entryExists(target) {
                         try FileManager.default.removeItem(at: target)
                     }
                     try FileManager.default.createDirectory(
@@ -996,7 +1099,7 @@ struct ArtifactRestoreTransaction {
                 } catch {
                     failures.append(target.lastPathComponent)
                 }
-            } else if step.existedBefore == false, FileManager.default.fileExists(atPath: target.path) {
+            } else if step.existedBefore == false, Self.entryExists(target) {
                 // Nothing was here before the restore, so nothing imported may
                 // stay behind — an abandoned instruction file or dashboard
                 // would otherwise become live configuration.
@@ -1224,6 +1327,38 @@ struct ArtifactRestoreTransaction {
             absentCredentials: absent, caseVaultKeyMintedByRestore: mintsVaultKey)
     }
 
+    /// The whole preferences domain, minus the preserved prefixes: every key the
+    /// restore may change (present now or in the snapshot) with its current value,
+    /// so a rollback also removes keys the restore added.
+    private func captureLocalBeforeState(plan: ArtifactRestorePlan, sections: Set<ArtifactBackupSection>,
+                                         incoming: [String: Any]?) throws -> ArtifactRestoreBeforeState {
+        var preferences = Data()
+        var keys: [String] = []
+        if sections.contains(.settings) {
+            let current = defaults.persistentDomain(forName: defaultsDomain) ?? [:]
+            keys = Set(current.keys).union((incoming ?? [:]).keys)
+                .filter { !LocalRestoreSnapshot.isPreserved($0) }.sorted()
+            let values = current.filter { keys.contains($0.key) }
+            do {
+                preferences = try PropertyListSerialization.data(fromPropertyList: values,
+                                                                 format: .binary, options: 0)
+            } catch { throw ArtifactBackupError.restoreFailed }
+        }
+        return ArtifactRestoreBeforeState(
+            transactionID: plan.id, createdAt: Date(),
+            sections: sections.sorted { $0.rawValue < $1.rawValue },
+            preferences: preferences, preferenceKeys: keys, credentials: [:],
+            absentCredentials: [], caseVaultKeyMintedByRestore: false)
+    }
+
+    private func applyLocalSettings(_ values: [String: Any], keys: [String]) throws {
+        for key in keys {
+            if let value = values[key] { defaults.set(value, forKey: key) }
+            else { defaults.removeObject(forKey: key) }
+        }
+        guard defaults.synchronize() else { throw ArtifactBackupError.writeFailed }
+    }
+
     private func applySettings(_ data: Data?) throws {
         guard let data else { throw ArtifactBackupError.damaged }
         let payload: ArtifactSettingsPayload
@@ -1402,6 +1537,15 @@ struct ArtifactRestoreTransaction {
             guard rename(temporary.path, url.path) == 0 else { throw ArtifactBackupError.writeFailed }
             try ConfigBackupFiles.synchronizeDirectory(url.deletingLastPathComponent())
         } catch { throw ArtifactBackupError.writeFailed }
+    }
+
+    /// Whether anything occupies `url`, without following a link: `fileExists`
+    /// reports a dangling link as absent, so a restore would leave it in place.
+    /// Every restore target and rollback decision asks this.
+    /// WHY: .project-docs/decisions/2026-11-26-preview-restore-points.md
+    static func entryExists(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0
     }
 
     private static func identity(_ url: URL) throws -> (device: UInt64, inode: UInt64) {

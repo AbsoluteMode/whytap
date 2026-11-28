@@ -2452,6 +2452,22 @@ WHY: .project-docs/decisions/2026-10-19-one-running-copy.md
 `--installation-check` loads the packaged executable and verifies resources
 without starting the app runtime. User guide: `docs/install.md`. Policy:
 `.project-docs/decisions/2026-09-10-public-installation.md`.
+`--restore-point create --reason <text> | apply <id> [--sections a,b] | list`
+(`PreviewRestorePoints`) also runs headless before the installation guard and
+prints one JSON object; create and apply hold the shared instance lease
+(production and beta) and refuse while Whytap runs, `list` is read-only. The
+build queue uses it around preview builds: the outgoing app saves a same-Mac,
+byte-exact `LocalRestoreSnapshot` (the whole settings domain except `backup.`
+and `SU` keys, plus clone copies of the covered Application Support folders
+with modes and links; never provider keys, Case, History or meeting audio;
+last 5 kept under `<bundle root>/restore-points/<id>/`, 0700/0600, published
+by one rename). A rollback the owner asks for parks one with
+`ArtifactRestoreTransaction.armLocal`, which never displaces another restore;
+the startup transaction installs it verbatim (unlike the cross-Mac import,
+nothing is parked or filtered), merges Costs spent meanwhile and keeps the
+replaced data as its recovery checkpoint. Info.plist
+`ExodiaRestorePointVersion` tells the queue the app can do this. WHY:
+.project-docs/decisions/2026-11-26-preview-restore-points.md
 
 Targets: library `Sidekey` (all app code) + thin executable `SidekeyApp`
 (product `Sidekey`, `SidekeyAppMain.run()`) and `SidekeyTests`. Flavors: `prod` (default) and `beta` (`-DBETA`: separate

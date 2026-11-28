@@ -48,6 +48,51 @@ struct ModelMenu: View {
     }
 }
 
+/// Subtitles' model dropdown: the same control and picker as a feature row,
+/// listing the two live-translation engines. One without a readable key is
+/// shown disabled with what it needs.
+// WHY: .project-docs/decisions/2026-11-28-subtitle-engine-choice.md
+@MainActor
+struct SubtitlesModelMenu: View {
+    @ObservedObject var viewModel: APIAndModelsViewModel
+    let onAddKey: () -> Void
+    var width: CGFloat? = nil
+    @State private var isPresented = false
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        let slot = viewModel.audioTranslate
+        Button {
+            isPresented.toggle()
+        } label: {
+            MacPopupLabel(title: slot.label, minWidth: width ?? 90, maxWidth: width ?? 300)
+        }
+        .buttonStyle(APIModelFeedbackStyle(cornerRadius: MacPopupMetrics.radius, focused: focused))
+        .focused($focused)
+        .help(slot.label)
+        .accessibilityLabel("Model for Subtitles")
+        .accessibilityValue(slot.label)
+        .popover(isPresented: $isPresented, arrowEdge: .bottom) {
+            ModelPicker(
+                sections: slot.sections,
+                missingProviderHint: "Add a key for Soniox or OpenAI",
+                onSelect: { account, model in
+                    isPresented = false
+                    if let engine = AudioTranslateSlot.engine(account: account, model: model) {
+                        viewModel.selectSubtitleEngine(engine)
+                    }
+                },
+                onRefresh: {},
+                onAddKey: { isPresented = false; onAddKey() },
+                onClose: { isPresented = false }
+            )
+        }
+        .onChange(of: isPresented) { _, shown in
+            if !shown { focused = true }
+        }
+    }
+}
+
 /// The model dropdown of a shared Speech or LLM row: the picker of the kind's
 /// lead feature, whose pick goes to the caller (which may first ask about
 /// custom per-feature models).

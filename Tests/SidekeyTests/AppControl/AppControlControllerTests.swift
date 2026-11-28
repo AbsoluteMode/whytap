@@ -42,6 +42,8 @@ final class AppControlControllerTests: XCTestCase {
         let preferences: UserPreferencesCache
         let probe: ControlTestProbe
         let controller: AppControlController
+        let keys: ProviderKeyStore
+        let subtitleEngine: SubtitleAudioTranslate.Choice
     }
 
     private func env(googleReview: @escaping () -> Bool = { false }) throws -> Env {
@@ -65,14 +67,17 @@ final class AppControlControllerTests: XCTestCase {
         let models = APIAndModelsViewModel(routing: routing, keys: keys,
             catalogs: ModelCatalogStore(fileURL: file, fetcher: ControlTestCatalog()),
             checks: ModelCheckStore(defaults: defaults), keyStatuses: KeyStatusStore(defaults: defaults),
-            probe: probe, endpoints: ControlTestEndpoints(), inputLanguage: { nil })
+            probe: probe, endpoints: ControlTestEndpoints(), inputLanguage: { nil },
+            subtitleEngine: SubtitleAudioTranslate.Choice(defaults: defaults))
         let preferences = UserPreferencesCache(defaults: defaults)
         let controller = AppControlController(routing: routing, models: models, preferences: preferences,
             languages: PrivacyPreferences(defaults: defaults), idle: IslandIdlePreferences(defaults: defaults),
             identity: AppBuildIdentity(info: ["CFBundleVersion": "test-42", "ExodiaSourceRevision": "fixture-sha"], bundleURL: URL(fileURLWithPath: "/tmp/Whytap.app")),
             activity: { .object(["drop": .string("idle")]) }, googleCalendarReview: googleReview,
-            agentWorkspace: { "/tmp/fixture-app-support/whytap/agent" })
-        return Env(routing: routing, preferences: preferences, probe: probe, controller: controller)
+            agentWorkspace: { "/tmp/fixture-app-support/whytap/agent" },
+            subtitleEngine: SubtitleAudioTranslate.Choice(defaults: defaults))
+        return Env(routing: routing, preferences: preferences, probe: probe, controller: controller,
+                   keys: keys, subtitleEngine: SubtitleAudioTranslate.Choice(defaults: defaults))
     }
 
     private var expectedOld: AppControlValue {
@@ -216,6 +221,36 @@ final class AppControlControllerTests: XCTestCase {
             XCTAssertFalse(response.ok)
         }
         XCTAssertEqual(e.preferences.currentMode, .smart)
+    }
+
+    /// Subtitles' engine: read without the Keychain, set only to an engine
+    /// whose key can be read, with the same expected-value check.
+    func test_subtitles_engine_setting_follows_the_keys_and_the_saved_choice() async throws {
+        let e = try env()
+        let initial = await e.controller.handle(AppControlRequest("get_settings"))
+        XCTAssertEqual(initial.data.object?["values"]?.object?["subtitlesEngine"], .null)
+        XCTAssertEqual(initial.data.object?["acceptedValues"]?.object?["subtitlesEngine"],
+                       .array([.string("soniox"), .string("openAI")]))
+        let noKey = await e.controller.handle(AppControlRequest("set_setting", arguments: [
+            "key": .string("subtitlesEngine"), "value": .string("soniox"), "expected": .null]))
+        XCTAssertEqual(noKey.data.object?["code"], .string("not_configured"))
+        XCTAssertNil(e.subtitleEngine.saved)
+        try e.keys.save("fake-soniox-key", account: BYOKKeyStore.account(for: .soniox))
+        let set = await e.controller.handle(AppControlRequest("set_setting", arguments: [
+            "key": .string("subtitlesEngine"), "value": .string("soniox"), "expected": .null]))
+        XCTAssertTrue(set.ok)
+        XCTAssertEqual(set.data.object?["value"], .string("soniox"))
+        XCTAssertEqual(e.subtitleEngine.saved, .soniox)
+        XCTAssertEqual(NativeAgentAppControl.changeLine("set_setting", set.data), "Subtitles model → Soniox · stt-rt-v6")
+        for args: [String: AppControlValue] in [
+            ["key": .string("subtitlesEngine"), "value": .string("openAI"), "expected": .null],
+            ["key": .string("subtitlesEngine"), "value": .string("whisper"), "expected": .string("soniox")],
+            ["key": .string("subtitlesEngine"), "value": .null, "expected": .string("soniox")]
+        ] {
+            let response = await e.controller.handle(AppControlRequest("set_setting", arguments: args))
+            XCTAssertFalse(response.ok, "\(args)")
+        }
+        XCTAssertEqual(e.subtitleEngine.saved, .soniox)
     }
 
     func test_provider_must_belong_to_current_model_and_auto_removes_pin() async throws {

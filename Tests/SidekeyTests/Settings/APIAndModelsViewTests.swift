@@ -33,9 +33,11 @@ final class APIAndModelsViewTests: XCTestCase {
 
     func test_tab_has_a_single_model_menu_and_no_account_dropdown() throws {
         let view = try source("APIAndModelsView.swift")
-        // One per-feature menu (Advanced) and one shared menu (Speech/LLM rows).
+        // One per-feature menu (Advanced), one shared menu (Speech/LLM rows)
+        // and Subtitles' engine menu, all on the same model picker.
         XCTAssertEqual(view.components(separatedBy: "SharedModelMenu(").count - 1, 1)
-        XCTAssertEqual(view.components(separatedBy: "ModelMenu(").count - 1, 2)
+        XCTAssertEqual(view.components(separatedBy: "SubtitlesModelMenu(").count - 1, 1)
+        XCTAssertEqual(view.components(separatedBy: "ModelMenu(").count - 1, 3)
         XCTAssertTrue(view.contains("ScrollViewReader"))
         XCTAssertTrue(view.contains("focusedFeature"))
     }

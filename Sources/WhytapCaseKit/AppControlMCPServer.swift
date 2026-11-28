@@ -322,7 +322,7 @@ public final class AppControlMCPServer {
         ])])
         return [
             tool("get_state", "Read live build identity, activity flags, every feature's exact model route and the Agent workspace folder (agentWorkspace: AGENTS.md memory, sessions). No user content or keys.", [:], []),
-            tool("get_settings", "Read the settings this connection can change and their accepted values: dropMode (Drop dictation, fast or smart), inputLanguage and outputLanguage (one language code, or null: Auto for input, off for output), autoHideIsland. The island's tools and their hotkeys have their own operations (whytap_toolbox_get). Other hotkeys, meeting recording, displays and the rest of Settings cannot be read or changed here: say so instead of guessing what Whytap offers. No raw UserDefaults access.", [:], []),
+            tool("get_settings", "Read the settings this connection can change and their accepted values: dropMode (Drop dictation, fast or smart), inputLanguage and outputLanguage (one language code, or null: Auto for input, off for output), autoHideIsland, subtitlesEngine (the live audio translation engine Subtitles send system audio to: soniox or openAI; null means no choice yet, which runs OpenAI unless only a Soniox key exists; only an engine whose key is in Keys & models can be set). The island's tools and their hotkeys have their own operations (whytap_toolbox_get). Other hotkeys, meeting recording, displays and the rest of Settings cannot be read or changed here: say so instead of guessing what Whytap offers. No raw UserDefaults access.", [:], []),
             tool("list_models", "Search the app's cached compatible models and configured accounts for one feature; no inference request.",
                  ["feature": string, "query": string, "account": string,
                   "limit": .object(["type": .string("integer"), "minimum": .int(1), "maximum": .int(100)])], ["feature"]),
@@ -335,7 +335,7 @@ public final class AppControlMCPServer {
                  ["feature": string, "provider": .object(["type": .array([.string("string"), .string("null")])]), "expected": route],
                  ["feature", "provider", "expected"], writes: true),
             tool("set_setting", "Change one supported setting using its existing app store; it is saved at once and stays. Read get_settings first and pass the exact expected current value.",
-                 ["key": .object(["type": .string("string"), "enum": .array(["dropMode", "inputLanguage", "outputLanguage", "autoHideIsland"].map(AppControlValue.string))]),
+                 ["key": .object(["type": .string("string"), "enum": .array(["dropMode", "inputLanguage", "outputLanguage", "autoHideIsland", "subtitlesEngine"].map(AppControlValue.string))]),
                   "value": .object(["type": .array([.string("string"), .string("boolean"), .string("null")])]),
                   "expected": .object(["type": .array([.string("string"), .string("boolean"), .string("null")])])],
                  ["key", "value", "expected"], writes: true),

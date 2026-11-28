@@ -150,3 +150,7 @@ status) serves frames and handshakes, and logs carry only a documented type,
 - The config frame's `api_key`: Soniox deprecates it; the header works.
 
 2026-11-25 · branch claude/subtitles-soniox-engine
+
+Update 2026-11-28: superseded for engine selection. The user now chooses the
+engine in Keys & models; without a choice Subtitles use OpenAI (Soniox only
+when it is the only key). See 2026-11-28-subtitle-engine-choice.md.

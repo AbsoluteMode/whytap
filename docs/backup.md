@@ -127,9 +127,11 @@ after recovery; external event caches are not backed up. Older archives preserve
 calendar connections already on this Mac. A visible Planner or retained task
 draft blocks restore, while ordinary backups can continue.
 
-- Keys & models routes for every feature, registered server addresses, languages,
+- Keys & models routes for every feature, the Subtitles engine choice,
+  registered server addresses, languages,
   meeting preferences, hotkeys, vocabulary, Toolbox layout,
-  display and feature settings, and agent preferences.
+  display and feature settings, and agent preferences. Older archives without
+  a Subtitles engine choice keep this Mac's choice.
 - Whytap's saved speech and text provider keys (including Anthropic and each
   registered custom server), and independently recoverable
   Case items and secrets.

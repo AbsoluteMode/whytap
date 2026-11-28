@@ -3,7 +3,7 @@ id: whytap-meeting-gate-whytap-activity-2026-11-24
 type: decision
 title: The meeting gate defers on Whytap's own capture and real call apps, not on Discord voice chat
 summary: Any microphone user no longer defers an install. Whytap's own audio capture, call apps, browsers with a microphone and unknown microphone users still do; Discord and macOS CoreSpeech do not. An owner override is left to a separate change.
-status: superseded-in-part
+status: confirmed
 tags: [build, queue, builder, install, meetings]
 canonical_for: [builder-meeting-gate-whytap-activity]
 verified_at: 2026-11-24
@@ -21,7 +21,7 @@ sources:
     reference: Sources/Sidekey/Meetings/CoreAudioSystemAudioSource.swift
     confirmed_at: 2026-11-24
 superseded_by: 2026-11-28-meeting-gate-foreign-microphone.md
-related: [2026-10-20-meeting-aware-builder-refresh.md, 2026-11-23-builder-queue-group-install.md, ../processes/shared-app-development.md]
+related: [2026-11-28-meeting-gate-foreign-microphone.md, 2026-10-20-meeting-aware-builder-refresh.md, 2026-11-23-builder-queue-group-install.md, ../processes/shared-app-development.md]
 ---
 
 # Meeting gate: Whytap's own activity
